@@ -351,7 +351,7 @@ def cmd_help(
         _print_unknown_command(command)
         raise typer.Exit(2)
     args = ["--help"] if command is None else [command, "--help"]
-    app(args=args, prog_name="fascat")
+    app(args=args, prog_name="fascat", color=not _color_disabled_requested([]))
 
 
 def run(args: Sequence[str] | None = None) -> None:
@@ -363,8 +363,9 @@ def run(args: Sequence[str] | None = None) -> None:
         _print_unknown_command(unknown_command)
         raise SystemExit(2)
 
-    with _temporary_no_color(_color_disabled_requested(raw_args)):
-        app(args=normalized_args, prog_name="fascat")
+    color_enabled = not _color_disabled_requested(raw_args)
+    with _temporary_no_color(not color_enabled):
+        app(args=normalized_args, prog_name="fascat", color=color_enabled)
 
 
 def _is_tty() -> bool:

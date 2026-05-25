@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import NamedTuple
 
@@ -7,6 +8,7 @@ from fascat import __version__
 from fascat.cli import app, run
 
 runner = CliRunner()
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 class RunResult(NamedTuple):
@@ -23,6 +25,14 @@ def invoke_run(args: list[str], capsys) -> RunResult:  # type: ignore[no-untyped
         exit_code = int(exc.code or 0)
     captured = capsys.readouterr()
     return RunResult(exit_code=exit_code, stdout=captured.out, stderr=captured.err)
+
+
+def plain(text: str) -> str:
+    return ANSI_RE.sub("", text)
+
+
+def compact(text: str) -> str:
+    return " ".join(plain(text).split())
 
 
 def test_version_flag() -> None:
@@ -64,7 +74,7 @@ def test_inspect_help() -> None:
 def test_convert_help() -> None:
     result = runner.invoke(app, ["convert", "--help"])
     assert result.exit_code == 0
-    assert "--target-triangles" in result.output
+    assert "--target-triangles" in plain(result.output)
 
 
 def test_validate_help() -> None:
@@ -142,7 +152,7 @@ def test_convert_existing_output_requires_force(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["convert", str(step_file), str(output_file)])
     assert result.exit_code == 1
-    assert "Pass --force" in result.output
+    assert "Pass --force" in compact(result.output)
 
 
 def test_validate_rejects_unknown_extension(tmp_path: Path) -> None:
@@ -174,7 +184,7 @@ def test_validate_generated_usd(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["validate", str(output_file)])
     assert result.exit_code == 0
-    assert "valid USD" in result.output
+    assert "valid USD" in compact(result.output)
 
 
 def test_convert_rejects_invalid_lods() -> None:
@@ -192,20 +202,20 @@ def test_convert_rejects_invalid_lods_as_json(capsys) -> None:  # type: ignore[n
 def test_help_command_alias(capsys) -> None:  # type: ignore[no-untyped-def]
     result = invoke_run(["help"], capsys)
     assert result.exit_code == 0
-    assert "Usage: fascat" in result.stdout
+    assert "Usage: fascat" in compact(result.stdout)
 
 
 def test_help_command_alias_for_subcommand(capsys) -> None:  # type: ignore[no-untyped-def]
     result = invoke_run(["help", "convert"], capsys)
     assert result.exit_code == 0
-    assert "Usage: fascat convert" in result.stdout
-    assert "--target-triangles" in result.stdout
+    assert "Usage: fascat convert" in compact(result.stdout)
+    assert "--target-triangles" in plain(result.stdout)
 
 
 def test_help_wins_with_invalid_tokens(capsys) -> None:  # type: ignore[no-untyped-def]
     result = invoke_run(["convert", "input.step", "output.usdc", "--bad", "-h"], capsys)
     assert result.exit_code == 0
-    assert "Usage: fascat convert" in result.stdout
+    assert "Usage: fascat convert" in compact(result.stdout)
     assert "No such option" not in result.stderr
 
 
