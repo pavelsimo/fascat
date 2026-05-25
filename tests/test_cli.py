@@ -98,22 +98,40 @@ def test_validate_missing_file_fails() -> None:
     assert "Missing output file" in result.output
 
 
-def test_inspect_existing_file_reports_unimplemented(tmp_path: Path) -> None:
-    step_file = tmp_path / "input.step"
-    step_file.write_text("ISO-10303-21;", encoding="utf-8")
-
-    result = runner.invoke(app, ["inspect", str(step_file)])
-    assert result.exit_code == 1
-    assert "STEP inspection is not implemented yet" in result.output
+def test_inspect_fixture_reports_stats() -> None:
+    result = runner.invoke(app, ["inspect", "tests/fixtures/spool-clamp-lid.step"])
+    assert result.exit_code == 0
+    assert "1 parts" in result.output
+    assert "units=millimetre" in result.output
 
 
-def test_convert_existing_file_reports_unimplemented(tmp_path: Path) -> None:
-    step_file = tmp_path / "input.step"
-    step_file.write_text("ISO-10303-21;", encoding="utf-8")
+def test_convert_fixture_writes_usd_and_report(tmp_path: Path) -> None:
+    output_file = tmp_path / "output.usda"
+    report_file = tmp_path / "report.json"
 
-    result = runner.invoke(app, ["convert", str(step_file), str(tmp_path / "output.usdc")])
-    assert result.exit_code == 1
-    assert "STEP-to-USD conversion is not implemented yet" in result.output
+    result = runner.invoke(
+        app,
+        [
+            "convert",
+            "tests/fixtures/spool-clamp-lid.step",
+            str(output_file),
+            "--sag",
+            "0.2",
+            "--angle",
+            "20",
+            "--target-triangles",
+            "120",
+            "--lods",
+            "0.5",
+            "--report",
+            str(report_file),
+        ],
+    )
+    assert result.exit_code == 0
+    assert output_file.exists()
+    assert report_file.exists()
+    assert "Converted" in result.output
+    assert '"steps"' in report_file.read_text(encoding="utf-8")
 
 
 def test_convert_existing_output_requires_force(tmp_path: Path) -> None:
@@ -134,6 +152,29 @@ def test_validate_rejects_unknown_extension(tmp_path: Path) -> None:
     result = runner.invoke(app, ["validate", str(output_file)])
     assert result.exit_code == 2
     assert "Unsupported USD extension" in result.output
+
+
+def test_validate_generated_usd(tmp_path: Path) -> None:
+    output_file = tmp_path / "output.usda"
+    convert_result = runner.invoke(
+        app,
+        [
+            "convert",
+            "tests/fixtures/spool-clamp-lid.step",
+            str(output_file),
+            "--sag",
+            "0.2",
+            "--target-triangles",
+            "80",
+            "--lods",
+            "0.5",
+        ],
+    )
+    assert convert_result.exit_code == 0
+
+    result = runner.invoke(app, ["validate", str(output_file)])
+    assert result.exit_code == 0
+    assert "valid USD" in result.output
 
 
 def test_convert_rejects_invalid_lods() -> None:

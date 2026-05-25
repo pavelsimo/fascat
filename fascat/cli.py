@@ -4,16 +4,21 @@ import json
 import os
 import sys
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from difflib import get_close_matches
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, NoReturn
 
 import typer
 from rich.console import Console
 
 from fascat import __version__
+from fascat.io.step import read_step, read_step_bytes
+from fascat.io.usd import validate_usd
+from fascat.options import LODOptions, OptimizeOptions, StageOptions, Tessellation
+from fascat.pipeline import convert
+from fascat.profiles import by_name
 
 DOCS_URL = "https://pavelsimo.github.io/fascat"
 ISSUES_URL = "https://github.com/pavelsimo/fascat/issues"
@@ -152,12 +157,19 @@ def cmd_inspect(
         _emit(ctx, payload, f"Would inspect {input_path} with profile {profile.value}.")
         return
 
-    _require_existing_file(input_path, "input", ctx, payload)
-    _fail_not_implemented(
-        "STEP inspection is not implemented yet. Milestone 4 will add the OCP-backed importer.",
-        payload,
-        ctx,
-    )
+    asset = _read_step_for_cli(input_path, ctx, payload)
+    result = {
+        **payload,
+        "units": asset.units,
+        "meters_per_unit": asset.meters_per_unit,
+        "up_axis": asset.up_axis,
+        "stats": asset.stats(),
+        "parts": [
+            {"id": part.id, "name": part.name, "materials": list(part.material_ids)} for part in asset.parts.values()
+        ],
+        "report": asset.report.to_dict(),
+    }
+    _emit(ctx, result, f"{input_path}: {_format_stats(asset.stats())}; units={asset.units}")
 
 
 @app.command(
@@ -236,12 +248,54 @@ def cmd_convert(
     if not _is_stdio(output_path) and output_path.exists() and not force:
         _fail(ctx, payload, f"Output already exists: {output_path}. Pass --force to overwrite.")
 
-    _fail_not_implemented(
-        "STEP-to-USD conversion is not implemented yet. Milestones 2-6 will add mesh repair, USD export, "
-        "STEP import, optimization, LODs, and reports.",
-        payload,
-        ctx,
-    )
+    try:
+        profile_options = by_name(profile.value)
+        base_tessellation = profile_options.tessellation
+        if base_tessellation is None:
+            _fail(ctx, payload, "The inspect-only profile cannot be used for conversion.", code=2)
+        tessellation = replace(
+            base_tessellation,
+            sag=sag if sag is not None else base_tessellation.sag,
+            angle=angle if angle is not None else base_tessellation.angle,
+        )
+        optimize_options = profile_options.optimize
+        if optimize_options is not None:
+            optimize_options = replace(
+                optimize_options,
+                target_triangles=target_triangles
+                if target_triangles is not None
+                else optimize_options.target_triangles,
+                ratio=ratio,
+            )
+        stage_options = replace(profile_options.stage, uv0=uv0.value)
+        lod_options = LODOptions(tuple(lod_values)) if lod_values is not None else profile_options.lods
+        asset = _convert_for_cli(
+            input_path,
+            output_path,
+            profile=profile.value,
+            tessellation=tessellation,
+            stage=stage_options,
+            optimize=optimize_options,
+            lods=lod_options,
+        )
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        _fail(ctx, payload, str(exc))
+        raise AssertionError("unreachable") from exc
+
+    if report is not None:
+        asset.report.write_json(report)
+
+    if _is_stdio(output_path):
+        return
+
+    result = {
+        **payload,
+        "stats": asset.stats(),
+        "report": asset.report.to_dict(),
+    }
+    _emit(ctx, result, f"Converted {input_path} to {output_path}: {_format_stats(asset.stats())}.")
 
 
 @app.command(
@@ -270,12 +324,12 @@ def cmd_validate(
         return
 
     _require_existing_file(output_path, "output", ctx, payload)
-
-    _fail_not_implemented(
-        "USD validation is not implemented yet. Milestone 3 will add usd-core-backed validation.",
-        payload,
-        ctx,
-    )
+    try:
+        stats = _validate_usd_for_cli(output_path)
+    except Exception as exc:
+        _fail(ctx, payload, str(exc))
+        raise AssertionError("unreachable") from exc
+    _emit(ctx, {**payload, "stats": stats}, f"{output_path}: valid USD, {_format_stats(stats)}.")
 
 
 @app.command("version", epilog=f"Docs: {DOCS_URL}")
@@ -376,7 +430,7 @@ def _is_stdio(path: Path) -> bool:
     return str(path) == "-"
 
 
-def _fail(ctx: typer.Context, payload: dict[str, Any], message: str, code: int = 1) -> None:
+def _fail(ctx: typer.Context, payload: dict[str, Any], message: str, code: int = 1) -> NoReturn:
     if _state(ctx).json_output:
         out.print_json(json.dumps({**payload, "error": message}))
     else:
@@ -384,8 +438,115 @@ def _fail(ctx: typer.Context, payload: dict[str, Any], message: str, code: int =
     raise typer.Exit(code)
 
 
-def _fail_not_implemented(message: str, payload: dict[str, Any], ctx: typer.Context) -> None:
-    _fail(ctx, payload, message)
+def _read_step_for_cli(path: Path, ctx: typer.Context, payload: dict[str, Any]) -> Any:
+    if _is_stdio(path):
+        data = sys.stdin.buffer.read()
+        if not data:
+            _fail(ctx, payload, "Missing input data on stdin.")
+        return read_step_bytes(data)
+    _require_existing_file(path, "input", ctx, payload)
+    try:
+        return read_step(path)
+    except Exception as exc:
+        _fail(ctx, payload, str(exc))
+        raise AssertionError("unreachable") from exc
+
+
+def _convert_for_cli(
+    input_path: Path,
+    output_path: Path,
+    *,
+    profile: str,
+    tessellation: Tessellation,
+    stage: StageOptions,
+    optimize: OptimizeOptions | None,
+    lods: LODOptions | None,
+) -> Any:
+    if _is_stdio(input_path):
+        data = sys.stdin.buffer.read()
+        if not data:
+            raise RuntimeError("Missing input data on stdin.")
+        with _temporary_step_file(data) as temp_input:
+            return _convert_output(temp_input, output_path, profile, tessellation, stage, optimize, lods)
+    return _convert_output(input_path, output_path, profile, tessellation, stage, optimize, lods)
+
+
+def _convert_output(
+    input_path: Path,
+    output_path: Path,
+    profile: str,
+    tessellation: Tessellation,
+    stage: StageOptions,
+    optimize: OptimizeOptions | None,
+    lods: LODOptions | None,
+) -> Any:
+    if _is_stdio(output_path):
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".usda") as handle:
+            asset = convert(
+                input_path,
+                handle.name,
+                profile=profile,
+                tessellation=tessellation,
+                stage=stage,
+                optimize=optimize,
+                lods=lods,
+            )
+            handle.seek(0)
+            sys.stdout.buffer.write(handle.read())
+            return asset
+    return convert(
+        input_path,
+        output_path,
+        profile=profile,
+        tessellation=tessellation,
+        stage=stage,
+        optimize=optimize,
+        lods=lods,
+    )
+
+
+class _temporary_step_file:
+    def __init__(self, data: bytes) -> None:
+        self.data = data
+        self.path: Path | None = None
+        self._handle: Any = None
+
+    def __enter__(self) -> Path:
+        import tempfile
+
+        self._handle = tempfile.NamedTemporaryFile(suffix=".step")
+        self._handle.write(self.data)
+        self._handle.flush()
+        self.path = Path(self._handle.name)
+        return self.path
+
+    def __exit__(self, *_exc_info: object) -> None:
+        if self._handle is not None:
+            self._handle.close()
+
+
+def _validate_usd_for_cli(path: Path) -> dict[str, int]:
+    if _is_stdio(path):
+        import tempfile
+
+        data = sys.stdin.buffer.read()
+        if not data:
+            raise RuntimeError("Missing USD data on stdin.")
+        with tempfile.NamedTemporaryFile(suffix=".usda") as handle:
+            handle.write(data)
+            handle.flush()
+            return validate_usd(handle.name)
+    return validate_usd(path)
+
+
+def _format_stats(stats: dict[str, int]) -> str:
+    parts = []
+    for key in ("parts", "occurrences", "materials", "meshes", "vertices", "points", "triangles"):
+        if key in stats:
+            parts.append(f"{stats[key]} {key}")
+    return ", ".join(parts) if parts else json.dumps(stats, sort_keys=True)
 
 
 def _normalize_args(args: Sequence[str]) -> list[str]:

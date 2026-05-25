@@ -6,4 +6,4 @@ pre-commit:
     lint:
       run: uv run ruff check .
     typecheck:
-      run: uv run mypy facet/
+      run: uv run mypy fascat/

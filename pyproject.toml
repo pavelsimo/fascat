@@ -24,24 +24,18 @@ classifiers = [
     "Topic :: Multimedia :: Graphics :: 3D Modeling",
 ]
 dependencies = [
+    "cadquery-ocp>=7.7",
+    "fast-simplification>=0.1",
+    "meshoptimizer>=0.2.30a0,<0.3",
     "numpy>=1.24",
+    "trimesh>=4.0",
     "typer>=0.15",
     "typing-extensions>=4.8",
     "rich>=13.0",
+    "usd-core>=24.8",
 ]
 
 [project.optional-dependencies]
-cad = [
-    "cadquery-ocp>=7.7",
-]
-mesh = [
-    "fast-simplification>=0.1",
-    "meshoptimizer>=0.2.30a0,<0.3",
-    "trimesh>=4.0",
-]
-usd = [
-    "usd-core>=24.8",
-]
 uv = [
     "xatlas>=0.0.9",
 ]
@@ -94,6 +88,18 @@ ignore = ["E501"]
 strict = true
 python_version = "3.10"
 files = ["fascat"]
+
+[[tool.mypy.overrides]]
+module = [
+    "fast_simplification",
+    "meshoptimizer",
+    "OCP.*",
+    "pxr.*",
+    "trimesh",
+    "trimesh.*",
+    "xatlas",
+]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

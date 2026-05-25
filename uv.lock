@@ -415,25 +415,19 @@ wheels = [
 name = "fascat"
 source = { editable = "." }
 dependencies = [
+    { name = "cadquery-ocp" },
+    { name = "fast-simplification" },
+    { name = "meshoptimizer" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "rich" },
+    { name = "trimesh" },
     { name = "typer" },
     { name = "typing-extensions" },
+    { name = "usd-core" },
 ]
 
 [package.optional-dependencies]
-cad = [
-    { name = "cadquery-ocp" },
-]
-mesh = [
-    { name = "fast-simplification" },
-    { name = "meshoptimizer" },
-    { name = "trimesh" },
-]
-usd = [
-    { name = "usd-core" },
-]
 uv = [
     { name = "xatlas" },
 ]
@@ -448,18 +442,18 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cadquery-ocp", marker = "extra == 'cad'", specifier = ">=7.7" },
-    { name = "fast-simplification", marker = "extra == 'mesh'", specifier = ">=0.1" },
-    { name = "meshoptimizer", marker = "extra == 'mesh'", specifier = ">=0.2.30a0,<0.3" },
+    { name = "cadquery-ocp", specifier = ">=7.7" },
+    { name = "fast-simplification", specifier = ">=0.1" },
+    { name = "meshoptimizer", specifier = ">=0.2.30a0,<0.3" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "rich", specifier = ">=13.0" },
-    { name = "trimesh", marker = "extra == 'mesh'", specifier = ">=4.0" },
+    { name = "trimesh", specifier = ">=4.0" },
     { name = "typer", specifier = ">=0.15" },
     { name = "typing-extensions", specifier = ">=4.8" },
-    { name = "usd-core", marker = "extra == 'usd'", specifier = ">=24.8" },
+    { name = "usd-core", specifier = ">=24.8" },
     { name = "xatlas", marker = "extra == 'uv'", specifier = ">=0.0.9" },
 ]
-provides-extras = ["cad", "mesh", "usd", "uv"]
+provides-extras = ["uv"]
 
 [package.metadata.requires-dev]
 dev = [
