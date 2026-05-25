@@ -609,15 +609,27 @@ class _temporary_no_color:
     def __init__(self, enabled: bool) -> None:
         self.enabled = enabled
         self.previous_value: str | None = None
+        self.previous_color_system: object | None = None
+        self.previous_force_terminal: object | None = None
 
     def __enter__(self) -> None:
         self.previous_value = os.environ.get("NO_COLOR")
         if self.enabled:
             os.environ["NO_COLOR"] = "1"
+            import typer.rich_utils as rich_utils
+
+            self.previous_color_system = rich_utils.COLOR_SYSTEM
+            self.previous_force_terminal = rich_utils.FORCE_TERMINAL
+            rich_utils.COLOR_SYSTEM = None
+            rich_utils.FORCE_TERMINAL = False
 
     def __exit__(self, *_exc_info: object) -> None:
         if not self.enabled:
             return
+        import typer.rich_utils as rich_utils
+
+        rich_utils.COLOR_SYSTEM = self.previous_color_system  # type: ignore[assignment]
+        rich_utils.FORCE_TERMINAL = self.previous_force_terminal  # type: ignore[assignment]
         if self.previous_value is None:
             os.environ.pop("NO_COLOR", None)
         else:
