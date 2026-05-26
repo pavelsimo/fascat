@@ -1,10 +1,11 @@
+import builtins
 import json
 import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import pytest
 from typer.testing import CliRunner
@@ -39,6 +40,17 @@ def plain(text: str) -> str:
 
 def compact(text: str) -> str:
     return " ".join(plain(text).split())
+
+
+def block_imports(monkeypatch: pytest.MonkeyPatch, *prefixes: str) -> None:
+    original_import = builtins.__import__
+
+    def guarded_import(name: str, *args: object, **kwargs: object) -> Any:
+        if any(name == prefix or name.startswith(f"{prefix}.") for prefix in prefixes):
+            raise ImportError(name)
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
 
 
 def test_version_flag() -> None:
@@ -146,6 +158,20 @@ def test_inspect_fixture_reports_stats() -> None:
     assert payload["root"]["transform"][3] == [0.0, 0.0, 0.0, 1.0]
     assert payload["parts"][0]["has_source_shape"] is True
     assert "report" in payload
+
+
+def test_inspect_missing_step_backend_exits_nonzero(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    block_imports(monkeypatch, "OCP")
+    step_file = tmp_path / "input.step"
+    step_file.write_text("ISO-10303-21;", encoding="utf-8")
+
+    result = runner.invoke(app, ["inspect", str(step_file)])
+
+    assert result.exit_code == 1
+    assert "STEP import requires cadquery-ocp" in result.output
 
 
 @pytest.mark.requires_ocp
@@ -492,6 +518,20 @@ def test_validate_rejects_unknown_extension(tmp_path: Path) -> None:
     result = runner.invoke(app, ["validate", str(output_file)])
     assert result.exit_code == 2
     assert "Unsupported USD extension" in result.output
+
+
+def test_validate_missing_usd_backend_exits_nonzero(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    block_imports(monkeypatch, "pxr")
+    output_file = tmp_path / "output.usda"
+    output_file.write_text("#usda 1.0", encoding="utf-8")
+
+    result = runner.invoke(app, ["validate", str(output_file)])
+
+    assert result.exit_code == 1
+    assert "USD validation requires usd-core" in result.output
 
 
 @pytest.mark.requires_ocp
