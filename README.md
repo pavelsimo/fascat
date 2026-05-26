@@ -5,7 +5,7 @@ Fascat is a Python library and CLI for converting CAD STEP data into realtime-re
 [![release](https://img.shields.io/github/v/release/pavelsimo/fascat?style=flat-square&color=4d9e4d&logoColor=white)](https://github.com/pavelsimo/fascat/releases)
 [![license MIT](https://img.shields.io/badge/license-MIT-ffd60a?style=flat-square&logoColor=white)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10+-3776ab?style=flat-square&logoColor=white)](https://python.org)
-[![PyPI](https://img.shields.io/pypi/v/fascat?style=flat-square&color=3775a9&logoColor=white)](https://pypi.org/project/fascat)
+[![PyPI](https://img.shields.io/pypi/v/fascat?style=flat-square&label=PyPI&color=3775a9&cacheSeconds=300&logoColor=white)](https://pypi.org/project/fascat)
 [![Homebrew](https://img.shields.io/badge/Homebrew-b28f62?style=flat-square&logoColor=white)](https://github.com/pavelsimo/homebrew-tap)
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-0088cc?style=flat-square&logoColor=white)](https://deepwiki.com/pavelsimo/fascat)
 
