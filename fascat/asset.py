@@ -28,6 +28,13 @@ class Node:
     transform: Transform = field(default_factory=identity_transform)
     metadata: dict[str, str] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        self.children = list(self.children)
+        self.transform = np.asarray(self.transform, dtype=np.float64).copy()
+        if self.transform.shape != (4, 4):
+            raise ValueError("node transform must have shape (4, 4)")
+        self.metadata = dict(self.metadata)
+
     def copy(self) -> Node:
         return Node(
             id=self.id,
@@ -66,6 +73,11 @@ class Part:
     fingerprint: str | None = None
     lod_meshes: list[Mesh] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        self.material_ids = list(self.material_ids)
+        self.metadata = dict(self.metadata)
+        self.lod_meshes = list(self.lod_meshes)
+
     def copy(self, *, keep_source: bool = True) -> Part:
         return Part(
             id=self.id,
@@ -101,6 +113,10 @@ class Asset:
     up_axis: Literal["Y", "Z"] = "Z"
     source_path: Path | None = None
     report: Report = field(default_factory=Report)
+
+    def __post_init__(self) -> None:
+        self.parts = dict(self.parts)
+        self.materials = dict(self.materials)
 
     @property
     def part_count(self) -> int:

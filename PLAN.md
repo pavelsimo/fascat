@@ -676,7 +676,7 @@ Initial profile defaults:
 
 Unit tests:
 
-- Asset and material copies isolate mutable metadata while preserving new-asset semantics.
+- Asset, node, part, and material constructors/copies isolate mutable containers while preserving new-asset semantics.
 - Missing backend tests assert OCP, USD, and xatlas paths fail with clear errors.
 - Mesh removes unreferenced vertices.
 - Mesh removes degenerate triangles.
