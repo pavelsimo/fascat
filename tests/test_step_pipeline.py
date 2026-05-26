@@ -54,11 +54,18 @@ def _write_repeated_box_step(path: Path) -> None:
 @pytest.mark.parametrize("fixture", sorted(Path("tests/fixtures").glob("*.step")))
 def test_step_fixtures_import_with_names_units_and_parts(fixture: Path) -> None:
     asset = fc.read_step(fixture)
+    nodes = asset.root.walk()
 
     assert asset.part_count >= 1
     assert asset.occurrence_count >= asset.part_count
     assert asset.units
     assert asset.meters_per_unit > 0.0
+    assert asset.root.name == fixture.stem
+    assert all(node.name for node in nodes)
+    assert all("step_label" in node.metadata for node in nodes[1:])
+    assert all(part.name for part in asset.parts.values())
+    assert all(part.metadata["source_identity"].endswith(str(fixture)) for part in asset.parts.values())
+    assert all(part.metadata["shape_fingerprint"] == part.fingerprint for part in asset.parts.values())
     assert asset.root.children
     assert asset.report.steps[0].name == "import"
     assert asset.report.steps[0].before == {
