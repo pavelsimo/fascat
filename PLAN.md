@@ -751,6 +751,7 @@ CLI tests:
 - `fascat inspect fixture.step`
 - `fascat inspect --json fixture.step` exposes profile options, hierarchy root, transforms, parts, materials, and report data.
 - `fascat inspect -`, `fascat convert - -`, and `fascat validate -` exercise real stdin/stdout streams.
+- `fascat convert fixture.step` defaults to binary `.usdc` output and validates it.
 - `fascat convert fixture.step output.usda`
 - `fascat validate output.usda`
 - `fascat convert` rejects `--debug` with binary `.usdc`.

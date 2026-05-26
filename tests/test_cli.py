@@ -1,5 +1,6 @@
 import json
 import re
+import shutil
 from pathlib import Path
 from typing import NamedTuple
 
@@ -156,6 +157,36 @@ def test_inspect_reads_step_from_stdin() -> None:
     assert payload["input"] == "-"
     assert payload["stats"]["parts"] == 1
     assert payload["report"]["source_path"] is None
+
+
+@pytest.mark.requires_ocp
+@pytest.mark.requires_usd
+def test_convert_defaults_to_binary_usdc_and_validates(tmp_path: Path) -> None:
+    input_file = tmp_path / "spool.step"
+    output_file = input_file.with_suffix(".usdc")
+    shutil.copyfile("tests/fixtures/spool-clamp-lid.step", input_file)
+
+    result = runner.invoke(
+        app,
+        [
+            "convert",
+            str(input_file),
+            "--sag",
+            "0.2",
+            "--target-triangles",
+            "80",
+            "--lods",
+            "0.5",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert output_file.exists()
+    assert f"Converted {input_file} to {output_file}" in compact(result.output)
+
+    validate_result = runner.invoke(app, ["validate", str(output_file)])
+    assert validate_result.exit_code == 0
+    assert "valid USD" in compact(validate_result.output)
 
 
 @pytest.mark.requires_ocp
