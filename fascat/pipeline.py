@@ -12,7 +12,15 @@ from fascat.io.gltf import write_gltf as _write_gltf
 from fascat.io.step import read_step
 from fascat.io.usd import validate_usd
 from fascat.io.usd import write_usd as _write_usd
-from fascat.options import ConversionProfile, LODOptions, OptimizeOptions, StageOptions, Tessellation, UVMode
+from fascat.options import (
+    ConversionProfile,
+    LODOptions,
+    MergeOptions,
+    OptimizeOptions,
+    StageOptions,
+    Tessellation,
+    UVMode,
+)
 from fascat.report import timed_step
 
 USD_SUFFIXES = {".usd", ".usda", ".usdc"}
@@ -26,6 +34,7 @@ def convert(
     profile: str | ConversionProfile = "realtime-desktop",
     tessellation: Tessellation | None = None,
     stage: StageOptions | None = None,
+    merge: MergeOptions | None = None,
     optimize: OptimizeOptions | None = None,
     lods: LODOptions | None = None,
     progress: Callable[[str, dict[str, int]], None] | None = None,
@@ -51,6 +60,10 @@ def convert(
     asset = asset.stage(stage or selected.stage)
     if progress is not None:
         progress("stage", asset.stats())
+    if merge is not None:
+        asset = asset.merge(merge, where=where)
+        if progress is not None:
+            progress("merge", asset.stats())
     optimize_options = optimize if optimize is not None else selected.optimize
     if optimize_options is not None:
         asset = asset.optimize(optimize_options, where=where)
@@ -257,6 +270,10 @@ def optimize(
         ),
         where=where,
     )
+
+
+def merge(asset: Asset, *, options: MergeOptions | None = None, where: Filter | None = None) -> Asset:
+    return asset.merge(options or MergeOptions(), where=where)
 
 
 def lods(

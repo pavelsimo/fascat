@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 
 from fascat.material import Material
 from fascat.mesh import Mesh
-from fascat.options import LODOptions, OptimizeOptions, RepairOptions, StageOptions, Tessellation
+from fascat.options import LODOptions, MergeOptions, OptimizeOptions, RepairOptions, StageOptions, Tessellation
 from fascat.report import Report, timed_step
 
 Transform = NDArray[np.float64]
@@ -141,6 +141,21 @@ class Asset:
     @property
     def occurrence_count(self) -> int:
         return sum(1 for node in self.root.walk() if node.part_id is not None)
+
+    @property
+    def draw_call_count(self) -> int:
+        total = 0
+        for node in self.root.walk():
+            if node.part_id is None:
+                continue
+            part = self.parts.get(node.part_id)
+            if part is None or part.mesh is None:
+                continue
+            if part.mesh.material_indices is None:
+                total += 1
+            else:
+                total += max(1, len(set(part.mesh.material_indices.astype(int).tolist())))
+        return total
 
     def copy(self, *, keep_source: bool = True) -> Asset:
         return Asset(
@@ -283,6 +298,31 @@ class Asset:
         )
         return asset
 
+    def merge(self, options: MergeOptions | None = None, *, where: Any | None = None) -> Asset:
+        from fascat.ops.hierarchy import merge_asset
+
+        opts = options or MergeOptions()
+        scope = self._operation_scope(where)
+        selected_node_ids = (
+            scope.selection.node_ids
+            if scope.selection is not None
+            else {node.id for node in scope.asset.root.walk() if node.part_id is not None}
+        )
+        before = _hierarchy_report_stats(self)
+        warning_count = len(self.report.warnings)
+        with timed_step() as timer:
+            asset = merge_asset(scope.asset, opts, selected_node_ids=selected_node_ids)
+        step_warnings = asset.report.warnings[warning_count:]
+        asset.report.add_step(
+            "merge",
+            options=_options_with_scope(opts.to_dict(), scope),
+            before=before,
+            after=_hierarchy_report_stats(asset),
+            duration=timer.duration,
+            warnings=step_warnings,
+        )
+        return asset
+
     def write_usd(self, path: str | Path, *, debug: bool = False) -> None:
         from fascat.io.usd import write_usd
 
@@ -408,6 +448,10 @@ def _options_with_scope(options: dict[str, object], scope: _OperationScope) -> d
         "where": scope.selection.filter.to_dict(),
         "matched": scope.selection.stats(),
     }
+
+
+def _hierarchy_report_stats(asset: Asset) -> dict[str, int]:
+    return {**asset.stats(include_lods=True), "draw_calls": asset.draw_call_count}
 
 
 def _unique_part_id(parts: dict[str, Part], base: str) -> str:

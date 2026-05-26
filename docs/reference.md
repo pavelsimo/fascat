@@ -51,6 +51,14 @@ fascat inspect input.step --json
 | `--materials` | `cad` | Material staging mode: `cad`, `display`, or `none` |
 | `--filter` | unset | Scope optimization and LOD work with a selector such as `path=*/Fasteners/*` |
 | `--exclude-filter` | unset | Exclude selector matches from `--filter` results |
+| `--merge` | `false` | Merge selected geometry before optimization |
+| `--merge-mode` | `all` | Merge mode: `all`, `by-material`, `by-node-name`, `by-part-name`, `hierarchy-level`, `parent-children`, `final-level`, or `regions` |
+| `--keep-parent / --no-keep-parent` | `true` | Attach merged nodes to a shared selected parent when possible |
+| `--merge-metadata` | `preserve` | Metadata policy: `preserve`, `combine`, `summarize`, or `drop` |
+| `--max-vertices-per-mesh` | `65535` | Split merged output above this vertex count |
+| `--region-size` | unset | Spatial region size for `--merge-mode regions` |
+| `--merge-strategy` | `all` | Region merge strategy: `all` or `by-material` |
+| `--hierarchy-level` | `1` | Hierarchy level used by `--merge-mode hierarchy-level` |
 | `--preserve-instances / --no-preserve-instances` | `true` | Preserve repeated parts as shared instances, or duplicate per occurrence |
 | `--debug` | `false` | Require text `.usd` or `.usda` output for debugging |
 | `--report` | unset | Write a JSON conversion report sidecar |

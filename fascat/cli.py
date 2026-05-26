@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from difflib import get_close_matches
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Any, NoReturn
+from typing import Annotated, Any, NoReturn, cast
 
 import typer
 import typer.rich_utils as rich_utils
@@ -18,7 +18,7 @@ from fascat import __version__
 from fascat.filter import Filter, FilterExpressionError
 from fascat.io.gltf import GLTF_SUFFIXES
 from fascat.io.step import read_step, read_step_bytes
-from fascat.options import LODOptions, OptimizeOptions, StageOptions, Tessellation
+from fascat.options import LODOptions, MergeOptions, OptimizeOptions, StageOptions, Tessellation
 from fascat.pipeline import convert
 from fascat.pipeline import validate_output as validate_export
 from fascat.profiles import by_name
@@ -84,6 +84,29 @@ class MaterialMode(str, Enum):
     CAD = "cad"
     DISPLAY = "display"
     NONE = "none"
+
+
+class MergeMode(str, Enum):
+    ALL = "all"
+    BY_MATERIAL = "by-material"
+    BY_NODE_NAME = "by-node-name"
+    BY_PART_NAME = "by-part-name"
+    HIERARCHY_LEVEL = "hierarchy-level"
+    PARENT_CHILDREN = "parent-children"
+    FINAL_LEVEL = "final-level"
+    REGIONS = "regions"
+
+
+class MergeMetadata(str, Enum):
+    PRESERVE = "preserve"
+    COMBINE = "combine"
+    SUMMARIZE = "summarize"
+    DROP = "drop"
+
+
+class MergeStrategy(str, Enum):
+    ALL = "all"
+    BY_MATERIAL = "by-material"
 
 
 @dataclass(frozen=True)
@@ -252,6 +275,34 @@ def cmd_convert(
         MaterialMode,
         typer.Option("--materials", help="Material staging mode: cad, display, or none."),
     ] = MaterialMode.CAD,
+    merge: Annotated[bool, typer.Option("--merge", help="Merge selected geometry before optimization.")] = False,
+    merge_mode: Annotated[MergeMode, typer.Option("--merge-mode", help="Merge grouping mode.")] = MergeMode.ALL,
+    keep_parent: Annotated[
+        bool,
+        typer.Option(
+            "--keep-parent/--no-keep-parent", help="Attach merged nodes to a shared selected parent when possible."
+        ),
+    ] = True,
+    merge_metadata: Annotated[
+        MergeMetadata,
+        typer.Option("--merge-metadata", help="Metadata policy for merged parts."),
+    ] = MergeMetadata.PRESERVE,
+    max_vertices_per_mesh: Annotated[
+        int | None,
+        typer.Option("--max-vertices-per-mesh", help="Split merged output above this vertex count."),
+    ] = 65_535,
+    region_size: Annotated[
+        float | None,
+        typer.Option("--region-size", help="Spatial region size for --merge-mode regions."),
+    ] = None,
+    merge_strategy: Annotated[
+        MergeStrategy,
+        typer.Option("--merge-strategy", help="Substrategy for region merging."),
+    ] = MergeStrategy.ALL,
+    hierarchy_level: Annotated[
+        int,
+        typer.Option("--hierarchy-level", help="Hierarchy level used by --merge-mode hierarchy-level."),
+    ] = 1,
     filters: Annotated[
         list[str] | None,
         typer.Option("--filter", help="Scope optimization and LOD work with selectors such as path=*/Fasteners/*."),
@@ -287,6 +338,14 @@ def cmd_convert(
         "uv0": uv0.value,
         "uv1": uv1.value,
         "materials": materials.value,
+        "merge": merge,
+        "merge_mode": merge_mode.value,
+        "keep_parent": keep_parent,
+        "merge_metadata": merge_metadata.value,
+        "max_vertices_per_mesh": max_vertices_per_mesh,
+        "region_size": region_size,
+        "merge_strategy": merge_strategy.value,
+        "hierarchy_level": hierarchy_level,
         "filters": filters or [],
         "exclude_filters": exclude_filters or [],
         "preserve_instances": preserve_instances,
@@ -312,6 +371,14 @@ def cmd_convert(
         _fail(ctx, payload, "--target-triangles must be greater than 0.", code=2)
     if max_edge_length is not None and max_edge_length <= 0.0:
         _fail(ctx, payload, "--max-edge-length must be greater than 0.", code=2)
+    if max_vertices_per_mesh is not None and max_vertices_per_mesh <= 0:
+        _fail(ctx, payload, "--max-vertices-per-mesh must be greater than 0.", code=2)
+    if hierarchy_level < 0:
+        _fail(ctx, payload, "--hierarchy-level must be greater than or equal to 0.", code=2)
+    if region_size is not None and region_size <= 0.0:
+        _fail(ctx, payload, "--region-size must be greater than 0.", code=2)
+    if merge and merge_mode == MergeMode.REGIONS and region_size is None:
+        _fail(ctx, payload, "--merge-mode regions requires --region-size.", code=2)
     if debug and not _is_stdio(output_path) and output_path.suffix.lower() not in {".usd", ".usda"}:
         _fail(ctx, payload, "--debug requires .usd or .usda output.", code=2)
 
@@ -345,6 +412,19 @@ def cmd_convert(
                 preserve_instances=preserve_instances,
             )
         stage_options = replace(profile_options.stage, materials=materials.value, uv0=uv0.value, uv1=uv1.value)
+        merge_options = (
+            MergeOptions(
+                mode=cast(Any, merge_mode.value.replace("-", "_")),
+                keep_parent=keep_parent,
+                metadata=merge_metadata.value,
+                max_vertices_per_mesh=max_vertices_per_mesh,
+                region_size=region_size,
+                merge_strategy=cast(Any, merge_strategy.value.replace("-", "_")),
+                hierarchy_level=hierarchy_level,
+            )
+            if merge
+            else None
+        )
         lod_options = LODOptions(tuple(lod_values)) if lod_values is not None else profile_options.lods
         asset = _convert_for_cli(
             input_path,
@@ -352,6 +432,7 @@ def cmd_convert(
             profile=profile.value,
             tessellation=tessellation,
             stage=stage_options,
+            merge=merge_options,
             optimize=optimize_options,
             lods=lod_options,
             where=where,
@@ -585,6 +666,7 @@ def _convert_for_cli(
     profile: str,
     tessellation: Tessellation,
     stage: StageOptions,
+    merge: MergeOptions | None,
     optimize: OptimizeOptions | None,
     lods: LODOptions | None,
     where: Filter | None,
@@ -597,10 +679,10 @@ def _convert_for_cli(
             raise RuntimeError("Missing input data on stdin.")
         with _temporary_step_file(data) as temp_input:
             return _convert_output(
-                temp_input, output_path, profile, tessellation, stage, optimize, lods, where, progress, debug
+                temp_input, output_path, profile, tessellation, stage, merge, optimize, lods, where, progress, debug
             )
     return _convert_output(
-        input_path, output_path, profile, tessellation, stage, optimize, lods, where, progress, debug
+        input_path, output_path, profile, tessellation, stage, merge, optimize, lods, where, progress, debug
     )
 
 
@@ -610,6 +692,7 @@ def _convert_output(
     profile: str,
     tessellation: Tessellation,
     stage: StageOptions,
+    merge: MergeOptions | None,
     optimize: OptimizeOptions | None,
     lods: LODOptions | None,
     where: Filter | None,
@@ -628,6 +711,7 @@ def _convert_output(
                 profile=profile,
                 tessellation=tessellation,
                 stage=stage,
+                merge=merge,
                 optimize=optimize,
                 lods=lods,
                 where=where,
@@ -644,6 +728,7 @@ def _convert_output(
         profile=profile,
         tessellation=tessellation,
         stage=stage,
+        merge=merge,
         optimize=optimize,
         lods=lods,
         where=where,

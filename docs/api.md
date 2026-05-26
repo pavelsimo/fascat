@@ -96,6 +96,29 @@ asset = asset.stage(
 
 Filters support node path, node name, part id, part name, material, metadata, bounding box, size, triangle count, vertex count, and logical `all`, `any`, and `not_` composition. If a selected occurrence shares a part with an unmatched occurrence, Fascat duplicates the selected occurrence's part before applying the operation so the unmatched branch stays intact. Report steps include `where` and `matched` fields when an operation is scoped.
 
+## Hierarchy merge
+
+Use `merge()` to reduce node count and draw calls before optimization.
+
+```python
+import fascat as fc
+
+asset = fc.read_step("motor.step").tessellate().stage()
+
+asset = asset.merge(
+    fc.MergeOptions(
+        mode="by_material",
+        keep_parent=True,
+        metadata="combine",
+        max_vertices_per_mesh=65_535,
+        preserve_materials=True,
+    ),
+    where=fc.Filter.path("*/Fasteners/*"),
+)
+```
+
+Merge modes include `all`, `by_material`, `by_node_name`, `by_part_name`, `hierarchy_level`, `parent_children`, `final_level`, and `regions`. Merging bakes node transforms into merged vertex positions, keeps material slots when requested, removes replaced empty nodes, and records before/after `draw_calls` in the merge report step.
+
 ## One-shot conversion
 
 Use `fc.convert()` when you want the full default pipeline and output validation in one call.
@@ -108,6 +131,7 @@ asset = fc.convert(
     "motor.usdc",
     profile="realtime-desktop",
     where=fc.Filter.path("*/Fasteners/*"),
+    merge=fc.MergeOptions(mode="by_material", metadata="combine"),
 )
 
 print(asset.stats())
@@ -124,7 +148,7 @@ fc.convert("motor.step", "motor.gltf", profile="realtime-web")
 ```
 
 `fc.convert()` validates generated output by default. Pass `validate_output=False` only when another step in your pipeline validates the asset.
-When `where` is provided to `fc.convert()`, tessellation, repair, and staging still run for the full asset, while optimization and LOD generation are scoped to the matched assembly subset.
+When `where` is provided to `fc.convert()`, tessellation, repair, and staging still run for the full asset, while merge, optimization, and LOD generation are scoped to the matched assembly subset.
 
 ## Profiles
 

@@ -5,6 +5,18 @@ from typing import Literal
 
 UVMode = Literal["none", "box", "unwrap"]
 LODMode = Literal["variants"]
+MergeMode = Literal[
+    "all",
+    "by_material",
+    "by_node_name",
+    "by_part_name",
+    "hierarchy_level",
+    "parent_children",
+    "final_level",
+    "regions",
+]
+MergeMetadataPolicy = Literal["preserve", "combine", "summarize", "drop"]
+MergeStrategy = Literal["all", "by_material"]
 
 
 @dataclass(frozen=True)
@@ -105,6 +117,47 @@ class LODOptions:
 
     def to_dict(self) -> dict[str, object]:
         return {"ratios": list(self.ratios), "mode": self.mode}
+
+
+@dataclass(frozen=True)
+class MergeOptions:
+    mode: MergeMode = "all"
+    keep_parent: bool = True
+    metadata: MergeMetadataPolicy = "preserve"
+    max_vertices_per_mesh: int | None = 65_535
+    preserve_materials: bool = True
+    hierarchy_level: int = 1
+    region_size: float | None = None
+    merge_strategy: MergeStrategy = "all"
+    remove_empty_nodes: bool = True
+
+    def __post_init__(self) -> None:
+        if self.mode not in {
+            "all",
+            "by_material",
+            "by_node_name",
+            "by_part_name",
+            "hierarchy_level",
+            "parent_children",
+            "final_level",
+            "regions",
+        }:
+            raise ValueError("unsupported merge mode")
+        if self.metadata not in {"preserve", "combine", "summarize", "drop"}:
+            raise ValueError("merge metadata must be one of: preserve, combine, summarize, drop")
+        if self.merge_strategy not in {"all", "by_material"}:
+            raise ValueError("merge_strategy must be one of: all, by_material")
+        if self.max_vertices_per_mesh is not None and self.max_vertices_per_mesh <= 0:
+            raise ValueError("max_vertices_per_mesh must be greater than 0 when set")
+        if self.hierarchy_level < 0:
+            raise ValueError("hierarchy_level must be greater than or equal to 0")
+        if self.mode == "regions" and (self.region_size is None or self.region_size <= 0.0):
+            raise ValueError("region_size must be greater than 0 for regions merge mode")
+        if self.region_size is not None and self.region_size <= 0.0:
+            raise ValueError("region_size must be greater than 0 when set")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
 
 
 @dataclass(frozen=True)
