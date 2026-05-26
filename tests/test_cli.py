@@ -351,6 +351,51 @@ def test_convert_writes_failure_report_sidecar(monkeypatch, tmp_path: Path) -> N
     assert report["finished_at"] is not None
 
 
+@pytest.mark.requires_ocp
+@pytest.mark.requires_usd
+def test_convert_writes_failure_report_when_usd_validation_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import fascat.pipeline as pipeline
+
+    output_file = tmp_path / "output.usda"
+    report_file = tmp_path / "report.json"
+
+    def fail_validate(_path: str | Path) -> dict[str, int]:
+        raise RuntimeError("invalid generated USD")
+
+    monkeypatch.setattr(pipeline, "validate_usd", fail_validate)
+
+    result = runner.invoke(
+        app,
+        [
+            "convert",
+            "tests/fixtures/spool-clamp-lid.step",
+            str(output_file),
+            "--sag",
+            "0.2",
+            "--target-triangles",
+            "80",
+            "--lods",
+            "0.5",
+            "--report",
+            str(report_file),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "invalid generated USD" in result.output
+    assert output_file.exists()
+    assert report_file.exists()
+    report = json.loads(report_file.read_text(encoding="utf-8"))
+    step_names = [step["name"] for step in report["steps"]]
+    assert report["errors"] == ["invalid generated USD"]
+    assert step_names[-2:] == ["write", "validate"]
+    assert report["finished_at"] is not None
+    assert report["output_stats"]["triangles"] > 0
+
+
 def test_validate_rejects_unknown_extension(tmp_path: Path) -> None:
     output_file = tmp_path / "output.txt"
     output_file.write_text("not usd", encoding="utf-8")
