@@ -6,17 +6,30 @@ from fascat.asset import Asset, Part
 from fascat.options import OptimizeOptions
 
 
-def optimize_asset(asset: Asset, options: OptimizeOptions) -> Asset:
+def optimize_asset(asset: Asset, options: OptimizeOptions, *, selected_part_ids: set[str] | None = None) -> Asset:
     result = asset.copy(keep_source=True)
     if not options.preserve_instances:
-        result = _duplicate_parts_per_occurrence(result)
-    total_triangles = result.triangle_count
-    targets = _targets_for_parts(result.parts, total_triangles, options.target_triangles)
+        result = _duplicate_parts_per_occurrence(result, selected_part_ids=selected_part_ids)
+        if selected_part_ids is not None:
+            selected_part_ids = {
+                node.part_id
+                for node in result.root.walk()
+                if node.part_id is not None and "source_part_id" in result.parts[node.part_id].metadata
+            }
+    total_triangles = _selected_triangle_count(result.parts, selected_part_ids)
+    targets = _targets_for_parts(
+        result.parts,
+        total_triangles,
+        options.target_triangles,
+        selected_part_ids=selected_part_ids,
+    )
     if targets is not None and sum(targets.values()) > (options.target_triangles or 0):
         result.report.add_warning(
             "target_triangles is lower than the number of non-empty unique meshes; using one triangle per mesh"
         )
     for part in result.parts.values():
+        if selected_part_ids is not None and part.id not in selected_part_ids:
+            continue
         if part.mesh is None:
             continue
         mesh = part.mesh
@@ -33,13 +46,19 @@ def optimize_asset(asset: Asset, options: OptimizeOptions) -> Asset:
     return result
 
 
-def _duplicate_parts_per_occurrence(asset: Asset) -> Asset:
+def _duplicate_parts_per_occurrence(asset: Asset, *, selected_part_ids: set[str] | None = None) -> Asset:
     parts: dict[str, Part] = {}
     counters: dict[str, int] = {}
+    carried: set[str] = set()
     for node in asset.root.walk():
         if node.part_id is None or node.part_id not in asset.parts:
             continue
         source_id = node.part_id
+        if selected_part_ids is not None and source_id not in selected_part_ids:
+            if source_id not in carried:
+                parts[source_id] = asset.parts[source_id].copy(keep_source=True)
+                carried.add(source_id)
+            continue
         occurrence_index = counters.get(source_id, 0) + 1
         counters[source_id] = occurrence_index
         source = asset.parts[source_id]
@@ -60,6 +79,7 @@ def _targets_for_parts(
     parts: dict[str, Part],
     total_triangles: int,
     target_triangles: int | None,
+    selected_part_ids: set[str] | None = None,
 ) -> dict[str, int] | None:
     if target_triangles is None or total_triangles <= target_triangles or total_triangles == 0:
         return None
@@ -67,7 +87,9 @@ def _targets_for_parts(
     eligible = [
         (part_id, part.mesh.triangle_count)
         for part_id, part in parts.items()
-        if part.mesh is not None and part.mesh.triangle_count > 0
+        if (selected_part_ids is None or part_id in selected_part_ids)
+        and part.mesh is not None
+        and part.mesh.triangle_count > 0
     ]
     if not eligible:
         return None
@@ -104,3 +126,11 @@ def _targets_for_parts(
     for _remainder, _triangle_count, part_id in sorted(remainders, reverse=True)[:remaining]:
         targets[part_id] += 1
     return targets
+
+
+def _selected_triangle_count(parts: dict[str, Part], selected_part_ids: set[str] | None) -> int:
+    return sum(
+        part.mesh.triangle_count
+        for part_id, part in parts.items()
+        if (selected_part_ids is None or part_id in selected_part_ids) and part.mesh is not None
+    )

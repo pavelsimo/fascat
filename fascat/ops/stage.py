@@ -5,15 +5,17 @@ from fascat.mesh import Mesh
 from fascat.options import StageOptions
 
 
-def stage_asset(asset: Asset, options: StageOptions) -> Asset:
+def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[str] | None = None) -> Asset:
     result = asset.copy(keep_source=True)
     if options.uv1 == "unwrap":
         _require_xatlas()
     if options.uv0 == "unwrap":
         _require_xatlas()
-    _stage_materials(result, options)
+    _stage_materials(result, options, selected_part_ids=selected_part_ids)
 
     for part in result.parts.values():
+        if selected_part_ids is not None and part.id not in selected_part_ids:
+            continue
         if part.mesh is None:
             continue
         mesh = part.mesh
@@ -32,10 +34,12 @@ def stage_asset(asset: Asset, options: StageOptions) -> Asset:
     return result
 
 
-def _stage_materials(asset: Asset, options: StageOptions) -> None:
+def _stage_materials(asset: Asset, options: StageOptions, *, selected_part_ids: set[str] | None) -> None:
     if options.materials == "cad":
         return
     for part in asset.parts.values():
+        if selected_part_ids is not None and part.id not in selected_part_ids:
+            continue
         part.metadata.pop("display_color", None)
         if options.materials == "display" and part.material_ids:
             material = asset.materials.get(part.material_ids[0])
@@ -44,7 +48,8 @@ def _stage_materials(asset: Asset, options: StageOptions) -> None:
         part.material_ids = []
         if part.mesh is not None:
             part.mesh.material_indices = None
-    asset.materials = {}
+    if selected_part_ids is None:
+        asset.materials = {}
 
 
 def _require_xatlas() -> None:

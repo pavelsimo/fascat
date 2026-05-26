@@ -6,6 +6,7 @@ from typing import Any, Literal, cast
 
 from fascat import profiles
 from fascat.asset import Asset
+from fascat.filter import Filter
 from fascat.io.gltf import GLTF_SUFFIXES, validate_gltf
 from fascat.io.gltf import write_gltf as _write_gltf
 from fascat.io.step import read_step
@@ -30,6 +31,7 @@ def convert(
     progress: Callable[[str, dict[str, int]], None] | None = None,
     validate_output: bool = True,
     debug: bool = False,
+    where: Filter | None = None,
 ) -> Asset:
     output_format = _export_format(output_path)
     if debug and output_format != "usd":
@@ -51,12 +53,12 @@ def convert(
         progress("stage", asset.stats())
     optimize_options = optimize if optimize is not None else selected.optimize
     if optimize_options is not None:
-        asset = asset.optimize(optimize_options)
+        asset = asset.optimize(optimize_options, where=where)
         if progress is not None:
             progress("optimize", asset.stats())
     lod_options = lods if lods is not None else selected.lods
     if lod_options is not None:
-        asset = asset.lods(lod_options)
+        asset = asset.lods(lod_options, where=where)
         if progress is not None:
             progress("lods", asset.stats())
     write_before = _report_stats(asset)
@@ -202,6 +204,7 @@ def tessellate(
     max_edge_length: float | None = None,
     create_normals: bool = True,
     keep_brep: bool = False,
+    where: Filter | None = None,
 ) -> Asset:
     return asset.tessellate(
         Tessellation(
@@ -211,14 +214,15 @@ def tessellate(
             max_edge_length=max_edge_length,
             create_normals=create_normals,
             keep_brep=keep_brep,
-        )
+        ),
+        where=where,
     )
 
 
-def repair(asset: Asset, *, tolerance: float = 0.0) -> Asset:
+def repair(asset: Asset, *, tolerance: float = 0.0, where: Filter | None = None) -> Asset:
     from fascat.options import RepairOptions
 
-    return asset.repair(RepairOptions(tolerance=tolerance))
+    return asset.repair(RepairOptions(tolerance=tolerance), where=where)
 
 
 def stage(
@@ -228,8 +232,9 @@ def stage(
     normals: bool = True,
     uv0: UVMode = "box",
     uv1: UVMode | None = None,
+    where: Filter | None = None,
 ) -> Asset:
-    return asset.stage(StageOptions(materials=materials, normals=normals, uv0=uv0, uv1=uv1))
+    return asset.stage(StageOptions(materials=materials, normals=normals, uv0=uv0, uv1=uv1), where=where)
 
 
 def optimize(
@@ -240,6 +245,7 @@ def optimize(
     preserve_instances: bool = True,
     simplify: bool = True,
     optimize_buffers: bool = True,
+    where: Filter | None = None,
 ) -> Asset:
     return asset.optimize(
         OptimizeOptions(
@@ -248,9 +254,15 @@ def optimize(
             preserve_instances=preserve_instances,
             simplify=simplify,
             optimize_buffers=optimize_buffers,
-        )
+        ),
+        where=where,
     )
 
 
-def lods(asset: Asset, *, ratios: list[float] | tuple[float, ...] = (0.5, 0.25, 0.1)) -> Asset:
-    return asset.lods(LODOptions(tuple(ratios)))
+def lods(
+    asset: Asset,
+    *,
+    ratios: list[float] | tuple[float, ...] = (0.5, 0.25, 0.1),
+    where: Filter | None = None,
+) -> Asset:
+    return asset.lods(LODOptions(tuple(ratios)), where=where)

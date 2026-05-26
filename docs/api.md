@@ -62,6 +62,40 @@ asset.write_gltf("motor.glb")
 
 Pipeline operations return new `Asset` instances instead of mutating the previous asset. Write calls attach a final write step to the asset report.
 
+## Assembly filters
+
+Use `Filter` selectors to inspect or process one branch of an assembly while leaving the rest unchanged.
+
+```python
+import fascat as fc
+
+asset = fc.read_step("motor.step").tessellate()
+
+fasteners = fc.Filter(
+    path="*/Fasteners/*",
+    name=["Bolt*", "Nut*", "Washer*"],
+)
+
+large_castings = fc.Filter.all(
+    fc.Filter.path("*/Housing/*"),
+    fc.Filter.size(min_diagonal=50.0),
+)
+
+print(asset.select(fasteners).stats())
+
+asset = asset.optimize(
+    fc.OptimizeOptions(target_triangles=80_000),
+    where=fasteners,
+)
+
+asset = asset.stage(
+    fc.StageOptions(materials="display", uv0="none", uv1=None),
+    where=large_castings,
+)
+```
+
+Filters support node path, node name, part id, part name, material, metadata, bounding box, size, triangle count, vertex count, and logical `all`, `any`, and `not_` composition. If a selected occurrence shares a part with an unmatched occurrence, Fascat duplicates the selected occurrence's part before applying the operation so the unmatched branch stays intact. Report steps include `where` and `matched` fields when an operation is scoped.
+
 ## One-shot conversion
 
 Use `fc.convert()` when you want the full default pipeline and output validation in one call.
@@ -73,6 +107,7 @@ asset = fc.convert(
     "motor.step",
     "motor.usdc",
     profile="realtime-desktop",
+    where=fc.Filter.path("*/Fasteners/*"),
 )
 
 print(asset.stats())
@@ -89,6 +124,7 @@ fc.convert("motor.step", "motor.gltf", profile="realtime-web")
 ```
 
 `fc.convert()` validates generated output by default. Pass `validate_output=False` only when another step in your pipeline validates the asset.
+When `where` is provided to `fc.convert()`, tessellation, repair, and staging still run for the full asset, while optimization and LOD generation are scoped to the matched assembly subset.
 
 ## Profiles
 

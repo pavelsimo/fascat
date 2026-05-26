@@ -2,6 +2,7 @@
 
 from fascat import profiles
 from fascat.asset import Asset, Node, Part
+from fascat.filter import Filter, FilterExpressionError, SelectionMatch, SelectionResult
 from fascat.io.gltf import validate_gltf
 from fascat.io.step import read_step
 from fascat.io.usd import validate_usd
@@ -14,6 +15,8 @@ __version__ = "0.1.0"
 
 __all__ = [
     "Asset",
+    "Filter",
+    "FilterExpressionError",
     "LODOptions",
     "Material",
     "Mesh",
@@ -22,6 +25,8 @@ __all__ = [
     "OptimizeOptions",
     "Part",
     "RepairOptions",
+    "SelectionMatch",
+    "SelectionResult",
     "StageOptions",
     "Tessellation",
     "__version__",

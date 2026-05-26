@@ -49,10 +49,36 @@ fascat inspect input.step --json
 | `--uv0` | `box` | UV0 generation mode: `none`, `box`, or `unwrap` |
 | `--uv1` | `none` | UV1 generation mode: `none`, `box`, or `unwrap` |
 | `--materials` | `cad` | Material staging mode: `cad`, `display`, or `none` |
+| `--filter` | unset | Scope optimization and LOD work with a selector such as `path=*/Fasteners/*` |
+| `--exclude-filter` | unset | Exclude selector matches from `--filter` results |
 | `--preserve-instances / --no-preserve-instances` | `true` | Preserve repeated parts as shared instances, or duplicate per occurrence |
 | `--debug` | `false` | Require text `.usd` or `.usda` output for debugging |
 | `--report` | unset | Write a JSON conversion report sidecar |
 | `--force` | `false` | Overwrite an existing output file |
+
+## Inspect flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--profile` | `inspect-only` | Inspection profile to show in output |
+| `--filter` | unset | Report matched assembly nodes and parts |
+| `--exclude-filter` | unset | Exclude selector matches from `--filter` results |
+
+Supported filter expressions:
+
+| Expression | Meaning |
+|------------|---------|
+| `path=*/Fasteners/*` | Match node paths |
+| `name=Bolt*` | Match node names |
+| `part=part_123` | Match part ids |
+| `part-name=Housing*` | Match part names |
+| `material=*Steel*` | Match material ids or names |
+| `metadata.step_label=0:1:*` | Match metadata values |
+| `triangles<=1200` | Match triangle counts |
+| `vertices>=300` | Match vertex counts |
+| `size>=50` | Match bounding-box diagonal |
+
+Repeated `--filter` flags are combined with logical AND. Use `--exclude-filter` for negative selectors.
 
 ## File arguments
 

@@ -34,6 +34,20 @@ fascat convert motor.step motor.usda --debug --report report.json
 fascat convert motor.step - --dry-run
 ```
 
+## Scope by assembly filter
+
+```bash
+fascat inspect motor.step \
+  --filter 'path=*/Fasteners/*' \
+  --filter 'name=Bolt*' \
+  --json
+
+fascat convert motor.step motor.glb \
+  --filter 'path=*/Fasteners/*' \
+  --target-triangles 80000 \
+  --report report.json
+```
+
 ## Tune tessellation and LODs
 
 ```bash

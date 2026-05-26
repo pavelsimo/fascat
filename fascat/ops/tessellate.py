@@ -10,10 +10,12 @@ from fascat.mesh import Mesh
 from fascat.options import Tessellation
 
 
-def tessellate_asset(asset: Asset, options: Tessellation) -> Asset:
+def tessellate_asset(asset: Asset, options: Tessellation, *, selected_part_ids: set[str] | None = None) -> Asset:
     result = asset.copy(keep_source=True)
     mesh_by_source: dict[tuple[str, tuple[str, ...], tuple[int, ...] | None], Mesh] = {}
     for part in result.parts.values():
+        if selected_part_ids is not None and part.id not in selected_part_ids:
+            continue
         if part.mesh is not None:
             continue
         if part.source_shape is None:
@@ -37,6 +39,8 @@ def tessellate_asset(asset: Asset, options: Tessellation) -> Asset:
         part.fingerprint = part.mesh.fingerprint()
         if not options.keep_brep:
             part.source_shape = None
+    if selected_part_ids is not None:
+        return result
     return _deduplicate_parts_by_fingerprint(result)
 
 

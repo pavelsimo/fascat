@@ -154,6 +154,12 @@ class Asset:
             report=self.report.copy(),
         )
 
+    def select(self, where: Any | None = None) -> Any:
+        from fascat.filter import Filter
+
+        selector = Filter.from_value(where) or Filter()
+        return selector.select(self)
+
     def stats(self, *, include_lods: bool = False) -> dict[str, int]:
         stats = {
             "nodes": len(self.root.walk()),
@@ -173,18 +179,19 @@ class Asset:
     def _report_stats(self) -> dict[str, int]:
         return self.stats(include_lods=any(part.lod_meshes for part in self.parts.values()))
 
-    def tessellate(self, options: Tessellation | None = None) -> Asset:
+    def tessellate(self, options: Tessellation | None = None, *, where: Any | None = None) -> Asset:
         from fascat.ops.tessellate import tessellate_asset
 
         opts = options or Tessellation()
+        scope = self._operation_scope(where)
         before = self.stats()
         warning_count = len(self.report.warnings)
         with timed_step() as timer:
-            asset = tessellate_asset(self, opts)
+            asset = tessellate_asset(scope.asset, opts, selected_part_ids=scope.selected_part_ids)
         step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
             "tessellate",
-            options=opts.to_dict(),
+            options=_options_with_scope(opts.to_dict(), scope),
             before=before,
             after=asset.stats(),
             duration=timer.duration,
@@ -192,20 +199,23 @@ class Asset:
         )
         return asset
 
-    def repair(self, options: RepairOptions | None = None) -> Asset:
+    def repair(self, options: RepairOptions | None = None, *, where: Any | None = None) -> Asset:
         opts = options or RepairOptions()
+        scope = self._operation_scope(where)
         before = self.stats()
         warning_count = len(self.report.warnings)
         with timed_step() as timer:
-            asset = self.copy(keep_source=True)
+            asset = scope.asset.copy(keep_source=True)
             for part in asset.parts.values():
+                if scope.selected_part_ids is not None and part.id not in scope.selected_part_ids:
+                    continue
                 if part.mesh is not None:
                     part.mesh = part.mesh.repair(opts)
                     part.fingerprint = part.mesh.fingerprint()
         step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
             "repair",
-            options=opts.to_dict(),
+            options=_options_with_scope(opts.to_dict(), scope),
             before=before,
             after=asset.stats(),
             duration=timer.duration,
@@ -213,18 +223,19 @@ class Asset:
         )
         return asset
 
-    def stage(self, options: StageOptions | None = None) -> Asset:
+    def stage(self, options: StageOptions | None = None, *, where: Any | None = None) -> Asset:
         from fascat.ops.stage import stage_asset
 
         opts = options or StageOptions()
+        scope = self._operation_scope(where)
         before = self.stats()
         warning_count = len(self.report.warnings)
         with timed_step() as timer:
-            asset = stage_asset(self, opts)
+            asset = stage_asset(scope.asset, opts, selected_part_ids=scope.selected_part_ids)
         step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
             "stage",
-            options=opts.to_dict(),
+            options=_options_with_scope(opts.to_dict(), scope),
             before=before,
             after=asset.stats(),
             duration=timer.duration,
@@ -232,18 +243,19 @@ class Asset:
         )
         return asset
 
-    def optimize(self, options: OptimizeOptions | None = None) -> Asset:
+    def optimize(self, options: OptimizeOptions | None = None, *, where: Any | None = None) -> Asset:
         from fascat.ops.optimize import optimize_asset
 
         opts = options or OptimizeOptions()
+        scope = self._operation_scope(where)
         before = self.stats()
         warning_count = len(self.report.warnings)
         with timed_step() as timer:
-            asset = optimize_asset(self, opts)
+            asset = optimize_asset(scope.asset, opts, selected_part_ids=scope.selected_part_ids)
         step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
             "optimize",
-            options=opts.to_dict(),
+            options=_options_with_scope(opts.to_dict(), scope),
             before=before,
             after=asset.stats(),
             duration=timer.duration,
@@ -251,18 +263,19 @@ class Asset:
         )
         return asset
 
-    def lods(self, options: LODOptions | None = None) -> Asset:
+    def lods(self, options: LODOptions | None = None, *, where: Any | None = None) -> Asset:
         from fascat.ops.lod import build_lods
 
         opts = options or LODOptions()
+        scope = self._operation_scope(where)
         before = self.stats(include_lods=True)
         warning_count = len(self.report.warnings)
         with timed_step() as timer:
-            asset = build_lods(self, opts)
+            asset = build_lods(scope.asset, opts, selected_part_ids=scope.selected_part_ids)
         step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
             "lods",
-            options=opts.to_dict(),
+            options=_options_with_scope(opts.to_dict(), scope),
             before=before,
             after=asset.stats(include_lods=True),
             duration=timer.duration,
@@ -342,3 +355,65 @@ class Asset:
             "materials": {material_id: material.to_dict() for material_id, material in self.materials.items()},
             "report": self.report.to_dict(),
         }
+
+    def _operation_scope(self, where: Any | None) -> _OperationScope:
+        from fascat.filter import Filter
+
+        selector = Filter.from_value(where)
+        if selector is None:
+            return _OperationScope(asset=self, selected_part_ids=None, selection=None)
+
+        selection = selector.select(self)
+        scoped_asset = self._isolate_selected_occurrences(selection.node_ids)
+        selected_part_ids = {
+            node.part_id
+            for node in scoped_asset.root.walk()
+            if node.id in selection.node_ids and node.part_id is not None
+        }
+        return _OperationScope(asset=scoped_asset, selected_part_ids=selected_part_ids, selection=selection)
+
+    def _isolate_selected_occurrences(self, selected_node_ids: set[str]) -> Asset:
+        asset = self.copy(keep_source=True)
+        occurrences: dict[str, list[Node]] = {}
+        for node in asset.root.walk():
+            if node.part_id is not None and node.part_id in asset.parts:
+                occurrences.setdefault(node.part_id, []).append(node)
+
+        for part_id, nodes in occurrences.items():
+            selected_nodes = [node for node in nodes if node.id in selected_node_ids]
+            if not selected_nodes or len(selected_nodes) == len(nodes):
+                continue
+            new_part_id = _unique_part_id(asset.parts, part_id)
+            part = asset.parts[part_id].copy(keep_source=True)
+            part.id = new_part_id
+            part.metadata = {**part.metadata, "source_part_id": part_id}
+            asset.parts[new_part_id] = part
+            for node in selected_nodes:
+                node.part_id = new_part_id
+        return asset
+
+
+@dataclass(frozen=True)
+class _OperationScope:
+    asset: Asset
+    selected_part_ids: set[str] | None
+    selection: Any | None
+
+
+def _options_with_scope(options: dict[str, object], scope: _OperationScope) -> dict[str, object]:
+    if scope.selection is None:
+        return options
+    return {
+        **options,
+        "where": scope.selection.filter.to_dict(),
+        "matched": scope.selection.stats(),
+    }
+
+
+def _unique_part_id(parts: dict[str, Part], base: str) -> str:
+    candidate = f"{base}_selected"
+    suffix = 2
+    while candidate in parts:
+        candidate = f"{base}_selected_{suffix}"
+        suffix += 1
+    return candidate

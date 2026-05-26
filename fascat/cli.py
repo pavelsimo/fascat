@@ -15,6 +15,7 @@ import typer.rich_utils as rich_utils
 from rich.console import Console
 
 from fascat import __version__
+from fascat.filter import Filter, FilterExpressionError
 from fascat.io.gltf import GLTF_SUFFIXES
 from fascat.io.step import read_step, read_step_bytes
 from fascat.options import LODOptions, OptimizeOptions, StageOptions, Tessellation
@@ -156,6 +157,14 @@ def cmd_inspect(
     ctx: typer.Context,
     input_path: Annotated[Path, typer.Argument(help="STEP file to inspect, or '-' for stdin.", allow_dash=True)],
     profile: Annotated[Profile, typer.Option("--profile", help="Inspection profile to apply.")] = Profile.INSPECT_ONLY,
+    filters: Annotated[
+        list[str] | None,
+        typer.Option("--filter", help="Scope inspection with a selector such as path=*/Fasteners/* or triangles<=12."),
+    ] = None,
+    exclude_filters: Annotated[
+        list[str] | None,
+        typer.Option("--exclude-filter", help="Exclude selector matches from --filter results."),
+    ] = None,
 ) -> None:
     """Inspect STEP assembly metadata and planned conversion inputs."""
     state = _state(ctx)
@@ -163,8 +172,11 @@ def cmd_inspect(
         "command": "inspect",
         "input": str(input_path),
         "profile": profile.value,
+        "filters": filters or [],
+        "exclude_filters": exclude_filters or [],
         "dry_run": state.dry_run,
     }
+    where = _parse_filter_options(filters, exclude_filters, ctx, payload)
     _validate_step_input(input_path, ctx, payload)
     if state.dry_run:
         _emit(ctx, payload, f"Would inspect {input_path} with profile {profile.value}.")
@@ -172,6 +184,7 @@ def cmd_inspect(
 
     asset = _read_step_for_cli(input_path, ctx, payload)
     profile_options = by_name(profile.value)
+    selection = asset.select(where) if where is not None else None
     result = {
         **payload,
         "units": asset.units,
@@ -184,7 +197,12 @@ def cmd_inspect(
         "materials": [material.to_dict() for material in asset.materials.values()],
         "report": asset.report.to_dict(),
     }
-    _emit(ctx, result, f"{input_path}: {_format_stats(asset.stats())}; units={asset.units}")
+    if selection is not None:
+        result["selection"] = selection.to_dict()
+    message = f"{input_path}: {_format_stats(asset.stats())}; units={asset.units}"
+    if selection is not None:
+        message = f"{message}; matched {_format_stats(selection.stats())}"
+    _emit(ctx, result, message)
 
 
 @app.command(
@@ -234,6 +252,14 @@ def cmd_convert(
         MaterialMode,
         typer.Option("--materials", help="Material staging mode: cad, display, or none."),
     ] = MaterialMode.CAD,
+    filters: Annotated[
+        list[str] | None,
+        typer.Option("--filter", help="Scope optimization and LOD work with selectors such as path=*/Fasteners/*."),
+    ] = None,
+    exclude_filters: Annotated[
+        list[str] | None,
+        typer.Option("--exclude-filter", help="Exclude selector matches from --filter results."),
+    ] = None,
     preserve_instances: Annotated[
         bool,
         typer.Option(
@@ -261,12 +287,15 @@ def cmd_convert(
         "uv0": uv0.value,
         "uv1": uv1.value,
         "materials": materials.value,
+        "filters": filters or [],
+        "exclude_filters": exclude_filters or [],
         "preserve_instances": preserve_instances,
         "debug": debug,
         "report": str(report) if report else None,
         "force": force,
         "dry_run": state.dry_run,
     }
+    where = _parse_filter_options(filters, exclude_filters, ctx, payload)
     lod_values = _parse_lods(lods, ctx, payload)
     payload["lods"] = lod_values
     _validate_step_input(input_path, ctx, payload)
@@ -325,6 +354,7 @@ def cmd_convert(
             stage=stage_options,
             optimize=optimize_options,
             lods=lod_options,
+            where=where,
             progress=_progress_callback(ctx, output_path),
             debug=debug,
         )
@@ -492,6 +522,21 @@ def _parse_lods(value: str | None, ctx: typer.Context, payload: dict[str, Any]) 
     return ratios
 
 
+def _parse_filter_options(
+    filters: list[str] | None,
+    exclude_filters: list[str] | None,
+    ctx: typer.Context,
+    payload: dict[str, Any],
+) -> Filter | None:
+    try:
+        return Filter.from_cli(filters or [], exclude=exclude_filters or [])
+    except FilterExpressionError as exc:
+        _fail(ctx, payload, str(exc), code=2)
+    except ValueError as exc:
+        _fail(ctx, payload, str(exc), code=2)
+    raise AssertionError("unreachable")
+
+
 def _validate_step_input(path: Path, ctx: typer.Context, payload: dict[str, Any]) -> None:
     if not _is_stdio(path) and path.suffix.lower() not in STEP_SUFFIXES:
         _fail(ctx, payload, f"Unsupported STEP extension: {path.suffix or '<none>'}. Use .step or .stp.", code=2)
@@ -542,6 +587,7 @@ def _convert_for_cli(
     stage: StageOptions,
     optimize: OptimizeOptions | None,
     lods: LODOptions | None,
+    where: Filter | None,
     progress: Callable[[str, dict[str, int]], None] | None,
     debug: bool,
 ) -> Any:
@@ -551,9 +597,11 @@ def _convert_for_cli(
             raise RuntimeError("Missing input data on stdin.")
         with _temporary_step_file(data) as temp_input:
             return _convert_output(
-                temp_input, output_path, profile, tessellation, stage, optimize, lods, progress, debug
+                temp_input, output_path, profile, tessellation, stage, optimize, lods, where, progress, debug
             )
-    return _convert_output(input_path, output_path, profile, tessellation, stage, optimize, lods, progress, debug)
+    return _convert_output(
+        input_path, output_path, profile, tessellation, stage, optimize, lods, where, progress, debug
+    )
 
 
 def _convert_output(
@@ -564,6 +612,7 @@ def _convert_output(
     stage: StageOptions,
     optimize: OptimizeOptions | None,
     lods: LODOptions | None,
+    where: Filter | None,
     progress: Callable[[str, dict[str, int]], None] | None,
     debug: bool,
 ) -> Any:
@@ -581,6 +630,7 @@ def _convert_output(
                 stage=stage,
                 optimize=optimize,
                 lods=lods,
+                where=where,
                 progress=progress,
                 debug=debug,
             )
@@ -596,6 +646,7 @@ def _convert_output(
         stage=stage,
         optimize=optimize,
         lods=lods,
+        where=where,
         progress=progress,
         debug=debug,
     )
