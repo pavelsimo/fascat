@@ -262,6 +262,39 @@ def test_convert_fixture_writes_usd_and_report(tmp_path: Path) -> None:
 
 @pytest.mark.requires_ocp
 @pytest.mark.requires_usd
+def test_convert_json_output_includes_stats_and_report(tmp_path: Path) -> None:
+    output_file = tmp_path / "output.usda"
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "convert",
+            "tests/fixtures/spool-clamp-lid.step",
+            str(output_file),
+            "--sag",
+            "0.2",
+            "--target-triangles",
+            "80",
+            "--lods",
+            "0.5",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert output_file.exists()
+    payload = json.loads(result.output)
+    step_names = [step["name"] for step in payload["report"]["steps"]]
+    assert payload["command"] == "convert"
+    assert payload["stats"]["parts"] == 1
+    assert payload["stats"]["triangles"] > 0
+    assert payload["report"]["input_stats"]["parts"] == 1
+    assert payload["report"]["finished_at"] is not None
+    assert step_names[-2:] == ["write", "validate"]
+
+
+@pytest.mark.requires_ocp
+@pytest.mark.requires_usd
 def test_convert_debug_usda_authors_debug_metadata(tmp_path: Path) -> None:
     from pxr import Usd
 
