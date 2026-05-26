@@ -163,6 +163,7 @@ def test_usd_export_authors_uv0_normals_and_original_names(tmp_path: Path) -> No
     xform_prim = stage.GetPrimAtPath("/Scene/_123_motor_housing")
     assert xform_prim
     assert xform_prim.GetCustomDataByKey("fascat:originalName") == "123 motor housing!"
+    assert xform_prim.GetCustomDataByKey("fascat:nodeId") == "node"
     xform_ops = UsdGeom.Xformable(xform_prim).GetOrderedXformOps()
     assert len(xform_ops) == 1
     assert np.allclose(np.asarray(xform_ops[0].Get()), transform)
@@ -232,8 +233,8 @@ def test_usd_export_disambiguates_sanitized_name_collisions(tmp_path: Path) -> N
             id="root",
             name="root",
             children=[
-                Node(id="node_a", name="A", part_id="part-a"),
-                Node(id="node_b", name="B", part_id="part_a"),
+                Node(id="node-a", name="panel-a", part_id="part-a"),
+                Node(id="node-b", name="panel_a", part_id="part_a"),
             ],
         ),
         parts={
@@ -254,7 +255,13 @@ def test_usd_export_disambiguates_sanitized_name_collisions(tmp_path: Path) -> N
     second_prototype = stage.GetPrimAtPath("/__Prototypes/part_a_lod0_2")
     first_subset = stage.GetPrimAtPath("/__Prototypes/part_a_lod0/Mesh/red")
     second_subset = stage.GetPrimAtPath("/__Prototypes/part_a_lod0/Mesh/red_2")
+    first_node = stage.GetPrimAtPath("/Scene/panel_a")
+    second_node = stage.GetPrimAtPath("/Scene/panel_a_2")
 
+    assert first_node.GetCustomDataByKey("fascat:originalName") == "panel-a"
+    assert first_node.GetCustomDataByKey("fascat:nodeId") == "node-a"
+    assert second_node.GetCustomDataByKey("fascat:originalName") == "panel_a"
+    assert second_node.GetCustomDataByKey("fascat:nodeId") == "node-b"
     assert first_material.GetCustomDataByKey("fascat:materialId") == "red!"
     assert second_material.GetCustomDataByKey("fascat:materialId") == "red?"
     assert first_prototype.GetCustomDataByKey("fascat:partId") == "part-a"

@@ -210,6 +210,7 @@ def _write_node(
         if not np.allclose(child.transform, np.eye(4)):
             xform.AddTransformOp().Set(Gf.Matrix4d(child.transform.tolist()))
         xform.GetPrim().SetCustomDataByKey("fascat:originalName", child.name)
+        xform.GetPrim().SetCustomDataByKey("fascat:nodeId", child.id)
         if child.part_id is not None and (child.part_id, 0) in prototype_paths:
             part = parts[child.part_id]
             prim = xform.GetPrim()
