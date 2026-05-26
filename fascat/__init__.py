@@ -10,6 +10,7 @@ from fascat.material import Material
 from fascat.mesh import Mesh, MeshValidationError
 from fascat.metadata import Metadata, PmiAnnotation, Tolerance
 from fascat.options import (
+    BrepHealOptions,
     LODOptions,
     MergeOptions,
     OptimizeOptions,
@@ -20,6 +21,7 @@ from fascat.options import (
 )
 from fascat.pipeline import (
     convert,
+    heal_brep,
     lods,
     merge,
     optimize,
@@ -35,6 +37,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "Asset",
+    "BrepHealOptions",
     "Filter",
     "FilterExpressionError",
     "LODOptions",
@@ -56,6 +59,7 @@ __all__ = [
     "Tolerance",
     "__version__",
     "convert",
+    "heal_brep",
     "lods",
     "merge",
     "optimize",

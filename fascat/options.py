@@ -73,6 +73,26 @@ class StepReadOptions:
 
 
 @dataclass(frozen=True)
+class BrepHealOptions:
+    tolerance: float = 0.05
+    sew_faces: bool = True
+    fix_edges: bool = True
+    remove_sliver_faces: bool = False
+    max_sliver_area: float = 1e-4
+    unify_tolerances: bool = True
+    fail_on_open_shells: bool = False
+
+    def __post_init__(self) -> None:
+        if self.tolerance <= 0.0:
+            raise ValueError("heal tolerance must be greater than 0")
+        if self.max_sliver_area < 0.0:
+            raise ValueError("max_sliver_area must be greater than or equal to 0")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class StageOptions:
     materials: Literal["cad", "display", "none"] = "cad"
     normals: bool = True

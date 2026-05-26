@@ -18,7 +18,15 @@ from fascat import __version__
 from fascat.filter import Filter, FilterExpressionError
 from fascat.io.gltf import GLTF_SUFFIXES
 from fascat.io.step import read_step, read_step_bytes
-from fascat.options import LODOptions, MergeOptions, OptimizeOptions, StageOptions, StepReadOptions, Tessellation
+from fascat.options import (
+    BrepHealOptions,
+    LODOptions,
+    MergeOptions,
+    OptimizeOptions,
+    StageOptions,
+    StepReadOptions,
+    Tessellation,
+)
 from fascat.pipeline import convert
 from fascat.pipeline import validate_output as validate_export
 from fascat.profiles import by_name
@@ -202,6 +210,16 @@ def cmd_inspect(
         PmiMode,
         typer.Option("--pmi", help="PMI output mode: none, summary, full, metadata, or metadata-and-visuals."),
     ] = PmiMode.SUMMARY,
+    heal_brep: Annotated[bool, typer.Option("--heal-brep", help="Run BREP healing before inspection output.")] = False,
+    heal_tolerance: Annotated[float, typer.Option("--heal-tolerance", help="BREP healing tolerance.")] = 0.05,
+    remove_sliver_faces: Annotated[
+        bool,
+        typer.Option("--remove-sliver-faces", help="Detect tiny sliver faces during BREP healing."),
+    ] = False,
+    max_sliver_area: Annotated[
+        float,
+        typer.Option("--max-sliver-area", help="Area threshold for sliver-face reporting."),
+    ] = 1e-4,
     filters: Annotated[
         list[str] | None,
         typer.Option("--filter", help="Scope inspection with a selector such as path=*/Fasteners/* or triangles<=12."),
@@ -219,11 +237,19 @@ def cmd_inspect(
         "profile": profile.value,
         "metadata": metadata.value,
         "pmi": pmi.value,
+        "heal_brep": heal_brep,
+        "heal_tolerance": heal_tolerance,
+        "remove_sliver_faces": remove_sliver_faces,
+        "max_sliver_area": max_sliver_area,
         "filters": filters or [],
         "exclude_filters": exclude_filters or [],
         "dry_run": state.dry_run,
     }
     where = _parse_filter_options(filters, exclude_filters, ctx, payload)
+    if heal_tolerance <= 0.0:
+        _fail(ctx, payload, "--heal-tolerance must be greater than 0.", code=2)
+    if max_sliver_area < 0.0:
+        _fail(ctx, payload, "--max-sliver-area must be greater than or equal to 0.", code=2)
     _validate_step_input(input_path, ctx, payload)
     if state.dry_run:
         _emit(ctx, payload, f"Would inspect {input_path} with profile {profile.value}.")
@@ -231,6 +257,15 @@ def cmd_inspect(
 
     import_options = _step_read_options(metadata, pmi)
     asset = _read_step_for_cli(input_path, ctx, payload, import_options=import_options)
+    if heal_brep:
+        asset = asset.heal_brep(
+            _brep_heal_options(
+                heal_tolerance=heal_tolerance,
+                remove_sliver_faces=remove_sliver_faces,
+                max_sliver_area=max_sliver_area,
+            ),
+            where=where,
+        )
     profile_options = by_name(profile.value)
     selection = asset.select(where) if where is not None else None
     result = {
@@ -296,6 +331,20 @@ def cmd_convert(
         float | None,
         typer.Option("--max-edge-length", help="Split tessellated triangles longer than this length."),
     ] = None,
+    heal_brep: Annotated[bool, typer.Option("--heal-brep", help="Run BREP healing before tessellation.")] = False,
+    heal_tolerance: Annotated[float, typer.Option("--heal-tolerance", help="BREP healing tolerance.")] = 0.05,
+    remove_sliver_faces: Annotated[
+        bool,
+        typer.Option("--remove-sliver-faces", help="Detect tiny sliver faces during BREP healing."),
+    ] = False,
+    max_sliver_area: Annotated[
+        float,
+        typer.Option("--max-sliver-area", help="Area threshold for sliver-face reporting."),
+    ] = 1e-4,
+    fail_on_open_shells: Annotated[
+        bool,
+        typer.Option("--fail-on-open-shells", help="Fail if healed BREP still contains open shells."),
+    ] = False,
     lods: Annotated[
         str | None,
         typer.Option("--lods", help="Comma-separated LOD ratios, for example 0.5,0.25,0.1."),
@@ -373,6 +422,11 @@ def cmd_convert(
         "target_triangles": target_triangles,
         "ratio": ratio,
         "max_edge_length": max_edge_length,
+        "heal_brep": heal_brep,
+        "heal_tolerance": heal_tolerance,
+        "remove_sliver_faces": remove_sliver_faces,
+        "max_sliver_area": max_sliver_area,
+        "fail_on_open_shells": fail_on_open_shells,
         "lods": None,
         "uv0": uv0.value,
         "uv1": uv1.value,
@@ -412,6 +466,10 @@ def cmd_convert(
         _fail(ctx, payload, "--target-triangles must be greater than 0.", code=2)
     if max_edge_length is not None and max_edge_length <= 0.0:
         _fail(ctx, payload, "--max-edge-length must be greater than 0.", code=2)
+    if heal_tolerance <= 0.0:
+        _fail(ctx, payload, "--heal-tolerance must be greater than 0.", code=2)
+    if max_sliver_area < 0.0:
+        _fail(ctx, payload, "--max-sliver-area must be greater than or equal to 0.", code=2)
     if max_vertices_per_mesh is not None and max_vertices_per_mesh <= 0:
         _fail(ctx, payload, "--max-vertices-per-mesh must be greater than 0.", code=2)
     if hierarchy_level < 0:
@@ -454,6 +512,16 @@ def cmd_convert(
             )
         stage_options = replace(profile_options.stage, materials=materials.value, uv0=uv0.value, uv1=uv1.value)
         import_options = _step_read_options(metadata, pmi)
+        heal_options = (
+            _brep_heal_options(
+                heal_tolerance=heal_tolerance,
+                remove_sliver_faces=remove_sliver_faces,
+                max_sliver_area=max_sliver_area,
+                fail_on_open_shells=fail_on_open_shells,
+            )
+            if heal_brep
+            else None
+        )
         merge_options = (
             MergeOptions(
                 mode=cast(Any, merge_mode.value.replace("-", "_")),
@@ -475,6 +543,7 @@ def cmd_convert(
             tessellation=tessellation,
             stage=stage_options,
             import_options=import_options,
+            heal_brep=heal_options,
             merge=merge_options,
             optimize=optimize_options,
             lods=lod_options,
@@ -674,6 +743,21 @@ def _step_read_options(metadata: MetadataMode, pmi: PmiMode) -> StepReadOptions:
     )
 
 
+def _brep_heal_options(
+    *,
+    heal_tolerance: float,
+    remove_sliver_faces: bool,
+    max_sliver_area: float,
+    fail_on_open_shells: bool = False,
+) -> BrepHealOptions:
+    return BrepHealOptions(
+        tolerance=heal_tolerance,
+        remove_sliver_faces=remove_sliver_faces,
+        max_sliver_area=max_sliver_area,
+        fail_on_open_shells=fail_on_open_shells,
+    )
+
+
 def _metadata_summary(asset: Any) -> dict[str, int]:
     return {
         "asset": len(asset.metadata),
@@ -745,6 +829,7 @@ def _convert_for_cli(
     tessellation: Tessellation,
     stage: StageOptions,
     import_options: StepReadOptions,
+    heal_brep: BrepHealOptions | None,
     merge: MergeOptions | None,
     optimize: OptimizeOptions | None,
     lods: LODOptions | None,
@@ -764,6 +849,7 @@ def _convert_for_cli(
                 tessellation,
                 stage,
                 import_options,
+                heal_brep,
                 merge,
                 optimize,
                 lods,
@@ -778,6 +864,7 @@ def _convert_for_cli(
         tessellation,
         stage,
         import_options,
+        heal_brep,
         merge,
         optimize,
         lods,
@@ -794,6 +881,7 @@ def _convert_output(
     tessellation: Tessellation,
     stage: StageOptions,
     import_options: StepReadOptions,
+    heal_brep: BrepHealOptions | None,
     merge: MergeOptions | None,
     optimize: OptimizeOptions | None,
     lods: LODOptions | None,
@@ -813,6 +901,7 @@ def _convert_output(
                 profile=profile,
                 import_options=import_options,
                 tessellation=tessellation,
+                heal_brep=heal_brep,
                 stage=stage,
                 merge=merge,
                 optimize=optimize,
@@ -831,6 +920,7 @@ def _convert_output(
         profile=profile,
         import_options=import_options,
         tessellation=tessellation,
+        heal_brep=heal_brep,
         stage=stage,
         merge=merge,
         optimize=optimize,

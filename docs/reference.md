@@ -45,6 +45,11 @@ fascat inspect input.step --json
 | `--target-triangles` | profile value | Target triangle count for optimized LOD0 |
 | `--ratio` | unset | Simplification ratio when no triangle target is set |
 | `--max-edge-length` | profile value | Split tessellated triangles longer than this length |
+| `--heal-brep` | `false` | Run BREP healing before tessellation |
+| `--heal-tolerance` | `0.05` | BREP healing tolerance |
+| `--remove-sliver-faces` | `false` | Detect tiny sliver faces during BREP healing |
+| `--max-sliver-area` | `1e-4` | Area threshold for sliver-face reporting |
+| `--fail-on-open-shells` | `false` | Fail if healed BREP still contains open shells |
 | `--lods` | profile value | Comma-separated LOD ratios, for example `0.5,0.25,0.1` |
 | `--uv0` | `box` | UV0 generation mode: `none`, `box`, or `unwrap` |
 | `--uv1` | `none` | UV1 generation mode: `none`, `box`, or `unwrap` |
@@ -73,6 +78,10 @@ fascat inspect input.step --json
 | `--profile` | `inspect-only` | Inspection profile to show in output |
 | `--metadata` | `summary` | Metadata output mode: `none`, `summary`, or `full` |
 | `--pmi` | `summary` | PMI output mode: `none`, `summary`, `full`, `metadata`, or `metadata-and-visuals` |
+| `--heal-brep` | `false` | Run BREP healing before inspection output |
+| `--heal-tolerance` | `0.05` | BREP healing tolerance |
+| `--remove-sliver-faces` | `false` | Detect tiny sliver faces during BREP healing |
+| `--max-sliver-area` | `1e-4` | Area threshold for sliver-face reporting |
 | `--filter` | unset | Report matched assembly nodes and parts |
 | `--exclude-filter` | unset | Exclude selector matches from `--filter` results |
 

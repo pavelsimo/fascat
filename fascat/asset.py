@@ -10,7 +10,15 @@ from numpy.typing import NDArray
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.metadata import Metadata, PmiAnnotation
-from fascat.options import LODOptions, MergeOptions, OptimizeOptions, RepairOptions, StageOptions, Tessellation
+from fascat.options import (
+    BrepHealOptions,
+    LODOptions,
+    MergeOptions,
+    OptimizeOptions,
+    RepairOptions,
+    StageOptions,
+    Tessellation,
+)
 from fascat.report import Report, timed_step
 
 Transform = NDArray[np.float64]
@@ -325,6 +333,26 @@ class Asset:
             options=_options_with_scope(opts.to_dict(), scope),
             before=before,
             after=_hierarchy_report_stats(asset),
+            duration=timer.duration,
+            warnings=step_warnings,
+        )
+        return asset
+
+    def heal_brep(self, options: BrepHealOptions | None = None, *, where: Any | None = None) -> Asset:
+        from fascat.ops.heal import heal_brep_asset
+
+        opts = options or BrepHealOptions()
+        scope = self._operation_scope(where)
+        before = self.stats()
+        warning_count = len(self.report.warnings)
+        with timed_step() as timer:
+            asset = heal_brep_asset(scope.asset, opts, selected_part_ids=scope.selected_part_ids)
+        step_warnings = asset.report.warnings[warning_count:]
+        asset.report.add_step(
+            "heal_brep",
+            options=_options_with_scope(opts.to_dict(), scope),
+            before=before,
+            after=asset.stats(),
             duration=timer.duration,
             warnings=step_warnings,
         )

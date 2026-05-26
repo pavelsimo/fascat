@@ -13,6 +13,7 @@ from fascat.io.step import read_step
 from fascat.io.usd import validate_usd
 from fascat.io.usd import write_usd as _write_usd
 from fascat.options import (
+    BrepHealOptions,
     ConversionProfile,
     LODOptions,
     MergeOptions,
@@ -35,6 +36,7 @@ def convert(
     profile: str | ConversionProfile = "realtime-desktop",
     import_options: StepReadOptions | None = None,
     tessellation: Tessellation | None = None,
+    heal_brep: BrepHealOptions | None = None,
     stage: StageOptions | None = None,
     merge: MergeOptions | None = None,
     optimize: OptimizeOptions | None = None,
@@ -52,6 +54,10 @@ def convert(
     if progress is not None:
         progress("source", asset.stats())
     tessellation_options = tessellation or selected.tessellation
+    if heal_brep is not None:
+        asset = asset.heal_brep(heal_brep, where=where)
+        if progress is not None:
+            progress("heal_brep", asset.stats())
     if tessellation_options is not None:
         asset = asset.tessellate(tessellation_options)
         if progress is not None:
@@ -238,6 +244,15 @@ def repair(asset: Asset, *, tolerance: float = 0.0, where: Filter | None = None)
     from fascat.options import RepairOptions
 
     return asset.repair(RepairOptions(tolerance=tolerance), where=where)
+
+
+def heal_brep(
+    asset: Asset,
+    *,
+    options: BrepHealOptions | None = None,
+    where: Filter | None = None,
+) -> Asset:
+    return asset.heal_brep(options or BrepHealOptions(), where=where)
 
 
 def stage(

@@ -154,6 +154,27 @@ asset.pmi.append(
 
 glTF export writes metadata and PMI into `extras.fascat`. USD export writes Fascat metadata into `customData` on the scene, nodes, prototypes, materials, meshes, and `/PMI/*` annotation prims.
 
+## BREP Healing
+
+Run BREP healing before tessellation when STEP topology needs sewing, edge fixing, tolerance unification, or open-shell reporting.
+
+```python
+asset = fc.read_step("motor.step").heal_brep(
+    fc.BrepHealOptions(
+        tolerance=0.05,
+        sew_faces=True,
+        fix_edges=True,
+        remove_sliver_faces=True,
+        max_sliver_area=1e-4,
+        unify_tolerances=True,
+        fail_on_open_shells=False,
+    ),
+    where=fc.Filter.path("*/Housing/*"),
+)
+```
+
+The operation stores per-part `brep_*` metadata and records a `heal_brep` report step. `fc.convert(..., heal_brep=fc.BrepHealOptions())` runs healing before tessellation.
+
 ## One-shot conversion
 
 Use `fc.convert()` when you want the full default pipeline and output validation in one call.

@@ -56,6 +56,8 @@ fascat convert motor.step motor.glb \
 
 ```bash
 fascat convert input.step output.usdc \
+  --heal-brep \
+  --heal-tolerance 0.05 \
   --sag 0.1 \
   --angle 15 \
   --max-edge-length 25 \
