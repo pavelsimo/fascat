@@ -18,8 +18,12 @@ def tessellate_asset(asset: Asset, options: Tessellation) -> Asset:
         if part.source_shape is None:
             result.report.add_warning(f"part has no source shape and cannot be tessellated: {part.name}")
             continue
-        part.mesh = tessellate_shape(part.source_shape, options)
-        if part.material_ids:
+        part.mesh = tessellate_shape(
+            part.source_shape,
+            options,
+            face_material_indices=_face_material_indices_from_metadata(part.metadata),
+        )
+        if part.material_ids and part.mesh.material_indices is None:
             part.mesh.material_indices = np.zeros(part.mesh.triangle_count, dtype=np.int64)
         part.fingerprint = part.mesh.fingerprint()
         if not options.keep_brep:
@@ -27,7 +31,12 @@ def tessellate_asset(asset: Asset, options: Tessellation) -> Asset:
     return _deduplicate_parts_by_fingerprint(result)
 
 
-def tessellate_shape(shape: object, options: Tessellation) -> Mesh:
+def tessellate_shape(
+    shape: object,
+    options: Tessellation,
+    *,
+    face_material_indices: list[int] | None = None,
+) -> Mesh:
     try:
         from OCP.BRep import BRep_Tool
         from OCP.BRepMesh import BRepMesh_IncrementalMesh
@@ -50,12 +59,16 @@ def tessellate_shape(shape: object, options: Tessellation) -> Mesh:
 
     points: list[tuple[float, float, float]] = []
     faces: list[tuple[int, int, int]] = []
+    material_indices: list[int] = []
     face_index = 0
     explorer = TopExp_Explorer(brep_shape, TopAbs_FACE)
     while explorer.More():
         face = TopoDS.Face_s(explorer.Current())
         location = TopLoc_Location()
         triangulation = BRep_Tool.Triangulation_s(face, location)
+        material_index = None
+        if face_material_indices is not None and face_index < len(face_material_indices):
+            material_index = face_material_indices[face_index]
         if triangulation is not None:
             offset = len(points)
             transform = location.Transformation()
@@ -69,12 +82,19 @@ def tessellate_shape(shape: object, options: Tessellation) -> Mesh:
                     faces.append((offset + c - 1, offset + b - 1, offset + a - 1))
                 else:
                     faces.append((offset + a - 1, offset + b - 1, offset + c - 1))
+                if material_index is not None:
+                    material_indices.append(material_index)
         face_index += 1
         explorer.Next()
 
     mesh = Mesh(
         points=np.asarray(points, dtype=np.float64).reshape((-1, 3)),
         faces=np.asarray(faces, dtype=np.int64).reshape((-1, 3)),
+        material_indices=(
+            np.asarray(material_indices, dtype=np.int64)
+            if material_indices and len(material_indices) == len(faces)
+            else None
+        ),
         metadata={"occt_faces": str(face_index)},
     )
     if options.max_edge_length is not None:
@@ -85,6 +105,13 @@ def tessellate_shape(shape: object, options: Tessellation) -> Mesh:
         mesh.normals = None
     mesh.validate()
     return mesh
+
+
+def _face_material_indices_from_metadata(metadata: dict[str, str]) -> list[int] | None:
+    value = metadata.get("occt_face_material_indices")
+    if not value:
+        return None
+    return [int(item) for item in value.split(",") if item]
 
 
 def _deduplicate_parts_by_fingerprint(asset: Asset) -> Asset:

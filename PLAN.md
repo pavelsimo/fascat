@@ -685,6 +685,7 @@ Unit tests:
 - Mesh enforces `max_edge_length` subdivision.
 - Hole filling stays disabled for open planar sheets and limited to small non-planar boundaries.
 - Mesh preserves UVs and material indices through buffer optimization.
+- Mesh preserves material indices and face groups when filtering faces during repair.
 - `xatlas` unwrap tests are marked with `pytest.mark.requires_xatlas`.
 
 Pipeline tests:
@@ -717,6 +718,7 @@ STEP tests:
 - Test `Tessellation.max_edge_length` on a STEP-backed tessellation path.
 - Test stable STEP IDs include source identity.
 - Test importer part identity reuses matching source, shape, and material fingerprints before tessellation.
+- Test STEP face color material plans map to mesh material indices for USD subsets.
 - Mark OCP-backed tests with `pytest.mark.requires_ocp`.
 
 CLI tests:

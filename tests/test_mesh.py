@@ -177,6 +177,32 @@ def test_merge_close_vertices_preserves_material_indices() -> None:
     assert sorted(merged.material_indices.tolist()) == [0, 1]
 
 
+def test_repair_drops_non_finite_faces_without_losing_material_indices() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [np.nan, 0, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [0, 3, 2]], dtype=int),
+        material_indices=np.array([1, 2], dtype=int),
+    )
+
+    repaired = mesh.repair(RepairOptions())
+
+    assert repaired.triangle_count == 1
+    assert repaired.material_indices is not None
+    assert repaired.material_indices.tolist() == [1]
+
+
+def test_filtering_faces_remaps_face_groups() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.array([[0, 0, 1], [0, 1, 2], [2, 1, 3]], dtype=int),
+        face_groups={"panel": np.array([1, 2], dtype=int)},
+    )
+
+    repaired = mesh.remove_degenerate_faces()
+
+    assert repaired.face_groups["panel"].tolist() == [0, 1]
+
+
 def test_fill_holes_is_limited_to_small_non_planar_boundaries() -> None:
     open_sheet = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),

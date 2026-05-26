@@ -540,20 +540,21 @@ class Mesh:
         finite = np.asarray(np.isfinite(self.points).all(axis=1), dtype=np.bool_)
         if finite.all():
             return self.copy()
-        remap = np.full(self.vertex_count, -1, dtype=np.int64)
-        remap[finite] = np.arange(int(finite.sum()), dtype=np.int64)
-        face_mask = finite[self.faces].all(axis=1)
-        points = self.points[finite]
-        faces = remap[self.faces[face_mask]]
-        return self._with_geometry(points, faces)
+        keep = np.flatnonzero(finite[self.faces].all(axis=1))
+        return self._filter_faces(keep).remove_unreferenced_vertices()
 
     def _filter_faces(self, keep: IntArray) -> Mesh:
         mesh = self.copy()
         mesh.faces = self.faces[keep].copy()
         if self.material_indices is not None:
             mesh.material_indices = self.material_indices[keep].copy()
+        old_to_new = {int(old_index): new_index for new_index, old_index in enumerate(keep.astype(int).tolist())}
         mesh.face_groups = {
-            name: np.intersect1d(values, keep).astype(np.int64) for name, values in self.face_groups.items()
+            name: np.asarray(
+                [old_to_new[int(value)] for value in values.astype(int).tolist() if int(value) in old_to_new],
+                dtype=np.int64,
+            )
+            for name, values in self.face_groups.items()
         }
         return mesh
 

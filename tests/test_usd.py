@@ -100,6 +100,27 @@ def test_usd_export_uses_instanceable_references_for_repeated_parts(tmp_path: Pa
     assert stage.GetPrimAtPath("/__Prototypes/cube_lod0/Mesh")
 
 
+def test_usd_export_marks_repeated_parts_instanceable_across_assemblies(tmp_path: Path) -> None:
+    mesh = cube_mesh()
+    root = Node(
+        id="root",
+        name="root",
+        children=[
+            Node(id="g1", name="Group A", children=[Node(id="n1", name="Cube", part_id="cube")]),
+            Node(id="g2", name="Group B", children=[Node(id="n2", name="Cube", part_id="cube")]),
+        ],
+    )
+    asset = Asset(root=root, parts={"cube": Part(id="cube", name="Cube", mesh=mesh)}, materials={})
+    output = tmp_path / "nested-instances.usda"
+
+    write_usd(asset, output)
+
+    stage = Usd.Stage.Open(str(output))
+    assert stage is not None
+    assert stage.GetPrimAtPath("/Scene/Group_A/Cube").IsInstanceable()
+    assert stage.GetPrimAtPath("/Scene/Group_B/Cube").IsInstanceable()
+
+
 def test_usd_export_authors_face_material_subsets(tmp_path: Path) -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),

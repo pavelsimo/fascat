@@ -37,7 +37,8 @@ def write_usd(asset: Asset, path: str | Path, *, debug: bool = False) -> None:
 
     material_paths = _write_materials(stage, asset.materials)
     prototype_paths = _write_prototypes(stage, asset.parts, asset.materials, material_paths)
-    _write_node(stage, asset.root, scene_path, asset.parts, prototype_paths)
+    occurrence_counts = _part_occurrence_counts(asset.root)
+    _write_node(stage, asset.root, scene_path, asset.parts, prototype_paths, occurrence_counts)
 
     if not stage.GetRootLayer().Save():
         raise RuntimeError(f"failed to save USD stage: {output_path}")
@@ -130,6 +131,7 @@ def _write_node(
     parent_path: str,
     parts: dict[str, Part],
     prototype_paths: dict[tuple[str, int], str],
+    occurrence_counts: dict[str, int],
 ) -> None:
     from pxr import Gf, Sdf, UsdGeom
 
@@ -160,9 +162,9 @@ def _write_node(
                 variant_set.SetVariantSelection("lod0")
             else:
                 prim.GetReferences().AddInternalReference(Sdf.Path(prototype_paths[(child.part_id, 0)]))
-            if _part_occurrence_count(node, child.part_id) > 1:
+            if occurrence_counts.get(child.part_id, 0) > 1:
                 prim.SetInstanceable(True)
-        _write_node(stage, child, path, parts, prototype_paths)
+        _write_node(stage, child, path, parts, prototype_paths, occurrence_counts)
 
 
 def _write_mesh(
@@ -243,8 +245,12 @@ def _bind_materials(stage: Any, usd_mesh: Any, part: Part, mesh: Any, material_p
         UsdShade.MaterialBindingAPI(subset.GetPrim()).Bind(material)
 
 
-def _part_occurrence_count(node: Node, part_id: str) -> int:
-    return sum(1 for item in node.walk() if item.part_id == part_id)
+def _part_occurrence_counts(root: Node) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in root.walk():
+        if item.part_id is not None:
+            counts[item.part_id] = counts.get(item.part_id, 0) + 1
+    return counts
 
 
 def _usd_name(value: str) -> str:

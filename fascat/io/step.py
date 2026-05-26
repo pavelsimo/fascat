@@ -24,7 +24,7 @@ def _read_step_path(source: Path, *, source_identity: str) -> Asset:
         raise ValueError(f"unsupported STEP extension: {source.suffix or '<none>'}")
 
     with timed_step() as timer:
-        document, shape_tool, unit_name, meters_per_unit = _read_xde_document(source)
+        document, shape_tool, color_tool, unit_name, meters_per_unit = _read_xde_document(source)
         free_labels = _free_shape_labels(shape_tool)
         root = Node(
             id=_stable_id("node", f"{source_identity}:root"),
@@ -35,7 +35,18 @@ def _read_step_path(source: Path, *, source_identity: str) -> Asset:
         part_index: dict[tuple[str, str, str], str] = {}
         materials: dict[str, Material] = {}
         for index, label in enumerate(free_labels, start=1):
-            root.children.append(_build_node(label, f"root/{index}", source_identity, parts, part_index, materials))
+            root.children.append(
+                _build_node(
+                    label,
+                    f"root/{index}",
+                    source_identity,
+                    shape_tool,
+                    color_tool,
+                    parts,
+                    part_index,
+                    materials,
+                )
+            )
 
     report = Report(source_path=str(source))
     asset = Asset(
@@ -71,7 +82,7 @@ def read_step_bytes(data: bytes, *, name: str = "stdin.step") -> Asset:
     return asset
 
 
-def _read_xde_document(path: Path) -> tuple[Any, Any, str, float]:
+def _read_xde_document(path: Path) -> tuple[Any, Any, Any, str, float]:
     try:
         from OCP.IFSelect import IFSelect_RetDone
         from OCP.STEPCAFControl import STEPCAFControl_Reader
@@ -100,7 +111,8 @@ def _read_xde_document(path: Path) -> tuple[Any, Any, str, float]:
     if not reader.Transfer(document):
         raise RuntimeError(f"failed to transfer STEP data into XDE document: {path}")
     shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
-    return document, shape_tool, unit_name, meters_per_unit
+    color_tool = XCAFDoc_DocumentTool.ColorTool_s(document.Main())
+    return document, shape_tool, color_tool, unit_name, meters_per_unit
 
 
 def _free_shape_labels(shape_tool: Any) -> list[Any]:
@@ -115,6 +127,8 @@ def _build_node(
     label: Any,
     occurrence_path: str,
     source_identity: str,
+    shape_tool: Any,
+    color_tool: Any,
     parts: dict[str, Part],
     part_index: dict[tuple[str, str, str], str],
     materials: dict[str, Material],
@@ -136,7 +150,16 @@ def _build_node(
         for index in range(children.Lower(), children.Upper() + 1):
             child = children.Value(index)
             node.children.append(
-                _build_node(child, f"{occurrence_path}/{index}", source_identity, parts, part_index, materials)
+                _build_node(
+                    child,
+                    f"{occurrence_path}/{index}",
+                    source_identity,
+                    shape_tool,
+                    color_tool,
+                    parts,
+                    part_index,
+                    materials,
+                )
             )
         return node
 
@@ -148,30 +171,45 @@ def _build_node(
     part_entry = _label_entry(shape_label)
     color = _label_color(label) or _label_color(shape_label) or (0.75, 0.75, 0.75, 1.0)
     material_id = _material_id(color)
+    face_material_ids, face_material_colors = _face_material_ids(
+        shape_tool,
+        color_tool,
+        shape_label,
+        shape,
+        base_material_id=material_id,
+    )
+    material_ids, face_material_indices = _material_binding_plan(material_id, face_material_ids)
+    material_signature = "|".join(material_ids)
+    if any(index != 0 for index in face_material_indices):
+        material_signature = f"{material_signature}:{','.join(str(index) for index in face_material_indices)}"
     shape_hash = _shape_fingerprint(shape)
     part_id, is_new_part = _canonical_part_id(
         source_identity=source_identity,
         part_entry=part_entry,
         shape_hash=shape_hash,
-        material_id=material_id,
+        material_signature=material_signature,
         part_index=part_index,
     )
     node.part_id = part_id
     if is_new_part:
-        if material_id not in materials:
-            materials[material_id] = Material(id=material_id, name=f"CAD color {material_id[-8:]}", base_color=color)
+        _ensure_material(materials, material_id, color)
+        for face_material_id, face_color in face_material_colors.items():
+            _ensure_material(materials, face_material_id, face_color)
+        metadata = {
+            "step_label": part_entry,
+            "occurrence_label": label_entry,
+            "source_identity": source_identity,
+            "source_name": _label_name(shape_label) or "",
+            "shape_fingerprint": shape_hash,
+        }
+        if any(index != 0 for index in face_material_indices):
+            metadata["occt_face_material_indices"] = ",".join(str(index) for index in face_material_indices)
         parts[part_id] = Part(
             id=part_id,
             name=_label_name(shape_label) or _label_name(label) or f"Part {part_entry}",
             source_shape=shape,
-            material_ids=[material_id],
-            metadata={
-                "step_label": part_entry,
-                "occurrence_label": label_entry,
-                "source_identity": source_identity,
-                "source_name": _label_name(shape_label) or "",
-                "shape_fingerprint": shape_hash,
-            },
+            material_ids=material_ids,
+            metadata=metadata,
             fingerprint=shape_hash,
         )
     return node
@@ -182,16 +220,35 @@ def _canonical_part_id(
     source_identity: str,
     part_entry: str,
     shape_hash: str,
-    material_id: str,
+    material_signature: str,
     part_index: dict[tuple[str, str, str], str],
 ) -> tuple[str, bool]:
-    key = (source_identity, shape_hash, material_id)
+    key = (source_identity, shape_hash, material_signature)
     existing = part_index.get(key)
     if existing is not None:
         return existing, False
     part_id = _stable_id("part", f"{source_identity}:{part_entry}")
     part_index[key] = part_id
     return part_id, True
+
+
+def _material_binding_plan(base_material_id: str, face_material_ids: list[str]) -> tuple[list[str], list[int]]:
+    material_ids = [base_material_id]
+    material_indices: list[int] = []
+    for face_material_id in face_material_ids:
+        if face_material_id not in material_ids:
+            material_ids.append(face_material_id)
+        material_indices.append(material_ids.index(face_material_id))
+    return material_ids, material_indices
+
+
+def _ensure_material(
+    materials: dict[str, Material],
+    material_id: str,
+    color: tuple[float, float, float, float],
+) -> None:
+    if material_id not in materials:
+        materials[material_id] = Material(id=material_id, name=f"CAD color {material_id[-8:]}", base_color=color)
 
 
 def _shape_definition_label(label: Any) -> Any:
@@ -231,6 +288,52 @@ def _label_color(label: Any) -> tuple[float, float, float, float] | None:
     for color_type in (XCAFDoc_ColorSurf, XCAFDoc_ColorGen):
         color = Quantity_Color()
         if XCAFDoc_ColorTool.GetColor_s(label, color_type, color):
+            return (float(color.Red()), float(color.Green()), float(color.Blue()), 1.0)
+    return None
+
+
+def _face_material_ids(
+    shape_tool: Any,
+    color_tool: Any,
+    shape_label: Any,
+    shape: Any,
+    *,
+    base_material_id: str,
+) -> tuple[list[str], dict[str, tuple[float, float, float, float]]]:
+    from OCP.TDF import TDF_Label
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    material_ids: list[str] = []
+    colors: dict[str, tuple[float, float, float, float]] = {}
+    explorer = TopExp_Explorer(shape, TopAbs_FACE)
+    while explorer.More():
+        face = TopoDS.Face_s(explorer.Current())
+        color = _shape_color(color_tool, face)
+        if color is None:
+            sub_label = TDF_Label()
+            if shape_tool.FindSubShape(shape_label, face, sub_label):
+                color = _label_color(sub_label)
+        if color is None:
+            material_ids.append(base_material_id)
+        else:
+            material_id = _material_id(color)
+            material_ids.append(material_id)
+            colors[material_id] = color
+        explorer.Next()
+    return material_ids, colors
+
+
+def _shape_color(color_tool: Any, shape: Any) -> tuple[float, float, float, float] | None:
+    from OCP.Quantity import Quantity_Color
+    from OCP.XCAFDoc import XCAFDoc_ColorGen, XCAFDoc_ColorSurf
+
+    for color_type in (XCAFDoc_ColorSurf, XCAFDoc_ColorGen):
+        color = Quantity_Color()
+        if color_tool.GetColor(shape, color_type, color):
+            return (float(color.Red()), float(color.Green()), float(color.Blue()), 1.0)
+        if color_tool.GetInstanceColor(shape, color_type, color):
             return (float(color.Red()), float(color.Green()), float(color.Blue()), 1.0)
     return None
 
