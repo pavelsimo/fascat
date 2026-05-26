@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 
 import fascat as fc
@@ -53,6 +55,29 @@ def test_functional_api_wraps_tessellation_options() -> None:
         "keep_brep": True,
     }
     assert step.warnings == ["part has no source shape and cannot be tessellated: Part"]
+
+
+def test_functional_write_usd_records_report_step(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.io.usd as usd
+
+    asset = fc.Asset(root=fc.Node(id="root", name="root"))
+    output = tmp_path / "output.usda"
+    calls: dict[str, object] = {}
+
+    def fake_write_usd(written_asset: fc.Asset, path: str | Path, *, debug: bool = False) -> None:
+        calls["asset"] = written_asset
+        calls["path"] = path
+        calls["debug"] = debug
+
+    monkeypatch.setattr(usd, "write_usd", fake_write_usd)
+
+    fc.write_usd(asset, output, debug=True)
+    step = asset.report.steps[-1]
+
+    assert calls == {"asset": asset, "path": output, "debug": True}
+    assert step.name == "write"
+    assert step.options == {"format": "OpenUSD", "debug": True}
+    assert asset.report.finished_at is not None
 
 
 def test_node_to_dict_includes_transform() -> None:

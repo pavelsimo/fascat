@@ -51,7 +51,7 @@ def test_convert_report_includes_timed_write_and_validate_steps(monkeypatch, tmp
         written["debug"] = debug
         written["triangles"] = asset.triangle_count
 
-    monkeypatch.setattr(pipeline, "write_usd", fake_write_usd)
+    monkeypatch.setattr(pipeline, "_write_usd", fake_write_usd)
     monkeypatch.setattr(pipeline, "validate_usd", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
 
     converted = convert(
@@ -82,7 +82,7 @@ def test_convert_report_output_stats_include_lod_totals(monkeypatch, tmp_path: P
     import fascat.pipeline as pipeline
 
     monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
-    monkeypatch.setattr(pipeline, "write_usd", lambda _asset, _path, *, debug=False: None)
+    monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False: None)
     monkeypatch.setattr(pipeline, "validate_usd", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
 
     converted = convert(
@@ -103,7 +103,7 @@ def test_convert_report_finishes_when_validation_is_disabled(monkeypatch, tmp_pa
     import fascat.pipeline as pipeline
 
     monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
-    monkeypatch.setattr(pipeline, "write_usd", lambda _asset, _path, *, debug=False: None)
+    monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False: None)
 
     converted = convert(
         "input.step",
@@ -127,7 +127,7 @@ def test_convert_report_records_write_failure(monkeypatch, tmp_path: Path) -> No
         captured["asset"] = asset
         raise RuntimeError("disk full")
 
-    monkeypatch.setattr(pipeline, "write_usd", fail_write_usd)
+    monkeypatch.setattr(pipeline, "_write_usd", fail_write_usd)
 
     with pytest.raises(RuntimeError, match="disk full") as error:
         convert("input.step", tmp_path / "output.usdc", profile=_test_profile())
@@ -147,7 +147,9 @@ def test_convert_report_records_validation_failure(monkeypatch, tmp_path: Path) 
 
     captured: dict[str, Asset] = {}
     monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
-    monkeypatch.setattr(pipeline, "write_usd", lambda asset, _path, *, debug=False: captured.setdefault("asset", asset))
+    monkeypatch.setattr(
+        pipeline, "_write_usd", lambda asset, _path, *, debug=False: captured.setdefault("asset", asset)
+    )
     monkeypatch.setattr(pipeline, "validate_usd", lambda _path: (_ for _ in ()).throw(RuntimeError("invalid usd")))
 
     with pytest.raises(RuntimeError, match="invalid usd") as error:

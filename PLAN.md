@@ -702,7 +702,7 @@ Pipeline tests:
 - Import and validation report steps retain asset-level before/after statistics.
 - Operation reports attach warnings to the step that produced them.
 - Conversion reports include timed write and validation steps.
-- Direct `Asset.write_usd()` calls record timed write steps and attach failure reports.
+- Direct `Asset.write_usd()` and public `fc.write_usd()` calls record timed write steps and attach failure reports.
 - Conversion reports record errors and the failed write or validation step before raising.
 - Conversion progress callbacks receive source and per-stage stats.
 - Repeated parts can be preserved or duplicated per occurrence.

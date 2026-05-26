@@ -100,6 +100,7 @@ def test_public_usd_write_apis_export_valid_stages(tmp_path: Path) -> None:
 
     assert validate_usd(method_output)["triangles"] == mesh.triangle_count
     assert validate_usd(function_output)["triangles"] == mesh.triangle_count
+    assert [step.name for step in asset.report.steps] == ["write", "write"]
 
 
 def test_usd_export_authors_uv0_normals_and_original_names(tmp_path: Path) -> None:

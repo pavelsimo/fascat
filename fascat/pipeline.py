@@ -7,7 +7,8 @@ from typing import Any, Literal, cast
 from fascat import profiles
 from fascat.asset import Asset
 from fascat.io.step import read_step
-from fascat.io.usd import validate_usd, write_usd
+from fascat.io.usd import validate_usd
+from fascat.io.usd import write_usd as _write_usd
 from fascat.options import ConversionProfile, LODOptions, OptimizeOptions, StageOptions, Tessellation, UVMode
 from fascat.report import timed_step
 
@@ -55,7 +56,7 @@ def convert(
     write_timer = timed_step()
     try:
         with write_timer:
-            write_usd(asset, output_path, debug=debug)
+            _write_usd(asset, output_path, debug=debug)
     except Exception as exc:
         _record_failed_step(
             asset,
@@ -135,6 +136,10 @@ def _record_failed_step(
 
 def _report_stats(asset: Asset) -> dict[str, int]:
     return asset.stats(include_lods=any(part.lod_meshes for part in asset.parts.values()))
+
+
+def write_usd(asset: Asset, path: str | Path, *, debug: bool = False) -> None:
+    asset.write_usd(path, debug=debug)
 
 
 def tessellate(
