@@ -14,6 +14,7 @@ class Material:
     metadata: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "metadata", dict(self.metadata))
         if len(self.base_color) != 4:
             raise ValueError("base_color must contain RGBA values")
         if any(value < 0.0 or value > 1.0 for value in self.base_color):
@@ -24,6 +25,17 @@ class Material:
             raise ValueError("roughness must be between 0 and 1")
         if self.opacity < 0.0 or self.opacity > 1.0:
             raise ValueError("opacity must be between 0 and 1")
+
+    def copy(self) -> Material:
+        return Material(
+            id=self.id,
+            name=self.name,
+            base_color=self.base_color,
+            metallic=self.metallic,
+            roughness=self.roughness,
+            opacity=self.opacity,
+            metadata=dict(self.metadata),
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {

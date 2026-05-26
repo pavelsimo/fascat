@@ -126,7 +126,7 @@ class Asset:
         return Asset(
             root=self.root.copy(),
             parts={part_id: part.copy(keep_source=keep_source) for part_id, part in self.parts.items()},
-            materials=dict(self.materials),
+            materials={material_id: material.copy() for material_id, material in self.materials.items()},
             units=self.units,
             meters_per_unit=self.meters_per_unit,
             up_axis=self.up_axis,
