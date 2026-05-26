@@ -142,6 +142,14 @@ def test_validate_missing_file_fails() -> None:
     assert "Missing output file" in result.output
 
 
+def test_convert_missing_input_file_fails_before_processing(capsys) -> None:  # type: ignore[no-untyped-def]
+    result = invoke_run(["convert", "missing.step", "output.usdc"], capsys)
+
+    assert result.exit_code == 1
+    assert "Missing input file: missing.step" in result.stderr
+    assert result.stdout == ""
+
+
 @pytest.mark.requires_ocp
 def test_inspect_fixture_reports_stats() -> None:
     result = runner.invoke(app, ["inspect", "tests/fixtures/spool-clamp-lid.step"])
