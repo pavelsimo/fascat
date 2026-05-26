@@ -135,10 +135,21 @@ def test_usd_export_authors_mesh_material_units_and_lods(tmp_path: Path) -> None
     assert variant_set.GetVariantSelection() == "lod0"
     assert variant_set.GetVariantNames() == ["lod0", "lod1"]
     mesh_prim = next(prim for prim in Usd.PrimRange(stage.GetDefaultPrim()) if prim.IsA(UsdGeom.Mesh))
-    assert UsdGeom.Mesh(mesh_prim).GetSubdivisionSchemeAttr().Get() == "none"
-    assert UsdGeom.Mesh(mesh_prim).GetDisplayColorAttr().Get()[0] == (1.0, 0.0, 0.0)
+    usd_mesh = UsdGeom.Mesh(mesh_prim)
+    face_counts = usd_mesh.GetFaceVertexCountsAttr().Get()
+    face_indices = usd_mesh.GetFaceVertexIndicesAttr().Get()
+    points = usd_mesh.GetPointsAttr().Get()
+
+    assert usd_mesh.GetSubdivisionSchemeAttr().Get() == "none"
+    assert len(points) == mesh.vertex_count
+    assert all(count == 3 for count in face_counts)
+    assert len(face_counts) == mesh.triangle_count
+    assert len(face_indices) == mesh.triangle_count * 3
+    assert min(face_indices) >= 0
+    assert max(face_indices) < len(points)
+    assert usd_mesh.GetDisplayColorAttr().Get()[0] == (1.0, 0.0, 0.0)
     assert "MaterialBindingAPI" in mesh_prim.GetAppliedSchemas()
-    extent = UsdGeom.Mesh(mesh_prim).GetExtentAttr().Get()
+    extent = usd_mesh.GetExtentAttr().Get()
     assert len(extent) == 2
     assert tuple(extent[0]) == (-1.0, -1.0, -1.0)
     assert tuple(extent[1]) == (1.0, 1.0, 1.0)
