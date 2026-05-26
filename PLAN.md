@@ -676,6 +676,7 @@ Initial profile defaults:
 
 Unit tests:
 
+- Missing backend tests assert OCP, USD, and xatlas paths fail with clear errors.
 - Mesh removes unreferenced vertices.
 - Mesh removes degenerate triangles.
 - Mesh merges close vertices using tolerance.

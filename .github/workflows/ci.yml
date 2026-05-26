@@ -57,4 +57,4 @@ jobs:
         run: uv pip uninstall cadquery-ocp cadquery-ocp-proxy usd-core xatlas
 
       - name: Test backend-free core behavior
-        run: uv run --no-sync pytest tests/test_mesh.py tests/test_profiles.py --no-cov
+        run: uv run --no-sync pytest tests/test_mesh.py tests/test_profiles.py tests/test_backend_errors.py --no-cov
