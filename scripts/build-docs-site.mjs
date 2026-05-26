@@ -20,7 +20,7 @@ import { join, basename } from "path";
 const TOOL         = "fascat";
 const REPO_URL     = "https://github.com/pavelsimo/fascat";
 const BREW_TAP     = "pavelsimo/homebrew-tap";
-const DESC         = "convert CAD STEP data into realtime-ready OpenUSD assets";
+const DESC         = "convert CAD STEP data into realtime-ready OpenUSD and glTF assets";
 const COLOR_SCHEME = "teal"; // teal | ocean | purple | amber
 const SITE_BASE    = existsSync("docs/CNAME")
   ? `https://${readFileSync("docs/CNAME","utf8").trim()}`
@@ -695,13 +695,14 @@ if(tocLinks.length){
 // ── Navigation ────────────────────────────────────────────────────────────────
 
 const sections = [
-  ["Get Started", ["index.md", "install.md", "quickstart.md"]],
+  ["Get Started", ["index.md", "install.md", "quickstart.md", "api.md"]],
   ["Reference",   ["reference.md"]],
 ];
 
 const LABELS = {
   "index":      "Home",
   "quickstart": "Quick Start",
+  "api":        "Python API",
 };
 
 function fileToLabel(filename) {
