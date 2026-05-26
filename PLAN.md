@@ -773,7 +773,7 @@ CLI tests:
 - `fascat validate output.usda`
 - `fascat convert` rejects `--debug` with binary `.usdc`.
 - `fascat convert --dry-run` rejects unsorted LOD ratios.
-- `fascat convert` emits source and per-stage progress on stderr.
+- `fascat convert` emits source, tessellate, repair, stage, optimize, LOD, write, and validate progress with count stats on stderr.
 - `fascat convert` validates generated USD before reporting success.
 - `fascat convert --report` writes a failure report sidecar when conversion exposes one, including generated USD validation failures.
 - `fascat convert --materials` exercises CAD material binding, displayColor-only, and no-material staging modes through generated USD output.

@@ -781,7 +781,16 @@ def test_convert_reports_stage_progress_to_stderr(tmp_path: Path, capsys) -> Non
 
     assert result.exit_code == 0
     assert "Converted" in result.stdout
-    assert "source:" in result.stderr
-    assert "tessellate:" in result.stderr
-    assert "write:" in result.stderr
-    assert "validate:" in result.stderr
+    progress_lines = [line for line in result.stderr.splitlines() if ":" in line]
+    assert [line.split(":", 1)[0] for line in progress_lines] == [
+        "source",
+        "tessellate",
+        "repair",
+        "stage",
+        "optimize",
+        "lods",
+        "write",
+        "validate",
+    ]
+    assert all(re.search(r"\d+ parts", line) for line in progress_lines)
+    assert all(re.search(r"\d+ triangles", line) for line in progress_lines)
