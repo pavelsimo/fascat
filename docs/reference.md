@@ -30,8 +30,8 @@ fascat inspect input.step --json
 | Command | Description |
 |---------|-------------|
 | `fascat inspect input.step` | Inspect STEP assembly metadata and planned conversion inputs |
-| `fascat convert input.step [output.usdc]` | Convert STEP CAD into OpenUSD |
-| `fascat validate output.usdc` | Validate generated USD output |
+| `fascat convert input.step [output.usdc]` | Convert STEP CAD into OpenUSD or glTF |
+| `fascat validate output.usdc` | Validate generated USD or glTF output |
 | `fascat help [command]` | Show top-level or command-specific help |
 | `fascat version` | Print version and exit |
 
@@ -39,7 +39,7 @@ fascat inspect input.step --json
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--profile` | `realtime-desktop` | Conversion profile: `inspect-only`, `realtime-desktop`, or `realtime-web` |
+| `--profile` | `realtime-desktop` | Conversion profile: `inspect-only`, `realtime-desktop`, `realtime-web`, or `virtual-reality` |
 | `--sag` | profile value | CAD tessellation sag tolerance |
 | `--angle` | profile value | CAD tessellation angle tolerance in degrees |
 | `--target-triangles` | profile value | Target triangle count for optimized LOD0 |
@@ -68,9 +68,11 @@ When the convert output argument is omitted for a file input, Fascat writes besi
 
 When output is `-`, USD bytes are reserved for stdout and progress/errors stay on stderr.
 
-`--debug` is only valid with `.usd` or `.usda` output. Binary `.usdc` output is rejected when debug mode is enabled.
+Supported output suffixes are `.usd`, `.usda`, `.usdc`, `.gltf`, and `.glb`.
 
-`convert` validates the generated USD before reporting success. If validation fails, the command exits non-zero.
+`--debug` is only valid with `.usd` or `.usda` output. Binary `.usdc`, `.gltf`, and `.glb` output is rejected when debug mode is enabled.
+
+`convert` validates the generated asset before reporting success. If validation fails, the command exits non-zero.
 
 ## Output streams
 

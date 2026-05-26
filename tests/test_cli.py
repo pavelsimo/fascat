@@ -140,6 +140,16 @@ def test_convert_dry_run_accepts_material_staging_mode() -> None:
     assert '"materials": "display"' in result.output
 
 
+def test_convert_dry_run_accepts_gltf_output_and_virtual_reality_profile() -> None:
+    result = runner.invoke(
+        app,
+        ["--json", "--dry-run", "convert", "input.step", "output.glb", "--profile", "virtual-reality"],
+    )
+    assert result.exit_code == 0
+    assert '"output": "output.glb"' in result.output
+    assert '"profile": "virtual-reality"' in result.output
+
+
 def test_inspect_dry_run() -> None:
     result = runner.invoke(app, ["--dry-run", "inspect", "input.step"])
     assert result.exit_code == 0
@@ -301,6 +311,36 @@ def test_convert_explicit_binary_usdc_and_validates(tmp_path: Path) -> None:
     validate_result = runner.invoke(app, ["validate", str(output_file)])
     assert validate_result.exit_code == 0
     assert "valid USD" in compact(validate_result.output)
+
+
+@pytest.mark.requires_ocp
+def test_convert_explicit_binary_glb_and_validates(tmp_path: Path) -> None:
+    output_file = tmp_path / "explicit.glb"
+
+    result = runner.invoke(
+        app,
+        [
+            "convert",
+            "tests/fixtures/spool-clamp-lid.step",
+            str(output_file),
+            "--profile",
+            "virtual-reality",
+            "--sag",
+            "0.2",
+            "--target-triangles",
+            "80",
+            "--lods",
+            "0.5",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert output_file.read_bytes().startswith(b"glTF")
+    assert "Converted tests/fixtures/spool-clamp-lid.step to" in compact(result.output)
+
+    validate_result = runner.invoke(app, ["validate", str(output_file)])
+    assert validate_result.exit_code == 0
+    assert "valid glTF" in compact(validate_result.output)
 
 
 @pytest.mark.requires_ocp
@@ -652,7 +692,7 @@ def test_validate_rejects_unknown_extension(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["validate", str(output_file)])
     assert result.exit_code == 2
-    assert "Unsupported USD extension" in result.output
+    assert "Unsupported export extension" in result.output
 
 
 def test_validate_missing_usd_backend_exits_nonzero(
@@ -798,7 +838,7 @@ def test_convert_rejects_bad_input_suffix(capsys) -> None:  # type: ignore[no-un
 def test_convert_rejects_bad_output_suffix(capsys) -> None:  # type: ignore[no-untyped-def]
     result = invoke_run(["--dry-run", "convert", "input.step", "output.txt"], capsys)
     assert result.exit_code == 2
-    assert "Unsupported USD extension" in result.stderr
+    assert "Unsupported export extension" in result.stderr
 
 
 def test_convert_rejects_zero_ratio(capsys) -> None:  # type: ignore[no-untyped-def]

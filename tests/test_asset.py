@@ -265,3 +265,51 @@ def test_asset_write_usd_records_failure_report(monkeypatch: pytest.MonkeyPatch,
     assert step.after == asset.stats()
     assert asset.report.finished_at is not None
     assert asset.report.output_stats == asset.stats()
+
+
+def test_asset_write_gltf_records_report_step(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import fascat.io.gltf as gltf
+
+    asset = Asset(root=Node(id="root", name="root"))
+    output = tmp_path / "output.glb"
+    calls: dict[str, object] = {}
+
+    def fake_write_gltf(written_asset: Asset, path: str | Path) -> None:
+        calls["asset"] = written_asset
+        calls["path"] = path
+
+    monkeypatch.setattr(gltf, "write_gltf", fake_write_gltf)
+
+    asset.write_gltf(output)
+    step = asset.report.steps[-1]
+
+    assert calls == {"asset": asset, "path": output}
+    assert step.name == "write"
+    assert step.options == {"format": "glTF"}
+    assert step.before == asset.stats()
+    assert step.after == asset.stats()
+    assert step.duration >= 0.0
+    assert asset.report.finished_at is not None
+    assert asset.report.output_stats == asset.stats()
+
+
+def test_asset_write_gltf_records_failure_report(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import fascat.io.gltf as gltf
+
+    asset = Asset(root=Node(id="root", name="root"))
+
+    def fail_write_gltf(_asset: Asset, _path: str | Path) -> None:
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(gltf, "write_gltf", fail_write_gltf)
+
+    with pytest.raises(RuntimeError, match="disk full") as error:
+        asset.write_gltf(tmp_path / "output.glb")
+
+    step = asset.report.steps[-1]
+    assert error.value.report is asset.report
+    assert asset.report.errors == ["disk full"]
+    assert step.name == "write"
+    assert step.after == asset.stats()
+    assert asset.report.finished_at is not None
+    assert asset.report.output_stats == asset.stats()

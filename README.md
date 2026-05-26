@@ -1,6 +1,6 @@
 # 🐱 fascat
 
-Fascat is a Python library and CLI for converting CAD STEP data into realtime-ready OpenUSD assets.
+Fascat is a Python library and CLI for converting CAD STEP data into realtime-ready OpenUSD and glTF assets.
 
 [![release](https://img.shields.io/github/v/release/pavelsimo/fascat?style=flat-square&color=4d9e4d&logoColor=white)](https://github.com/pavelsimo/fascat/releases)
 [![license MIT](https://img.shields.io/badge/license-MIT-ffd60a?style=flat-square&logoColor=white)](LICENSE)
@@ -12,7 +12,7 @@ Fascat is a Python library and CLI for converting CAD STEP data into realtime-re
 The V1 pipeline is intentionally narrow:
 
 ```text
-STEP CAD -> imported assembly -> tessellated meshes -> repaired meshes -> staged materials and UVs -> optimized LODs -> OpenUSD
+STEP CAD -> imported assembly -> tessellated meshes -> repaired meshes -> staged materials and UVs -> optimized LODs -> OpenUSD/glTF
 ```
 
 ## Installation
@@ -50,6 +50,9 @@ fascat --json inspect motor.step
 fascat convert motor.step
 fascat convert motor.step motor.usdc --profile realtime-desktop
 
+# Convert STEP to binary glTF for VR/runtime engines
+fascat convert motor.step motor.glb --profile virtual-reality
+
 # Tune tessellation, UVs, optimization, and LODs
 fascat convert motor.step motor.usdc \
   --sag 0.1 \
@@ -66,8 +69,9 @@ fascat convert motor.step motor.usdc --dry-run
 # Emit a debuggable ASCII USD and report
 fascat convert motor.step motor.usda --debug --report report.json
 
-# Validate generated USD
+# Validate generated output
 fascat validate motor.usdc
+fascat validate motor.glb
 ```
 
 ## Commands
@@ -75,12 +79,12 @@ fascat validate motor.usdc
 | Command | Description |
 |---------|-------------|
 | `fascat inspect input.step` | Inspect a STEP assembly before conversion |
-| `fascat convert input.step [output.usdc]` | Convert STEP CAD into OpenUSD |
-| `fascat validate output.usdc` | Validate generated USD output |
+| `fascat convert input.step [output.usdc]` | Convert STEP CAD into OpenUSD or glTF |
+| `fascat validate output.usdc` | Validate generated USD or glTF output |
 | `fascat help [command]` | Show top-level or command-specific help |
 | `fascat version` | Print version and exit |
 
-Fascat follows standard CLI stream conventions: primary output and JSON go to stdout, while errors and per-stage conversion progress go to stderr. Conversion validates the generated USD before reporting success. File arguments accept `-` for stdin/stdout where meaningful.
+Fascat follows standard CLI stream conventions: primary output and JSON go to stdout, while errors and per-stage conversion progress go to stderr. Conversion validates the generated asset before reporting success. File arguments accept `-` for stdin/stdout where meaningful.
 
 ## Python API
 
@@ -95,6 +99,9 @@ fc.convert(
     optimize=fc.OptimizeOptions(target_triangles=1_000_000, preserve_instances=True),
     lods=fc.LODOptions((0.5, 0.25, 0.1)),
 )
+
+asset = fc.read_step("pump.step").tessellate().repair().stage().optimize()
+asset.write_gltf("pump.glb")
 ```
 
 ## Docs

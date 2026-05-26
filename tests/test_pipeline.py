@@ -175,6 +175,35 @@ def test_convert_report_includes_timed_write_and_validate_steps(monkeypatch, tmp
     assert converted.report.output_stats == converted.stats()
 
 
+def test_convert_dispatches_gltf_writer_and_validator(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.pipeline as pipeline
+
+    asset = _triangle_asset()
+    written: dict[str, object] = {}
+
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: asset)
+
+    def fake_write_gltf(asset: Asset, path: str | Path) -> None:
+        written["path"] = str(path)
+        written["triangles"] = asset.triangle_count
+
+    monkeypatch.setattr(pipeline, "_write_gltf", fake_write_gltf)
+    monkeypatch.setattr(pipeline, "validate_gltf", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
+
+    converted = convert(
+        "input.step",
+        tmp_path / "output.glb",
+        profile=_test_profile(),
+    )
+    steps = {step.name: step for step in converted.report.steps}
+
+    assert written["path"] == str(tmp_path / "output.glb")
+    assert written["triangles"] == 1
+    assert steps["write"].options == {"format": "glTF"}
+    assert steps["validate"].options == {"backend": "fascat-gltf"}
+    assert steps["validate"].after["validated_triangles"] == 1
+
+
 def test_convert_report_output_stats_include_lod_totals(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     import fascat.pipeline as pipeline
 

@@ -48,6 +48,23 @@ def realtime_web(
     )
 
 
+def virtual_reality(
+    *,
+    tessellation_sag: float = 0.15,
+    angle: float = 15.0,
+    max_triangles: int = 500_000,
+    lod_ratios: list[float] | tuple[float, ...] = (0.5, 0.25, 0.125),
+) -> ConversionProfile:
+    return ConversionProfile(
+        name="virtual-reality",
+        tessellation=Tessellation(sag=tessellation_sag, angle=angle),
+        repair=RepairOptions(tolerance=1e-7),
+        stage=StageOptions(uv0="box", uv1=None),
+        optimize=OptimizeOptions(target_triangles=max_triangles, simplify=True, optimize_buffers=True),
+        lods=LODOptions(ratios=tuple(lod_ratios)) if lod_ratios else None,
+    )
+
+
 def by_name(name: str) -> ConversionProfile:
     if name == "inspect-only":
         return inspect_only()
@@ -55,4 +72,6 @@ def by_name(name: str) -> ConversionProfile:
         return realtime_desktop()
     if name == "realtime-web":
         return realtime_web()
+    if name == "virtual-reality":
+        return virtual_reality()
     raise ValueError(f"unknown profile: {name}")

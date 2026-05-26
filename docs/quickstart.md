@@ -24,11 +24,12 @@ fascat --json inspect motor.step
 cat motor.step | fascat inspect -
 ```
 
-## Convert to OpenUSD
+## Convert to OpenUSD or glTF
 
 ```bash
 fascat convert motor.step
 fascat convert motor.step motor.usdc --profile realtime-desktop
+fascat convert motor.step motor.glb --profile virtual-reality
 fascat convert motor.step motor.usda --debug --report report.json
 fascat convert motor.step - --dry-run
 ```
@@ -46,12 +47,13 @@ fascat convert input.step output.usdc \
   --lods 0.5,0.25,0.1
 ```
 
-Use `.usda` or `.usd` with `--debug` when you want inspectable text output. Binary `.usdc` output is rejected in debug mode.
+Use `.usda` or `.usd` with `--debug` when you want inspectable text output. Binary `.usdc`, `.gltf`, and `.glb` output is rejected in debug mode.
 
 ## Validate output
 
 ```bash
 fascat validate output.usdc
+fascat validate output.glb
 ```
 
 ## JSON output

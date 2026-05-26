@@ -15,10 +15,11 @@ import typer.rich_utils as rich_utils
 from rich.console import Console
 
 from fascat import __version__
+from fascat.io.gltf import GLTF_SUFFIXES
 from fascat.io.step import read_step, read_step_bytes
-from fascat.io.usd import validate_usd
 from fascat.options import LODOptions, OptimizeOptions, StageOptions, Tessellation
 from fascat.pipeline import convert
+from fascat.pipeline import validate_output as validate_export
 from fascat.profiles import by_name
 from fascat.report import Report
 
@@ -27,6 +28,7 @@ ISSUES_URL = "https://github.com/pavelsimo/fascat/issues"
 rich_utils.MAX_WIDTH = 120
 STEP_SUFFIXES = {".step", ".stp"}
 USD_SUFFIXES = {".usd", ".usda", ".usdc"}
+EXPORT_SUFFIXES = USD_SUFFIXES | GLTF_SUFFIXES
 COMMAND_NAMES = ("inspect", "convert", "validate", "version", "help")
 GLOBAL_FLAG_ALIASES = {
     "--json",
@@ -44,6 +46,7 @@ VERSION_FLAGS = {"-V", "--version"}
 TOP_LEVEL_EPILOG = f"""Examples:
   fascat inspect motor.step
   fascat convert motor.step motor.usdc --profile realtime-desktop
+  fascat convert motor.step motor.glb --profile virtual-reality
   fascat --json validate motor.usdc
 
 Docs: {DOCS_URL}
@@ -51,7 +54,7 @@ Issues: {ISSUES_URL}"""
 
 app = typer.Typer(
     name="fascat",
-    help="convert CAD STEP data into realtime-ready OpenUSD assets",
+    help="convert CAD STEP data into realtime-ready OpenUSD and glTF assets",
     epilog=TOP_LEVEL_EPILOG,
     no_args_is_help=True,
     rich_markup_mode="rich",
@@ -67,6 +70,7 @@ class Profile(str, Enum):
     INSPECT_ONLY = "inspect-only"
     REALTIME_DESKTOP = "realtime-desktop"
     REALTIME_WEB = "realtime-web"
+    VIRTUAL_REALITY = "virtual-reality"
 
 
 class UVMode(str, Enum):
@@ -127,7 +131,7 @@ def main(
     dry_run: Annotated[bool, typer.Option("--dry-run", "-n", help="Preview changes without applying them.")] = False,
     no_input: Annotated[bool, typer.Option("--no-input", help="Disable interactive prompts.")] = False,
 ) -> None:
-    """convert CAD STEP data into realtime-ready OpenUSD assets"""
+    """convert CAD STEP data into realtime-ready OpenUSD and glTF assets"""
     _configure_consoles(no_color)
     ctx.obj = CliState(
         verbose=verbose,
@@ -187,6 +191,7 @@ def cmd_inspect(
     "convert",
     epilog=f"""Examples:
   fascat convert motor.step motor.usdc
+  fascat convert motor.step motor.glb --profile virtual-reality
   fascat convert motor.step
   fascat convert motor.step motor.usda --debug --report report.json
   fascat --dry-run --json convert motor.step motor.usdc
@@ -200,7 +205,7 @@ def cmd_convert(
     output_path: Annotated[
         Path | None,
         typer.Argument(
-            help="Output USD file, usually .usdc or .usda, or '-' for stdout. Defaults to input .usdc.",
+            help="Output USD or glTF file, or '-' for stdout. Defaults to input .usdc.",
             allow_dash=True,
         ),
     ] = None,
@@ -240,7 +245,7 @@ def cmd_convert(
     report: Annotated[Path | None, typer.Option("--report", help="Write a JSON conversion report sidecar.")] = None,
     force: Annotated[bool, typer.Option("--force", "-f", help="Overwrite an existing output file.")] = False,
 ) -> None:
-    """Convert a STEP file into realtime-ready OpenUSD."""
+    """Convert a STEP file into a realtime-ready OpenUSD or glTF asset."""
     state = _state(ctx)
     payload: dict[str, Any] = {
         "command": "convert",
@@ -267,7 +272,7 @@ def cmd_convert(
     _validate_step_input(input_path, ctx, payload)
     output_path = _resolve_convert_output(input_path, output_path, ctx, payload)
     payload["output"] = str(output_path)
-    _validate_usd_output(output_path, ctx, payload)
+    _validate_export_output(output_path, ctx, payload)
     if ratio is not None and (ratio <= 0.0 or ratio >= 1.0):
         _fail(ctx, payload, "--ratio must be greater than 0 and less than 1.", code=2)
     if sag is not None and sag <= 0.0:
@@ -278,8 +283,8 @@ def cmd_convert(
         _fail(ctx, payload, "--target-triangles must be greater than 0.", code=2)
     if max_edge_length is not None and max_edge_length <= 0.0:
         _fail(ctx, payload, "--max-edge-length must be greater than 0.", code=2)
-    if debug and not _is_stdio(output_path) and output_path.suffix.lower() == ".usdc":
-        _fail(ctx, payload, "--debug requires .usd or .usda output, not binary .usdc.", code=2)
+    if debug and not _is_stdio(output_path) and output_path.suffix.lower() not in {".usd", ".usda"}:
+        _fail(ctx, payload, "--debug requires .usd or .usda output.", code=2)
 
     if state.dry_run:
         _emit(ctx, payload, f"Would convert {input_path} to {output_path} with profile {profile.value}.")
@@ -351,6 +356,7 @@ def cmd_convert(
     "validate",
     epilog=f"""Examples:
   fascat validate motor.usdc
+  fascat validate motor.glb
   fascat --json validate motor.usda
   cat motor.usdc | fascat validate -
 
@@ -358,27 +364,32 @@ Docs: {DOCS_URL}/reference.html""",
 )
 def cmd_validate(
     ctx: typer.Context,
-    output_path: Annotated[Path, typer.Argument(help="USD file to validate, or '-' for stdin.", allow_dash=True)],
+    output_path: Annotated[
+        Path,
+        typer.Argument(help="Generated USD or glTF file to validate, or '-' for USD stdin.", allow_dash=True),
+    ],
 ) -> None:
-    """Validate a generated USD file."""
+    """Validate a generated USD or glTF file."""
     state = _state(ctx)
     payload = {
         "command": "validate",
         "output": str(output_path),
         "dry_run": state.dry_run,
     }
-    _validate_usd_output(output_path, ctx, payload)
+    _validate_export_output(output_path, ctx, payload)
     if state.dry_run:
         _emit(ctx, payload, f"Would validate {output_path}.")
         return
 
     _require_existing_file(output_path, "output", ctx, payload)
     try:
-        stats = _validate_usd_for_cli(output_path)
+        stats = _validate_output_for_cli(output_path)
     except Exception as exc:
         _fail(ctx, payload, str(exc))
         raise AssertionError("unreachable") from exc
-    _emit(ctx, {**payload, "stats": stats}, f"{output_path}: valid USD, {_format_stats(stats)}.")
+    _emit(
+        ctx, {**payload, "stats": stats}, f"{output_path}: valid {_export_label(output_path)}, {_format_stats(stats)}."
+    )
 
 
 @app.command("version", epilog=f"Docs: {DOCS_URL}")
@@ -486,9 +497,14 @@ def _validate_step_input(path: Path, ctx: typer.Context, payload: dict[str, Any]
         _fail(ctx, payload, f"Unsupported STEP extension: {path.suffix or '<none>'}. Use .step or .stp.", code=2)
 
 
-def _validate_usd_output(path: Path, ctx: typer.Context, payload: dict[str, Any]) -> None:
-    if not _is_stdio(path) and path.suffix.lower() not in USD_SUFFIXES:
-        _fail(ctx, payload, f"Unsupported USD extension: {path.suffix or '<none>'}. Use .usd, .usda, or .usdc.", code=2)
+def _validate_export_output(path: Path, ctx: typer.Context, payload: dict[str, Any]) -> None:
+    if not _is_stdio(path) and path.suffix.lower() not in EXPORT_SUFFIXES:
+        _fail(
+            ctx,
+            payload,
+            f"Unsupported export extension: {path.suffix or '<none>'}. Use .usd, .usda, .usdc, .gltf, or .glb.",
+            code=2,
+        )
 
 
 def _is_stdio(path: Path) -> bool:
@@ -616,7 +632,7 @@ class _temporary_step_file:
             self._handle.close()
 
 
-def _validate_usd_for_cli(path: Path) -> dict[str, int]:
+def _validate_output_for_cli(path: Path) -> dict[str, int]:
     if _is_stdio(path):
         import tempfile
 
@@ -626,8 +642,15 @@ def _validate_usd_for_cli(path: Path) -> dict[str, int]:
         with tempfile.NamedTemporaryFile(suffix=".usda") as handle:
             handle.write(data)
             handle.flush()
-            return validate_usd(handle.name)
-    return validate_usd(path)
+            return validate_export(handle.name)
+    return validate_export(path)
+
+
+def _export_label(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix in GLTF_SUFFIXES:
+        return "glTF"
+    return "USD"
 
 
 def _format_stats(stats: dict[str, int]) -> str:

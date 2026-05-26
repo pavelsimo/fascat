@@ -6,11 +6,16 @@ from typing import Any, Literal, cast
 
 from fascat import profiles
 from fascat.asset import Asset
+from fascat.io.gltf import GLTF_SUFFIXES, validate_gltf
+from fascat.io.gltf import write_gltf as _write_gltf
 from fascat.io.step import read_step
 from fascat.io.usd import validate_usd
 from fascat.io.usd import write_usd as _write_usd
 from fascat.options import ConversionProfile, LODOptions, OptimizeOptions, StageOptions, Tessellation, UVMode
 from fascat.report import timed_step
+
+USD_SUFFIXES = {".usd", ".usda", ".usdc"}
+ExportFormat = Literal["usd", "gltf"]
 
 
 def convert(
@@ -26,6 +31,9 @@ def convert(
     validate_output: bool = True,
     debug: bool = False,
 ) -> Asset:
+    output_format = _export_format(output_path)
+    if debug and output_format != "usd":
+        raise ValueError("--debug is only supported for .usd or .usda exports")
     selected = profiles.by_name(profile) if isinstance(profile, str) else profile
     asset = read_step(input_path)
     if progress is not None:
@@ -52,11 +60,11 @@ def convert(
         if progress is not None:
             progress("lods", asset.stats())
     write_before = _report_stats(asset)
-    write_options: dict[str, object] = {"format": "OpenUSD", "debug": debug}
+    write_options: dict[str, object] = _write_options(output_format, debug=debug)
     write_timer = timed_step()
     try:
         with write_timer:
-            _write_usd(asset, output_path, debug=debug)
+            _write_output(asset, output_path, output_format, debug=debug)
     except Exception as exc:
         _record_failed_step(
             asset,
@@ -78,11 +86,11 @@ def convert(
         progress("write", asset.stats())
     if validate_output:
         validate_before = _report_stats(asset)
-        validate_options: dict[str, object] = {"backend": "usd-core"}
+        validate_options: dict[str, object] = _validate_options(output_format)
         validate_timer = timed_step()
         try:
             with validate_timer:
-                validation_stats = validate_usd(output_path)
+                validation_stats = _validate_output(output_path, output_format)
         except Exception as exc:
             _record_failed_step(
                 asset,
@@ -140,6 +148,49 @@ def _report_stats(asset: Asset) -> dict[str, int]:
 
 def write_usd(asset: Asset, path: str | Path, *, debug: bool = False) -> None:
     asset.write_usd(path, debug=debug)
+
+
+def write_gltf(asset: Asset, path: str | Path) -> None:
+    asset.write_gltf(path)
+
+
+def validate_output(path: str | Path) -> dict[str, int]:
+    output_format = _export_format(path)
+    return _validate_output(path, output_format)
+
+
+def _export_format(path: str | Path) -> ExportFormat:
+    suffix = Path(path).suffix.lower()
+    if suffix in USD_SUFFIXES or str(path) == "-":
+        return "usd"
+    if suffix in GLTF_SUFFIXES:
+        return "gltf"
+    raise ValueError(f"unsupported export extension: {suffix or '<none>'}")
+
+
+def _write_output(asset: Asset, path: str | Path, output_format: ExportFormat, *, debug: bool) -> None:
+    if output_format == "usd":
+        _write_usd(asset, path, debug=debug)
+        return
+    _write_gltf(asset, path)
+
+
+def _validate_output(path: str | Path, output_format: ExportFormat) -> dict[str, int]:
+    if output_format == "usd":
+        return validate_usd(path)
+    return validate_gltf(path)
+
+
+def _write_options(output_format: ExportFormat, *, debug: bool) -> dict[str, object]:
+    if output_format == "usd":
+        return {"format": "OpenUSD", "debug": debug}
+    return {"format": "glTF"}
+
+
+def _validate_options(output_format: ExportFormat) -> dict[str, object]:
+    if output_format == "usd":
+        return {"backend": "usd-core"}
+    return {"backend": "fascat-gltf"}
 
 
 def tessellate(

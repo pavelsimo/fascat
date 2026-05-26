@@ -300,6 +300,36 @@ class Asset:
         )
         self.report.finish(self._report_stats())
 
+    def write_gltf(self, path: str | Path) -> None:
+        from fascat.io.gltf import write_gltf
+
+        before = self._report_stats()
+        options: dict[str, object] = {"format": "glTF"}
+        timer = timed_step()
+        try:
+            with timer:
+                write_gltf(self, path)
+        except Exception as exc:
+            self.report.add_error(str(exc) or exc.__class__.__name__)
+            self.report.add_step(
+                "write",
+                options=options,
+                before=before,
+                after=self._report_stats(),
+                duration=timer.duration,
+            )
+            self.report.finish(self._report_stats())
+            cast(Any, exc).report = self.report
+            raise
+        self.report.add_step(
+            "write",
+            options=options,
+            before=before,
+            after=self._report_stats(),
+            duration=timer.duration,
+        )
+        self.report.finish(self._report_stats())
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "source_path": str(self.source_path) if self.source_path else None,
