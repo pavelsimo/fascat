@@ -683,6 +683,7 @@ Unit tests:
 - Mesh merges close vertices using tolerance.
 - Mesh removes duplicate faces.
 - Mesh computes normals without NaNs.
+- Mesh repair removes negative and out-of-range face indices before later cleanup.
 - Mesh validation rejects out-of-range indices.
 - Mesh enforces `max_edge_length` subdivision.
 - Hole filling stays disabled for open planar sheets and limited to small non-planar boundaries.

@@ -124,6 +124,7 @@ class Mesh:
     def repair(self, options: RepairOptions | None = None) -> Mesh:
         opts = options or RepairOptions()
         mesh = self.copy()
+        mesh = mesh._drop_invalid_faces()
         mesh = mesh._drop_non_finite()
         mesh = mesh.remove_unreferenced_vertices()
         if opts.merge_vertices and opts.tolerance > 0.0:
@@ -554,6 +555,15 @@ class Mesh:
         if finite.all():
             return self.copy()
         keep = np.flatnonzero(finite[self.faces].all(axis=1))
+        return self._filter_faces(keep).remove_unreferenced_vertices()
+
+    def _drop_invalid_faces(self) -> Mesh:
+        if self.triangle_count == 0:
+            return self.copy()
+        valid = np.asarray((self.faces >= 0).all(axis=1) & (self.faces < self.vertex_count).all(axis=1), dtype=np.bool_)
+        if valid.all():
+            return self.copy()
+        keep = np.flatnonzero(valid)
         return self._filter_faces(keep).remove_unreferenced_vertices()
 
     def _filter_faces(self, keep: IntArray) -> Mesh:

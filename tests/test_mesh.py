@@ -191,6 +191,25 @@ def test_repair_drops_non_finite_faces_without_losing_material_indices() -> None
     assert repaired.material_indices.tolist() == [1]
 
 
+def test_repair_drops_invalid_face_indices_before_cleanup() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [5, 5, 5]], dtype=float),
+        faces=np.array([[0, 1, 2], [-1, 1, 2], [0, 1, 9]], dtype=int),
+        material_indices=np.array([3, 4, 5], dtype=int),
+        face_groups={"panel": np.array([0, 1, 2], dtype=int)},
+    )
+
+    repaired = mesh.repair()
+
+    repaired.validate()
+    assert repaired.vertex_count == 3
+    assert repaired.triangle_count == 1
+    assert repaired.faces.tolist() == [[0, 1, 2]]
+    assert repaired.material_indices is not None
+    assert repaired.material_indices.tolist() == [3]
+    assert repaired.face_groups["panel"].tolist() == [0]
+
+
 def test_fix_winding_preserves_face_linked_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
     trimesh = pytest.importorskip("trimesh")
 
