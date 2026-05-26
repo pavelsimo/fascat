@@ -50,7 +50,7 @@ def convert(
         asset = asset.lods(lod_options)
         if progress is not None:
             progress("lods", asset.stats())
-    write_before = asset.stats()
+    write_before = _report_stats(asset)
     write_options: dict[str, object] = {"format": "OpenUSD", "debug": debug}
     write_timer = timed_step()
     try:
@@ -70,13 +70,13 @@ def convert(
         "write",
         options=write_options,
         before=write_before,
-        after=asset.stats(),
+        after=_report_stats(asset),
         duration=write_timer.duration,
     )
     if progress is not None:
         progress("write", asset.stats())
     if validate_output:
-        validate_before = asset.stats()
+        validate_before = _report_stats(asset)
         validate_options: dict[str, object] = {"backend": "usd-core"}
         validate_timer = timed_step()
         try:
@@ -107,7 +107,7 @@ def convert(
         )
         if progress is not None:
             progress("validate", asset.stats())
-    asset.report.finish(asset.stats())
+    asset.report.finish(_report_stats(asset))
     return asset
 
 
@@ -126,11 +126,15 @@ def _record_failed_step(
         name,
         options=options,
         before=before,
-        after=asset.stats(),
+        after=_report_stats(asset),
         duration=duration,
     )
-    asset.report.finish(asset.stats())
+    asset.report.finish(_report_stats(asset))
     cast(Any, exc).report = asset.report
+
+
+def _report_stats(asset: Asset) -> dict[str, int]:
+    return asset.stats(include_lods=any(part.lod_meshes for part in asset.parts.values()))
 
 
 def tessellate(

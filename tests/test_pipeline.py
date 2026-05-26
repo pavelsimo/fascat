@@ -7,7 +7,7 @@ import pytest
 
 from fascat.asset import Asset, Node, Part
 from fascat.mesh import Mesh
-from fascat.options import ConversionProfile, RepairOptions, StageOptions
+from fascat.options import ConversionProfile, LODOptions, RepairOptions, StageOptions
 from fascat.pipeline import convert
 from fascat.report import Report
 
@@ -74,6 +74,45 @@ def test_convert_report_includes_timed_write_and_validate_steps(monkeypatch, tmp
     }
     assert steps["write"].duration >= 0.0
     assert steps["validate"].duration >= 0.0
+    assert converted.report.finished_at is not None
+    assert converted.report.output_stats == converted.stats()
+
+
+def test_convert_report_output_stats_include_lod_totals(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.pipeline as pipeline
+
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr(pipeline, "write_usd", lambda _asset, _path, *, debug=False: None)
+    monkeypatch.setattr(pipeline, "validate_usd", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
+
+    converted = convert(
+        "input.step",
+        tmp_path / "output.usdc",
+        profile=_test_profile(),
+        lods=LODOptions((0.5,)),
+    )
+    write_step = next(step for step in converted.report.steps if step.name == "write")
+
+    assert write_step.before["lod_meshes"] == 1
+    assert write_step.before["lod_triangles"] == 1
+    assert converted.report.output_stats["lod_meshes"] == 1
+    assert converted.report.output_stats["lod_triangles"] == 1
+
+
+def test_convert_report_finishes_when_validation_is_disabled(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.pipeline as pipeline
+
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr(pipeline, "write_usd", lambda _asset, _path, *, debug=False: None)
+
+    converted = convert(
+        "input.step",
+        tmp_path / "output.usdc",
+        profile=_test_profile(),
+        validate_output=False,
+    )
+
+    assert converted.report.steps[-1].name == "write"
     assert converted.report.finished_at is not None
     assert converted.report.output_stats == converted.stats()
 

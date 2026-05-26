@@ -53,4 +53,5 @@ def test_lods_are_monotonic() -> None:
     assert step.before["lod_meshes"] == 0
     assert step.before["lod_triangles"] == 0
     assert step.after["lod_meshes"] == 3
+    assert step.after["lod_vertices"] == sum(lod.vertex_count for lod in part.lod_meshes)
     assert step.after["lod_triangles"] == sum(counts[1:])

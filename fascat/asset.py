@@ -122,13 +122,6 @@ class Asset:
     def occurrence_count(self) -> int:
         return sum(1 for node in self.root.walk() if node.part_id is not None)
 
-    def _stats_with_lods(self) -> dict[str, int]:
-        stats = self.stats()
-        lod_meshes = [lod for part in self.parts.values() for lod in part.lod_meshes]
-        stats["lod_meshes"] = len(lod_meshes)
-        stats["lod_triangles"] = sum(mesh.triangle_count for mesh in lod_meshes)
-        return stats
-
     def copy(self, *, keep_source: bool = True) -> Asset:
         return Asset(
             root=self.root.copy(),
@@ -141,8 +134,8 @@ class Asset:
             report=self.report.copy(),
         )
 
-    def stats(self) -> dict[str, int]:
-        return {
+    def stats(self, *, include_lods: bool = False) -> dict[str, int]:
+        stats = {
             "nodes": len(self.root.walk()),
             "parts": self.part_count,
             "occurrences": self.occurrence_count,
@@ -150,6 +143,12 @@ class Asset:
             "vertices": self.vertex_count,
             "triangles": self.triangle_count,
         }
+        if include_lods:
+            lod_meshes = [lod for part in self.parts.values() for lod in part.lod_meshes]
+            stats["lod_meshes"] = len(lod_meshes)
+            stats["lod_vertices"] = sum(mesh.vertex_count for mesh in lod_meshes)
+            stats["lod_triangles"] = sum(mesh.triangle_count for mesh in lod_meshes)
+        return stats
 
     def tessellate(self, options: Tessellation | None = None) -> Asset:
         from fascat.ops.tessellate import tessellate_asset
@@ -233,7 +232,7 @@ class Asset:
         from fascat.ops.lod import build_lods
 
         opts = options or LODOptions()
-        before = self._stats_with_lods()
+        before = self.stats(include_lods=True)
         warning_count = len(self.report.warnings)
         with timed_step() as timer:
             asset = build_lods(self, opts)
@@ -242,7 +241,7 @@ class Asset:
             "lods",
             options=opts.to_dict(),
             before=before,
-            after=asset._stats_with_lods(),
+            after=asset.stats(include_lods=True),
             duration=timer.duration,
             warnings=step_warnings,
         )
@@ -259,7 +258,7 @@ class Asset:
             "units": self.units,
             "meters_per_unit": self.meters_per_unit,
             "up_axis": self.up_axis,
-            "stats": self.stats(),
+            "stats": self.stats(include_lods=True),
             "root": self.root.to_dict(),
             "parts": {part_id: part.to_dict() for part_id, part in self.parts.items()},
             "materials": {material_id: material.to_dict() for material_id, material in self.materials.items()},
