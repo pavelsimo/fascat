@@ -57,10 +57,19 @@ def validate_usd(path: str | Path) -> dict[str, int]:
     if not default_prim:
         raise RuntimeError("USD stage has no defaultPrim")
 
+    stats = _validate_mesh_tree(default_prim, Usd, UsdGeom)
+    _validate_lod_variants(default_prim, Usd, UsdGeom)
+
+    if stats["meshes"] == 0:
+        raise RuntimeError("USD stage contains no meshes under defaultPrim")
+    return stats
+
+
+def _validate_mesh_tree(root_prim: Any, Usd: Any, UsdGeom: Any) -> dict[str, int]:
     mesh_count = 0
     point_count = 0
     face_count = 0
-    for prim in Usd.PrimRange(default_prim):
+    for prim in Usd.PrimRange(root_prim):
         if not prim.IsA(UsdGeom.Mesh):
             continue
         mesh = UsdGeom.Mesh(prim)
@@ -79,10 +88,35 @@ def validate_usd(path: str | Path) -> dict[str, int]:
         mesh_count += 1
         point_count += len(points)
         face_count += len(counts)
-
-    if mesh_count == 0:
-        raise RuntimeError("USD stage contains no meshes under defaultPrim")
     return {"meshes": mesh_count, "points": point_count, "triangles": face_count}
+
+
+def _validate_lod_variants(root_prim: Any, Usd: Any, UsdGeom: Any) -> None:
+    stage = root_prim.GetStage()
+    lod_prim_paths = []
+    for prim in Usd.PrimRange(root_prim):
+        variant_set = prim.GetVariantSets().GetVariantSet("lod")
+        if variant_set.GetVariantNames():
+            lod_prim_paths.append(prim.GetPath())
+
+    for prim_path in lod_prim_paths:
+        prim = stage.GetPrimAtPath(prim_path)
+        if not prim:
+            continue
+        variant_set = prim.GetVariantSets().GetVariantSet("lod")
+        variant_names = list(variant_set.GetVariantNames())
+        original_selection = variant_set.GetVariantSelection()
+        try:
+            for variant_name in variant_names:
+                variant_set.SetVariantSelection(variant_name)
+                stats = _validate_mesh_tree(prim, Usd, UsdGeom)
+                if stats["meshes"] == 0:
+                    raise RuntimeError(f"LOD variant {prim.GetPath()}[{variant_name}] contains no meshes")
+        finally:
+            if original_selection:
+                variant_set.SetVariantSelection(original_selection)
+            else:
+                variant_set.ClearVariantSelection()
 
 
 def _write_materials(stage: Any, materials: dict[str, Material]) -> dict[str, str]:

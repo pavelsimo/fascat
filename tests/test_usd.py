@@ -51,6 +51,14 @@ def cube_mesh() -> Mesh:
     return Mesh(points=points, faces=faces).compute_normals().box_uv()
 
 
+def author_triangle_mesh(stage: object, path: str, indices: list[int]) -> None:
+    mesh = UsdGeom.Mesh.Define(stage, path)
+    mesh.CreateSubdivisionSchemeAttr("none")
+    mesh.CreatePointsAttr([(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)])
+    mesh.CreateFaceVertexCountsAttr([3])
+    mesh.CreateFaceVertexIndicesAttr(indices)
+
+
 def test_usd_export_authors_mesh_material_units_and_lods(tmp_path: Path) -> None:
     mesh = cube_mesh()
     root = Node(id="root", name="root", children=[Node(id="n1", name="Cube Occurrence", part_id="cube")])
@@ -84,6 +92,32 @@ def test_usd_export_authors_mesh_material_units_and_lods(tmp_path: Path) -> None
     assert len(extent) == 2
     assert tuple(extent[0]) == (-1.0, -1.0, -1.0)
     assert tuple(extent[1]) == (1.0, 1.0, 1.0)
+
+
+def test_validate_usd_rejects_invalid_lod_variant_mesh(tmp_path: Path) -> None:
+    output = tmp_path / "invalid-lod.usda"
+    stage = Usd.Stage.CreateNew(str(output))
+    assert stage is not None
+    scene = UsdGeom.Xform.Define(stage, "/Scene")
+    stage.SetDefaultPrim(scene.GetPrim())
+    thing_prim = UsdGeom.Xform.Define(stage, "/Scene/Thing").GetPrim()
+    variant_set = thing_prim.GetVariantSets().AddVariantSet("lod")
+
+    variant_set.AddVariant("lod0")
+    variant_set.SetVariantSelection("lod0")
+    with variant_set.GetVariantEditContext():
+        author_triangle_mesh(stage, "/Scene/Thing/Mesh", [0, 1, 2])
+
+    variant_set.AddVariant("lod1")
+    variant_set.SetVariantSelection("lod1")
+    with variant_set.GetVariantEditContext():
+        author_triangle_mesh(stage, "/Scene/Thing/Mesh", [0, 1, 9])
+
+    variant_set.SetVariantSelection("lod0")
+    assert stage.GetRootLayer().Save()
+
+    with pytest.raises(RuntimeError, match="out-of-range face indices"):
+        validate_usd(output)
 
 
 def test_public_usd_write_apis_export_valid_stages(tmp_path: Path) -> None:

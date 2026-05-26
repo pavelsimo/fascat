@@ -734,6 +734,7 @@ USD tests:
 - Assert `displayColor` fallback is authored.
 - Assert per-face material subsets are authored when material indices require them.
 - Assert LOD variants exist with `lod0` selected when requested.
+- Assert USD validation checks every authored `lod` variant, not only the selected default variant.
 - Mark USD-backed tests with `pytest.mark.requires_usd`.
 
 STEP tests:
