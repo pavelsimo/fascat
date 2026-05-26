@@ -74,6 +74,8 @@ Supported output suffixes are `.usd`, `.usda`, `.usdc`, `.gltf`, and `.glb`.
 
 Direct JT import requires Open Cascade JT Import-Export bindings exposed as `OCP.JTCAFControl`. When those bindings are unavailable, `inspect` and `convert` fail before processing with a backend error.
 
+The Python API exposes `fc.has_native_jt_backend()` for checking whether the current environment can read JT files directly.
+
 `--debug` is only valid with `.usd` or `.usda` output. Binary `.usdc`, `.gltf`, and `.glb` output is rejected when debug mode is enabled.
 
 `convert` validates the generated asset before reporting success. If validation fails, the command exits non-zero.

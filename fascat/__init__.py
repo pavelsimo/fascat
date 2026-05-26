@@ -4,7 +4,7 @@ from fascat import profiles
 from fascat.asset import Asset, Node, Part
 from fascat.io.gltf import validate_gltf
 from fascat.io.importer import read_cad
-from fascat.io.jt import read_jt
+from fascat.io.jt import has_native_jt_backend, read_jt
 from fascat.io.step import read_step
 from fascat.io.usd import validate_usd
 from fascat.material import Material
@@ -28,6 +28,7 @@ __all__ = [
     "Tessellation",
     "__version__",
     "convert",
+    "has_native_jt_backend",
     "lods",
     "optimize",
     "profiles",
