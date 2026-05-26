@@ -92,6 +92,8 @@ def _write_materials(stage: Any, materials: dict[str, Material]) -> dict[str, st
     for material in materials.values():
         material_path = f"/Materials/{_usd_name(material.id)}"
         usd_material = UsdShade.Material.Define(stage, material_path)
+        usd_material.GetPrim().SetCustomDataByKey("fascat:materialId", material.id)
+        usd_material.GetPrim().SetCustomDataByKey("fascat:originalName", material.name)
         shader = UsdShade.Shader.Define(stage, f"{material_path}/PreviewSurface")
         shader.CreateIdAttr("UsdPreviewSurface")
         shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*material.base_color[:3]))
@@ -119,7 +121,9 @@ def _write_prototypes(
             if mesh is None:
                 continue
             part_path = f"/__Prototypes/{_usd_name(part.id)}_lod{lod_index}"
-            UsdGeom.Xform.Define(stage, part_path)
+            prototype = UsdGeom.Xform.Define(stage, part_path)
+            prototype.GetPrim().SetCustomDataByKey("fascat:partId", part.id)
+            prototype.GetPrim().SetCustomDataByKey("fascat:originalName", part.name)
             _write_mesh(stage, f"{part_path}/Mesh", part, mesh, materials, material_paths)
             prototype_paths[(part.id, lod_index)] = part_path
     return prototype_paths

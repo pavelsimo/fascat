@@ -145,6 +145,42 @@ def test_usd_export_authors_uv0_normals_and_original_names(tmp_path: Path) -> No
     assert len(st.Get()) == mesh.vertex_count
 
 
+def test_usd_export_preserves_original_names_on_sanitized_prototypes_and_materials(tmp_path: Path) -> None:
+    mesh = cube_mesh()
+    material = Material(id="12 red material!", name="12 red material!", base_color=(1.0, 0.0, 0.0, 1.0))
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[Node(id="node", name="Occurrence", part_id="123 part id!")],
+        ),
+        parts={
+            "123 part id!": Part(
+                id="123 part id!",
+                name="123 part source!",
+                mesh=mesh,
+                material_ids=[material.id],
+            )
+        },
+        materials={material.id: material},
+    )
+    output = tmp_path / "sanitized.usda"
+
+    write_usd(asset, output)
+
+    stage = Usd.Stage.Open(str(output))
+    assert stage is not None
+    material_prim = stage.GetPrimAtPath("/Materials/_12_red_material")
+    prototype_prim = stage.GetPrimAtPath("/__Prototypes/_123_part_id_lod0")
+
+    assert material_prim
+    assert material_prim.GetCustomDataByKey("fascat:materialId") == "12 red material!"
+    assert material_prim.GetCustomDataByKey("fascat:originalName") == "12 red material!"
+    assert prototype_prim
+    assert prototype_prim.GetCustomDataByKey("fascat:partId") == "123 part id!"
+    assert prototype_prim.GetCustomDataByKey("fascat:originalName") == "123 part source!"
+
+
 def test_usd_export_uses_instanceable_references_for_repeated_parts(tmp_path: Path) -> None:
     mesh = cube_mesh()
     root = Node(
