@@ -41,14 +41,17 @@ class Mesh:
     metadata: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.points = np.asarray(self.points, dtype=np.float64)
-        self.faces = np.asarray(self.faces, dtype=np.int64)
+        self.points = np.array(self.points, dtype=np.float64, copy=True)
+        self.faces = np.array(self.faces, dtype=np.int64, copy=True)
         if self.normals is not None:
-            self.normals = np.asarray(self.normals, dtype=np.float64)
-        self.uvs = {channel: np.asarray(values, dtype=np.float64) for channel, values in self.uvs.items()}
+            self.normals = np.array(self.normals, dtype=np.float64, copy=True)
+        self.uvs = {channel: np.array(values, dtype=np.float64, copy=True) for channel, values in self.uvs.items()}
         if self.material_indices is not None:
-            self.material_indices = np.asarray(self.material_indices, dtype=np.int64)
-        self.face_groups = {name: np.asarray(values, dtype=np.int64) for name, values in self.face_groups.items()}
+            self.material_indices = np.array(self.material_indices, dtype=np.int64, copy=True)
+        self.face_groups = {
+            name: np.array(values, dtype=np.int64, copy=True) for name, values in self.face_groups.items()
+        }
+        self.metadata = dict(self.metadata)
 
     @property
     def vertex_count(self) -> int:

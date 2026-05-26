@@ -16,6 +16,43 @@ def valid_triangle(**overrides: object) -> Mesh:
     return Mesh(**values)
 
 
+def test_mesh_copies_mutable_inputs_on_construction() -> None:
+    points = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float)
+    faces = np.array([[0, 1, 2]], dtype=int)
+    normals = np.array([[0, 0, 1], [0, 0, 1], [0, 0, 1]], dtype=float)
+    uv0 = np.array([[0, 0], [1, 0], [0, 1]], dtype=float)
+    material_indices = np.array([0], dtype=int)
+    group = np.array([0], dtype=int)
+    metadata = {"source": "cad"}
+
+    mesh = Mesh(
+        points=points,
+        faces=faces,
+        normals=normals,
+        uvs={0: uv0},
+        material_indices=material_indices,
+        face_groups={"panel": group},
+        metadata=metadata,
+    )
+    points[0, 0] = 9.0
+    faces[0, 0] = 2
+    normals[0, 2] = -1.0
+    uv0[0, 0] = 9.0
+    material_indices[0] = 3
+    group[0] = 2
+    metadata["source"] = "changed"
+
+    assert mesh.points[0, 0] == 0.0
+    assert mesh.faces.tolist() == [[0, 1, 2]]
+    assert mesh.normals is not None
+    assert mesh.normals[0, 2] == 1.0
+    assert mesh.uvs[0][0, 0] == 0.0
+    assert mesh.material_indices is not None
+    assert mesh.material_indices.tolist() == [0]
+    assert mesh.face_groups["panel"].tolist() == [0]
+    assert mesh.metadata == {"source": "cad"}
+
+
 def test_mesh_removes_unreferenced_vertices() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [5, 5, 5]], dtype=float),
