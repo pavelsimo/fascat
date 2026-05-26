@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 
 from fascat import __version__
 from fascat.cli import app, run
+from fascat.report import Report
 
 runner = CliRunner()
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -196,6 +197,34 @@ def test_convert_existing_output_requires_force(tmp_path: Path) -> None:
     result = runner.invoke(app, ["convert", str(step_file), str(output_file)])
     assert result.exit_code == 1
     assert "Pass --force" in compact(result.output)
+
+
+def test_convert_writes_failure_report_sidecar(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.cli as cli
+
+    input_file = tmp_path / "input.step"
+    output_file = tmp_path / "output.usdc"
+    report_file = tmp_path / "report.json"
+    input_file.write_text("ISO-10303-21;", encoding="utf-8")
+    failure_report = Report(source_path=str(input_file))
+    failure_report.add_error("invalid usd")
+    failure_report.finish({"parts": 1, "triangles": 2})
+    error = RuntimeError("invalid usd")
+    error.report = failure_report
+
+    def fail_convert(*_args: object, **_kwargs: object) -> object:
+        raise error
+
+    monkeypatch.setattr(cli, "_convert_for_cli", fail_convert)
+
+    result = runner.invoke(app, ["convert", str(input_file), str(output_file), "--report", str(report_file)])
+
+    assert result.exit_code == 1
+    assert "invalid usd" in result.output
+    assert report_file.exists()
+    report = json.loads(report_file.read_text(encoding="utf-8"))
+    assert report["errors"] == ["invalid usd"]
+    assert report["finished_at"] is not None
 
 
 def test_validate_rejects_unknown_extension(tmp_path: Path) -> None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, cast
 
 from fascat import profiles
 from fascat.asset import Asset
@@ -50,37 +50,87 @@ def convert(
         asset = asset.lods(lod_options)
         if progress is not None:
             progress("lods", asset.stats())
-    with timed_step() as timer:
-        write_usd(asset, output_path, debug=debug)
+    write_before = asset.stats()
+    write_options: dict[str, object] = {"format": "OpenUSD", "debug": debug}
+    write_timer = timed_step()
+    try:
+        with write_timer:
+            write_usd(asset, output_path, debug=debug)
+    except Exception as exc:
+        _record_failed_step(
+            asset,
+            "write",
+            options=write_options,
+            before=write_before,
+            duration=write_timer.duration,
+            exc=exc,
+        )
+        raise
     asset.report.add_step(
         "write",
-        options={"format": "OpenUSD", "debug": debug},
-        before=asset.stats(),
+        options=write_options,
+        before=write_before,
         after=asset.stats(),
-        duration=timer.duration,
+        duration=write_timer.duration,
     )
     if progress is not None:
         progress("write", asset.stats())
     if validate_output:
-        with timed_step() as timer:
-            validation_stats = validate_usd(output_path)
+        validate_before = asset.stats()
+        validate_options: dict[str, object] = {"backend": "usd-core"}
+        validate_timer = timed_step()
+        try:
+            with validate_timer:
+                validation_stats = validate_usd(output_path)
+        except Exception as exc:
+            _record_failed_step(
+                asset,
+                "validate",
+                options=validate_options,
+                before=validate_before,
+                duration=validate_timer.duration,
+                exc=exc,
+            )
+            raise
         after = {
-            **asset.stats(),
+            **validate_before,
             "validated_meshes": validation_stats["meshes"],
             "validated_points": validation_stats["points"],
             "validated_triangles": validation_stats["triangles"],
         }
         asset.report.add_step(
             "validate",
-            options={"backend": "usd-core"},
-            before=asset.stats(),
+            options=validate_options,
+            before=validate_before,
             after=after,
-            duration=timer.duration,
+            duration=validate_timer.duration,
         )
         if progress is not None:
             progress("validate", asset.stats())
     asset.report.finish(asset.stats())
     return asset
+
+
+def _record_failed_step(
+    asset: Asset,
+    name: str,
+    *,
+    options: dict[str, object],
+    before: dict[str, int],
+    duration: float,
+    exc: Exception,
+) -> None:
+    message = str(exc) or exc.__class__.__name__
+    asset.report.add_error(message)
+    asset.report.add_step(
+        name,
+        options=options,
+        before=before,
+        after=asset.stats(),
+        duration=duration,
+    )
+    asset.report.finish(asset.stats())
+    cast(Any, exc).report = asset.report
 
 
 def tessellate(

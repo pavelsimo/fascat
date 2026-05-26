@@ -699,10 +699,11 @@ Pipeline tests:
 - Import and validation report steps retain asset-level before/after statistics.
 - Operation reports attach warnings to the step that produced them.
 - Conversion reports include timed write and validation steps.
+- Conversion reports record errors and the failed write or validation step before raising.
 - Conversion progress callbacks receive source and per-stage stats.
 - Repeated parts can be preserved or duplicated per occurrence.
 - Optimization tests assert target triangle budgets take precedence over ratio.
-- Functional API wrappers cover stage, optimize, and LOD operations.
+- Functional API wrappers cover tessellate, stage, optimize, and LOD operations.
 - Public node dictionaries preserve transforms.
 
 USD tests:
@@ -744,6 +745,7 @@ CLI tests:
 - `fascat convert` rejects `--debug` with binary `.usdc`.
 - `fascat convert` emits source and per-stage progress on stderr.
 - `fascat convert` validates generated USD before reporting success.
+- `fascat convert --report` writes a failure report sidecar when conversion exposes one.
 - `fascat convert --materials` exposes CAD material, displayColor-only, and no-material staging modes.
 
 ## 15. Milestones

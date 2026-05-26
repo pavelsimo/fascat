@@ -20,6 +20,7 @@ from fascat.io.usd import validate_usd
 from fascat.options import LODOptions, OptimizeOptions, StageOptions, Tessellation
 from fascat.pipeline import convert
 from fascat.profiles import by_name
+from fascat.report import Report
 
 DOCS_URL = "https://pavelsimo.github.io/fascat"
 ISSUES_URL = "https://github.com/pavelsimo/fascat/issues"
@@ -325,6 +326,10 @@ def cmd_convert(
     except typer.Exit:
         raise
     except Exception as exc:
+        if report is not None:
+            failure_report = getattr(exc, "report", None)
+            if isinstance(failure_report, Report):
+                failure_report.write_json(report)
         _fail(ctx, payload, str(exc))
         raise AssertionError("unreachable") from exc
 
