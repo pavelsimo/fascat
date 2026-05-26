@@ -51,10 +51,12 @@ class RepairOptions:
 class StageOptions:
     materials: Literal["cad", "display", "none"] = "cad"
     normals: bool = True
-    uv0: UVMode = "box"
+    uv0: UVMode | None = "box"
     uv1: UVMode | None = None
 
     def __post_init__(self) -> None:
+        if self.uv0 is None:
+            object.__setattr__(self, "uv0", "none")
         if self.materials not in {"cad", "display", "none"}:
             raise ValueError("materials must be one of: cad, display, none")
         if self.uv0 not in {"none", "box", "unwrap"}:

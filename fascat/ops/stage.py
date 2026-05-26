@@ -17,7 +17,7 @@ def stage_asset(asset: Asset, options: StageOptions) -> Asset:
         if part.mesh is None:
             continue
         mesh = part.mesh
-        if options.normals or mesh.normals is None:
+        if options.normals:
             mesh = mesh.compute_normals()
         if options.uv0 == "box":
             mesh = mesh.box_uv(0)
