@@ -157,7 +157,11 @@ def test_inspect_fixture_reports_stats() -> None:
     assert "children" in payload["root"]
     assert payload["root"]["transform"][3] == [0.0, 0.0, 0.0, 1.0]
     assert payload["parts"][0]["has_source_shape"] is True
-    assert "report" in payload
+    assert len(payload["materials"]) == 1
+    assert len(payload["materials"][0]["base_color"]) == 4
+    assert payload["report"]["input_stats"]["parts"] == 1
+    assert payload["report"]["steps"][0]["name"] == "import"
+    assert payload["report"]["steps"][0]["after"]["parts"] == 1
 
 
 def test_inspect_missing_step_backend_exits_nonzero(
@@ -344,7 +348,7 @@ def test_convert_debug_usda_authors_debug_metadata(tmp_path: Path) -> None:
 
 @pytest.mark.requires_ocp
 @pytest.mark.requires_usd
-def test_convert_material_modes_write_display_only_and_no_material_usd(tmp_path: Path) -> None:
+def test_convert_material_modes_write_cad_display_and_no_material_usd(tmp_path: Path) -> None:
     from pxr import Usd, UsdGeom
 
     fixture = "tests/fixtures/radial-fan-50x15.step"
@@ -352,10 +356,11 @@ def test_convert_material_modes_write_display_only_and_no_material_usd(tmp_path:
         (0.009721217676997185, 0.009721217676997185, 0.009721217676997185),
         abs=1e-6,
     )
+    cad_output = tmp_path / "cad.usda"
     display_output = tmp_path / "display.usda"
     none_output = tmp_path / "none.usda"
 
-    for mode, output in (("display", display_output), ("none", none_output)):
+    for mode, output in (("cad", cad_output), ("display", display_output), ("none", none_output)):
         result = runner.invoke(
             app,
             [
@@ -374,12 +379,18 @@ def test_convert_material_modes_write_display_only_and_no_material_usd(tmp_path:
         )
         assert result.exit_code == 0
 
+    cad_stage = Usd.Stage.Open(str(cad_output))
     display_stage = Usd.Stage.Open(str(display_output))
     none_stage = Usd.Stage.Open(str(none_output))
+    assert cad_stage is not None
     assert display_stage is not None
     assert none_stage is not None
+    cad_mesh = next(prim for prim in Usd.PrimRange(cad_stage.GetDefaultPrim()) if prim.IsA(UsdGeom.Mesh))
     display_mesh = next(prim for prim in Usd.PrimRange(display_stage.GetDefaultPrim()) if prim.IsA(UsdGeom.Mesh))
     none_mesh = next(prim for prim in Usd.PrimRange(none_stage.GetDefaultPrim()) if prim.IsA(UsdGeom.Mesh))
+
+    assert cad_stage.GetPrimAtPath("/Materials")
+    assert "MaterialBindingAPI" in cad_mesh.GetAppliedSchemas()
 
     assert not display_stage.GetPrimAtPath("/Materials")
     assert "MaterialBindingAPI" not in display_mesh.GetAppliedSchemas()

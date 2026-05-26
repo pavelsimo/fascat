@@ -763,7 +763,7 @@ CLI tests:
 
 - `fascat --help`
 - `fascat inspect fixture.step`
-- `fascat inspect --json fixture.step` exposes profile options, hierarchy root, transforms, parts, materials, and report data.
+- `fascat inspect --json fixture.step` exposes profile options, hierarchy root, transforms, parts, material payloads, and import report data.
 - `fascat inspect`, `fascat convert`, and `fascat validate` missing-backend failures exit non-zero with clear errors.
 - `fascat inspect -`, `fascat convert - -`, and `fascat validate -` exercise real process stdin/stdout streams.
 - `fascat convert fixture.step` defaults to binary `.usdc` output and validates it.
@@ -775,7 +775,7 @@ CLI tests:
 - `fascat convert` emits source and per-stage progress on stderr.
 - `fascat convert` validates generated USD before reporting success.
 - `fascat convert --report` writes a failure report sidecar when conversion exposes one, including generated USD validation failures.
-- `fascat convert --materials` exercises CAD material, displayColor-only, and no-material staging modes through generated USD output.
+- `fascat convert --materials` exercises CAD material binding, displayColor-only, and no-material staging modes through generated USD output.
 
 ## 15. Milestones
 
