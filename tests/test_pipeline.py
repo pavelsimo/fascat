@@ -7,7 +7,7 @@ import pytest
 
 from fascat.asset import Asset, Node, Part
 from fascat.mesh import Mesh
-from fascat.options import ConversionProfile, LODOptions, RepairOptions, StageOptions
+from fascat.options import ConversionProfile, LODOptions, OptimizeOptions, RepairOptions, StageOptions
 from fascat.pipeline import convert
 from fascat.report import Report
 
@@ -36,6 +36,68 @@ def _test_profile() -> ConversionProfile:
         optimize=None,
         lods=None,
     )
+
+
+def test_asset_operations_return_new_assets_without_mutating_originals() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [2, 1, 3]], dtype=int),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    staged = asset.stage(StageOptions(uv0="box", uv1=None))
+    optimized = asset.optimize(OptimizeOptions(target_triangles=1, optimize_buffers=False))
+    with_lods = asset.lods(LODOptions((0.5,)))
+    tessellated = asset.tessellate()
+
+    original_mesh = asset.parts["part"].mesh
+    staged_mesh = staged.parts["part"].mesh
+    optimized_mesh = optimized.parts["part"].mesh
+
+    assert staged is not asset
+    assert optimized is not asset
+    assert with_lods is not asset
+    assert tessellated is not asset
+    assert asset.report.steps == []
+    assert asset.report.warnings == []
+    assert original_mesh is not None
+    assert original_mesh.normals is None
+    assert original_mesh.uvs == {}
+    assert original_mesh.triangle_count == 2
+    assert asset.parts["part"].lod_meshes == []
+    assert staged_mesh is not None
+    assert staged_mesh.normals is not None
+    assert 0 in staged_mesh.uvs
+    assert optimized_mesh is not None
+    assert optimized_mesh.triangle_count <= original_mesh.triangle_count
+    assert len(with_lods.parts["part"].lod_meshes) == 1
+    assert tessellated.report.warnings == []
+
+    dirty = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={
+            "part": Part(
+                id="part",
+                name="Part",
+                mesh=Mesh(
+                    points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [2, 2, 2]], dtype=float),
+                    faces=np.array([[0, 1, 2], [2, 1, 0], [0, 0, 1]], dtype=int),
+                ),
+            )
+        },
+    )
+
+    repaired = dirty.repair(RepairOptions())
+
+    assert repaired is not dirty
+    assert dirty.report.steps == []
+    assert dirty.parts["part"].mesh is not None
+    assert dirty.parts["part"].mesh.triangle_count == 3
+    assert repaired.parts["part"].mesh is not None
+    assert repaired.parts["part"].mesh.triangle_count == 1
 
 
 def test_asset_operation_reports_include_options_and_before_after_counts() -> None:
