@@ -246,6 +246,36 @@ def test_convert_defaults_to_binary_usdc_and_validates(tmp_path: Path) -> None:
 
 @pytest.mark.requires_ocp
 @pytest.mark.requires_usd
+def test_convert_explicit_binary_usdc_and_validates(tmp_path: Path) -> None:
+    output_file = tmp_path / "explicit.usdc"
+
+    result = runner.invoke(
+        app,
+        [
+            "convert",
+            "tests/fixtures/spool-clamp-lid.step",
+            str(output_file),
+            "--sag",
+            "0.2",
+            "--target-triangles",
+            "80",
+            "--lods",
+            "0.5",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert output_file.read_bytes().startswith(b"PXR-USDC")
+    assert "Converted tests/fixtures/spool-clamp-lid.step to" in compact(result.output)
+    assert "1 parts" in compact(result.output)
+
+    validate_result = runner.invoke(app, ["validate", str(output_file)])
+    assert validate_result.exit_code == 0
+    assert "valid USD" in compact(validate_result.output)
+
+
+@pytest.mark.requires_ocp
+@pytest.mark.requires_usd
 def test_convert_fixture_writes_usd_and_report(tmp_path: Path) -> None:
     output_file = tmp_path / "output.usda"
     report_file = tmp_path / "report.json"
