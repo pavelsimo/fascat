@@ -1,6 +1,8 @@
 import json
 import re
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import NamedTuple
 
@@ -310,6 +312,59 @@ def test_convert_reads_step_from_stdin_and_writes_usd_to_stdout() -> None:
     validate_result = runner.invoke(app, ["validate", "-"], input=result.output)
     assert validate_result.exit_code == 0
     assert "valid USD" in compact(validate_result.output)
+
+
+@pytest.mark.requires_ocp
+@pytest.mark.requires_usd
+def test_cli_stdio_paths_use_real_process_streams() -> None:
+    step_data = Path("tests/fixtures/spool-clamp-lid.step").read_text(encoding="utf-8")
+
+    inspect_result = subprocess.run(
+        [sys.executable, "-m", "fascat", "--json", "inspect", "-"],
+        input=step_data,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert inspect_result.returncode == 0
+    inspect_payload = json.loads(inspect_result.stdout)
+    assert inspect_payload["input"] == "-"
+    assert inspect_payload["stats"]["parts"] == 1
+
+    convert_result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "fascat",
+            "convert",
+            "-",
+            "-",
+            "--sag",
+            "0.2",
+            "--target-triangles",
+            "80",
+            "--lods",
+            "0.5",
+            "--debug",
+        ],
+        input=step_data,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert convert_result.returncode == 0
+    assert "#usda" in convert_result.stdout
+    assert convert_result.stderr == ""
+
+    validate_result = subprocess.run(
+        [sys.executable, "-m", "fascat", "validate", "-"],
+        input=convert_result.stdout,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert validate_result.returncode == 0
+    assert "valid USD" in compact(validate_result.stdout)
 
 
 def test_convert_existing_output_requires_force(tmp_path: Path) -> None:
