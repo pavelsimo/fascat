@@ -339,8 +339,14 @@ def _shape_color(color_tool: Any, shape: Any) -> tuple[float, float, float, floa
 
 
 def _shape_fingerprint(shape: Any) -> str:
+    hash_code = getattr(shape, "HashCode", None)
+    if callable(hash_code):
+        try:
+            return str(hash_code(2_147_483_647))
+        except Exception:
+            pass
     try:
-        return str(shape.HashCode(2_147_483_647))
+        return str(hash(shape))
     except Exception:
         return str(id(shape))
 

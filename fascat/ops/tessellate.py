@@ -12,19 +12,28 @@ from fascat.options import Tessellation
 
 def tessellate_asset(asset: Asset, options: Tessellation) -> Asset:
     result = asset.copy(keep_source=True)
+    mesh_by_source: dict[tuple[str, tuple[str, ...], tuple[int, ...] | None], Mesh] = {}
     for part in result.parts.values():
         if part.mesh is not None:
             continue
         if part.source_shape is None:
             result.report.add_warning(f"part has no source shape and cannot be tessellated: {part.name}")
             continue
-        part.mesh = tessellate_shape(
-            part.source_shape,
-            options,
-            face_material_indices=_face_material_indices_from_metadata(part.metadata),
-        )
-        if part.material_ids and part.mesh.material_indices is None:
-            part.mesh.material_indices = np.zeros(part.mesh.triangle_count, dtype=np.int64)
+        face_material_indices = _face_material_indices_from_metadata(part.metadata)
+        cache_key = _tessellation_cache_key(part.source_shape, part.material_ids, face_material_indices)
+        cached_mesh = mesh_by_source.get(cache_key)
+        if cached_mesh is None:
+            part.mesh = tessellate_shape(
+                part.source_shape,
+                options,
+                face_material_indices=face_material_indices,
+            )
+            if part.material_ids and part.mesh.material_indices is None:
+                part.mesh.material_indices = np.zeros(part.mesh.triangle_count, dtype=np.int64)
+            part.mesh.validate()
+            mesh_by_source[cache_key] = part.mesh.copy()
+        else:
+            part.mesh = cached_mesh.copy()
         part.fingerprint = part.mesh.fingerprint()
         if not options.keep_brep:
             part.source_shape = None
@@ -114,6 +123,15 @@ def _face_material_indices_from_metadata(metadata: dict[str, str]) -> list[int] 
     return [int(item) for item in value.split(",") if item]
 
 
+def _tessellation_cache_key(
+    shape: object,
+    material_ids: list[str],
+    face_material_indices: list[int] | None,
+) -> tuple[str, tuple[str, ...], tuple[int, ...] | None]:
+    indices = None if face_material_indices is None else tuple(face_material_indices)
+    return (shape_fingerprint(shape), tuple(material_ids), indices)
+
+
 def _deduplicate_parts_by_fingerprint(asset: Asset) -> Asset:
     canonical_by_key: dict[tuple[str, tuple[str, ...], tuple[int, ...] | None], str] = {}
     replacements: dict[str, str] = {}
@@ -140,10 +158,13 @@ def _deduplicate_parts_by_fingerprint(asset: Asset) -> Asset:
 
 
 def shape_fingerprint(shape: Any) -> str:
+    hash_code = getattr(shape, "HashCode", None)
+    if callable(hash_code):
+        try:
+            return str(hash_code(2_147_483_647))
+        except Exception:
+            pass
     try:
-        from OCP.TopoDS import TopoDS_Shape
-    except ImportError:
+        return str(hash(shape))
+    except Exception:
         return str(id(shape))
-    if isinstance(shape, TopoDS_Shape):
-        return str(shape.HashCode(2_147_483_647))
-    return str(id(shape))
