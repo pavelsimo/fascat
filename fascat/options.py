@@ -7,7 +7,7 @@ UVMode = Literal["none", "box", "unwrap", "lightmap"]
 NormalMode = Literal["none", "smooth", "hard_edges", "flat"]
 MaterialMode = Literal["cad", "display", "none"]
 MaterialPipelineMode = Literal["cad", "pbr"]
-LODMode = Literal["variants"]
+LODMode = Literal["variants", "extras", "separate"]
 MergeMode = Literal[
     "all",
     "by_material",
@@ -253,6 +253,11 @@ class OptimizeOptions:
 class LODOptions:
     ratios: list[float] | tuple[float, ...] = (0.5, 0.25, 0.1)
     mode: LODMode = "variants"
+    screen_coverage: list[float] | tuple[float, ...] | None = None
+    per_part_budget: bool = False
+    drop_tiny_parts: bool = False
+    tiny_part_screen_size: float = 2.0
+    validate: bool = False
 
     def __post_init__(self) -> None:
         ratios = tuple(float(ratio) for ratio in self.ratios)
@@ -263,11 +268,30 @@ class LODOptions:
             raise ValueError("LOD ratios must be greater than 0 and less than 1")
         if ratios != tuple(sorted(ratios, reverse=True)):
             raise ValueError("LOD ratios must be sorted from highest to lowest detail")
-        if self.mode != "variants":
-            raise ValueError("only variant-based LODs are supported")
+        if self.mode not in {"variants", "extras", "separate"}:
+            raise ValueError("LOD mode must be one of: variants, extras, separate")
+        if self.screen_coverage is not None:
+            screen_coverage = tuple(float(value) for value in self.screen_coverage)
+            object.__setattr__(self, "screen_coverage", screen_coverage)
+            if len(screen_coverage) != len(ratios):
+                raise ValueError("screen_coverage must contain one value per LOD ratio")
+            if any(value <= 0.0 or value > 1.0 for value in screen_coverage):
+                raise ValueError("screen_coverage values must be greater than 0 and no more than 1")
+            if screen_coverage != tuple(sorted(screen_coverage, reverse=True)):
+                raise ValueError("screen_coverage values must be sorted from highest to lowest")
+        if self.tiny_part_screen_size < 0.0:
+            raise ValueError("tiny_part_screen_size must be greater than or equal to 0")
 
     def to_dict(self) -> dict[str, object]:
-        return {"ratios": list(self.ratios), "mode": self.mode}
+        return {
+            "ratios": list(self.ratios),
+            "mode": self.mode,
+            "screen_coverage": None if self.screen_coverage is None else list(self.screen_coverage),
+            "per_part_budget": self.per_part_budget,
+            "drop_tiny_parts": self.drop_tiny_parts,
+            "tiny_part_screen_size": self.tiny_part_screen_size,
+            "validate": self.validate,
+        }
 
 
 @dataclass(frozen=True)

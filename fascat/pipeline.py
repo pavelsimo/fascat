@@ -428,6 +428,23 @@ def lods(
     asset: Asset,
     *,
     ratios: list[float] | tuple[float, ...] = (0.5, 0.25, 0.1),
+    mode: Literal["variants", "extras", "separate"] = "variants",
+    screen_coverage: list[float] | tuple[float, ...] | None = None,
+    per_part_budget: bool = False,
+    drop_tiny_parts: bool = False,
+    tiny_part_screen_size: float = 2.0,
+    validate: bool = False,
     where: Filter | None = None,
 ) -> Asset:
-    return asset.lods(LODOptions(tuple(ratios)), where=where)
+    return asset.lods(
+        LODOptions(
+            tuple(ratios),
+            mode=mode,
+            screen_coverage=screen_coverage,
+            per_part_budget=per_part_budget,
+            drop_tiny_parts=drop_tiny_parts,
+            tiny_part_screen_size=tiny_part_screen_size,
+            validate=validate,
+        ),
+        where=where,
+    )

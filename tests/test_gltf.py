@@ -106,6 +106,7 @@ def test_glb_export_writes_valid_scene_materials_uvs_and_lod_metadata(tmp_path: 
     assert "_fascat_index" not in document["materials"][0]
     assert occurrence["matrix"][12:15] == [2.0, 0.0, 0.0]
     assert occurrence["extras"]["fascat"]["lodMeshIndices"] == [1]
+    assert occurrence["extras"]["fascat"]["lods"] == [{"level": 1, "mesh": 1}]
     assert len(binary) >= document["buffers"][0]["byteLength"]
 
 

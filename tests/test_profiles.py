@@ -101,7 +101,9 @@ def test_lod_options_normalize_list_ratios() -> None:
         (lambda: fc.LODOptions(()), "at least one"),
         (lambda: fc.LODOptions((1.0,)), "greater than 0"),
         (lambda: fc.LODOptions((0.25, 0.5)), "sorted"),
-        (lambda: fc.LODOptions((0.5,), mode="payloads"), "variant-based"),
+        (lambda: fc.LODOptions((0.5,), mode="payloads"), "LOD mode"),
+        (lambda: fc.LODOptions((0.5,), screen_coverage=(0.5, 0.25)), "one value per LOD"),
+        (lambda: fc.LODOptions((0.5,), tiny_part_screen_size=-1.0), "tiny_part_screen_size"),
     ],
 )
 def test_options_validate_bad_inputs(factory: object, message: str) -> None:

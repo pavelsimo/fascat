@@ -167,7 +167,15 @@ def test_asset_operation_reports_include_options_and_before_after_counts() -> No
             "small_part_triangle_threshold",
             "preserve_silhouette",
         },
-        "lods": {"ratios", "mode"},
+        "lods": {
+            "ratios",
+            "mode",
+            "screen_coverage",
+            "per_part_budget",
+            "drop_tiny_parts",
+            "tiny_part_screen_size",
+            "validate",
+        },
         "bake_materials": {"maps_resolution", "force_uv_generation", "uv_channel", "padding", "bake", "merge_output"},
         "decimate": {
             "criterion",

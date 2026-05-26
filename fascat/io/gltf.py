@@ -127,7 +127,7 @@ def _build_document(asset: Asset, *, binary_uri: bool) -> tuple[dict[str, Any], 
     material_indices = _write_materials(asset.materials)
     meshes: list[dict[str, Any]] = []
     part_meshes: dict[str, int] = {}
-    part_lods: dict[str, list[int]] = {}
+    part_lods: dict[str, list[dict[str, object]]] = {}
     pmi_by_part = _pmi_by_part(asset)
 
     for part in asset.parts.values():
@@ -143,22 +143,21 @@ def _build_document(asset: Asset, *, binary_uri: bool) -> tuple[dict[str, Any], 
             lod=0,
             pmi_ids=pmi_by_part.get(part.id, []),
         )
-        lod_indices: list[int] = []
+        lod_entries: list[dict[str, object]] = []
         for lod, lod_mesh in enumerate(part.lod_meshes, start=1):
-            lod_indices.append(
-                _append_mesh(
-                    builder,
-                    meshes,
-                    part,
-                    lod_mesh,
-                    material_indices,
-                    export_space,
-                    lod=lod,
-                    pmi_ids=pmi_by_part.get(part.id, []),
-                )
+            mesh_index = _append_mesh(
+                builder,
+                meshes,
+                part,
+                lod_mesh,
+                material_indices,
+                export_space,
+                lod=lod,
+                pmi_ids=pmi_by_part.get(part.id, []),
             )
-        if lod_indices:
-            part_lods[part.id] = lod_indices
+            lod_entries.append(_lod_entry(mesh_index, lod, lod_mesh))
+        if lod_entries:
+            part_lods[part.id] = lod_entries
 
     nodes: list[dict[str, Any]] = []
     root_node = _append_node(nodes, asset.root, part_meshes, part_lods, export_space)
@@ -311,6 +310,24 @@ def _append_mesh(
     return len(meshes) - 1
 
 
+def _lod_entry(mesh_index: int, lod: int, mesh: Mesh) -> dict[str, object]:
+    entry: dict[str, object] = {"level": lod, "mesh": mesh_index}
+    if "lod_ratio" in mesh.metadata:
+        entry["ratio"] = _metadata_float(mesh.metadata["lod_ratio"])
+    if "lod_screen_coverage" in mesh.metadata:
+        entry["screenCoverage"] = _metadata_float(mesh.metadata["lod_screen_coverage"])
+    if mesh.metadata.get("lod_omitted"):
+        entry["omitted"] = mesh.metadata["lod_omitted"]
+    return entry
+
+
+def _metadata_float(value: object) -> object:
+    try:
+        return float(str(value))
+    except ValueError:
+        return str(value)
+
+
 def _face_groups(part: Part, mesh: Mesh) -> list[tuple[str | None, NDArray[np.int64]]]:
     all_faces = np.arange(mesh.triangle_count, dtype=np.int64)
     if mesh.material_indices is None:
@@ -327,7 +344,7 @@ def _append_node(
     nodes: list[dict[str, Any]],
     node: Node,
     part_meshes: dict[str, int],
-    part_lods: dict[str, list[int]],
+    part_lods: dict[str, list[dict[str, object]]],
     export_space: _ExportSpace,
 ) -> int:
     gltf_node: dict[str, Any] = {
@@ -341,7 +358,8 @@ def _append_node(
         gltf_node["mesh"] = part_meshes[node.part_id]
         lods = part_lods.get(node.part_id)
         if lods:
-            gltf_node["extras"]["fascat"]["lodMeshIndices"] = lods
+            gltf_node["extras"]["fascat"]["lodMeshIndices"] = [entry["mesh"] for entry in lods]
+            gltf_node["extras"]["fascat"]["lods"] = lods
     index = len(nodes)
     nodes.append(gltf_node)
     children = [_append_node(nodes, child, part_meshes, part_lods, export_space) for child in node.children]

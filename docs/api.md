@@ -73,6 +73,11 @@ asset = asset.lods(
     fc.LODOptions(
         ratios=[0.5, 0.25, 0.1],
         mode="variants",
+        screen_coverage=[0.5, 0.2, 0.05],
+        per_part_budget=True,
+        drop_tiny_parts=True,
+        tiny_part_screen_size=2.0,
+        validate=True,
     )
 )
 

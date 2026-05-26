@@ -56,6 +56,12 @@ fascat inspect input.step --json
 | `--max-sliver-area` | `1e-4` | Area threshold for sliver-face reporting |
 | `--fail-on-open-shells` | `false` | Fail if healed BREP still contains open shells |
 | `--lods` | profile value | Comma-separated LOD ratios, for example `0.5,0.25,0.1` |
+| `--lod-mode` | `variants` | LOD output mode: `variants`, `extras`, or `separate` |
+| `--lod-screen-coverage` | unset | Screen coverage values for generated LODs |
+| `--lod-per-part-budget` | `false` | Apply LOD budgets independently per part |
+| `--lod-drop-tiny-parts` | `false` | Omit tiny parts from lower LOD meshes |
+| `--lod-tiny-part-screen-size` | `2.0` | Screen-size threshold for tiny-part LOD omission |
+| `--validate-lods` | `false` | Validate generated LOD monotonicity |
 | `--normals` | `smooth` | Normal generation mode: `none`, `smooth`, `hard-edges`, or `flat` |
 | `--preserve-face-boundaries` | `false` | Treat CAD face-group boundaries as hard normal edges |
 | `--tangents` | `false` | Generate glTF-compatible vertex tangents from UV0 |
@@ -115,8 +121,6 @@ fascat inspect input.step --json
 | `--minimum-cavity-volume-m3` | `0.5` | Minimum cavity volume to preserve |
 | `--run-lod-generators` | `false` | Run preset-driven LOD generation after optimization actions |
 | `--lod-preset` | `desktop` | LOD preset: `desktop`, `web`, `mobile`, or `vr` |
-| `--lod-screen-coverage` | unset | Screen coverage values for generated LODs |
-| `--validate-lods` | `false` | Validate generated LOD monotonicity |
 | `--preserve-instances / --no-preserve-instances` | `true` | Preserve repeated parts as shared instances, or duplicate per occurrence |
 | `--preserve-hard-edges` | `false` | Protect faces adjacent to hard edges during simplification |
 | `--hard-edge-angle` | `30` | Angle threshold for hard-edge preservation |

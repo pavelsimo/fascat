@@ -129,6 +129,9 @@ def test_convert_help() -> None:
     assert "--remove-holes" in plain(result.output)
     assert "--remove-occluded" in plain(result.output)
     assert "--run-lod-generators" in plain(result.output)
+    assert "--lod-mode" in plain(result.output)
+    assert "--lod-per-part-budget" in plain(result.output)
+    assert "--lod-drop-tiny-parts" in plain(result.output)
 
 
 def test_validate_help() -> None:

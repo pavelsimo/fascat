@@ -90,7 +90,13 @@ fascat convert input.step output.usdc \
   --uv-padding 4 \
   --atlas \
   --atlas-size 4096 \
-  --lods 0.5,0.25,0.1
+  --lods 0.5,0.25,0.1 \
+  --lod-mode variants \
+  --lod-screen-coverage 0.5,0.2,0.05 \
+  --lod-per-part-budget \
+  --lod-drop-tiny-parts \
+  --lod-tiny-part-screen-size 2 \
+  --validate-lods
 ```
 
 Use `.usda` or `.usd` with `--debug` when you want inspectable text output. Binary `.usdc`, `.gltf`, and `.glb` output is rejected in debug mode.

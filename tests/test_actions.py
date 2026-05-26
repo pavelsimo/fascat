@@ -211,6 +211,12 @@ def test_cli_convert_accepts_optimization_action_options_during_dry_run() -> Non
             "--neighbors-preservation",
             "1",
             "--run-lod-generators",
+            "--lod-mode",
+            "variants",
+            "--lod-per-part-budget",
+            "--lod-drop-tiny-parts",
+            "--lod-tiny-part-screen-size",
+            "2",
             "--lod-preset",
             "vr",
             "--lod-screen-coverage",
@@ -229,3 +235,5 @@ def test_cli_convert_accepts_optimization_action_options_during_dry_run() -> Non
     assert payload["remove_holes"] is True
     assert payload["remove_occluded"] is True
     assert payload["run_lod_generators"] is True
+    assert payload["lod_per_part_budget"] is True
+    assert payload["lod_drop_tiny_parts"] is True

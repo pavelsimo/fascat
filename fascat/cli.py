@@ -186,6 +186,12 @@ class LODPreset(str, Enum):
     VR = "vr"
 
 
+class LODMode(str, Enum):
+    VARIANTS = "variants"
+    EXTRAS = "extras"
+    SEPARATE = "separate"
+
+
 class MetadataMode(str, Enum):
     NONE = "none"
     SUMMARY = "summary"
@@ -441,6 +447,22 @@ def cmd_convert(
         str | None,
         typer.Option("--lods", help="Comma-separated LOD ratios, for example 0.5,0.25,0.1."),
     ] = None,
+    lod_mode: Annotated[
+        LODMode,
+        typer.Option("--lod-mode", help="LOD output mode: variants, extras, or separate."),
+    ] = LODMode.VARIANTS,
+    lod_per_part_budget: Annotated[
+        bool,
+        typer.Option("--lod-per-part-budget", help="Apply LOD budgets independently per part."),
+    ] = False,
+    lod_drop_tiny_parts: Annotated[
+        bool,
+        typer.Option("--lod-drop-tiny-parts", help="Omit tiny parts from lower LOD meshes."),
+    ] = False,
+    lod_tiny_part_screen_size: Annotated[
+        float,
+        typer.Option("--lod-tiny-part-screen-size", help="Screen-size threshold for tiny-part LOD omission."),
+    ] = 2.0,
     normals: Annotated[
         NormalMode,
         typer.Option("--normals", help="Normal generation mode: none, smooth, hard-edges, or flat."),
@@ -735,6 +757,10 @@ def cmd_convert(
         "max_sliver_area": max_sliver_area,
         "fail_on_open_shells": fail_on_open_shells,
         "lods": None,
+        "lod_mode": lod_mode.value,
+        "lod_per_part_budget": lod_per_part_budget,
+        "lod_drop_tiny_parts": lod_drop_tiny_parts,
+        "lod_tiny_part_screen_size": lod_tiny_part_screen_size,
         "normals": normals.value,
         "preserve_face_boundaries": preserve_face_boundaries,
         "tangents": tangents,
@@ -889,12 +915,21 @@ def cmd_convert(
         and len(lod_coverages) != len(lod_values)
     ):
         _fail(ctx, payload, "--lod-screen-coverage and --lods must have the same number of values.", code=2)
+    if (
+        not run_lod_generators
+        and lod_coverages is not None
+        and lod_values is not None
+        and len(lod_coverages) != len(lod_values)
+    ):
+        _fail(ctx, payload, "--lod-screen-coverage and --lods must have the same number of values.", code=2)
     if run_lod_generators and lod_coverages is not None and lod_values is None:
         default_lod_count = len(LODGeneratorOptions(preset=cast(Any, lod_preset.value)).levels)
         if len(lod_coverages) != default_lod_count:
             _fail(
                 ctx, payload, "--lod-screen-coverage must match the preset LOD count or be paired with --lods.", code=2
             )
+    if lod_tiny_part_screen_size < 0.0:
+        _fail(ctx, payload, "--lod-tiny-part-screen-size must be greater than or equal to 0.", code=2)
     if debug and not _is_stdio(output_path) and output_path.suffix.lower() not in {".usd", ".usda"}:
         _fail(ctx, payload, "--debug requires .usd or .usda output.", code=2)
     if quality_report is not None and report is not None and quality_report.resolve() == report.resolve():
@@ -1060,7 +1095,16 @@ def cmd_convert(
             if run_lod_generators
             else None
         )
-        lod_options = LODOptions(tuple(lod_values)) if lod_values is not None else profile_options.lods
+        lod_options = _lod_options_for_cli(
+            profile_options.lods,
+            lod_values,
+            lod_coverages,
+            lod_mode.value,
+            lod_per_part_budget,
+            lod_drop_tiny_parts,
+            lod_tiny_part_screen_size,
+            validate_lods,
+        )
         asset = _convert_for_cli(
             input_path,
             output_path,
@@ -1313,6 +1357,34 @@ def _lod_generator_options(
         for coverage, ratio in zip(coverages, ratios, strict=True)
     )
     return LODGeneratorOptions(preset=cast(Any, preset), levels=levels, validate=validate_lods)
+
+
+def _lod_options_for_cli(
+    profile_lods: LODOptions | None,
+    lod_values: list[float] | None,
+    lod_coverages: list[float] | None,
+    lod_mode: str,
+    lod_per_part_budget: bool,
+    lod_drop_tiny_parts: bool,
+    lod_tiny_part_screen_size: float,
+    validate_lods: bool,
+) -> LODOptions | None:
+    ratios = tuple(lod_values) if lod_values is not None else None
+    if ratios is None and profile_lods is not None:
+        ratios = tuple(profile_lods.ratios)
+    if ratios is None:
+        return None
+    if lod_coverages is not None and len(lod_coverages) != len(ratios):
+        raise ValueError("screen_coverage must contain one value per LOD ratio")
+    return LODOptions(
+        ratios=ratios,
+        mode=cast(Any, lod_mode),
+        screen_coverage=None if lod_coverages is None else tuple(lod_coverages),
+        per_part_budget=lod_per_part_budget,
+        drop_tiny_parts=lod_drop_tiny_parts,
+        tiny_part_screen_size=lod_tiny_part_screen_size,
+        validate=validate_lods,
+    )
 
 
 def _parse_filter_options(
