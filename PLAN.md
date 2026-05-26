@@ -751,6 +751,7 @@ CLI tests:
 - `fascat convert fixture.step output.usda`
 - `fascat validate output.usda`
 - `fascat convert` rejects `--debug` with binary `.usdc`.
+- `fascat convert --dry-run` rejects unsorted LOD ratios.
 - `fascat convert` emits source and per-stage progress on stderr.
 - `fascat convert` validates generated USD before reporting success.
 - `fascat convert --report` writes a failure report sidecar when conversion exposes one.

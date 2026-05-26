@@ -316,6 +316,12 @@ def test_convert_rejects_invalid_lods() -> None:
     assert "--lods ratios" in result.output
 
 
+def test_convert_rejects_unsorted_lods_during_dry_run(capsys) -> None:  # type: ignore[no-untyped-def]
+    result = invoke_run(["--dry-run", "convert", "input.step", "output.usdc", "--lods", "0.25,0.5"], capsys)
+    assert result.exit_code == 2
+    assert "--lods ratios must be sorted from highest to lowest detail" in result.stderr
+
+
 def test_convert_rejects_invalid_max_edge_length(capsys) -> None:  # type: ignore[no-untyped-def]
     result = invoke_run(["--dry-run", "convert", "input.step", "output.usdc", "--max-edge-length", "0"], capsys)
     assert result.exit_code == 2

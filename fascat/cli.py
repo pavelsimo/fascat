@@ -476,6 +476,8 @@ def _parse_lods(value: str | None, ctx: typer.Context, payload: dict[str, Any]) 
         _fail(ctx, payload, "--lods must include at least one ratio.", code=2)
     if any(ratio <= 0.0 or ratio >= 1.0 for ratio in ratios):
         _fail(ctx, payload, "--lods ratios must be greater than 0 and less than 1.", code=2)
+    if ratios != sorted(ratios, reverse=True):
+        _fail(ctx, payload, "--lods ratios must be sorted from highest to lowest detail.", code=2)
     return ratios
 
 
