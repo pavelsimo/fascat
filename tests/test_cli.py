@@ -150,6 +150,13 @@ def test_convert_dry_run_accepts_gltf_output_and_virtual_reality_profile() -> No
     assert '"profile": "virtual-reality"' in result.output
 
 
+def test_convert_dry_run_accepts_jt_input() -> None:
+    result = runner.invoke(app, ["--json", "--dry-run", "convert", "input.jt", "output.glb"])
+    assert result.exit_code == 0
+    assert '"input": "input.jt"' in result.output
+    assert '"output": "output.glb"' in result.output
+
+
 def test_inspect_dry_run() -> None:
     result = runner.invoke(app, ["--dry-run", "inspect", "input.step"])
     assert result.exit_code == 0
@@ -238,6 +245,22 @@ def test_convert_missing_step_backend_exits_nonzero(
 
     assert result.exit_code == 1
     assert "STEP import requires cadquery-ocp" in result.output
+
+
+def test_inspect_missing_jt_backend_exits_nonzero(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import fascat.io.jt as jt
+
+    def missing_native_backend(*_args: object, **_kwargs: object) -> object:
+        raise jt._JTBackendUnavailable("missing")
+
+    monkeypatch.setattr(jt, "_read_jt_native_path", missing_native_backend)
+    jt_file = tmp_path / "input.jt"
+    jt_file.write_bytes(b"not a real jt file")
+
+    result = runner.invoke(app, ["inspect", str(jt_file)])
+
+    assert result.exit_code == 1
+    assert "JT import requires" in result.output
 
 
 @pytest.mark.requires_ocp
@@ -832,7 +855,7 @@ def test_json_error_payload_for_missing_file(capsys) -> None:  # type: ignore[no
 def test_convert_rejects_bad_input_suffix(capsys) -> None:  # type: ignore[no-untyped-def]
     result = invoke_run(["--dry-run", "convert", "input.txt", "output.usdc"], capsys)
     assert result.exit_code == 2
-    assert "Unsupported STEP extension" in result.stderr
+    assert "Unsupported CAD input extension" in result.stderr
 
 
 def test_convert_rejects_bad_output_suffix(capsys) -> None:  # type: ignore[no-untyped-def]

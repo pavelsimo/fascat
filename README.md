@@ -1,6 +1,6 @@
 # 🐱 fascat
 
-Fascat is a Python library and CLI for converting CAD STEP data into realtime-ready OpenUSD and glTF assets.
+Fascat is a Python library and CLI for converting CAD assemblies into realtime-ready OpenUSD and glTF assets.
 
 [![release](https://img.shields.io/github/v/release/pavelsimo/fascat?style=flat-square&color=4d9e4d&logoColor=white)](https://github.com/pavelsimo/fascat/releases)
 [![license MIT](https://img.shields.io/badge/license-MIT-ffd60a?style=flat-square&logoColor=white)](LICENSE)
@@ -12,7 +12,7 @@ Fascat is a Python library and CLI for converting CAD STEP data into realtime-re
 The V1 pipeline is intentionally narrow:
 
 ```text
-STEP CAD -> imported assembly -> tessellated meshes -> repaired meshes -> staged materials and UVs -> optimized LODs -> OpenUSD/glTF
+STEP/JT CAD -> imported assembly -> tessellated meshes -> repaired meshes -> staged materials and UVs -> optimized LODs -> OpenUSD/glTF
 ```
 
 ## Installation
@@ -53,6 +53,9 @@ fascat convert motor.step motor.usdc --profile realtime-desktop
 # Convert STEP to binary glTF for VR/runtime engines
 fascat convert motor.step motor.glb --profile virtual-reality
 
+# Convert direct JT input when Open Cascade JT bindings are installed
+fascat convert motor.jt motor.usdc
+
 # Tune tessellation, UVs, optimization, and LODs
 fascat convert motor.step motor.usdc \
   --sag 0.1 \
@@ -78,13 +81,15 @@ fascat validate motor.glb
 
 | Command | Description |
 |---------|-------------|
-| `fascat inspect input.step` | Inspect a STEP assembly before conversion |
-| `fascat convert input.step [output.usdc]` | Convert STEP CAD into OpenUSD or glTF |
+| `fascat inspect input.step` | Inspect a CAD assembly before conversion |
+| `fascat convert input.step [output.usdc]` | Convert CAD into OpenUSD or glTF |
 | `fascat validate output.usdc` | Validate generated USD or glTF output |
 | `fascat help [command]` | Show top-level or command-specific help |
 | `fascat version` | Print version and exit |
 
 Fascat follows standard CLI stream conventions: primary output and JSON go to stdout, while errors and per-stage conversion progress go to stderr. Conversion validates the generated asset before reporting success. File arguments accept `-` for stdin/stdout where meaningful.
+
+Supported input suffixes are `.step`, `.stp`, and `.jt`. STEP import uses the default `cadquery-ocp` backend. Direct JT import requires Open Cascade JT Import-Export bindings exposed as `OCP.JTCAFControl`; the regular open `cadquery-ocp` wheels may not include that commercial reader.
 
 ## Python API
 
@@ -140,6 +145,8 @@ asset = asset.lods(
 asset.write_usd("motor.usdc")
 asset.write_gltf("motor.glb")
 ```
+
+Use `fc.read_jt("motor.jt")` for direct JT input when the JT backend is installed, or `fc.read_cad(path)` to dispatch by suffix.
 
 ## Docs
 

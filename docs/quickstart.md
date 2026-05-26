@@ -24,12 +24,19 @@ fascat --json inspect motor.step
 cat motor.step | fascat inspect -
 ```
 
+JT input is direct when Open Cascade JT bindings are installed:
+
+```bash
+fascat inspect motor.jt
+```
+
 ## Convert to OpenUSD or glTF
 
 ```bash
 fascat convert motor.step
 fascat convert motor.step motor.usdc --profile realtime-desktop
 fascat convert motor.step motor.glb --profile virtual-reality
+fascat convert motor.jt motor.usdc
 fascat convert motor.step motor.usda --debug --report report.json
 fascat convert motor.step - --dry-run
 ```

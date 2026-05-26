@@ -5,6 +5,8 @@ description: Use fascat from Python
 
 The Python API exposes the same pipeline as the CLI, but keeps each conversion step explicit and composable.
 
+Use `fc.read_step()` for STEP files, `fc.read_jt()` for direct JT files, or `fc.read_cad()` when you want Fascat to dispatch from the file suffix. Direct JT import requires Open Cascade JT Import-Export bindings exposed as `OCP.JTCAFControl`.
+
 ## End-to-end pipeline
 
 ```python
@@ -86,6 +88,7 @@ fc.convert("motor.step", "motor.usdc")
 fc.convert("motor.step", "motor.usda", debug=True)
 fc.convert("motor.step", "motor.glb", profile="virtual-reality")
 fc.convert("motor.step", "motor.gltf", profile="realtime-web")
+fc.convert("motor.jt", "motor.usdc")
 ```
 
 `fc.convert()` validates generated output by default. Pass `validate_output=False` only when another step in your pipeline validates the asset.
@@ -109,7 +112,7 @@ Available profiles:
 
 | Profile | Use |
 |---------|-----|
-| `inspect-only` | inspect STEP input without conversion |
+| `inspect-only` | inspect CAD input without conversion |
 | `realtime-desktop` | higher-detail OpenUSD or glTF output |
 | `realtime-web` | lower triangle budgets for web delivery |
 | `virtual-reality` | balanced triangle budgets and LODs for VR runtimes |
@@ -132,6 +135,13 @@ asset = fc.lods(asset, ratios=(0.5, 0.25, 0.1))
 
 fc.write_usd(asset, "motor.usdc")
 fc.write_gltf(asset, "motor.glb")
+```
+
+For suffix-based import:
+
+```python
+asset = fc.read_cad("motor.step")
+asset = fc.read_cad("motor.jt")
 ```
 
 ## Reports and stats
@@ -182,7 +192,11 @@ print(payload["root"])
 print(payload["parts"])
 ```
 
-The asset model preserves hierarchy, part records, material records, transforms, units, and source metadata where the STEP backend can read them.
+The asset model preserves hierarchy, part records, material records, transforms, units, and source metadata where the active CAD backend can read them.
+
+## JT notes
+
+`fc.read_jt()` is a direct reader path. It does not convert JT through STEP. It expects a native Open Cascade JT reader in the Python environment and raises a clear backend error when `OCP.JTCAFControl` is unavailable.
 
 ## glTF notes
 
