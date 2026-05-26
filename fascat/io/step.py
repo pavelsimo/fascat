@@ -11,6 +11,8 @@ from fascat.asset import Asset, Node, Part
 from fascat.material import Material
 from fascat.report import Report, timed_step
 
+_PartIndex = dict[tuple[str, str, str, str], str]
+
 
 def read_step(path: str | Path) -> Asset:
     source = Path(path)
@@ -32,7 +34,7 @@ def _read_step_path(source: Path, *, source_identity: str) -> Asset:
             metadata={"source": str(source), "source_identity": source_identity},
         )
         parts: dict[str, Part] = {}
-        part_index: dict[tuple[str, str, str], str] = {}
+        part_index: _PartIndex = {}
         materials: dict[str, Material] = {}
         for index, label in enumerate(free_labels, start=1):
             root.children.append(
@@ -130,7 +132,7 @@ def _build_node(
     shape_tool: Any,
     color_tool: Any,
     parts: dict[str, Part],
-    part_index: dict[tuple[str, str, str], str],
+    part_index: _PartIndex,
     materials: dict[str, Material],
 ) -> Node:
     from OCP.TDF import TDF_LabelSequence
@@ -221,14 +223,22 @@ def _canonical_part_id(
     part_entry: str,
     shape_hash: str,
     material_signature: str,
-    part_index: dict[tuple[str, str, str], str],
+    part_index: _PartIndex,
 ) -> tuple[str, bool]:
-    key = (source_identity, shape_hash, material_signature)
-    existing = part_index.get(key)
+    label_key = ("label", source_identity, part_entry, material_signature)
+    existing = part_index.get(label_key)
     if existing is not None:
         return existing, False
+
+    shape_key = ("shape", source_identity, shape_hash, material_signature)
+    existing = part_index.get(shape_key)
+    if existing is not None:
+        part_index[label_key] = existing
+        return existing, False
+
     part_id = _stable_id("part", f"{source_identity}:{part_entry}")
-    part_index[key] = part_id
+    part_index[label_key] = part_id
+    part_index[shape_key] = part_id
     return part_id, True
 
 

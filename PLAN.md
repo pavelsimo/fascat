@@ -745,7 +745,7 @@ STEP tests:
 - Test `Tessellation.max_edge_length` on a STEP-backed tessellation path.
 - Test `Tessellation.keep_brep` controls source-shape retention after tessellation.
 - Test stable STEP IDs include source identity.
-- Test importer part identity reuses matching source, shape, and material fingerprints before tessellation.
+- Test importer part identity prefers matching source labels, then matching shape and material fingerprints before tessellation.
 - Test STEP face color material plans map to mesh material indices for USD subsets.
 - Test tessellation reuses matching source-shape meshes while keeping distinct face-material assignments separate.
 - Test tessellation dedupe preserves distinct per-face material assignments.

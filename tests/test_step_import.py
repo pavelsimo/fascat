@@ -4,7 +4,7 @@ from fascat.io.step import _canonical_part_id, _material_binding_plan, _shape_fi
 
 
 def test_canonical_part_id_reuses_matching_shape_and_material() -> None:
-    part_index: dict[tuple[str, str, str], str] = {}
+    part_index: dict[tuple[str, str, str, str], str] = {}
 
     first_id, first_is_new = _canonical_part_id(
         source_identity="model.step",
@@ -33,6 +33,38 @@ def test_canonical_part_id_reuses_matching_shape_and_material() -> None:
     assert first_id == second_id
     assert different_material_is_new is True
     assert different_material_id != first_id
+
+
+def test_canonical_part_id_prefers_source_label_before_shape_hash() -> None:
+    part_index: dict[tuple[str, str, str, str], str] = {}
+
+    first_id, first_is_new = _canonical_part_id(
+        source_identity="model.step",
+        part_entry="0:1:1",
+        shape_hash="shape-a",
+        material_signature="mat-red",
+        part_index=part_index,
+    )
+    repeated_label_id, repeated_label_is_new = _canonical_part_id(
+        source_identity="model.step",
+        part_entry="0:1:1",
+        shape_hash="unstable-shape-hash",
+        material_signature="mat-red",
+        part_index=part_index,
+    )
+    repeated_shape_id, repeated_shape_is_new = _canonical_part_id(
+        source_identity="model.step",
+        part_entry="0:1:2",
+        shape_hash="shape-a",
+        material_signature="mat-red",
+        part_index=part_index,
+    )
+
+    assert first_is_new is True
+    assert repeated_label_is_new is False
+    assert repeated_shape_is_new is False
+    assert repeated_label_id == first_id
+    assert repeated_shape_id == first_id
 
 
 def test_material_binding_plan_maps_step_face_colors_to_indices() -> None:
