@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import math
-from typing import Any
 
 import numpy as np
 
+from fascat._ocp import shape_fingerprint
 from fascat.asset import Asset
 from fascat.mesh import Mesh
 from fascat.options import Tessellation
@@ -155,16 +155,3 @@ def _deduplicate_parts_by_fingerprint(asset: Asset) -> Asset:
             node.part_id = replacements[node.part_id]
     asset.parts = {part_id: part for part_id, part in asset.parts.items() if part_id not in replacements}
     return asset
-
-
-def shape_fingerprint(shape: Any) -> str:
-    hash_code = getattr(shape, "HashCode", None)
-    if callable(hash_code):
-        try:
-            return str(hash_code(2_147_483_647))
-        except Exception:
-            pass
-    try:
-        return str(hash(shape))
-    except Exception:
-        return str(id(shape))

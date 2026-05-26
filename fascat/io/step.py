@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import hashlib
 import tempfile
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from fascat._ocp import shape_fingerprint as _shape_fingerprint
 from fascat.asset import Asset, Node, Part
 from fascat.material import Material
 from fascat.report import Report, timed_step
@@ -348,19 +348,6 @@ def _shape_color(color_tool: Any, shape: Any) -> tuple[float, float, float, floa
     return None
 
 
-def _shape_fingerprint(shape: Any) -> str:
-    hash_code = getattr(shape, "HashCode", None)
-    if callable(hash_code):
-        try:
-            return str(hash_code(2_147_483_647))
-        except Exception:
-            pass
-    try:
-        return str(hash(shape))
-    except Exception:
-        return str(id(shape))
-
-
 def _label_transform(label: Any) -> np.ndarray:
     from OCP.XCAFDoc import XCAFDoc_ShapeTool
 
@@ -407,5 +394,7 @@ def _material_id(color: tuple[float, float, float, float]) -> str:
 
 
 def _stable_id(prefix: str, value: str) -> str:
+    import hashlib
+
     digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
     return f"{prefix}_{digest}"

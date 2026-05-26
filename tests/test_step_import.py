@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
+import fascat as fc
 from fascat.io.step import _canonical_part_id, _material_binding_plan, _shape_fingerprint
 
 
@@ -83,3 +88,15 @@ def test_shape_fingerprint_falls_back_to_python_hash() -> None:
             return 123
 
     assert _shape_fingerprint(ShapeWithoutHashCode()) == "123"
+
+
+@pytest.mark.requires_ocp
+def test_step_shape_fingerprints_are_stable_across_imports() -> None:
+    fixture = Path("tests/fixtures/spool-clamp-lid.step")
+
+    first = fc.read_step(fixture)
+    second = fc.read_step(fixture)
+
+    assert [part.metadata["shape_fingerprint"] for part in first.parts.values()] == [
+        part.metadata["shape_fingerprint"] for part in second.parts.values()
+    ]
