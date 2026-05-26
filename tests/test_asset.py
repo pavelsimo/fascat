@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -18,6 +20,32 @@ def test_material_copies_input_metadata() -> None:
     metadata["source"] = "changed"
 
     assert material.metadata == {"source": "cad"}
+
+
+@pytest.mark.parametrize(
+    ("overrides", "match"),
+    [
+        ({"base_color": (1.0, 0.0, 0.0)}, "base_color must contain RGBA values"),
+        ({"base_color": (1.0, 0.0, float("nan"), 1.0)}, "base_color values must be finite"),
+        ({"base_color": (1.0, -0.1, 0.0, 1.0)}, "base_color values must be between 0 and 1"),
+        ({"metallic": float("inf")}, "metallic must be finite"),
+        ({"metallic": 1.1}, "metallic must be between 0 and 1"),
+        ({"roughness": float("nan")}, "roughness must be finite"),
+        ({"roughness": -0.1}, "roughness must be between 0 and 1"),
+        ({"opacity": float("inf")}, "opacity must be finite"),
+        ({"opacity": -0.1}, "opacity must be between 0 and 1"),
+    ],
+)
+def test_material_rejects_invalid_unit_values(overrides: dict[str, Any], match: str) -> None:
+    kwargs: dict[str, Any] = {
+        "id": "mat",
+        "name": "Material",
+        "base_color": (1.0, 0.0, 0.0, 1.0),
+    }
+    kwargs.update(overrides)
+
+    with pytest.raises(ValueError, match=match):
+        Material(**kwargs)
 
 
 def test_asset_copy_isolates_material_metadata() -> None:
@@ -131,6 +159,28 @@ def test_asset_copies_report_on_construction() -> None:
 
     assert asset.report.warnings == ["outside"]
     assert asset.report.input_stats == {"parts": 1}
+
+
+def test_report_summary_and_json_output(tmp_path: Path) -> None:
+    report = Report(source_path="input.step", warnings=["fixed winding"], input_stats={"parts": 1, "triangles": 12})
+    report.add_step(
+        "repair",
+        before={"parts": 2, "triangles": 12},
+        after={"parts": 2, "triangles": 8},
+        duration=0.5,
+        warnings=["removed degenerate faces"],
+    )
+    report.finish({"parts": 2, "triangles": 8, "materials": 3})
+    output = tmp_path / "report.json"
+
+    report.write_json(output)
+    payload = json.loads(output.read_text(encoding="utf-8"))
+
+    assert report.summary() == "2 parts, 8 triangles, 3 materials, 1 warnings"
+    assert payload["source_path"] == "input.step"
+    assert payload["output_stats"] == {"parts": 2, "triangles": 8, "materials": 3}
+    assert payload["steps"][0]["name"] == "repair"
+    assert payload["steps"][0]["warnings"] == ["removed degenerate faces"]
 
 
 def test_asset_write_usd_records_report_step(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

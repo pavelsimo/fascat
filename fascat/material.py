@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from math import isfinite
 
 
 @dataclass(frozen=True)
@@ -17,12 +18,20 @@ class Material:
         object.__setattr__(self, "metadata", dict(self.metadata))
         if len(self.base_color) != 4:
             raise ValueError("base_color must contain RGBA values")
+        if any(not isfinite(value) for value in self.base_color):
+            raise ValueError("base_color values must be finite")
         if any(value < 0.0 or value > 1.0 for value in self.base_color):
             raise ValueError("base_color values must be between 0 and 1")
+        if not isfinite(self.metallic):
+            raise ValueError("metallic must be finite")
         if self.metallic < 0.0 or self.metallic > 1.0:
             raise ValueError("metallic must be between 0 and 1")
+        if not isfinite(self.roughness):
+            raise ValueError("roughness must be finite")
         if self.roughness < 0.0 or self.roughness > 1.0:
             raise ValueError("roughness must be between 0 and 1")
+        if not isfinite(self.opacity):
+            raise ValueError("opacity must be finite")
         if self.opacity < 0.0 or self.opacity > 1.0:
             raise ValueError("opacity must be between 0 and 1")
 

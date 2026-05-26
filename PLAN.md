@@ -677,7 +677,9 @@ Initial profile defaults:
 Unit tests:
 
 - Asset, node, part, and material constructors/copies isolate mutable containers while preserving new-asset semantics.
+- Material validates RGBA length plus finite base-color, metallic, roughness, and opacity unit ranges.
 - Report and report-step constructors/copies isolate mutable step, warning, error, and stats containers.
+- Report summary and JSON output expose source, output stats, steps, and step warnings.
 - Missing backend tests assert OCP, USD, and xatlas paths fail with clear errors.
 - Mesh removes unreferenced vertices.
 - Mesh removes degenerate triangles.
