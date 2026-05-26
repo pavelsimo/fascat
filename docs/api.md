@@ -203,6 +203,15 @@ if fc.has_native_jt_backend():
     asset = fc.read_jt("motor.jt")
 ```
 
+For native-backend verification, download sample files and run the gated JT integration test:
+
+```bash
+make jt-samples
+make jt-test
+```
+
+`make jt-test` uses `FASCAT_JT_SAMPLE_DIR` to test every `.jt` file in the downloaded sample directory.
+
 ## glTF notes
 
 OpenUSD is the highest-fidelity export path for USD-style LOD variants and instance metadata.
