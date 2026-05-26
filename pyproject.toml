@@ -104,6 +104,11 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--cov=fascat --cov-report=term-missing"
+markers = [
+    "requires_ocp: requires the cadquery-ocp STEP backend",
+    "requires_usd: requires the usd-core OpenUSD backend",
+    "requires_xatlas: requires the xatlas UV unwrap backend",
+]
 
 [tool.coverage.run]
 branch = true

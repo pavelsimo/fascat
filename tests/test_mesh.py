@@ -76,3 +76,81 @@ def test_box_uv_matches_vertex_count() -> None:
     assert staged.uvs[0].shape == (3, 2)
     assert staged.uvs[0].min() >= 0.0
     assert staged.uvs[0].max() <= 1.0
+
+
+def test_subdivide_long_edges_enforces_limit_and_preserves_materials() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [4, 0, 0], [0, 3, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+        material_indices=np.array([1], dtype=int),
+    )
+
+    subdivided = mesh.subdivide_long_edges(1.0)
+    edge_lengths = []
+    for face in subdivided.faces:
+        corners = subdivided.points[face]
+        edge_lengths.extend(
+            [
+                np.linalg.norm(corners[1] - corners[0]),
+                np.linalg.norm(corners[2] - corners[1]),
+                np.linalg.norm(corners[0] - corners[2]),
+            ]
+        )
+
+    assert max(edge_lengths) <= 1.0
+    assert subdivided.triangle_count > mesh.triangle_count
+    assert subdivided.material_indices is not None
+    assert set(subdivided.material_indices.tolist()) == {1}
+
+
+def test_optimize_buffers_preserves_uvs_and_material_indices() -> None:
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [1, 1, 0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [2, 1, 3]], dtype=int),
+        uvs={0: np.array([[0, 0], [1, 0], [0, 1], [1, 1]], dtype=float)},
+        material_indices=np.array([0, 1], dtype=int),
+    )
+
+    optimized = mesh.optimize_buffers()
+
+    optimized.validate()
+    assert optimized.uvs[0].shape == (optimized.vertex_count, 2)
+    assert optimized.material_indices is not None
+    assert sorted(optimized.material_indices.tolist()) == [0, 1]
+
+
+def test_fill_holes_is_limited_to_small_non_planar_boundaries() -> None:
+    open_sheet = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [2, 1, 3]], dtype=int),
+    )
+    open_tetrahedron = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float),
+        faces=np.array([[0, 2, 1], [0, 1, 3], [1, 2, 3]], dtype=int),
+    )
+
+    assert open_sheet.fill_holes().triangle_count == open_sheet.triangle_count
+    assert open_tetrahedron.fill_holes().triangle_count == 4
+
+
+@pytest.mark.requires_xatlas
+def test_unwrap_uv_uses_xatlas_backend() -> None:
+    pytest.importorskip("xatlas")
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+
+    unwrapped = mesh.unwrap_uv(0)
+
+    assert unwrapped.metadata["uv0"] == "xatlas"
+    assert unwrapped.uvs[0].shape == (unwrapped.vertex_count, 2)
+    assert np.isfinite(unwrapped.uvs[0]).all()

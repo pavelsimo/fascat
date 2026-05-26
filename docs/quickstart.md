@@ -38,9 +38,13 @@ fascat convert motor.step - --dry-run
 fascat convert input.step output.usdc \
   --sag 0.1 \
   --angle 15 \
+  --max-edge-length 25 \
   --target-triangles 500000 \
+  --uv1 box \
   --lods 0.5,0.25,0.1
 ```
+
+Use `.usda` or `.usd` with `--debug` when you want inspectable text output. Binary `.usdc` output is rejected in debug mode.
 
 ## Validate output
 

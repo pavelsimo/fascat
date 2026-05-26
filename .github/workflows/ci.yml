@@ -22,7 +22,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --dev --all-extras
 
       - name: Check formatting
         run: uv run ruff format --check .
@@ -38,3 +38,23 @@ jobs:
 
       - name: Build
         run: uv build
+
+  core:
+    name: Core without CAD/USD backends
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --dev --all-extras
+
+      - name: Remove optional geometry backends
+        run: uv pip uninstall cadquery-ocp cadquery-ocp-proxy usd-core xatlas
+
+      - name: Test backend-free core behavior
+        run: uv run --no-sync pytest tests/test_mesh.py tests/test_profiles.py --no-cov

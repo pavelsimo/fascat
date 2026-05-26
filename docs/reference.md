@@ -44,9 +44,12 @@ fascat inspect input.step --json
 | `--angle` | profile value | CAD tessellation angle tolerance in degrees |
 | `--target-triangles` | profile value | Target triangle count for optimized LOD0 |
 | `--ratio` | unset | Simplification ratio when no triangle target is set |
+| `--max-edge-length` | profile value | Split tessellated triangles longer than this length |
 | `--lods` | profile value | Comma-separated LOD ratios, for example `0.5,0.25,0.1` |
 | `--uv0` | `box` | UV0 generation mode: `none`, `box`, or `unwrap` |
-| `--debug` | `false` | Prefer debuggable USDA output conventions |
+| `--uv1` | `none` | UV1 generation mode: `none`, `box`, or `unwrap` |
+| `--preserve-instances / --no-preserve-instances` | `true` | Preserve repeated parts as shared instances, or duplicate per occurrence |
+| `--debug` | `false` | Require text `.usd` or `.usda` output for debugging |
 | `--report` | unset | Write a JSON conversion report sidecar |
 | `--force` | `false` | Overwrite an existing output file |
 
@@ -62,12 +65,14 @@ cat output.usdc | fascat validate -
 
 When output is `-`, USD bytes are reserved for stdout and progress/errors stay on stderr.
 
+`--debug` is only valid with `.usd` or `.usda` output. Binary `.usdc` output is rejected when debug mode is enabled.
+
 ## Output streams
 
 | Stream | Contents |
 |--------|----------|
 | stdout | Primary command output and `--json` payloads |
-| stderr | Errors, progress, warnings, and diagnostics |
+| stderr | Errors, source counts, per-stage progress, warnings, and diagnostics |
 
 When `--json` is active, expected runtime errors are reported as JSON payloads on stdout and still exit non-zero.
 

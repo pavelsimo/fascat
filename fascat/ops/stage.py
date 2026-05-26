@@ -39,7 +39,4 @@ def _require_xatlas() -> None:
 
 
 def _unwrap_uv(mesh: Mesh, channel: int) -> Mesh:
-    # xatlas parameterization is available as an optional backend. For V1,
-    # box projection remains the deterministic fallback used by the CLI profiles.
-    _require_xatlas()
-    return mesh.box_uv(channel)
+    return mesh.unwrap_uv(channel)

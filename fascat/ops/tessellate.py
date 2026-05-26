@@ -24,7 +24,7 @@ def tessellate_asset(asset: Asset, options: Tessellation) -> Asset:
         part.fingerprint = part.mesh.fingerprint()
         if not options.keep_brep:
             part.source_shape = None
-    return result
+    return _deduplicate_parts_by_fingerprint(result)
 
 
 def tessellate_shape(shape: object, options: Tessellation) -> Mesh:
@@ -77,10 +77,36 @@ def tessellate_shape(shape: object, options: Tessellation) -> Mesh:
         faces=np.asarray(faces, dtype=np.int64).reshape((-1, 3)),
         metadata={"occt_faces": str(face_index)},
     )
+    if options.max_edge_length is not None:
+        mesh = mesh.subdivide_long_edges(options.max_edge_length)
     if options.create_normals:
         mesh = mesh.compute_normals()
+    else:
+        mesh.normals = None
     mesh.validate()
     return mesh
+
+
+def _deduplicate_parts_by_fingerprint(asset: Asset) -> Asset:
+    canonical_by_key: dict[tuple[str, tuple[str, ...]], str] = {}
+    replacements: dict[str, str] = {}
+    for part_id, part in asset.parts.items():
+        if part.fingerprint is None:
+            continue
+        key = (part.fingerprint, tuple(part.material_ids))
+        canonical_id = canonical_by_key.get(key)
+        if canonical_id is None:
+            canonical_by_key[key] = part_id
+            continue
+        replacements[part_id] = canonical_id
+    if not replacements:
+        return asset
+
+    for node in asset.root.walk():
+        if node.part_id in replacements:
+            node.part_id = replacements[node.part_id]
+    asset.parts = {part_id: part for part_id, part in asset.parts.items() if part_id not in replacements}
+    return asset
 
 
 def shape_fingerprint(shape: Any) -> str:

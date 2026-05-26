@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from difflib import get_close_matches
 from enum import Enum
@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Annotated, Any, NoReturn
 
 import typer
+import typer.rich_utils as rich_utils
 from rich.console import Console
 
 from fascat import __version__
@@ -22,6 +23,7 @@ from fascat.profiles import by_name
 
 DOCS_URL = "https://pavelsimo.github.io/fascat"
 ISSUES_URL = "https://github.com/pavelsimo/fascat/issues"
+rich_utils.MAX_WIDTH = 120
 STEP_SUFFIXES = {".step", ".stp"}
 USD_SUFFIXES = {".usd", ".usda", ".usdc"}
 COMMAND_NAMES = ("inspect", "convert", "validate", "version", "help")
@@ -200,11 +202,23 @@ def cmd_convert(
         float | None,
         typer.Option("--ratio", help="Simplification ratio when no triangle target is set."),
     ] = None,
+    max_edge_length: Annotated[
+        float | None,
+        typer.Option("--max-edge-length", help="Split tessellated triangles longer than this length."),
+    ] = None,
     lods: Annotated[
         str | None,
         typer.Option("--lods", help="Comma-separated LOD ratios, for example 0.5,0.25,0.1."),
     ] = None,
     uv0: Annotated[UVMode, typer.Option("--uv0", help="UV0 generation mode.")] = UVMode.BOX,
+    uv1: Annotated[UVMode, typer.Option("--uv1", help="UV1 generation mode.")] = UVMode.NONE,
+    preserve_instances: Annotated[
+        bool,
+        typer.Option(
+            "--preserve-instances/--no-preserve-instances",
+            help="Preserve repeated parts as shared instances.",
+        ),
+    ] = True,
     debug: Annotated[bool, typer.Option("--debug", help="Prefer debuggable USDA output conventions.")] = False,
     report: Annotated[Path | None, typer.Option("--report", help="Write a JSON conversion report sidecar.")] = None,
     force: Annotated[bool, typer.Option("--force", "-f", help="Overwrite an existing output file.")] = False,
@@ -220,8 +234,11 @@ def cmd_convert(
         "angle": angle,
         "target_triangles": target_triangles,
         "ratio": ratio,
+        "max_edge_length": max_edge_length,
         "lods": None,
         "uv0": uv0.value,
+        "uv1": uv1.value,
+        "preserve_instances": preserve_instances,
         "debug": debug,
         "report": str(report) if report else None,
         "force": force,
@@ -239,6 +256,10 @@ def cmd_convert(
         _fail(ctx, payload, "--angle must be greater than 0 and no more than 180.", code=2)
     if target_triangles is not None and target_triangles <= 0:
         _fail(ctx, payload, "--target-triangles must be greater than 0.", code=2)
+    if max_edge_length is not None and max_edge_length <= 0.0:
+        _fail(ctx, payload, "--max-edge-length must be greater than 0.", code=2)
+    if debug and not _is_stdio(output_path) and output_path.suffix.lower() == ".usdc":
+        _fail(ctx, payload, "--debug requires .usd or .usda output, not binary .usdc.", code=2)
 
     if state.dry_run:
         _emit(ctx, payload, f"Would convert {input_path} to {output_path} with profile {profile.value}.")
@@ -257,6 +278,7 @@ def cmd_convert(
             base_tessellation,
             sag=sag if sag is not None else base_tessellation.sag,
             angle=angle if angle is not None else base_tessellation.angle,
+            max_edge_length=max_edge_length if max_edge_length is not None else base_tessellation.max_edge_length,
         )
         optimize_options = profile_options.optimize
         if optimize_options is not None:
@@ -266,8 +288,9 @@ def cmd_convert(
                 if target_triangles is not None
                 else optimize_options.target_triangles,
                 ratio=ratio,
+                preserve_instances=preserve_instances,
             )
-        stage_options = replace(profile_options.stage, uv0=uv0.value)
+        stage_options = replace(profile_options.stage, uv0=uv0.value, uv1=uv1.value)
         lod_options = LODOptions(tuple(lod_values)) if lod_values is not None else profile_options.lods
         asset = _convert_for_cli(
             input_path,
@@ -277,6 +300,7 @@ def cmd_convert(
             stage=stage_options,
             optimize=optimize_options,
             lods=lod_options,
+            progress=_progress_callback(ctx, output_path),
         )
     except typer.Exit:
         raise
@@ -462,14 +486,15 @@ def _convert_for_cli(
     stage: StageOptions,
     optimize: OptimizeOptions | None,
     lods: LODOptions | None,
+    progress: Callable[[str, dict[str, int]], None] | None,
 ) -> Any:
     if _is_stdio(input_path):
         data = sys.stdin.buffer.read()
         if not data:
             raise RuntimeError("Missing input data on stdin.")
         with _temporary_step_file(data) as temp_input:
-            return _convert_output(temp_input, output_path, profile, tessellation, stage, optimize, lods)
-    return _convert_output(input_path, output_path, profile, tessellation, stage, optimize, lods)
+            return _convert_output(temp_input, output_path, profile, tessellation, stage, optimize, lods, progress)
+    return _convert_output(input_path, output_path, profile, tessellation, stage, optimize, lods, progress)
 
 
 def _convert_output(
@@ -480,6 +505,7 @@ def _convert_output(
     stage: StageOptions,
     optimize: OptimizeOptions | None,
     lods: LODOptions | None,
+    progress: Callable[[str, dict[str, int]], None] | None,
 ) -> Any:
     if _is_stdio(output_path):
         import tempfile
@@ -493,6 +519,7 @@ def _convert_output(
                 stage=stage,
                 optimize=optimize,
                 lods=lods,
+                progress=progress,
             )
             handle.seek(0)
             sys.stdout.buffer.write(handle.read())
@@ -505,7 +532,19 @@ def _convert_output(
         stage=stage,
         optimize=optimize,
         lods=lods,
+        progress=progress,
     )
+
+
+def _progress_callback(ctx: typer.Context, output_path: Path) -> Callable[[str, dict[str, int]], None] | None:
+    state = _state(ctx)
+    if state.quiet or state.json_output or _is_stdio(output_path):
+        return None
+
+    def progress(step: str, stats: dict[str, int]) -> None:
+        err.print(f"{step}: {_format_stats(stats)}")
+
+    return progress
 
 
 class _temporary_step_file:

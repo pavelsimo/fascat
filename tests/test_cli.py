@@ -2,6 +2,7 @@ import re
 from pathlib import Path
 from typing import NamedTuple
 
+import pytest
 from typer.testing import CliRunner
 
 from fascat import __version__
@@ -75,6 +76,9 @@ def test_convert_help() -> None:
     result = runner.invoke(app, ["convert", "--help"])
     assert result.exit_code == 0
     assert "--target-triangles" in plain(result.output)
+    assert "--max-edge-length" in plain(result.output)
+    assert "--uv1" in plain(result.output)
+    assert "--no-preserve-instances" in plain(result.output)
 
 
 def test_validate_help() -> None:
@@ -108,6 +112,7 @@ def test_validate_missing_file_fails() -> None:
     assert "Missing output file" in result.output
 
 
+@pytest.mark.requires_ocp
 def test_inspect_fixture_reports_stats() -> None:
     result = runner.invoke(app, ["inspect", "tests/fixtures/spool-clamp-lid.step"])
     assert result.exit_code == 0
@@ -115,6 +120,8 @@ def test_inspect_fixture_reports_stats() -> None:
     assert "units=millimetre" in result.output
 
 
+@pytest.mark.requires_ocp
+@pytest.mark.requires_usd
 def test_convert_fixture_writes_usd_and_report(tmp_path: Path) -> None:
     output_file = tmp_path / "output.usda"
     report_file = tmp_path / "report.json"
@@ -129,10 +136,14 @@ def test_convert_fixture_writes_usd_and_report(tmp_path: Path) -> None:
             "0.2",
             "--angle",
             "20",
+            "--max-edge-length",
+            "1000",
             "--target-triangles",
             "120",
             "--lods",
             "0.5",
+            "--uv1",
+            "box",
             "--report",
             str(report_file),
         ],
@@ -164,6 +175,8 @@ def test_validate_rejects_unknown_extension(tmp_path: Path) -> None:
     assert "Unsupported USD extension" in result.output
 
 
+@pytest.mark.requires_ocp
+@pytest.mark.requires_usd
 def test_validate_generated_usd(tmp_path: Path) -> None:
     output_file = tmp_path / "output.usda"
     convert_result = runner.invoke(
@@ -191,6 +204,18 @@ def test_convert_rejects_invalid_lods() -> None:
     result = runner.invoke(app, ["--dry-run", "convert", "input.step", "output.usdc", "--lods", "1.5"])
     assert result.exit_code == 2
     assert "--lods ratios" in result.output
+
+
+def test_convert_rejects_invalid_max_edge_length(capsys) -> None:  # type: ignore[no-untyped-def]
+    result = invoke_run(["--dry-run", "convert", "input.step", "output.usdc", "--max-edge-length", "0"], capsys)
+    assert result.exit_code == 2
+    assert "--max-edge-length must be greater than 0" in result.stderr
+
+
+def test_debug_requires_text_usd_output(capsys) -> None:  # type: ignore[no-untyped-def]
+    result = invoke_run(["--dry-run", "convert", "input.step", "output.usdc", "--debug"], capsys)
+    assert result.exit_code == 2
+    assert "--debug requires .usd or .usda output" in result.stderr
 
 
 def test_convert_rejects_invalid_lods_as_json(capsys) -> None:  # type: ignore[no-untyped-def]
@@ -290,3 +315,30 @@ def test_dumb_term_has_no_ansi(capsys, monkeypatch) -> None:  # type: ignore[no-
     result = invoke_run(["--help"], capsys)
     assert result.exit_code == 0
     assert "\x1b[" not in result.stdout
+
+
+@pytest.mark.requires_ocp
+@pytest.mark.requires_usd
+def test_convert_reports_stage_progress_to_stderr(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    output_file = tmp_path / "output.usda"
+
+    result = invoke_run(
+        [
+            "convert",
+            "tests/fixtures/spool-clamp-lid.step",
+            str(output_file),
+            "--sag",
+            "0.2",
+            "--target-triangles",
+            "80",
+            "--lods",
+            "0.5",
+        ],
+        capsys,
+    )
+
+    assert result.exit_code == 0
+    assert "Converted" in result.stdout
+    assert "source:" in result.stderr
+    assert "tessellate:" in result.stderr
+    assert "write:" in result.stderr

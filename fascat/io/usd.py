@@ -33,7 +33,7 @@ def write_usd(asset: Asset, path: str | Path) -> None:
     stage.SetDefaultPrim(scene.GetPrim())
 
     material_paths = _write_materials(stage, asset.materials)
-    prototype_paths = _write_prototypes(stage, asset.parts, material_paths)
+    prototype_paths = _write_prototypes(stage, asset.parts, asset.materials, material_paths)
     _write_node(stage, asset.root, scene_path, asset.parts, prototype_paths)
 
     if not stage.GetRootLayer().Save():
@@ -99,7 +99,12 @@ def _write_materials(stage: Any, materials: dict[str, Material]) -> dict[str, st
     return paths
 
 
-def _write_prototypes(stage: Any, parts: dict[str, Part], material_paths: dict[str, str]) -> dict[tuple[str, int], str]:
+def _write_prototypes(
+    stage: Any,
+    parts: dict[str, Part],
+    materials: dict[str, Material],
+    material_paths: dict[str, str],
+) -> dict[tuple[str, int], str]:
     from pxr import UsdGeom
 
     prototype_paths: dict[tuple[str, int], str] = {}
@@ -111,7 +116,7 @@ def _write_prototypes(stage: Any, parts: dict[str, Part], material_paths: dict[s
                 continue
             part_path = f"/__Prototypes/{_usd_name(part.id)}_lod{lod_index}"
             UsdGeom.Xform.Define(stage, part_path)
-            _write_mesh(stage, f"{part_path}/Mesh", part, mesh, material_paths)
+            _write_mesh(stage, f"{part_path}/Mesh", part, mesh, materials, material_paths)
             prototype_paths[(part.id, lod_index)] = part_path
     return prototype_paths
 
@@ -157,8 +162,15 @@ def _write_node(
         _write_node(stage, child, path, parts, prototype_paths)
 
 
-def _write_mesh(stage: Any, path: str, part: Part, mesh: Any, material_paths: dict[str, str]) -> None:
-    from pxr import Gf, Sdf, UsdGeom, UsdShade, Vt
+def _write_mesh(
+    stage: Any,
+    path: str,
+    part: Part,
+    mesh: Any,
+    materials: dict[str, Material],
+    material_paths: dict[str, str],
+) -> None:
+    from pxr import Gf, Sdf, UsdGeom, Vt
 
     mesh.validate()
     usd_mesh = UsdGeom.Mesh.Define(stage, path)
@@ -178,13 +190,50 @@ def _write_mesh(stage: Any, path: str, part: Part, mesh: Any, material_paths: di
             UsdGeom.Tokens.vertex,
         )
         primvar.Set([Gf.Vec2f(*uv) for uv in mesh.uvs[0].tolist()])
+    _write_display_color(usd_mesh, part, materials)
     if part.material_ids:
-        material_path = material_paths.get(part.material_ids[0])
-        if material_path:
-            material = UsdShade.Material.Get(stage, material_path)
-            UsdShade.MaterialBindingAPI(usd_mesh).Bind(material)
+        _bind_materials(stage, usd_mesh, part, mesh, material_paths)
     usd_mesh.GetPrim().SetCustomDataByKey("fascat:partId", part.id)
     usd_mesh.GetPrim().SetCustomDataByKey("fascat:originalName", part.name)
+
+
+def _write_display_color(usd_mesh: Any, part: Part, materials: dict[str, Material]) -> None:
+    from pxr import Gf
+
+    base_color = (0.75, 0.75, 0.75, 1.0)
+    if part.material_ids:
+        material = materials.get(part.material_ids[0])
+        if material is not None:
+            base_color = material.base_color
+    usd_mesh.CreateDisplayColorAttr([Gf.Vec3f(*base_color[:3])])
+    usd_mesh.CreateDisplayOpacityAttr([float(base_color[3])])
+
+
+def _bind_materials(stage: Any, usd_mesh: Any, part: Part, mesh: Any, material_paths: dict[str, str]) -> None:
+    from pxr import UsdGeom, UsdShade
+
+    first_material_path = material_paths.get(part.material_ids[0])
+    if first_material_path:
+        first_material = UsdShade.Material.Get(stage, first_material_path)
+        UsdShade.MaterialBindingAPI(usd_mesh).Bind(first_material)
+
+    if mesh.material_indices is None or len(set(mesh.material_indices.astype(int).tolist())) <= 1:
+        return
+
+    for material_index, material_id in enumerate(part.material_ids):
+        face_indices = np.flatnonzero(mesh.material_indices == material_index).astype(int).tolist()
+        material_path = material_paths.get(material_id)
+        if not face_indices or not material_path:
+            continue
+        subset = UsdGeom.Subset.CreateGeomSubset(
+            usd_mesh,
+            _usd_name(material_id),
+            UsdGeom.Tokens.face,
+            face_indices,
+            "materialBind",
+        )
+        material = UsdShade.Material.Get(stage, material_path)
+        UsdShade.MaterialBindingAPI(subset.GetPrim()).Bind(material)
 
 
 def _part_occurrence_count(node: Node, part_id: str) -> int:

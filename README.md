@@ -49,6 +49,15 @@ fascat --json inspect motor.step
 # Convert STEP to binary OpenUSD
 fascat convert motor.step motor.usdc --profile realtime-desktop
 
+# Tune tessellation, UVs, optimization, and LODs
+fascat convert motor.step motor.usdc \
+  --sag 0.1 \
+  --angle 15 \
+  --max-edge-length 25 \
+  --target-triangles 500000 \
+  --uv1 box \
+  --lods 0.5,0.25,0.1
+
 # Preview a conversion without writing files
 fascat convert motor.step motor.usdc --dry-run
 
@@ -69,9 +78,9 @@ fascat validate motor.usdc
 | `fascat help [command]` | Show top-level or command-specific help |
 | `fascat version` | Print version and exit |
 
-Fascat follows standard CLI stream conventions: primary output and JSON go to stdout, while errors and progress go to stderr. File arguments accept `-` for stdin/stdout where meaningful.
+Fascat follows standard CLI stream conventions: primary output and JSON go to stdout, while errors and per-stage conversion progress go to stderr. File arguments accept `-` for stdin/stdout where meaningful.
 
-## Python API Target
+## Python API
 
 ```python
 import fascat as fc
@@ -79,11 +88,10 @@ import fascat as fc
 fc.convert(
     "pump.step",
     "pump.usdc",
-    profile=fc.profiles.realtime_desktop(
-        tessellation_sag=0.1,
-        max_triangles=1_000_000,
-        lod_ratios=[0.5, 0.25, 0.1],
-    ),
+    tessellation=fc.Tessellation(sag=0.1, angle=15, max_edge_length=25),
+    stage=fc.StageOptions(uv0="box", uv1="unwrap"),
+    optimize=fc.OptimizeOptions(target_triangles=1_000_000, preserve_instances=True),
+    lods=fc.LODOptions((0.5, 0.25, 0.1)),
 )
 ```
 

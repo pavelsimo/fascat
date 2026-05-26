@@ -128,7 +128,13 @@ class Mesh:
         used = np.unique(self.faces.reshape(-1))
         remap = np.full(self.vertex_count, -1, dtype=np.int64)
         remap[used] = np.arange(used.shape[0], dtype=np.int64)
-        return self._with_geometry(self.points[used], remap[self.faces])
+        mesh = self.copy()
+        mesh.points = self.points[used].copy()
+        mesh.faces = remap[self.faces]
+        if self.normals is not None:
+            mesh.normals = self.normals[used].copy()
+        mesh.uvs = {channel: values[used].copy() for channel, values in self.uvs.items()}
+        return mesh
 
     def merge_close_vertices(self, tolerance: float) -> Mesh:
         if tolerance <= 0.0 or self.vertex_count == 0:
@@ -177,6 +183,61 @@ class Mesh:
         mesh.normals = normals
         return mesh
 
+    def subdivide_long_edges(self, max_edge_length: float) -> Mesh:
+        if max_edge_length <= 0.0:
+            raise ValueError("max_edge_length must be greater than 0")
+        mesh = self.copy()
+        if mesh.triangle_count == 0:
+            return mesh
+
+        points = mesh.points.tolist()
+        faces: list[list[int]] = mesh.faces.astype(int).tolist()
+        material_indices = None if mesh.material_indices is None else mesh.material_indices.astype(int).tolist()
+
+        changed = True
+        iterations = 0
+        while changed and iterations < 32:
+            changed = False
+            iterations += 1
+            next_faces: list[list[int]] = []
+            next_materials: list[int] = []
+            for face_index, face in enumerate(faces):
+                triangle = np.asarray([points[index] for index in face], dtype=np.float64)
+                edge_pairs = ((0, 1), (1, 2), (2, 0))
+                lengths = [float(np.linalg.norm(triangle[b] - triangle[a])) for a, b in edge_pairs]
+                longest = int(np.argmax(lengths))
+                if lengths[longest] <= max_edge_length:
+                    next_faces.append(face)
+                    if material_indices is not None:
+                        next_materials.append(material_indices[face_index])
+                    continue
+                changed = True
+                a_corner, b_corner = edge_pairs[longest]
+                c_corner = next(corner for corner in range(3) if corner not in {a_corner, b_corner})
+                a = face[a_corner]
+                b = face[b_corner]
+                c = face[c_corner]
+                midpoint = ((np.asarray(points[a]) + np.asarray(points[b])) * 0.5).tolist()
+                midpoint_index = len(points)
+                points.append(midpoint)
+                next_faces.append([a, midpoint_index, c])
+                next_faces.append([midpoint_index, b, c])
+                if material_indices is not None:
+                    next_materials.extend([material_indices[face_index], material_indices[face_index]])
+            faces = next_faces
+            material_indices = next_materials if material_indices is not None else None
+
+        result = Mesh(
+            points=np.asarray(points, dtype=np.float64),
+            faces=np.asarray(faces, dtype=np.int64),
+            material_indices=None if material_indices is None else np.asarray(material_indices, dtype=np.int64),
+            metadata={**mesh.metadata, "max_edge_length": str(max_edge_length)},
+        )
+        if 0 in mesh.uvs or 1 in mesh.uvs:
+            for channel in mesh.uvs:
+                result = result.box_uv(channel)
+        return result.compute_normals()
+
     def box_uv(self, channel: int = 0) -> Mesh:
         mesh = self.copy()
         if self.vertex_count == 0:
@@ -191,6 +252,36 @@ class Mesh:
         mesh.uvs[channel] = uv.astype(np.float64)
         return mesh
 
+    def unwrap_uv(self, channel: int = 0) -> Mesh:
+        try:
+            import xatlas
+        except ImportError as exc:
+            raise RuntimeError("UV unwrap requires the optional xatlas dependency") from exc
+
+        if self.triangle_count == 0:
+            mesh = self.copy()
+            mesh.uvs[channel] = np.empty((0, 2), dtype=np.float64)
+            return mesh
+
+        vertex_mapping, faces, uvs = xatlas.parametrize(
+            self.points.astype(np.float32),
+            self.faces.astype(np.uint32),
+            None if self.normals is None else self.normals.astype(np.float32),
+        )
+        mapping = np.asarray(vertex_mapping, dtype=np.int64)
+        mesh = Mesh(
+            points=self.points[mapping].copy(),
+            faces=np.asarray(faces, dtype=np.int64),
+            normals=None if self.normals is None else self.normals[mapping].copy(),
+            uvs={**{key: values[mapping].copy() for key, values in self.uvs.items() if key != channel}},
+            material_indices=None if self.material_indices is None else self.material_indices.copy(),
+            face_groups={name: values.copy() for name, values in self.face_groups.items()},
+            metadata={**self.metadata, f"uv{channel}": "xatlas"},
+        )
+        mesh.uvs[channel] = np.asarray(uvs, dtype=np.float64)
+        mesh.validate()
+        return mesh
+
     def simplify(self, *, target_triangles: int | None = None, ratio: float | None = None) -> Mesh:
         if self.triangle_count == 0:
             return self.copy()
@@ -203,16 +294,41 @@ class Mesh:
             return self.copy()
 
         try:
-            from fast_simplification import simplify
+            import meshoptimizer
 
-            points, faces = simplify(
-                self.points.astype(np.float64), self.faces.astype(np.int64), target_count=target_triangles
+            indices = np.ascontiguousarray(self.faces.reshape(-1), dtype=np.uint32)
+            destination = np.empty_like(indices)
+            index_count = meshoptimizer.simplify(
+                destination,
+                indices,
+                np.ascontiguousarray(self.points.astype(np.float32)),
+                vertex_count=self.vertex_count,
+                target_index_count=target_triangles * 3,
             )
-            return Mesh(points=np.asarray(points), faces=np.asarray(faces)).repair(RepairOptions())
+            simplified_indices = np.asarray(destination[:index_count], dtype=np.int64)
+            if simplified_indices.size < 3:
+                return self.copy()
+            face_count = simplified_indices.size // 3
+            mesh = self.copy()
+            mesh.faces = simplified_indices[: face_count * 3].reshape((-1, 3))
+            mesh.material_indices = None
+            return mesh.remove_unreferenced_vertices().compute_normals()
         except Exception:
-            stride = max(1, int(np.ceil(self.triangle_count / target_triangles)))
-            keep = np.arange(0, self.triangle_count, stride, dtype=np.int64)[:target_triangles]
-            return self._filter_faces(keep).remove_unreferenced_vertices().compute_normals()
+            try:
+                from fast_simplification import simplify
+
+                points, faces = simplify(
+                    self.points.astype(np.float64), self.faces.astype(np.int64), target_count=target_triangles
+                )
+                mesh = Mesh(points=np.asarray(points), faces=np.asarray(faces))
+                if self.uvs:
+                    for channel in self.uvs:
+                        mesh = mesh.box_uv(channel)
+                return mesh.repair(RepairOptions())
+            except Exception:
+                stride = max(1, int(np.ceil(self.triangle_count / target_triangles)))
+                keep = np.arange(0, self.triangle_count, stride, dtype=np.int64)[:target_triangles]
+                return self._filter_faces(keep).remove_unreferenced_vertices().compute_normals()
 
     def optimize_buffers(self) -> Mesh:
         if self.triangle_count == 0:
@@ -221,21 +337,85 @@ class Mesh:
             import meshoptimizer
 
             indices = np.ascontiguousarray(self.faces.reshape(-1), dtype=np.uint32)
-            optimized = meshoptimizer.optimize_vertex_cache(indices, self.vertex_count)
-            faces = np.asarray(optimized, dtype=np.int64).reshape((-1, 3))
-            return self._with_geometry(self.points.copy(), faces)
+            cache_optimized = np.empty_like(indices)
+            meshoptimizer.optimize_vertex_cache(cache_optimized, indices, vertex_count=self.vertex_count)
+            reordered_face_indices: np.ndarray | None = None
+            if self.material_indices is not None or self.face_groups:
+                old_face_lookup = {
+                    tuple(sorted(face)): index for index, face in enumerate(self.faces.astype(int).tolist())
+                }
+                reordered_face_indices = np.asarray(
+                    [
+                        old_face_lookup.get(tuple(sorted(face)), index)
+                        for index, face in enumerate(cache_optimized.reshape((-1, 3)).astype(int).tolist())
+                    ],
+                    dtype=np.int64,
+                )
+
+            vertex_attributes = [self.points.astype(np.float32)]
+            if self.normals is not None:
+                vertex_attributes.append(self.normals.astype(np.float32))
+            for channel in sorted(self.uvs):
+                vertex_attributes.append(self.uvs[channel].astype(np.float32))
+            vertex_stream = np.ascontiguousarray(np.column_stack(vertex_attributes))
+            remap = np.empty(self.vertex_count, dtype=np.uint32)
+            unique_vertices = meshoptimizer.generate_vertex_remap(
+                remap,
+                cache_optimized,
+                vertices=vertex_stream,
+            )
+            remapped_indices = np.empty_like(cache_optimized)
+            meshoptimizer.remap_index_buffer(remapped_indices, cache_optimized, remap=remap)
+            old_for_new = np.empty(int(unique_vertices), dtype=np.int64)
+            for old_index, new_index in enumerate(remap.astype(np.int64)):
+                if new_index < unique_vertices:
+                    old_for_new[new_index] = old_index
+
+            mesh = self.copy()
+            mesh.points = self.points[old_for_new].copy()
+            mesh.faces = np.asarray(remapped_indices, dtype=np.int64).reshape((-1, 3))
+            if self.normals is not None:
+                mesh.normals = self.normals[old_for_new].copy()
+            mesh.uvs = {channel: values[old_for_new].copy() for channel, values in self.uvs.items()}
+            if self.material_indices is not None and reordered_face_indices is not None:
+                mesh.material_indices = self.material_indices[reordered_face_indices].copy()
+            if self.face_groups and reordered_face_indices is not None:
+                inverse_face_order = np.empty_like(reordered_face_indices)
+                inverse_face_order[reordered_face_indices] = np.arange(reordered_face_indices.shape[0])
+                mesh.face_groups = {
+                    name: inverse_face_order[values]
+                    for name, values in self.face_groups.items()
+                    if np.isin(values, reordered_face_indices).all()
+                }
+            return mesh
         except Exception:
             return self.copy()
 
     def fill_holes(self) -> Mesh:
-        try:
-            import trimesh
-
-            tri = trimesh.Trimesh(vertices=self.points, faces=self.faces, process=False)
-            trimesh.repair.fill_holes(tri)
-            return Mesh(points=np.asarray(tri.vertices), faces=np.asarray(tri.faces), metadata=dict(self.metadata))
-        except Exception:
+        loops = self._boundary_loops()
+        if not loops or max(len(loop) for loop in loops) > 8:
             return self.copy()
+        if np.linalg.matrix_rank(self.points - self.points.mean(axis=0), tol=1e-9) < 3:
+            return self.copy()
+
+        fill_faces: list[list[int]] = []
+        for loop in loops:
+            if len(loop) < 3:
+                continue
+            anchor = loop[0]
+            for index in range(1, len(loop) - 1):
+                fill_faces.append([anchor, loop[index], loop[index + 1]])
+        if not fill_faces:
+            return self.copy()
+
+        mesh = self.copy()
+        mesh.faces = np.vstack([self.faces, np.asarray(fill_faces, dtype=np.int64)])
+        if self.material_indices is not None:
+            fill_material = int(self.material_indices[0]) if self.material_indices.size else 0
+            mesh.material_indices = np.concatenate(
+                [self.material_indices.copy(), np.full(len(fill_faces), fill_material, dtype=np.int64)]
+            )
+        return mesh
 
     def fix_winding(self) -> Mesh:
         try:
@@ -244,9 +424,62 @@ class Mesh:
             tri = trimesh.Trimesh(vertices=self.points, faces=self.faces, process=False)
             fix_normals = cast(Callable[..., None], trimesh.repair.fix_normals)
             fix_normals(tri, multibody=True)
-            return Mesh(points=np.asarray(tri.vertices), faces=np.asarray(tri.faces), metadata=dict(self.metadata))
+            mesh = self.copy()
+            mesh.points = np.asarray(tri.vertices, dtype=np.float64)
+            mesh.faces = np.asarray(tri.faces, dtype=np.int64)
+            return mesh
         except Exception:
             return self.copy()
+
+    def _boundary_loops(self) -> list[list[int]]:
+        if self.triangle_count == 0:
+            return []
+        directed_edges = np.concatenate(
+            [
+                self.faces[:, [0, 1]],
+                self.faces[:, [1, 2]],
+                self.faces[:, [2, 0]],
+            ]
+        )
+        undirected = np.sort(directed_edges, axis=1)
+        edges, counts = np.unique(undirected, axis=0, return_counts=True)
+        boundary_edges = edges[counts == 1]
+        if boundary_edges.size == 0:
+            return []
+
+        adjacency: dict[int, set[int]] = {}
+        for start, end in boundary_edges.astype(int).tolist():
+            adjacency.setdefault(start, set()).add(end)
+            adjacency.setdefault(end, set()).add(start)
+
+        loops: list[list[int]] = []
+        visited: set[tuple[int, int]] = set()
+        for start, neighbors in adjacency.items():
+            for neighbor in sorted(neighbors):
+                edge = (min(start, neighbor), max(start, neighbor))
+                if edge in visited:
+                    continue
+                loop = [start]
+                previous = start
+                current = neighbor
+                while True:
+                    loop.append(current)
+                    visited.add(edge)
+                    next_candidates = sorted(item for item in adjacency[current] if item != previous)
+                    if not next_candidates:
+                        break
+                    next_vertex = next_candidates[0]
+                    next_edge = (min(current, next_vertex), max(current, next_vertex))
+                    if next_vertex == start:
+                        visited.add(next_edge)
+                        break
+                    if next_edge in visited:
+                        break
+                    edge = next_edge
+                    previous, current = current, next_vertex
+                if len(loop) >= 3:
+                    loops.append(loop)
+        return loops
 
     def _drop_non_finite(self) -> Mesh:
         finite = np.asarray(np.isfinite(self.points).all(axis=1), dtype=np.bool_)
