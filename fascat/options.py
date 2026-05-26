@@ -20,6 +20,9 @@ MergeMode = Literal[
 ]
 MergeMetadataPolicy = Literal["preserve", "combine", "summarize", "drop"]
 MergeStrategy = Literal["all", "by_material"]
+IndexBufferMode = Literal["auto", "uint16", "uint32"]
+FlattenMode = Literal["none", "safe", "all"]
+InstancePolicy = Literal["auto", "preserve", "expand"]
 
 _TESSELLATION_PART_SETTING_KEYS = {
     "sag",
@@ -292,6 +295,33 @@ class MergeOptions:
             raise ValueError("region_size must be greater than 0 for regions merge mode")
         if self.region_size is not None and self.region_size <= 0.0:
             raise ValueError("region_size must be greater than 0 when set")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class SceneOptimizeOptions:
+    batch_by_material: bool = False
+    merge_compatible_meshes: bool = False
+    split_large_meshes: bool = False
+    max_vertices_per_mesh: int | None = 65_535
+    index_buffer: IndexBufferMode = "auto"
+    flatten: FlattenMode = "safe"
+    remove_empty_nodes: bool = True
+    instance_policy: InstancePolicy = "auto"
+
+    def __post_init__(self) -> None:
+        if self.max_vertices_per_mesh is not None and self.max_vertices_per_mesh <= 0:
+            raise ValueError("max_vertices_per_mesh must be greater than 0 when set")
+        if self.split_large_meshes and self.max_vertices_per_mesh is not None and self.max_vertices_per_mesh < 3:
+            raise ValueError("max_vertices_per_mesh must be at least 3 when split_large_meshes is true")
+        if self.index_buffer not in {"auto", "uint16", "uint32"}:
+            raise ValueError("index_buffer must be one of: auto, uint16, uint32")
+        if self.flatten not in {"none", "safe", "all"}:
+            raise ValueError("flatten must be one of: none, safe, all")
+        if self.instance_policy not in {"auto", "preserve", "expand"}:
+            raise ValueError("instance_policy must be one of: auto, preserve, expand")
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

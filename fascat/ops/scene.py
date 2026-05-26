@@ -1,0 +1,287 @@
+from __future__ import annotations
+
+import numpy as np
+
+from fascat.asset import Asset, Node, Part, identity_transform
+from fascat.mesh import Mesh
+from fascat.options import MergeOptions, SceneOptimizeOptions
+
+
+def optimize_scene_asset(
+    asset: Asset,
+    options: SceneOptimizeOptions,
+    *,
+    selected_node_ids: set[str],
+) -> Asset:
+    result = asset.copy(keep_source=True)
+    _apply_instance_policy(result, options, selected_node_ids)
+    if options.merge_compatible_meshes or options.batch_by_material:
+        from fascat.ops.hierarchy import merge_asset
+
+        result = merge_asset(
+            result,
+            MergeOptions(
+                mode="by_material" if options.batch_by_material else "all",
+                keep_parent=options.flatten == "none",
+                metadata="combine",
+                max_vertices_per_mesh=options.max_vertices_per_mesh if options.split_large_meshes else None,
+                preserve_materials=True,
+                merge_strategy="by_material" if options.batch_by_material else "all",
+                remove_empty_nodes=options.remove_empty_nodes,
+            ),
+            selected_node_ids=selected_node_ids,
+        )
+    if options.flatten == "all":
+        _flatten_all(result)
+    elif options.flatten == "safe":
+        _flatten_safe(result.root)
+    if options.remove_empty_nodes:
+        _remove_empty_nodes(result.root)
+    if options.split_large_meshes:
+        _split_oversized_meshes(result, options, selected_node_ids)
+    _annotate_index_buffers(result, options)
+    _annotate_instance_policy(result, options)
+    _drop_unreferenced_parts(result)
+    return result
+
+
+def _apply_instance_policy(asset: Asset, options: SceneOptimizeOptions, selected_node_ids: set[str]) -> None:
+    if options.instance_policy != "expand":
+        return
+    occurrence_counts = _part_occurrence_counts(asset)
+    existing_part_ids = set(asset.parts)
+    for node in asset.root.walk():
+        if node.id not in selected_node_ids or node.part_id is None:
+            continue
+        source_id = node.part_id
+        if occurrence_counts.get(source_id, 0) <= 1 or source_id not in asset.parts:
+            continue
+        source = asset.parts[source_id]
+        part = source.copy(keep_source=True)
+        part.id = _unique_part_id(existing_part_ids, f"{source_id}_{node.id}")
+        part.metadata = {
+            **part.metadata,
+            "source_part_id": source_id,
+            "occurrence_node_id": node.id,
+            "scene_instance_policy": "expand",
+        }
+        asset.parts[part.id] = part
+        existing_part_ids.add(part.id)
+        node.part_id = part.id
+
+
+def _flatten_safe(node: Node) -> None:
+    flattened: list[Node] = []
+    for child in node.children:
+        _flatten_safe(child)
+        if child.part_id is None and not child.metadata and np.allclose(child.transform, np.eye(4)):
+            flattened.extend(grandchild.copy() for grandchild in child.children)
+        else:
+            flattened.append(child)
+    node.children = flattened
+
+
+def _flatten_all(asset: Asset) -> None:
+    leaves: list[Node] = []
+
+    def walk(node: Node, world: np.ndarray) -> None:
+        current = world @ node.transform
+        if node.part_id is not None:
+            leaves.append(
+                Node(
+                    id=node.id,
+                    name=node.name,
+                    part_id=node.part_id,
+                    transform=current,
+                    metadata=dict(node.metadata),
+                )
+            )
+        for child in node.children:
+            walk(child, current)
+
+    for child in asset.root.children:
+        walk(child, np.eye(4, dtype=np.float64))
+    asset.root.children = leaves
+    asset.root.transform = identity_transform()
+
+
+def _remove_empty_nodes(node: Node) -> bool:
+    kept: list[Node] = []
+    for child in node.children:
+        if _remove_empty_nodes(child):
+            kept.append(child)
+    node.children = kept
+    return node.part_id is not None or bool(node.children)
+
+
+def _split_oversized_meshes(asset: Asset, options: SceneOptimizeOptions, selected_node_ids: set[str]) -> None:
+    max_vertices = options.max_vertices_per_mesh
+    if max_vertices is None:
+        return
+    selected_part_ids = _selected_part_ids(asset, selected_node_ids)
+    existing_part_ids = set(asset.parts)
+    split_part_ids: dict[str, list[str]] = {}
+    for part_id in sorted(selected_part_ids):
+        part = asset.parts.get(part_id)
+        if part is None or part.mesh is None or part.mesh.vertex_count <= max_vertices:
+            continue
+        chunks = _split_part(part, max_vertices=max_vertices, existing_part_ids=existing_part_ids)
+        if len(chunks) <= 1:
+            continue
+        for chunk in chunks:
+            asset.parts[chunk.id] = chunk
+            existing_part_ids.add(chunk.id)
+        split_part_ids[part_id] = [chunk.id for chunk in chunks]
+
+    if not split_part_ids:
+        return
+    existing_node_ids = {node.id for node in asset.root.walk()}
+    for node in asset.root.walk():
+        if node.part_id not in split_part_ids:
+            continue
+        source_part_id = node.part_id
+        node.part_id = None
+        chunk_nodes = []
+        for chunk_index, chunk_part_id in enumerate(split_part_ids[source_part_id], start=1):
+            child_id = _unique_node_id(existing_node_ids, f"{node.id}_split_{chunk_index}")
+            chunk_nodes.append(
+                Node(
+                    id=child_id,
+                    name=f"{node.name} {chunk_index}",
+                    part_id=chunk_part_id,
+                    transform=identity_transform(),
+                )
+            )
+        node.children = chunk_nodes + node.children
+
+
+def _split_part(part: Part, *, max_vertices: int, existing_part_ids: set[str]) -> list[Part]:
+    mesh = part.mesh
+    if mesh is None or mesh.triangle_count == 0:
+        return [part]
+    face_chunks = _face_chunks(mesh, max_vertices=max_vertices)
+    if len(face_chunks) <= 1:
+        return [part]
+    chunks: list[Part] = []
+    for chunk_index, face_indices in enumerate(face_chunks, start=1):
+        chunk_mesh = _slice_mesh(mesh, face_indices)
+        chunk_id = _unique_part_id(existing_part_ids, f"{part.id}_split_{chunk_index}")
+        existing_part_ids.add(chunk_id)
+        chunk = Part(
+            id=chunk_id,
+            name=f"{part.name} {chunk_index}",
+            mesh=chunk_mesh,
+            material_ids=list(part.material_ids),
+            metadata={
+                **part.metadata,
+                "split_source_part_id": part.id,
+                "split_chunk": str(chunk_index),
+                "split_chunks": str(len(face_chunks)),
+            },
+        )
+        chunk.fingerprint = chunk_mesh.fingerprint()
+        chunks.append(chunk)
+    return chunks
+
+
+def _face_chunks(mesh: Mesh, *, max_vertices: int) -> list[np.ndarray]:
+    chunks: list[np.ndarray] = []
+    current_faces: list[int] = []
+    current_vertices: set[int] = set()
+    for face_index, face in enumerate(mesh.faces.astype(int).tolist()):
+        face_vertices = set(face)
+        if current_faces and len(current_vertices | face_vertices) > max_vertices:
+            chunks.append(np.asarray(current_faces, dtype=np.int64))
+            current_faces = []
+            current_vertices = set()
+        current_faces.append(face_index)
+        current_vertices.update(face_vertices)
+    if current_faces:
+        chunks.append(np.asarray(current_faces, dtype=np.int64))
+    return chunks
+
+
+def _slice_mesh(mesh: Mesh, face_indices: np.ndarray) -> Mesh:
+    used = np.unique(mesh.faces[face_indices].reshape(-1))
+    remap = np.full(mesh.vertex_count, -1, dtype=np.int64)
+    remap[used] = np.arange(used.shape[0], dtype=np.int64)
+    face_lookup = {int(face_index): local_index for local_index, face_index in enumerate(face_indices.tolist())}
+    sliced = Mesh(
+        points=mesh.points[used],
+        faces=remap[mesh.faces[face_indices]],
+        normals=None if mesh.normals is None else mesh.normals[used],
+        tangents=None if mesh.tangents is None else mesh.tangents[used],
+        uvs={channel: values[used] for channel, values in mesh.uvs.items()},
+        material_indices=None if mesh.material_indices is None else mesh.material_indices[face_indices],
+        face_groups={
+            name: np.asarray(
+                [face_lookup[int(face_index)] for face_index in group.tolist() if int(face_index) in face_lookup],
+                dtype=np.int64,
+            )
+            for name, group in mesh.face_groups.items()
+        },
+        metadata=dict(mesh.metadata),
+    )
+    sliced.validate()
+    return sliced
+
+
+def _annotate_index_buffers(asset: Asset, options: SceneOptimizeOptions) -> None:
+    for part in asset.parts.values():
+        if part.mesh is None:
+            continue
+        if options.index_buffer == "uint16" and part.mesh.vertex_count > 65_535:
+            part.mesh.metadata["index_buffer"] = "uint32"
+            asset.report.add_warning(f"part exceeds uint16 index range, using uint32: {part.name}")
+        elif options.index_buffer == "uint32":
+            part.mesh.metadata["index_buffer"] = "uint32"
+        else:
+            part.mesh.metadata["index_buffer"] = "uint16" if part.mesh.vertex_count <= 65_535 else "uint32"
+
+
+def _annotate_instance_policy(asset: Asset, options: SceneOptimizeOptions) -> None:
+    occurrence_counts = _part_occurrence_counts(asset)
+    instanced = sum(1 for count in occurrence_counts.values() if count > 1)
+    asset.metadata["scene_instance_policy"] = options.instance_policy
+    asset.metadata["scene_instanced_part_count"] = str(instanced)
+
+
+def _part_occurrence_counts(asset: Asset) -> dict[str, int]:
+    occurrence_counts: dict[str, int] = {}
+    for node in asset.root.walk():
+        if node.part_id is not None:
+            occurrence_counts[node.part_id] = occurrence_counts.get(node.part_id, 0) + 1
+    return occurrence_counts
+
+
+def _selected_part_ids(asset: Asset, selected_node_ids: set[str]) -> set[str]:
+    part_ids = {node.part_id for node in asset.root.walk() if node.id in selected_node_ids and node.part_id is not None}
+    for part_id, part in asset.parts.items():
+        source_node_ids = set(str(part.metadata.get("source_node_ids", "")).split(","))
+        if source_node_ids & selected_node_ids:
+            part_ids.add(part_id)
+    return {part_id for part_id in part_ids if part_id is not None}
+
+
+def _drop_unreferenced_parts(asset: Asset) -> None:
+    referenced = {node.part_id for node in asset.root.walk() if node.part_id is not None}
+    asset.parts = {part_id: part for part_id, part in asset.parts.items() if part_id in referenced}
+
+
+def _unique_part_id(existing: set[str], base: str) -> str:
+    candidate = base
+    suffix = 2
+    while candidate in existing:
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    return candidate
+
+
+def _unique_node_id(existing: set[str], base: str) -> str:
+    candidate = base
+    suffix = 2
+    while candidate in existing:
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    existing.add(candidate)
+    return candidate

@@ -82,6 +82,12 @@ fascat inspect input.step --json
 | `--region-size` | unset | Spatial region size for `--merge-mode regions` |
 | `--merge-strategy` | `all` | Region merge strategy: `all` or `by-material` |
 | `--hierarchy-level` | `1` | Hierarchy level used by `--merge-mode hierarchy-level` |
+| `--batch-by-material` | `false` | Batch compatible scene geometry by material |
+| `--merge-compatible-meshes` | `false` | Merge compatible scene meshes to reduce draw calls |
+| `--split-large-meshes` | `false` | Split scene-optimized meshes above the vertex limit |
+| `--index-buffer` | `auto` | Index buffer mode: `auto`, `uint16`, or `uint32` |
+| `--flatten` | `safe` | Hierarchy flattening mode: `none`, `safe`, or `all` |
+| `--instance-policy` | `auto` | Instance policy: `auto`, `preserve`, or `expand` |
 | `--preserve-instances / --no-preserve-instances` | `true` | Preserve repeated parts as shared instances, or duplicate per occurrence |
 | `--preserve-hard-edges` | `false` | Protect faces adjacent to hard edges during simplification |
 | `--hard-edge-angle` | `30` | Angle threshold for hard-edge preservation |

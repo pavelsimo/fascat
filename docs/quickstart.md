@@ -48,6 +48,9 @@ fascat convert motor.step motor.glb \
   --filter 'path=*/Fasteners/*' \
   --merge \
   --merge-mode by-material \
+  --batch-by-material \
+  --merge-compatible-meshes \
+  --split-large-meshes \
   --target-triangles 80000 \
   --report report.json
 ```

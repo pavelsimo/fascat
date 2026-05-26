@@ -24,6 +24,7 @@ from fascat.options import (
     LODOptions,
     MergeOptions,
     OptimizeOptions,
+    SceneOptimizeOptions,
     StageOptions,
     StepReadOptions,
     Tessellation,
@@ -130,6 +131,24 @@ class MergeMetadata(str, Enum):
 class MergeStrategy(str, Enum):
     ALL = "all"
     BY_MATERIAL = "by-material"
+
+
+class IndexBufferMode(str, Enum):
+    AUTO = "auto"
+    UINT16 = "uint16"
+    UINT32 = "uint32"
+
+
+class FlattenMode(str, Enum):
+    NONE = "none"
+    SAFE = "safe"
+    ALL = "all"
+
+
+class InstancePolicy(str, Enum):
+    AUTO = "auto"
+    PRESERVE = "preserve"
+    EXPAND = "expand"
 
 
 class MetadataMode(str, Enum):
@@ -467,6 +486,30 @@ def cmd_convert(
         int,
         typer.Option("--hierarchy-level", help="Hierarchy level used by --merge-mode hierarchy-level."),
     ] = 1,
+    batch_by_material: Annotated[
+        bool,
+        typer.Option("--batch-by-material", help="Batch compatible scene geometry by material."),
+    ] = False,
+    merge_compatible_meshes: Annotated[
+        bool,
+        typer.Option("--merge-compatible-meshes", help="Merge compatible scene meshes to reduce draw calls."),
+    ] = False,
+    split_large_meshes: Annotated[
+        bool,
+        typer.Option("--split-large-meshes", help="Split scene-optimized meshes above the vertex limit."),
+    ] = False,
+    index_buffer: Annotated[
+        IndexBufferMode,
+        typer.Option("--index-buffer", help="Index buffer mode: auto, uint16, or uint32."),
+    ] = IndexBufferMode.AUTO,
+    flatten: Annotated[
+        FlattenMode,
+        typer.Option("--flatten", help="Hierarchy flattening mode: none, safe, or all."),
+    ] = FlattenMode.SAFE,
+    instance_policy: Annotated[
+        InstancePolicy,
+        typer.Option("--instance-policy", help="Instance policy: auto, preserve, or expand."),
+    ] = InstancePolicy.AUTO,
     filters: Annotated[
         list[str] | None,
         typer.Option("--filter", help="Scope optimization and LOD work with selectors such as path=*/Fasteners/*."),
@@ -565,6 +608,12 @@ def cmd_convert(
         "region_size": region_size,
         "merge_strategy": merge_strategy.value,
         "hierarchy_level": hierarchy_level,
+        "batch_by_material": batch_by_material,
+        "merge_compatible_meshes": merge_compatible_meshes,
+        "split_large_meshes": split_large_meshes,
+        "index_buffer": index_buffer.value,
+        "flatten": flatten.value,
+        "instance_policy": instance_policy.value,
         "filters": filters or [],
         "exclude_filters": exclude_filters or [],
         "preserve_instances": preserve_instances,
@@ -713,6 +762,27 @@ def cmd_convert(
             if merge
             else None
         )
+        scene_options = (
+            SceneOptimizeOptions(
+                batch_by_material=batch_by_material,
+                merge_compatible_meshes=merge_compatible_meshes,
+                split_large_meshes=split_large_meshes,
+                max_vertices_per_mesh=max_vertices_per_mesh,
+                index_buffer=index_buffer.value,
+                flatten=flatten.value,
+                remove_empty_nodes=True,
+                instance_policy=instance_policy.value,
+            )
+            if (
+                batch_by_material
+                or merge_compatible_meshes
+                or split_large_meshes
+                or flatten != FlattenMode.SAFE
+                or index_buffer != IndexBufferMode.AUTO
+                or instance_policy != InstancePolicy.AUTO
+            )
+            else None
+        )
         lod_options = LODOptions(tuple(lod_values)) if lod_values is not None else profile_options.lods
         asset = _convert_for_cli(
             input_path,
@@ -723,6 +793,7 @@ def cmd_convert(
             import_options=import_options,
             heal_brep=heal_options,
             merge=merge_options,
+            scene=scene_options,
             optimize=optimize_options,
             lods=lod_options,
             where=where,
@@ -1016,6 +1087,7 @@ def _convert_for_cli(
     import_options: StepReadOptions,
     heal_brep: BrepHealOptions | None,
     merge: MergeOptions | None,
+    scene: SceneOptimizeOptions | None,
     optimize: OptimizeOptions | None,
     lods: LODOptions | None,
     where: Filter | None,
@@ -1036,6 +1108,7 @@ def _convert_for_cli(
                 import_options,
                 heal_brep,
                 merge,
+                scene,
                 optimize,
                 lods,
                 where,
@@ -1051,6 +1124,7 @@ def _convert_for_cli(
         import_options,
         heal_brep,
         merge,
+        scene,
         optimize,
         lods,
         where,
@@ -1068,6 +1142,7 @@ def _convert_output(
     import_options: StepReadOptions,
     heal_brep: BrepHealOptions | None,
     merge: MergeOptions | None,
+    scene: SceneOptimizeOptions | None,
     optimize: OptimizeOptions | None,
     lods: LODOptions | None,
     where: Filter | None,
@@ -1089,6 +1164,7 @@ def _convert_output(
                 heal_brep=heal_brep,
                 stage=stage,
                 merge=merge,
+                scene=scene,
                 optimize=optimize,
                 lods=lods,
                 where=where,
@@ -1108,6 +1184,7 @@ def _convert_output(
         heal_brep=heal_brep,
         stage=stage,
         merge=merge,
+        scene=scene,
         optimize=optimize,
         lods=lods,
         where=where,

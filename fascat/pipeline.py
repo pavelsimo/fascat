@@ -19,6 +19,7 @@ from fascat.options import (
     LODOptions,
     MergeOptions,
     OptimizeOptions,
+    SceneOptimizeOptions,
     StageOptions,
     StepReadOptions,
     Tessellation,
@@ -41,6 +42,7 @@ def convert(
     heal_brep: BrepHealOptions | None = None,
     stage: StageOptions | None = None,
     merge: MergeOptions | None = None,
+    scene: SceneOptimizeOptions | None = None,
     optimize: OptimizeOptions | None = None,
     lods: LODOptions | None = None,
     progress: Callable[[str, dict[str, int]], None] | None = None,
@@ -74,6 +76,10 @@ def convert(
         asset = asset.merge(merge, where=where)
         if progress is not None:
             progress("merge", asset.stats())
+    if scene is not None:
+        asset = asset.optimize_scene(scene, where=where)
+        if progress is not None:
+            progress("optimize_scene", asset.stats())
     optimize_options = optimize if optimize is not None else selected.optimize
     if optimize_options is not None:
         asset = asset.optimize(optimize_options, where=where)
@@ -347,6 +353,10 @@ def optimize(
 
 def merge(asset: Asset, *, options: MergeOptions | None = None, where: Filter | None = None) -> Asset:
     return asset.merge(options or MergeOptions(), where=where)
+
+
+def optimize_scene(asset: Asset, *, options: SceneOptimizeOptions | None = None, where: Filter | None = None) -> Asset:
+    return asset.optimize_scene(options or SceneOptimizeOptions(), where=where)
 
 
 def lods(

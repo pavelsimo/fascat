@@ -122,6 +122,8 @@ def test_convert_help() -> None:
     assert "--no-preserve-instances" in plain(result.output)
     assert "--preserve-hard-edges" in plain(result.output)
     assert "material boundaries" in plain(result.output)
+    assert "--batch-by-material" in plain(result.output)
+    assert "--index-buffer" in plain(result.output)
 
 
 def test_validate_help() -> None:

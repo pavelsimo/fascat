@@ -294,6 +294,25 @@ asset = asset.stage(
 
 Atlas support currently records atlas and texture-bake metadata on materials and meshes. Dedicated material baking is a separate optimization step.
 
+## Scene Optimization
+
+Use scene optimization to reduce draw calls after staging and optional hierarchy merging. It batches compatible meshes, can batch by material, splits large merged meshes, simplifies empty hierarchy, and annotates the intended index-buffer width.
+
+```python
+asset = asset.optimize_scene(
+    fc.SceneOptimizeOptions(
+        batch_by_material=True,
+        merge_compatible_meshes=True,
+        split_large_meshes=True,
+        max_vertices_per_mesh=65_535,
+        index_buffer="auto",
+        flatten="safe",
+        remove_empty_nodes=True,
+        instance_policy="auto",
+    )
+)
+```
+
 ## One-shot conversion
 
 Use `fc.convert()` when you want the full default pipeline and output validation in one call.

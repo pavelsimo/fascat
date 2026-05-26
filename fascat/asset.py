@@ -16,6 +16,7 @@ from fascat.options import (
     MergeOptions,
     OptimizeOptions,
     RepairOptions,
+    SceneOptimizeOptions,
     StageOptions,
     Tessellation,
 )
@@ -335,6 +336,31 @@ class Asset:
         step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
             "merge",
+            options=_options_with_scope(opts.to_dict(), scope),
+            before=before,
+            after=_hierarchy_report_stats(asset),
+            duration=timer.duration,
+            warnings=step_warnings,
+        )
+        return asset
+
+    def optimize_scene(self, options: SceneOptimizeOptions | None = None, *, where: Any | None = None) -> Asset:
+        from fascat.ops.scene import optimize_scene_asset
+
+        opts = options or SceneOptimizeOptions()
+        scope = self._operation_scope(where)
+        selected_node_ids = (
+            scope.selection.node_ids
+            if scope.selection is not None
+            else {node.id for node in scope.asset.root.walk() if node.part_id is not None}
+        )
+        before = _hierarchy_report_stats(self)
+        warning_count = len(self.report.warnings)
+        with timed_step() as timer:
+            asset = optimize_scene_asset(scope.asset, opts, selected_node_ids=selected_node_ids)
+        step_warnings = asset.report.warnings[warning_count:]
+        asset.report.add_step(
+            "optimize_scene",
             options=_options_with_scope(opts.to_dict(), scope),
             before=before,
             after=_hierarchy_report_stats(asset),
