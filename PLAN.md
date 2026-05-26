@@ -813,9 +813,7 @@ JT tests:
 
 - Test `.jt` dispatch through the public `read_cad()` and `convert()` input path.
 - Test missing native JT backend errors are explicit.
-- Test `fc.has_native_jt_backend()` exposes native backend availability.
 - Test direct native JT reader integration with a license-clean fixture when `OCP.JTCAFControl` is available.
-- Allow native JT integration tests to read a local license-clean sample through `FASCAT_JT_SAMPLE`.
 - Mark native JT-backed tests with `pytest.mark.requires_jt`.
 
 CLI tests:

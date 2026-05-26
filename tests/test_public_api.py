@@ -12,7 +12,6 @@ def test_public_api_exports_cad_importers() -> None:
     assert callable(fc.read_cad)
     assert callable(fc.read_step)
     assert callable(fc.read_jt)
-    assert isinstance(fc.has_native_jt_backend(), bool)
 
 
 def test_functional_api_wraps_asset_operations() -> None:

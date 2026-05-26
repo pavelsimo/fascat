@@ -198,11 +198,6 @@ The asset model preserves hierarchy, part records, material records, transforms,
 
 `fc.read_jt()` is a direct reader path. It does not convert JT through STEP. It expects a native Open Cascade JT reader in the Python environment and raises a clear backend error when `OCP.JTCAFControl` is unavailable.
 
-```python
-if fc.has_native_jt_backend():
-    asset = fc.read_jt("motor.jt")
-```
-
 ## glTF notes
 
 OpenUSD is the highest-fidelity export path for USD-style LOD variants and instance metadata.

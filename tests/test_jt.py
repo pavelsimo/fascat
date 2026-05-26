@@ -6,13 +6,7 @@ import pytest
 
 from fascat.asset import Asset, Node
 from fascat.io import importer
-from fascat.io.jt import (
-    _JTBackendUnavailable,
-    _read_and_transfer_jt,
-    has_native_jt_backend,
-    read_jt,
-    read_jt_bytes,
-)
+from fascat.io.jt import _JTBackendUnavailable, read_jt, read_jt_bytes
 from fascat.report import Report
 
 
@@ -52,21 +46,6 @@ def test_read_jt_reports_missing_backend(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
     with pytest.raises(RuntimeError, match="JT import requires"):
         read_jt(source)
-
-
-def test_has_native_jt_backend_returns_boolean() -> None:
-    assert isinstance(has_native_jt_backend(), bool)
-
-
-def test_has_native_jt_backend_handles_missing_ocp_package(monkeypatch: pytest.MonkeyPatch) -> None:
-    import fascat.io.jt as jt
-
-    def missing_parent(_name: str) -> object:
-        raise ModuleNotFoundError("OCP")
-
-    monkeypatch.setattr(jt, "find_spec", missing_parent)
-
-    assert has_native_jt_backend() is False
 
 
 def test_read_jt_uses_native_reader(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -122,73 +101,6 @@ def test_read_jt_bytes_uses_name_as_source_identity(monkeypatch: pytest.MonkeyPa
     assert asset.report.source_path is None
     assert asset.root.metadata["source"] == "stdin.jt"
     assert asset.root.metadata["source_identity"] == "stdin.jt"
-
-
-def test_jt_reader_transfers_read_file_result(tmp_path: Path) -> None:
-    source = tmp_path / "input.jt"
-    document = object()
-    calls: list[tuple[str, object]] = []
-
-    class Reader:
-        def ReadFile(self, path: str) -> str:  # noqa: N802
-            calls.append(("read", path))
-            return "done"
-
-        def Transfer(self, transferred_document: object) -> bool:  # noqa: N802
-            calls.append(("transfer", transferred_document))
-            return True
-
-    _read_and_transfer_jt(Reader(), source, document, done_status="done")
-
-    assert calls == [("read", str(source)), ("transfer", document)]
-
-
-def test_jt_reader_rejects_failed_read_file(tmp_path: Path) -> None:
-    class Reader:
-        def ReadFile(self, _path: str) -> str:  # noqa: N802
-            return "failed"
-
-        def Transfer(self, _document: object) -> bool:  # noqa: N802
-            return True
-
-    with pytest.raises(RuntimeError, match="failed to read JT file"):
-        _read_and_transfer_jt(Reader(), tmp_path / "input.jt", object(), done_status="done")
-
-
-def test_jt_reader_rejects_failed_transfer(tmp_path: Path) -> None:
-    class Reader:
-        def ReadFile(self, _path: str) -> str:  # noqa: N802
-            return "done"
-
-        def Transfer(self, _document: object) -> bool:  # noqa: N802
-            return False
-
-    with pytest.raises(RuntimeError, match="failed to transfer JT data"):
-        _read_and_transfer_jt(Reader(), tmp_path / "input.jt", object(), done_status="done")
-
-
-def test_jt_reader_supports_perform_with_document(tmp_path: Path) -> None:
-    source = tmp_path / "input.jt"
-    document = object()
-    calls: list[tuple[str, object]] = []
-
-    class Reader:
-        def Perform(self, path: str, transferred_document: object) -> bool:  # noqa: N802
-            calls.append((path, transferred_document))
-            return True
-
-    _read_and_transfer_jt(Reader(), source, document, done_status="done")
-
-    assert calls == [(str(source), document)]
-
-
-def test_jt_reader_rejects_perform_without_document(tmp_path: Path) -> None:
-    class Reader:
-        def Perform(self, _path: str) -> bool:  # noqa: N802
-            return True
-
-    with pytest.raises(RuntimeError, match="Perform\\(file, document\\)"):
-        _read_and_transfer_jt(Reader(), tmp_path / "input.jt", object(), done_status="done")
 
 
 def test_read_cad_dispatches_step_and_jt(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

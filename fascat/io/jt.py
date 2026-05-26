@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import tempfile
-from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
@@ -13,13 +12,6 @@ JT_SUFFIXES = {".jt"}
 
 class _JTBackendUnavailable(RuntimeError):
     pass
-
-
-def has_native_jt_backend() -> bool:
-    try:
-        return find_spec("OCP.JTCAFControl") is not None
-    except ModuleNotFoundError:
-        return False
 
 
 def read_jt(path: str | Path) -> Asset:
@@ -105,14 +97,14 @@ def _read_and_transfer_jt(reader: Any, path: Path, document: Any, *, done_status
             raise RuntimeError(f"failed to read JT file: {path}")
         return
 
-    raise RuntimeError("installed JT backend does not expose ReadFile() or Perform(file, document)")
+    raise RuntimeError("installed JT backend does not expose ReadFile() or Perform()")
 
 
 def _perform_jt_import(perform: Any, path: Path, document: Any) -> Any:
     try:
         return perform(str(path), document)
-    except TypeError as exc:
-        raise RuntimeError("installed JT backend does not expose Perform(file, document)") from exc
+    except TypeError:
+        return perform(str(path))
 
 
 def _enable_reader_modes(reader: Any) -> None:

@@ -148,8 +148,6 @@ asset.write_gltf("motor.glb")
 
 Use `fc.read_jt("motor.jt")` for direct JT input when the JT backend is installed, or `fc.read_cad(path)` to dispatch by suffix.
 
-Use `fc.has_native_jt_backend()` to check whether the current Python environment can read JT directly.
-
 ## Docs
 
 Full documentation at **[pavelsimo.github.io/fascat](https://pavelsimo.github.io/fascat)**.
