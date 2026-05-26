@@ -182,6 +182,52 @@ def test_usd_export_preserves_original_names_on_sanitized_prototypes_and_materia
     assert prototype_prim.GetCustomDataByKey("fascat:originalName") == "123 part source!"
 
 
+def test_usd_export_disambiguates_sanitized_name_collisions(tmp_path: Path) -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [2, 1, 3]], dtype=int),
+        material_indices=np.array([0, 1], dtype=int),
+    )
+    materials = {
+        "red!": Material(id="red!", name="red bang", base_color=(1.0, 0.0, 0.0, 1.0)),
+        "red?": Material(id="red?", name="red question", base_color=(0.8, 0.0, 0.0, 1.0)),
+    }
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="node_a", name="A", part_id="part-a"),
+                Node(id="node_b", name="B", part_id="part_a"),
+            ],
+        ),
+        parts={
+            "part-a": Part(id="part-a", name="part dash", mesh=mesh, material_ids=["red!", "red?"]),
+            "part_a": Part(id="part_a", name="part underscore", mesh=mesh.copy()),
+        },
+        materials=materials,
+    )
+    output = tmp_path / "collisions.usda"
+
+    write_usd(asset, output)
+
+    stage = Usd.Stage.Open(str(output))
+    assert stage is not None
+    first_material = stage.GetPrimAtPath("/Materials/red")
+    second_material = stage.GetPrimAtPath("/Materials/red_2")
+    first_prototype = stage.GetPrimAtPath("/__Prototypes/part_a_lod0")
+    second_prototype = stage.GetPrimAtPath("/__Prototypes/part_a_lod0_2")
+    first_subset = stage.GetPrimAtPath("/__Prototypes/part_a_lod0/Mesh/red")
+    second_subset = stage.GetPrimAtPath("/__Prototypes/part_a_lod0/Mesh/red_2")
+
+    assert first_material.GetCustomDataByKey("fascat:materialId") == "red!"
+    assert second_material.GetCustomDataByKey("fascat:materialId") == "red?"
+    assert first_prototype.GetCustomDataByKey("fascat:partId") == "part-a"
+    assert second_prototype.GetCustomDataByKey("fascat:partId") == "part_a"
+    assert first_subset.GetCustomDataByKey("fascat:materialId") == "red!"
+    assert second_subset.GetCustomDataByKey("fascat:materialId") == "red?"
+
+
 def test_usd_export_uses_instanceable_references_for_repeated_parts(tmp_path: Path) -> None:
     mesh = cube_mesh()
     root = Node(

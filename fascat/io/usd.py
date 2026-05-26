@@ -89,8 +89,9 @@ def _write_materials(stage: Any, materials: dict[str, Material]) -> dict[str, st
     from pxr import Gf, Sdf, UsdShade
 
     paths: dict[str, str] = {}
+    used_names: set[str] = set()
     for material in materials.values():
-        material_path = f"/Materials/{_usd_name(material.id)}"
+        material_path = f"/Materials/{_unique_name(_usd_name(material.id), used_names)}"
         usd_material = UsdShade.Material.Define(stage, material_path)
         usd_material.GetPrim().SetCustomDataByKey("fascat:materialId", material.id)
         usd_material.GetPrim().SetCustomDataByKey("fascat:originalName", material.name)
@@ -114,13 +115,14 @@ def _write_prototypes(
     from pxr import UsdGeom
 
     prototype_paths: dict[tuple[str, int], str] = {}
+    used_names: set[str] = set()
     UsdGeom.Scope.Define(stage, "/__Prototypes")
     for part in parts.values():
         meshes = [part.mesh, *part.lod_meshes]
         for lod_index, mesh in enumerate(meshes):
             if mesh is None:
                 continue
-            part_path = f"/__Prototypes/{_usd_name(part.id)}_lod{lod_index}"
+            part_path = f"/__Prototypes/{_unique_name(f'{_usd_name(part.id)}_lod{lod_index}', used_names)}"
             prototype = UsdGeom.Xform.Define(stage, part_path)
             prototype.GetPrim().SetCustomDataByKey("fascat:partId", part.id)
             prototype.GetPrim().SetCustomDataByKey("fascat:originalName", part.name)
@@ -240,6 +242,7 @@ def _bind_materials(
     if mesh.material_indices is None or len(set(mesh.material_indices.astype(int).tolist())) <= 1:
         return
 
+    used_subset_names: set[str] = set()
     for material_index, material_id in enumerate(part.material_ids):
         face_indices = np.flatnonzero(mesh.material_indices == material_index).astype(int).tolist()
         material_path = material_paths.get(material_id)
@@ -247,7 +250,7 @@ def _bind_materials(
             continue
         subset = UsdGeom.Subset.CreateGeomSubset(
             usd_mesh,
-            _usd_name(material_id),
+            _unique_name(_usd_name(material_id), used_subset_names),
             UsdGeom.Tokens.face,
             face_indices,
             "materialBind",
@@ -275,3 +278,13 @@ def _usd_name(value: str) -> str:
     if cleaned[0].isdigit():
         cleaned = f"_{cleaned}"
     return cleaned
+
+
+def _unique_name(base: str, used: set[str]) -> str:
+    candidate = base
+    suffix = 2
+    while candidate in used:
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    used.add(candidate)
+    return candidate
