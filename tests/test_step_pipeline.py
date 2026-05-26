@@ -21,6 +21,15 @@ def test_step_fixtures_import_with_names_units_and_parts(fixture: Path) -> None:
     assert asset.meters_per_unit > 0.0
     assert asset.root.children
     assert asset.report.steps[0].name == "import"
+    assert asset.report.steps[0].before == {
+        "nodes": 0,
+        "parts": 0,
+        "occurrences": 0,
+        "materials": 0,
+        "vertices": 0,
+        "triangles": 0,
+    }
+    assert asset.report.steps[0].after == asset.stats()
 
 
 def test_step_ids_include_source_identity(tmp_path: Path) -> None:

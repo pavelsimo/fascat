@@ -693,6 +693,8 @@ Pipeline tests:
 - `Tessellation`, `RepairOptions`, `StageOptions`, `OptimizeOptions`, and `LODOptions` validate bad inputs.
 - Profiles produce deterministic option sets.
 - Operation reports include before/after counts.
+- Import and validation report steps retain asset-level before/after statistics.
+- Operation reports attach warnings to the step that produced them.
 - Conversion reports include timed write and validation steps.
 - Conversion progress callbacks receive source and per-stage stats.
 - Repeated parts can be preserved or duplicated per occurrence.

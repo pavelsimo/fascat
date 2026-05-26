@@ -86,15 +86,17 @@ class OptimizeOptions:
 
 @dataclass(frozen=True)
 class LODOptions:
-    ratios: tuple[float, ...] = (0.5, 0.25, 0.1)
+    ratios: list[float] | tuple[float, ...] = (0.5, 0.25, 0.1)
     mode: LODMode = "variants"
 
     def __post_init__(self) -> None:
-        if not self.ratios:
+        ratios = tuple(float(ratio) for ratio in self.ratios)
+        object.__setattr__(self, "ratios", ratios)
+        if not ratios:
             raise ValueError("LOD ratios must include at least one value")
-        if any(ratio <= 0.0 or ratio >= 1.0 for ratio in self.ratios):
+        if any(ratio <= 0.0 or ratio >= 1.0 for ratio in ratios):
             raise ValueError("LOD ratios must be greater than 0 and less than 1")
-        if tuple(self.ratios) != tuple(sorted(self.ratios, reverse=True)):
+        if ratios != tuple(sorted(ratios, reverse=True)):
             raise ValueError("LOD ratios must be sorted from highest to lowest detail")
         if self.mode != "variants":
             raise ValueError("only variant-based LODs are supported")

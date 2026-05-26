@@ -148,24 +148,38 @@ class Asset:
 
         opts = options or Tessellation()
         before = self.stats()
+        warning_count = len(self.report.warnings)
         with timed_step() as timer:
             asset = tessellate_asset(self, opts)
+        step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
-            "tessellate", options=opts.to_dict(), before=before, after=asset.stats(), duration=timer.duration
+            "tessellate",
+            options=opts.to_dict(),
+            before=before,
+            after=asset.stats(),
+            duration=timer.duration,
+            warnings=step_warnings,
         )
         return asset
 
     def repair(self, options: RepairOptions | None = None) -> Asset:
         opts = options or RepairOptions()
         before = self.stats()
+        warning_count = len(self.report.warnings)
         with timed_step() as timer:
             asset = self.copy(keep_source=True)
             for part in asset.parts.values():
                 if part.mesh is not None:
                     part.mesh = part.mesh.repair(opts)
                     part.fingerprint = part.mesh.fingerprint()
+        step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
-            "repair", options=opts.to_dict(), before=before, after=asset.stats(), duration=timer.duration
+            "repair",
+            options=opts.to_dict(),
+            before=before,
+            after=asset.stats(),
+            duration=timer.duration,
+            warnings=step_warnings,
         )
         return asset
 
@@ -174,10 +188,17 @@ class Asset:
 
         opts = options or StageOptions()
         before = self.stats()
+        warning_count = len(self.report.warnings)
         with timed_step() as timer:
             asset = stage_asset(self, opts)
+        step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
-            "stage", options=opts.to_dict(), before=before, after=asset.stats(), duration=timer.duration
+            "stage",
+            options=opts.to_dict(),
+            before=before,
+            after=asset.stats(),
+            duration=timer.duration,
+            warnings=step_warnings,
         )
         return asset
 
@@ -186,10 +207,17 @@ class Asset:
 
         opts = options or OptimizeOptions()
         before = self.stats()
+        warning_count = len(self.report.warnings)
         with timed_step() as timer:
             asset = optimize_asset(self, opts)
+        step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
-            "optimize", options=opts.to_dict(), before=before, after=asset.stats(), duration=timer.duration
+            "optimize",
+            options=opts.to_dict(),
+            before=before,
+            after=asset.stats(),
+            duration=timer.duration,
+            warnings=step_warnings,
         )
         return asset
 
@@ -198,10 +226,17 @@ class Asset:
 
         opts = options or LODOptions()
         before = self.stats()
+        warning_count = len(self.report.warnings)
         with timed_step() as timer:
             asset = build_lods(self, opts)
+        step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
-            "lods", options=opts.to_dict(), before=before, after=asset.stats(), duration=timer.duration
+            "lods",
+            options=opts.to_dict(),
+            before=before,
+            after=asset.stats(),
+            duration=timer.duration,
+            warnings=step_warnings,
         )
         return asset
 

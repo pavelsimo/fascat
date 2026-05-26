@@ -63,7 +63,7 @@ def _read_step_path(source: Path, *, source_identity: str) -> Asset:
     asset.report.add_step(
         "import",
         options={"format": "STEP", "backend": "OCP"},
-        before={},
+        before={"nodes": 0, "parts": 0, "occurrences": 0, "materials": 0, "vertices": 0, "triangles": 0},
         after=asset.stats(),
         duration=timer.duration,
     )

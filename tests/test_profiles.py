@@ -20,6 +20,13 @@ def test_profiles_produce_deterministic_option_sets() -> None:
     assert desktop.lods.ratios == (0.5, 0.25, 0.1)
 
 
+def test_lod_options_normalize_list_ratios() -> None:
+    options = fc.LODOptions(ratios=[0.5, 0.25, 0.1])
+
+    assert options.ratios == (0.5, 0.25, 0.1)
+    assert options.to_dict()["ratios"] == [0.5, 0.25, 0.1]
+
+
 @pytest.mark.parametrize(
     ("factory", "message"),
     [

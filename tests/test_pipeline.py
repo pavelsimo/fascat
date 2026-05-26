@@ -57,8 +57,27 @@ def test_convert_report_includes_timed_write_and_validate_steps(monkeypatch, tmp
     assert {"import", "repair", "stage", "write", "validate"} <= set(steps)
     assert steps["write"].before == converted.stats()
     assert steps["write"].after == converted.stats()
-    assert steps["validate"].after == {"meshes": 1, "points": 3, "triangles": 1}
+    assert steps["validate"].after == {
+        **converted.stats(),
+        "validated_meshes": 1,
+        "validated_points": 3,
+        "validated_triangles": 1,
+    }
     assert steps["write"].duration >= 0.0
     assert steps["validate"].duration >= 0.0
     assert converted.report.finished_at is not None
     assert converted.report.output_stats == converted.stats()
+
+
+def test_operation_report_step_captures_warnings() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Missing", part_id="missing")]),
+        parts={"missing": Part(id="missing", name="Missing")},
+    )
+
+    tessellated = asset.tessellate()
+    step = tessellated.report.steps[-1]
+
+    assert step.name == "tessellate"
+    assert step.warnings == ["part has no source shape and cannot be tessellated: Missing"]
+    assert tessellated.report.warnings == step.warnings

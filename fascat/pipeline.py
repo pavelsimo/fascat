@@ -64,11 +64,17 @@ def convert(
     if validate_output:
         with timed_step() as timer:
             validation_stats = validate_usd(output_path)
+        after = {
+            **asset.stats(),
+            "validated_meshes": validation_stats["meshes"],
+            "validated_points": validation_stats["points"],
+            "validated_triangles": validation_stats["triangles"],
+        }
         asset.report.add_step(
             "validate",
             options={"backend": "usd-core"},
             before=asset.stats(),
-            after=validation_stats,
+            after=after,
             duration=timer.duration,
         )
         if progress is not None:
