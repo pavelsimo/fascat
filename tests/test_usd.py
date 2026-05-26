@@ -138,6 +138,39 @@ def test_public_usd_write_apis_export_valid_stages(tmp_path: Path) -> None:
     assert [step.name for step in asset.report.steps] == ["write", "write"]
 
 
+def test_usd_export_authors_preview_surface_material_inputs(tmp_path: Path) -> None:
+    mesh = cube_mesh()
+    material = Material(
+        id="pbr",
+        name="PBR Material",
+        base_color=(0.2, 0.4, 0.6, 0.8),
+        metallic=0.25,
+        roughness=0.7,
+        opacity=0.35,
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Cube", part_id="cube")]),
+        parts={"cube": Part(id="cube", name="Cube", mesh=mesh, material_ids=[material.id])},
+        materials={material.id: material},
+    )
+    output = tmp_path / "preview-surface.usda"
+
+    write_usd(asset, output)
+
+    stage = Usd.Stage.Open(str(output))
+    assert stage is not None
+    shader = UsdShade.Shader(stage.GetPrimAtPath("/Materials/pbr/PreviewSurface"))
+    mesh_prim = next(prim for prim in Usd.PrimRange(stage.GetDefaultPrim()) if prim.IsA(UsdGeom.Mesh))
+    bound_material = UsdShade.MaterialBindingAPI(mesh_prim).ComputeBoundMaterial()[0]
+
+    assert shader.GetIdAttr().Get() == "UsdPreviewSurface"
+    assert tuple(shader.GetInput("diffuseColor").Get()) == pytest.approx((0.2, 0.4, 0.6))
+    assert shader.GetInput("opacity").Get() == pytest.approx(0.35)
+    assert shader.GetInput("metallic").Get() == pytest.approx(0.25)
+    assert shader.GetInput("roughness").Get() == pytest.approx(0.7)
+    assert bound_material.GetPath().pathString == "/Materials/pbr"
+
+
 def test_usd_export_authors_uv0_normals_and_original_names(tmp_path: Path) -> None:
     mesh = cube_mesh()
     transform = np.eye(4, dtype=float)

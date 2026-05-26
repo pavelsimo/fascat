@@ -724,7 +724,7 @@ USD tests:
 - Assert `subdivisionScheme = "none"`.
 - Assert stage units and up-axis are authored.
 - Assert face counts, indices, and points are valid.
-- Assert materials bind correctly through applied `MaterialBindingAPI` schemas.
+- Assert materials bind correctly through applied `MaterialBindingAPI` schemas and authored `UsdPreviewSurface` shader inputs.
 - Assert UV0 primvars, normals, and sanitized-name original metadata are authored.
 - Assert sanitized occurrence prims preserve original names and node IDs in metadata.
 - Assert sanitized prototype, material, and per-face subset prims preserve original names and IDs in metadata.
