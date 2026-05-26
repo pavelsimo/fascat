@@ -721,7 +721,7 @@ Pipeline tests:
 
 USD tests:
 
-- Export a generated cube mesh to `.usda`.
+- Export a generated cube mesh to `.usda` and binary `.usdc`.
 - Reopen with `usd-core`.
 - Assert `subdivisionScheme = "none"`.
 - Assert stage units and up-axis are authored.

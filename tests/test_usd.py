@@ -144,6 +144,21 @@ def test_usd_export_authors_mesh_material_units_and_lods(tmp_path: Path) -> None
     assert tuple(extent[1]) == (1.0, 1.0, 1.0)
 
 
+def test_usd_export_writes_binary_usdc(tmp_path: Path) -> None:
+    mesh = cube_mesh()
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Cube", part_id="cube")]),
+        parts={"cube": Part(id="cube", name="Cube", mesh=mesh)},
+        materials={},
+    )
+    output = tmp_path / "cube.usdc"
+
+    write_usd(asset, output)
+
+    assert output.read_bytes().startswith(b"PXR-USDC")
+    assert validate_usd(output)["triangles"] == mesh.triangle_count
+
+
 def test_validate_usd_rejects_invalid_lod_variant_mesh(tmp_path: Path) -> None:
     output = tmp_path / "invalid-lod.usda"
     stage = Usd.Stage.CreateNew(str(output))
