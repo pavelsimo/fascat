@@ -234,6 +234,54 @@ def test_convert_fixture_writes_usd_and_report(tmp_path: Path) -> None:
 
 @pytest.mark.requires_ocp
 @pytest.mark.requires_usd
+def test_convert_material_modes_write_display_only_and_no_material_usd(tmp_path: Path) -> None:
+    from pxr import Usd, UsdGeom
+
+    fixture = "tests/fixtures/radial-fan-50x15.step"
+    expected_display_color = pytest.approx(
+        (0.009721217676997185, 0.009721217676997185, 0.009721217676997185),
+        abs=1e-6,
+    )
+    display_output = tmp_path / "display.usda"
+    none_output = tmp_path / "none.usda"
+
+    for mode, output in (("display", display_output), ("none", none_output)):
+        result = runner.invoke(
+            app,
+            [
+                "convert",
+                fixture,
+                str(output),
+                "--sag",
+                "0.2",
+                "--target-triangles",
+                "80",
+                "--lods",
+                "0.5",
+                "--materials",
+                mode,
+            ],
+        )
+        assert result.exit_code == 0
+
+    display_stage = Usd.Stage.Open(str(display_output))
+    none_stage = Usd.Stage.Open(str(none_output))
+    assert display_stage is not None
+    assert none_stage is not None
+    display_mesh = next(prim for prim in Usd.PrimRange(display_stage.GetDefaultPrim()) if prim.IsA(UsdGeom.Mesh))
+    none_mesh = next(prim for prim in Usd.PrimRange(none_stage.GetDefaultPrim()) if prim.IsA(UsdGeom.Mesh))
+
+    assert not display_stage.GetPrimAtPath("/Materials")
+    assert "MaterialBindingAPI" not in display_mesh.GetAppliedSchemas()
+    assert tuple(UsdGeom.Mesh(display_mesh).GetDisplayColorAttr().Get()[0]) == expected_display_color
+
+    assert not none_stage.GetPrimAtPath("/Materials")
+    assert "MaterialBindingAPI" not in none_mesh.GetAppliedSchemas()
+    assert tuple(UsdGeom.Mesh(none_mesh).GetDisplayColorAttr().Get()[0]) == (0.75, 0.75, 0.75)
+
+
+@pytest.mark.requires_ocp
+@pytest.mark.requires_usd
 def test_convert_reads_step_from_stdin_and_writes_usd_to_stdout() -> None:
     step_data = Path("tests/fixtures/spool-clamp-lid.step").read_text(encoding="utf-8")
 

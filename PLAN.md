@@ -768,7 +768,7 @@ CLI tests:
 - `fascat convert` emits source and per-stage progress on stderr.
 - `fascat convert` validates generated USD before reporting success.
 - `fascat convert --report` writes a failure report sidecar when conversion exposes one.
-- `fascat convert --materials` exposes CAD material, displayColor-only, and no-material staging modes.
+- `fascat convert --materials` exercises CAD material, displayColor-only, and no-material staging modes through generated USD output.
 
 ## 15. Milestones
 
