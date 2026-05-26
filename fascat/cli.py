@@ -552,6 +552,8 @@ def _convert_output(
     if _is_stdio(output_path):
         import tempfile
 
+        import click
+
         with tempfile.NamedTemporaryFile(suffix=".usda") as handle:
             asset = convert(
                 input_path,
@@ -564,8 +566,9 @@ def _convert_output(
                 progress=progress,
                 debug=debug,
             )
-            handle.seek(0)
-            sys.stdout.buffer.write(handle.read())
+            stdout = click.get_binary_stream("stdout")
+            stdout.write(Path(handle.name).read_bytes())
+            stdout.flush()
             return asset
     return convert(
         input_path,

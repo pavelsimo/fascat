@@ -146,6 +146,19 @@ def test_inspect_fixture_reports_stats() -> None:
 
 
 @pytest.mark.requires_ocp
+def test_inspect_reads_step_from_stdin() -> None:
+    step_data = Path("tests/fixtures/spool-clamp-lid.step").read_text(encoding="utf-8")
+
+    result = runner.invoke(app, ["--json", "inspect", "-"], input=step_data)
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["input"] == "-"
+    assert payload["stats"]["parts"] == 1
+    assert payload["report"]["source_path"] is None
+
+
+@pytest.mark.requires_ocp
 @pytest.mark.requires_usd
 def test_convert_fixture_writes_usd_and_report(tmp_path: Path) -> None:
     output_file = tmp_path / "output.usda"
@@ -186,6 +199,38 @@ def test_convert_fixture_writes_usd_and_report(tmp_path: Path) -> None:
     assert report["finished_at"] is not None
     assert report["output_stats"]["materials"] == 0
     assert report["output_stats"]["triangles"] <= 120
+
+
+@pytest.mark.requires_ocp
+@pytest.mark.requires_usd
+def test_convert_reads_step_from_stdin_and_writes_usd_to_stdout() -> None:
+    step_data = Path("tests/fixtures/spool-clamp-lid.step").read_text(encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "convert",
+            "-",
+            "-",
+            "--sag",
+            "0.2",
+            "--target-triangles",
+            "80",
+            "--lods",
+            "0.5",
+            "--debug",
+        ],
+        input=step_data,
+    )
+
+    assert result.exit_code == 0
+    assert "#usda" in result.output
+    assert 'def Xform "Scene"' in result.output
+    assert "Converted" not in result.output
+
+    validate_result = runner.invoke(app, ["validate", "-"], input=result.output)
+    assert validate_result.exit_code == 0
+    assert "valid USD" in compact(validate_result.output)
 
 
 def test_convert_existing_output_requires_force(tmp_path: Path) -> None:
@@ -259,6 +304,10 @@ def test_validate_generated_usd(tmp_path: Path) -> None:
     result = runner.invoke(app, ["validate", str(output_file)])
     assert result.exit_code == 0
     assert "valid USD" in compact(result.output)
+
+    stdin_result = runner.invoke(app, ["validate", "-"], input=output_file.read_text(encoding="utf-8"))
+    assert stdin_result.exit_code == 0
+    assert "valid USD" in compact(stdin_result.output)
 
 
 def test_convert_rejects_invalid_lods() -> None:
