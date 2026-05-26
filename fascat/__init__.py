@@ -10,6 +10,7 @@ from fascat.material import Material
 from fascat.mesh import Mesh, MeshValidationError
 from fascat.metadata import Metadata, PmiAnnotation, Tolerance
 from fascat.options import (
+    AtlasOptions,
     BrepHealOptions,
     LODOptions,
     MergeOptions,
@@ -18,6 +19,7 @@ from fascat.options import (
     StageOptions,
     StepReadOptions,
     Tessellation,
+    UnwrapOptions,
 )
 from fascat.pipeline import (
     convert,
@@ -37,6 +39,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "Asset",
+    "AtlasOptions",
     "BrepHealOptions",
     "Filter",
     "FilterExpressionError",
@@ -57,6 +60,7 @@ __all__ = [
     "StepReadOptions",
     "Tessellation",
     "Tolerance",
+    "UnwrapOptions",
     "__version__",
     "convert",
     "heal_brep",

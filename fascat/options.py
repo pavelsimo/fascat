@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Literal
 
-UVMode = Literal["none", "box", "unwrap"]
+UVMode = Literal["none", "box", "unwrap", "lightmap"]
 NormalMode = Literal["none", "smooth", "hard_edges", "flat"]
+MaterialMode = Literal["cad", "display", "none"]
+MaterialPipelineMode = Literal["cad", "pbr"]
 LODMode = Literal["variants"]
 MergeMode = Literal[
     "all",
@@ -135,14 +137,49 @@ class BrepHealOptions:
 
 
 @dataclass(frozen=True)
+class UnwrapOptions:
+    texel_density: float | None = None
+    padding: int = 2
+    max_stretch: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.texel_density is not None and self.texel_density <= 0.0:
+            raise ValueError("texel_density must be greater than 0 when set")
+        if self.padding < 0:
+            raise ValueError("padding must be greater than or equal to 0")
+        if self.max_stretch is not None and self.max_stretch < 0.0:
+            raise ValueError("max_stretch must be greater than or equal to 0 when set")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class AtlasOptions:
+    enabled: bool = False
+    max_size: int = 4096
+
+    def __post_init__(self) -> None:
+        if self.max_size <= 0:
+            raise ValueError("atlas max_size must be greater than 0")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class StageOptions:
-    materials: Literal["cad", "display", "none"] = "cad"
+    materials: MaterialMode = "cad"
+    material_mode: MaterialPipelineMode = "cad"
+    merge_equivalent_materials: bool = False
     normals: bool = True
     normal_mode: NormalMode = "smooth"
     hard_edge_angle: float = 30.0
     preserve_face_boundaries: bool = False
     tangents: bool = False
     validate_normals: bool = False
+    unwrap: UnwrapOptions = field(default_factory=UnwrapOptions)
+    atlas: AtlasOptions = field(default_factory=AtlasOptions)
     uv0: UVMode | None = "box"
     uv1: UVMode | None = None
 
@@ -153,14 +190,16 @@ class StageOptions:
             object.__setattr__(self, "normals", False)
         if self.materials not in {"cad", "display", "none"}:
             raise ValueError("materials must be one of: cad, display, none")
+        if self.material_mode not in {"cad", "pbr"}:
+            raise ValueError("material_mode must be one of: cad, pbr")
         if self.normal_mode not in {"none", "smooth", "hard_edges", "flat"}:
             raise ValueError("normal_mode must be one of: none, smooth, hard_edges, flat")
         if self.hard_edge_angle <= 0.0 or self.hard_edge_angle > 180.0:
             raise ValueError("hard_edge_angle must be greater than 0 and no more than 180")
-        if self.uv0 not in {"none", "box", "unwrap"}:
-            raise ValueError("uv0 must be one of: none, box, unwrap")
-        if self.uv1 not in {None, "none", "box", "unwrap"}:
-            raise ValueError("uv1 must be one of: none, box, unwrap")
+        if self.uv0 not in {"none", "box", "unwrap", "lightmap"}:
+            raise ValueError("uv0 must be one of: none, box, unwrap, lightmap")
+        if self.uv1 not in {None, "none", "box", "unwrap", "lightmap"}:
+            raise ValueError("uv1 must be one of: none, box, unwrap, lightmap")
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

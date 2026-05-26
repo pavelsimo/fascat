@@ -39,12 +39,16 @@ asset = asset.repair(
 asset = asset.stage(
     fc.StageOptions(
         materials="cad",
+        material_mode="cad",
+        merge_equivalent_materials=False,
         normals=True,
         normal_mode="smooth",
         hard_edge_angle=30.0,
         preserve_face_boundaries=False,
         tangents=False,
         validate_normals=False,
+        unwrap=fc.UnwrapOptions(),
+        atlas=fc.AtlasOptions(),
         uv0="box",
         uv1=None,
     )
@@ -262,6 +266,33 @@ asset = asset.stage(
 ```
 
 Tangents require UV0. glTF export writes a `TANGENT` vertex attribute when staged meshes contain tangent data.
+
+## UV And Material Pipeline
+
+Staging can merge equivalent CAD materials, normalize simple CAD colors into PBR-friendly material values, tag UV unwrap settings, generate lightmap UV channels, and attach material-atlas metadata for later baking.
+
+```python
+asset = asset.stage(
+    fc.StageOptions(
+        materials="cad",
+        material_mode="pbr",
+        merge_equivalent_materials=True,
+        uv0="unwrap",
+        uv1="lightmap",
+        unwrap=fc.UnwrapOptions(
+            texel_density=256.0,
+            padding=4,
+            max_stretch=0.15,
+        ),
+        atlas=fc.AtlasOptions(
+            enabled=True,
+            max_size=4096,
+        ),
+    )
+)
+```
+
+Atlas support currently records atlas and texture-bake metadata on materials and meshes. Dedicated material baking is a separate optimization step.
 
 ## One-shot conversion
 

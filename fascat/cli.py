@@ -19,6 +19,7 @@ from fascat.filter import Filter, FilterExpressionError
 from fascat.io.gltf import GLTF_SUFFIXES
 from fascat.io.step import read_step, read_step_bytes
 from fascat.options import (
+    AtlasOptions,
     BrepHealOptions,
     LODOptions,
     MergeOptions,
@@ -26,6 +27,7 @@ from fascat.options import (
     StageOptions,
     StepReadOptions,
     Tessellation,
+    UnwrapOptions,
 )
 from fascat.pipeline import convert
 from fascat.pipeline import validate_output as validate_export
@@ -86,12 +88,18 @@ class UVMode(str, Enum):
     NONE = "none"
     BOX = "box"
     UNWRAP = "unwrap"
+    LIGHTMAP = "lightmap"
 
 
 class MaterialMode(str, Enum):
     CAD = "cad"
     DISPLAY = "display"
     NONE = "none"
+
+
+class MaterialPipelineMode(str, Enum):
+    CAD = "cad"
+    PBR = "pbr"
 
 
 class NormalMode(str, Enum):
@@ -401,6 +409,28 @@ def cmd_convert(
         MaterialMode,
         typer.Option("--materials", help="Material staging mode: cad, display, or none."),
     ] = MaterialMode.CAD,
+    material_mode: Annotated[
+        MaterialPipelineMode,
+        typer.Option("--material-mode", help="Material normalization mode: cad or pbr."),
+    ] = MaterialPipelineMode.CAD,
+    merge_equivalent_materials: Annotated[
+        bool,
+        typer.Option("--merge-equivalent-materials", help="Merge CAD materials with matching PBR values."),
+    ] = False,
+    texel_density: Annotated[
+        float | None,
+        typer.Option("--texel-density", help="UV texel density metadata for unwrap and atlas workflows."),
+    ] = None,
+    uv_padding: Annotated[
+        int,
+        typer.Option("--uv-padding", help="UV island padding metadata in pixels."),
+    ] = 2,
+    max_stretch: Annotated[
+        float | None,
+        typer.Option("--max-stretch", help="Maximum UV stretch metadata for unwrap workflows."),
+    ] = None,
+    atlas: Annotated[bool, typer.Option("--atlas", help="Tag materials and UVs for a generated atlas.")] = False,
+    atlas_size: Annotated[int, typer.Option("--atlas-size", help="Maximum atlas texture size.")] = 4096,
     metadata: Annotated[
         MetadataMode,
         typer.Option("--metadata", help="Metadata import/export mode: none, summary, or full."),
@@ -518,6 +548,13 @@ def cmd_convert(
         "uv0": uv0.value,
         "uv1": uv1.value,
         "materials": materials.value,
+        "material_mode": material_mode.value,
+        "merge_equivalent_materials": merge_equivalent_materials,
+        "texel_density": texel_density,
+        "uv_padding": uv_padding,
+        "max_stretch": max_stretch,
+        "atlas": atlas,
+        "atlas_size": atlas_size,
         "metadata": metadata.value,
         "pmi": pmi.value,
         "merge": merge,
@@ -581,6 +618,14 @@ def cmd_convert(
         _fail(ctx, payload, "--hard-edge-angle must be greater than 0 and no more than 180.", code=2)
     if small_part_triangle_threshold < 0:
         _fail(ctx, payload, "--small-part-triangle-threshold must be greater than or equal to 0.", code=2)
+    if texel_density is not None and texel_density <= 0.0:
+        _fail(ctx, payload, "--texel-density must be greater than 0.", code=2)
+    if uv_padding < 0:
+        _fail(ctx, payload, "--uv-padding must be greater than or equal to 0.", code=2)
+    if max_stretch is not None and max_stretch < 0.0:
+        _fail(ctx, payload, "--max-stretch must be greater than or equal to 0.", code=2)
+    if atlas_size <= 0:
+        _fail(ctx, payload, "--atlas-size must be greater than 0.", code=2)
     if debug and not _is_stdio(output_path) and output_path.suffix.lower() not in {".usd", ".usda"}:
         _fail(ctx, payload, "--debug requires .usd or .usda output.", code=2)
     if quality_report is not None and report is not None and quality_report.resolve() == report.resolve():
@@ -631,12 +676,16 @@ def cmd_convert(
         stage_options = replace(
             profile_options.stage,
             materials=materials.value,
+            material_mode=material_mode.value,
+            merge_equivalent_materials=merge_equivalent_materials,
             normals=normals != NormalMode.NONE,
             normal_mode=cast(Any, normals.value.replace("-", "_")),
             hard_edge_angle=hard_edge_angle,
             preserve_face_boundaries=preserve_face_boundaries,
             tangents=tangents,
             validate_normals=validate_normals,
+            unwrap=UnwrapOptions(texel_density=texel_density, padding=uv_padding, max_stretch=max_stretch),
+            atlas=AtlasOptions(enabled=atlas, max_size=atlas_size),
             uv0=uv0.value,
             uv1=uv1.value,
         )

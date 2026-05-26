@@ -60,9 +60,16 @@ fascat inspect input.step --json
 | `--preserve-face-boundaries` | `false` | Treat CAD face-group boundaries as hard normal edges |
 | `--tangents` | `false` | Generate glTF-compatible vertex tangents from UV0 |
 | `--validate-normals` | `false` | Validate staged normals and tangents |
-| `--uv0` | `box` | UV0 generation mode: `none`, `box`, or `unwrap` |
-| `--uv1` | `none` | UV1 generation mode: `none`, `box`, or `unwrap` |
+| `--uv0` | `box` | UV0 generation mode: `none`, `box`, `unwrap`, or `lightmap` |
+| `--uv1` | `none` | UV1 generation mode: `none`, `box`, `unwrap`, or `lightmap` |
 | `--materials` | `cad` | Material staging mode: `cad`, `display`, or `none` |
+| `--material-mode` | `cad` | Material normalization mode: `cad` or `pbr` |
+| `--merge-equivalent-materials` | `false` | Merge CAD materials with matching PBR values |
+| `--texel-density` | unset | UV texel density metadata for unwrap and atlas workflows |
+| `--uv-padding` | `2` | UV island padding metadata in pixels |
+| `--max-stretch` | unset | Maximum UV stretch metadata for unwrap workflows |
+| `--atlas` | `false` | Tag materials and UVs for a generated atlas |
+| `--atlas-size` | `4096` | Maximum atlas texture size |
 | `--metadata` | `full` | Metadata import/export mode: `none`, `summary`, or `full` |
 | `--pmi` | `metadata` | PMI import/export mode: `none`, `metadata`, or `metadata-and-visuals` |
 | `--filter` | unset | Scope optimization and LOD work with a selector such as `path=*/Fasteners/*` |

@@ -71,8 +71,14 @@ fascat convert input.step output.usdc \
   --normals hard-edges \
   --tangents \
   --validate-normals \
-  --materials display \
-  --uv1 box \
+  --materials cad \
+  --material-mode pbr \
+  --merge-equivalent-materials \
+  --uv1 lightmap \
+  --texel-density 256 \
+  --uv-padding 4 \
+  --atlas \
+  --atlas-size 4096 \
   --lods 0.5,0.25,0.1
 ```
 

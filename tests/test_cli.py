@@ -114,6 +114,8 @@ def test_convert_help() -> None:
     assert "--max-edge-length" in plain(result.output)
     assert "--quality-report" in plain(result.output)
     assert "--materials" in plain(result.output)
+    assert "--material-mode" in plain(result.output)
+    assert "--atlas-size" in plain(result.output)
     assert "--normals" in plain(result.output)
     assert "--tangents" in plain(result.output)
     assert "--uv1" in plain(result.output)
@@ -853,6 +855,20 @@ def test_convert_rejects_invalid_small_part_threshold(capsys) -> None:  # type: 
     )
     assert result.exit_code == 2
     assert "--small-part-triangle-threshold must be greater than or equal to 0" in result.stderr
+
+
+def test_convert_rejects_invalid_uv_pipeline_values(capsys) -> None:  # type: ignore[no-untyped-def]
+    result = invoke_run(["--dry-run", "convert", "input.step", "output.usdc", "--texel-density", "0"], capsys)
+    assert result.exit_code == 2
+    assert "--texel-density must be greater than 0" in result.stderr
+
+    result = invoke_run(["--dry-run", "convert", "input.step", "output.usdc", "--uv-padding", "-1"], capsys)
+    assert result.exit_code == 2
+    assert "--uv-padding must be greater than or equal to 0" in result.stderr
+
+    result = invoke_run(["--dry-run", "convert", "input.step", "output.usdc", "--atlas-size", "0"], capsys)
+    assert result.exit_code == 2
+    assert "--atlas-size must be greater than 0" in result.stderr
 
 
 def test_convert_rejects_invalid_lods_as_json(capsys) -> None:  # type: ignore[no-untyped-def]

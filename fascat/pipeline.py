@@ -13,6 +13,7 @@ from fascat.io.step import read_step
 from fascat.io.usd import validate_usd
 from fascat.io.usd import write_usd as _write_usd
 from fascat.options import (
+    AtlasOptions,
     BrepHealOptions,
     ConversionProfile,
     LODOptions,
@@ -21,6 +22,7 @@ from fascat.options import (
     StageOptions,
     StepReadOptions,
     Tessellation,
+    UnwrapOptions,
     UVMode,
 )
 from fascat.report import timed_step
@@ -271,12 +273,16 @@ def stage(
     asset: Asset,
     *,
     materials: Literal["cad", "display", "none"] = "cad",
+    material_mode: Literal["cad", "pbr"] = "cad",
+    merge_equivalent_materials: bool = False,
     normals: bool = True,
     normal_mode: Literal["none", "smooth", "hard_edges", "flat"] = "smooth",
     hard_edge_angle: float = 30.0,
     preserve_face_boundaries: bool = False,
     tangents: bool = False,
     validate_normals: bool = False,
+    unwrap: UnwrapOptions | None = None,
+    atlas: AtlasOptions | None = None,
     uv0: UVMode = "box",
     uv1: UVMode | None = None,
     where: Filter | None = None,
@@ -284,12 +290,16 @@ def stage(
     return asset.stage(
         StageOptions(
             materials=materials,
+            material_mode=material_mode,
+            merge_equivalent_materials=merge_equivalent_materials,
             normals=normals,
             normal_mode=normal_mode,
             hard_edge_angle=hard_edge_angle,
             preserve_face_boundaries=preserve_face_boundaries,
             tangents=tangents,
             validate_normals=validate_normals,
+            unwrap=unwrap or UnwrapOptions(),
+            atlas=atlas or AtlasOptions(),
             uv0=uv0,
             uv1=uv1,
         ),
