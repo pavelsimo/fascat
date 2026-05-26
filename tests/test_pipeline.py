@@ -141,7 +141,7 @@ def test_convert_report_includes_timed_write_and_validate_steps(monkeypatch, tmp
     asset = _triangle_asset()
     written: dict[str, object] = {}
 
-    monkeypatch.setattr(pipeline, "read_cad", lambda _path: asset)
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: asset)
 
     def fake_write_usd(asset: Asset, path: str | Path, *, debug: bool = False) -> None:
         written["path"] = str(path)
@@ -181,7 +181,7 @@ def test_convert_dispatches_gltf_writer_and_validator(monkeypatch, tmp_path: Pat
     asset = _triangle_asset()
     written: dict[str, object] = {}
 
-    monkeypatch.setattr(pipeline, "read_cad", lambda _path: asset)
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: asset)
 
     def fake_write_gltf(asset: Asset, path: str | Path) -> None:
         written["path"] = str(path)
@@ -204,28 +204,10 @@ def test_convert_dispatches_gltf_writer_and_validator(monkeypatch, tmp_path: Pat
     assert steps["validate"].after["validated_triangles"] == 1
 
 
-def test_convert_reads_cad_input_by_suffix(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
-
-    captured: dict[str, object] = {}
-
-    def fake_read_cad(path: str | Path) -> Asset:
-        captured["input"] = str(path)
-        return _triangle_asset()
-
-    monkeypatch.setattr(pipeline, "read_cad", fake_read_cad)
-    monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False: None)
-    monkeypatch.setattr(pipeline, "validate_usd", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
-
-    convert("input.jt", tmp_path / "output.usdc", profile=_test_profile())
-
-    assert captured["input"] == "input.jt"
-
-
 def test_convert_report_output_stats_include_lod_totals(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     import fascat.pipeline as pipeline
 
-    monkeypatch.setattr(pipeline, "read_cad", lambda _path: _triangle_asset())
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
     monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False: None)
     monkeypatch.setattr(pipeline, "validate_usd", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
 
@@ -246,7 +228,7 @@ def test_convert_report_output_stats_include_lod_totals(monkeypatch, tmp_path: P
 def test_convert_report_finishes_when_validation_is_disabled(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     import fascat.pipeline as pipeline
 
-    monkeypatch.setattr(pipeline, "read_cad", lambda _path: _triangle_asset())
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
     monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False: None)
 
     converted = convert(
@@ -265,7 +247,7 @@ def test_convert_report_records_write_failure(monkeypatch, tmp_path: Path) -> No
     import fascat.pipeline as pipeline
 
     captured: dict[str, Asset] = {}
-    monkeypatch.setattr(pipeline, "read_cad", lambda _path: _triangle_asset())
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
 
     def fail_write_usd(asset: Asset, _path: str | Path, *, debug: bool = False) -> None:
         captured["asset"] = asset
@@ -290,7 +272,7 @@ def test_convert_report_records_validation_failure(monkeypatch, tmp_path: Path) 
     import fascat.pipeline as pipeline
 
     captured: dict[str, Asset] = {}
-    monkeypatch.setattr(pipeline, "read_cad", lambda _path: _triangle_asset())
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
     monkeypatch.setattr(
         pipeline, "_write_usd", lambda asset, _path, *, debug=False: captured.setdefault("asset", asset)
     )

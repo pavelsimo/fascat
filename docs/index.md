@@ -1,13 +1,13 @@
 ---
 title: fascat
-description: convert CAD assemblies into realtime-ready OpenUSD and glTF assets
+description: convert CAD STEP data into realtime-ready OpenUSD and glTF assets
 ---
 
-Fascat converts CAD assemblies into realtime-ready OpenUSD and glTF assets while preserving hierarchy, materials, transforms, and repeated parts where possible.
+Fascat converts CAD STEP assemblies into realtime-ready OpenUSD and glTF assets while preserving hierarchy, materials, transforms, and repeated parts where possible.
 
 ## Why fascat
 
-- **Focused** — V1 supports STEP input and a direct JT reader when native JT bindings are installed
+- **Focused** — V1 supports one import path well: STEP in, OpenUSD or glTF out
 - **Scriptable** — command results can be emitted as JSON for pipeline use
 - **Inspectable** — conversion reports expose options, warnings, timings, and mesh statistics
 - **Conservative** — lossy operations are explicit and controlled by profiles or flags

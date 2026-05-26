@@ -29,8 +29,8 @@ fascat inspect input.step --json
 
 | Command | Description |
 |---------|-------------|
-| `fascat inspect input.step` | Inspect CAD assembly metadata and planned conversion inputs |
-| `fascat convert input.step [output.usdc]` | Convert CAD into OpenUSD or glTF |
+| `fascat inspect input.step` | Inspect STEP assembly metadata and planned conversion inputs |
+| `fascat convert input.step [output.usdc]` | Convert STEP CAD into OpenUSD or glTF |
 | `fascat validate output.usdc` | Validate generated USD or glTF output |
 | `fascat help [command]` | Show top-level or command-specific help |
 | `fascat version` | Print version and exit |
@@ -68,11 +68,7 @@ When the convert output argument is omitted for a file input, Fascat writes besi
 
 When output is `-`, USD bytes are reserved for stdout and progress/errors stay on stderr.
 
-Supported input suffixes are `.step`, `.stp`, and `.jt`.
-
 Supported output suffixes are `.usd`, `.usda`, `.usdc`, `.gltf`, and `.glb`.
-
-Direct JT import requires Open Cascade JT Import-Export bindings exposed as `OCP.JTCAFControl`. When those bindings are unavailable, `inspect` and `convert` fail before processing with a backend error.
 
 `--debug` is only valid with `.usd` or `.usda` output. Binary `.usdc`, `.gltf`, and `.glb` output is rejected when debug mode is enabled.
 

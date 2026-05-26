@@ -8,7 +8,7 @@ from fascat import profiles
 from fascat.asset import Asset
 from fascat.io.gltf import GLTF_SUFFIXES, validate_gltf
 from fascat.io.gltf import write_gltf as _write_gltf
-from fascat.io.importer import read_cad
+from fascat.io.step import read_step
 from fascat.io.usd import validate_usd
 from fascat.io.usd import write_usd as _write_usd
 from fascat.options import ConversionProfile, LODOptions, OptimizeOptions, StageOptions, Tessellation, UVMode
@@ -35,7 +35,7 @@ def convert(
     if debug and output_format != "usd":
         raise ValueError("--debug is only supported for .usd or .usda exports")
     selected = profiles.by_name(profile) if isinstance(profile, str) else profile
-    asset = read_cad(input_path)
+    asset = read_step(input_path)
     if progress is not None:
         progress("source", asset.stats())
     tessellation_options = tessellation or selected.tessellation

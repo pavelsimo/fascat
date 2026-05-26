@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import tempfile
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -20,37 +19,18 @@ def read_step(path: str | Path) -> Asset:
     return _read_step_path(source, source_identity=str(source.resolve()))
 
 
-def _read_step_path(source: Path, *, source_identity: str, display_name: str | None = None) -> Asset:
+def _read_step_path(source: Path, *, source_identity: str) -> Asset:
     if not source.exists():
         raise FileNotFoundError(f"missing STEP file: {source}")
     if source.suffix.lower() not in {".step", ".stp"}:
         raise ValueError(f"unsupported STEP extension: {source.suffix or '<none>'}")
 
-    return _read_xde_path(
-        source,
-        source_identity=source_identity,
-        display_name=display_name,
-        import_format="STEP",
-        backend="OCP",
-        reader=_read_xde_document,
-    )
-
-
-def _read_xde_path(
-    source: Path,
-    *,
-    source_identity: str,
-    import_format: str,
-    backend: str,
-    reader: Callable[[Path], tuple[Any, Any, Any, str, float]],
-    display_name: str | None = None,
-) -> Asset:
     with timed_step() as timer:
-        document, shape_tool, color_tool, unit_name, meters_per_unit = reader(source)
+        document, shape_tool, color_tool, unit_name, meters_per_unit = _read_xde_document(source)
         free_labels = _free_shape_labels(shape_tool)
         root = Node(
             id=_stable_id("node", f"{source_identity}:root"),
-            name=display_name or source.stem,
+            name=source.stem,
             metadata={"source": str(source), "source_identity": source_identity},
         )
         parts: dict[str, Part] = {}
@@ -84,7 +64,7 @@ def _read_xde_path(
     asset.report.input_stats = asset.stats()
     asset.report.add_step(
         "import",
-        options={"format": import_format, "backend": backend},
+        options={"format": "STEP", "backend": "OCP"},
         before={"nodes": 0, "parts": 0, "occurrences": 0, "materials": 0, "vertices": 0, "triangles": 0},
         after=asset.stats(),
         duration=timer.duration,

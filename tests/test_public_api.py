@@ -8,12 +8,6 @@ import pytest
 import fascat as fc
 
 
-def test_public_api_exports_cad_importers() -> None:
-    assert callable(fc.read_cad)
-    assert callable(fc.read_step)
-    assert callable(fc.read_jt)
-
-
 def test_functional_api_wraps_asset_operations() -> None:
     mesh = fc.Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),

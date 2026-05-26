@@ -1,10 +1,8 @@
-"""Convert CAD data into realtime-ready OpenUSD and glTF assets."""
+"""Convert CAD STEP data into realtime-ready OpenUSD and glTF assets."""
 
 from fascat import profiles
 from fascat.asset import Asset, Node, Part
 from fascat.io.gltf import validate_gltf
-from fascat.io.importer import read_cad
-from fascat.io.jt import read_jt
 from fascat.io.step import read_step
 from fascat.io.usd import validate_usd
 from fascat.material import Material
@@ -31,8 +29,6 @@ __all__ = [
     "lods",
     "optimize",
     "profiles",
-    "read_cad",
-    "read_jt",
     "read_step",
     "repair",
     "stage",

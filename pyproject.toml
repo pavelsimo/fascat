@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "fascat"
 dynamic = ["version"]
-description = "convert CAD assemblies into realtime-ready OpenUSD and glTF assets"
+description = "convert CAD STEP data into realtime-ready OpenUSD and glTF assets"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "pavelsimo" }]
-keywords = ["cad", "cli", "gltf", "jt", "openusd", "step", "usd"]
+keywords = ["cad", "cli", "gltf", "openusd", "step", "usd"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -106,7 +106,6 @@ testpaths = ["tests"]
 addopts = "--cov=fascat --cov-report=term-missing"
 markers = [
     "requires_ocp: requires the cadquery-ocp STEP backend",
-    "requires_jt: requires native Open Cascade JT Import-Export bindings",
     "requires_usd: requires the usd-core OpenUSD backend",
     "requires_xatlas: requires the xatlas UV unwrap backend",
 ]

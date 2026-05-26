@@ -9,7 +9,6 @@ import numpy as np
 import pytest
 
 from fascat.asset import Asset, Node, Part
-from fascat.io.jt import read_jt
 from fascat.io.step import read_step
 from fascat.io.usd import validate_usd, write_usd
 from fascat.mesh import Mesh
@@ -45,15 +44,6 @@ def test_step_import_reports_missing_ocp_backend(monkeypatch: pytest.MonkeyPatch
 
     with pytest.raises(RuntimeError, match="STEP import requires cadquery-ocp"):
         read_step(step_file)
-
-
-def test_jt_import_reports_missing_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    _block_imports(monkeypatch, "OCP")
-    jt_file = tmp_path / "input.jt"
-    jt_file.write_bytes(b"fake jt")
-
-    with pytest.raises(RuntimeError, match="JT import requires"):
-        read_jt(jt_file)
 
 
 def test_step_tessellation_reports_missing_ocp_backend(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -7,7 +7,7 @@ Fascat is a Python library and CLI for converting CAD data into realtime-ready O
 The first version should support one focused pipeline:
 
 ```text
-STEP/JT CAD -> imported assembly -> tessellated meshes -> repaired meshes -> staged materials and UVs -> optimized LODs -> OpenUSD/glTF
+STEP CAD -> imported assembly -> tessellated meshes -> repaired meshes -> staged materials and UVs -> optimized LODs -> OpenUSD/glTF
 ```
 
 Fascat takes guidance from Unity Asset Transformer SDK / Pixyz, but it is not a Pixyz clone. The goal is to define the minimum useful subset for high-quality CAD-to-realtime conversion, while relying on proven geometry libraries instead of reimplementing CAD kernels, tessellators, decimators, UV packers, or USD authoring from scratch.
@@ -40,7 +40,7 @@ The license is MIT. `AGENTS.md` is the canonical repository instruction file.
 - Optimize unique parts, not repeated occurrences.
 - Generate OpenUSD and glTF that are inspectable, standards-aligned, and friendly to realtime runtimes.
 - Prefer robust partial success with warnings over silent data loss.
-- Keep V1 narrow: STEP or direct JT in, realtime OpenUSD or glTF out.
+- Keep V1 narrow: STEP in, realtime OpenUSD or glTF out.
 
 ## 4. Research Summary
 
@@ -79,7 +79,6 @@ Important Unity references:
 ### Included
 
 - STEP import.
-- Direct JT import when Open Cascade JT Import-Export bindings are available as `OCP.JTCAFControl`.
 - Assembly hierarchy preservation.
 - Part names, transforms, units, colors, and simple metadata where available.
 - Repeated part detection and OpenUSD instancing.
@@ -115,7 +114,7 @@ Important Unity references:
 
 ### Deferred
 
-- More CAD formats beyond STEP/JT.
+- More CAD formats.
 - Occlusion removal.
 - Visual footprint.
 - AO baking.
@@ -136,9 +135,7 @@ Important Unity references:
 ```mermaid
 flowchart TD
     A["STEP file"] --> B["STEP importer<br/>OCP / OCCT XDE"]
-    JT["JT file"] --> JTI["JT importer<br/>OCP JTCAFControl / XDE"]
     B --> C["Fascat Asset<br/>scene tree, parts, metadata"]
-    JTI --> C
     C --> D["Tessellator<br/>OCCT BRepMesh"]
     D --> E["Mesh Store<br/>NumPy arrays"]
     E --> F["Repair<br/>trimesh + Fascat cleanup"]
@@ -156,9 +153,7 @@ flowchart TD
 flowchart LR
     subgraph PublicAPI["fascat public API"]
         Convert["convert()"]
-        ReadCAD["read_cad()"]
         ReadStep["read_step()"]
-        ReadJT["read_jt()"]
         Asset["Asset"]
         Profiles["profiles"]
     end
@@ -179,11 +174,8 @@ flowchart LR
         USD["usd-core"]
     end
 
-    Convert --> ReadCAD
-    ReadCAD --> ReadStep
-    ReadCAD --> ReadJT
+    Convert --> ReadStep
     ReadStep --> Asset
-    ReadJT --> Asset
     Asset --> Ops
     Ops --> Scene
     Ops --> Mesh
@@ -258,7 +250,6 @@ Core dependencies:
 Geometry and asset dependencies:
 
 - `cadquery-ocp`: Python bindings to Open CASCADE for STEP import and CAD tessellation.
-- Open Cascade JT Import-Export bindings: optional native JT reader exposed as `OCP.JTCAFControl`.
 - `trimesh`: mesh validation and repair helpers.
 - `fast-simplification`: triangle reduction.
 - `meshoptimizer`: vertex/index optimization.
@@ -274,7 +265,6 @@ Dependency policy:
 - Do not include PyMeshLab in V1 core because of licensing concerns.
 - Consider PyMeshLab later as an explicitly optional plugin if the project needs more advanced mesh processing.
 - Optional backends must fail with clear errors when requested but unavailable.
-- Direct JT import must fail clearly when `OCP.JTCAFControl` is not installed. Fascat should not silently convert JT through STEP.
 
 ## 9. Data Model
 
@@ -390,7 +380,7 @@ Primary fluent workflow:
 ```python
 import fascat as fc
 
-asset = fc.read_cad("motor.step")
+asset = fc.read_step("motor.step")
 
 asset = asset.tessellate(
     fc.Tessellation(
@@ -461,7 +451,7 @@ Functional style:
 ```python
 import fascat as fc
 
-asset = fc.read_cad("assembly.step")
+asset = fc.read_step("assembly.step")
 asset = fc.tessellate(asset, sag=0.1, angle=15)
 asset = fc.repair(asset, tolerance=0.05)
 asset = fc.optimize(asset, ratio=0.4)
@@ -472,7 +462,7 @@ fc.write_gltf(asset, "assembly.glb")
 Inspection:
 
 ```python
-asset = fc.read_cad("gearbox.step")
+asset = fc.read_step("gearbox.step")
 
 print(asset.report.summary())
 print(asset.triangle_count)
@@ -485,9 +475,7 @@ Commands:
 
 ```bash
 fascat inspect input.step
-fascat inspect input.jt
 fascat convert input.step output.usdc
-fascat convert input.jt output.usdc
 fascat convert input.step output.glb --profile virtual-reality
 fascat validate output.usdc
 fascat validate output.glb
@@ -528,8 +516,6 @@ Use `cadquery-ocp` and OCCT XDE APIs.
 Implementation targets:
 
 - Use `STEPCAFControl_Reader` for STEP assemblies.
-- Use `JTCAFControl_Reader` for direct JT assemblies when the Open Cascade JT Import-Export component is available.
-- Do not implement JT by routing through STEP conversion inside Fascat.
 - Preserve labels, names, colors, transforms, and units where exposed.
 - Traverse XDE document labels into `Node` and `Part`.
 - Keep source BREP shapes attached to `Part.source_shape` until tessellation.
@@ -809,13 +795,6 @@ STEP tests:
 - Test tessellation dedupe preserves distinct per-face material assignments.
 - Mark OCP-backed tests with `pytest.mark.requires_ocp`.
 
-JT tests:
-
-- Test `.jt` dispatch through the public `read_cad()` and `convert()` input path.
-- Test missing native JT backend errors are explicit.
-- Test direct native JT reader integration with a license-clean fixture when `OCP.JTCAFControl` is available.
-- Mark native JT-backed tests with `pytest.mark.requires_jt`.
-
 CLI tests:
 
 - `fascat --help`
@@ -891,7 +870,6 @@ CLI tests:
 Fascat V1 is done when:
 
 - A user can run `fascat convert model.step model.usdc`.
-- A user can run `fascat convert model.jt model.usdc` when native JT bindings are installed.
 - A user can run `fascat convert model.step model.glb --profile virtual-reality`.
 - The output USD opens through `usd-core`.
 - The output glTF validates through Fascat's glTF validator.
