@@ -150,6 +150,19 @@ def test_convert_missing_input_file_fails_before_processing(capsys) -> None:  # 
     assert result.stdout == ""
 
 
+def test_convert_rejects_inspect_only_profile_before_processing(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    input_file = tmp_path / "input.step"
+    input_file.write_text("ISO-10303-21;", encoding="utf-8")
+
+    result = invoke_run(
+        ["convert", str(input_file), str(tmp_path / "output.usdc"), "--profile", "inspect-only"], capsys
+    )
+
+    assert result.exit_code == 2
+    assert "The inspect-only profile cannot be used for conversion." in result.stderr
+    assert result.stdout == ""
+
+
 @pytest.mark.requires_ocp
 def test_inspect_fixture_reports_stats() -> None:
     result = runner.invoke(app, ["inspect", "tests/fixtures/spool-clamp-lid.step"])
