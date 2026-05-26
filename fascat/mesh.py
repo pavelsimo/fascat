@@ -133,9 +133,12 @@ class Mesh:
             mesh = mesh.remove_degenerate_faces(opts.area_epsilon)
         if opts.fix_winding:
             mesh = mesh.fix_winding()
-        if opts.fill_small_holes:
-            mesh = mesh.fill_holes()
         mesh = mesh.compute_normals()
+        if opts.fill_small_holes:
+            previous_triangle_count = mesh.triangle_count
+            mesh = mesh.fill_holes()
+            if mesh.triangle_count != previous_triangle_count:
+                mesh = mesh.compute_normals()
         mesh.validate()
         return mesh
 
@@ -605,10 +608,21 @@ class Mesh:
         )
 
     def to_dict(self) -> dict[str, Any]:
+        material_indices = None
+        if self.material_indices is not None:
+            material_indices = {
+                "count": int(self.material_indices.shape[0]),
+                "unique": sorted({int(value) for value in self.material_indices.tolist()}),
+            }
         return {
             "vertices": self.vertex_count,
             "triangles": self.triangle_count,
             "uv_channels": sorted(self.uvs),
             "has_normals": self.normals is not None,
+            "material_indices": material_indices,
+            "face_groups": {
+                name: {"count": int(values.shape[0]), "indices": values.astype(int).tolist()}
+                for name, values in self.face_groups.items()
+            },
             "metadata": dict(self.metadata),
         }

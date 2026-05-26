@@ -685,6 +685,8 @@ Unit tests:
 - Mesh validation rejects out-of-range indices.
 - Mesh enforces `max_edge_length` subdivision.
 - Hole filling stays disabled for open planar sheets and limited to small non-planar boundaries.
+- Repair sequence computes normals before optional hole filling and refreshes them when holes are filled.
+- Mesh dictionaries expose material-index and face-group summaries.
 - Mesh preserves UVs and material indices through buffer optimization.
 - Mesh preserves material indices and face groups when filtering faces during repair.
 - Mesh preserves material indices and face groups when winding repair reorders faces.

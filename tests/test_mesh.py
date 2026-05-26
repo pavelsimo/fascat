@@ -236,6 +236,52 @@ def test_mesh_validation_rejects_invalid_face_group_indices() -> None:
         mesh.validate()
 
 
+def test_repair_computes_normals_around_optional_hole_fill(monkeypatch: pytest.MonkeyPatch) -> None:
+    order: list[str] = []
+    original_compute_normals = Mesh.compute_normals
+    original_fill_holes = Mesh.fill_holes
+
+    def tracked_fix_winding(self: Mesh) -> Mesh:
+        order.append("fix_winding")
+        return self.copy()
+
+    def tracked_compute_normals(self: Mesh, *, angle_weighted: bool = True) -> Mesh:
+        order.append("compute_normals")
+        return original_compute_normals(self, angle_weighted=angle_weighted)
+
+    def tracked_fill_holes(self: Mesh) -> Mesh:
+        order.append("fill_holes")
+        return original_fill_holes(self)
+
+    monkeypatch.setattr(Mesh, "fix_winding", tracked_fix_winding)
+    monkeypatch.setattr(Mesh, "compute_normals", tracked_compute_normals)
+    monkeypatch.setattr(Mesh, "fill_holes", tracked_fill_holes)
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float),
+        faces=np.array([[0, 2, 1], [0, 1, 3], [1, 2, 3]], dtype=int),
+    )
+
+    repaired = mesh.repair(RepairOptions(fill_small_holes=True))
+
+    assert order == ["fix_winding", "compute_normals", "fill_holes", "compute_normals"]
+    assert repaired.normals is not None
+    assert repaired.triangle_count == 4
+
+
+def test_mesh_to_dict_exposes_material_and_face_group_summary() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [2, 1, 3]], dtype=int),
+        material_indices=np.array([2, 5], dtype=int),
+        face_groups={"panel": np.array([1], dtype=int)},
+    )
+
+    payload = mesh.to_dict()
+
+    assert payload["material_indices"] == {"count": 2, "unique": [2, 5]}
+    assert payload["face_groups"] == {"panel": {"count": 1, "indices": [1]}}
+
+
 def test_fill_holes_is_limited_to_small_non_planar_boundaries() -> None:
     open_sheet = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
