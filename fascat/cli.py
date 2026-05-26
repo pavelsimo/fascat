@@ -166,15 +166,17 @@ def cmd_inspect(
         return
 
     asset = _read_step_for_cli(input_path, ctx, payload)
+    profile_options = by_name(profile.value)
     result = {
         **payload,
         "units": asset.units,
         "meters_per_unit": asset.meters_per_unit,
         "up_axis": asset.up_axis,
         "stats": asset.stats(),
-        "parts": [
-            {"id": part.id, "name": part.name, "materials": list(part.material_ids)} for part in asset.parts.values()
-        ],
+        "options": profile_options.to_dict(),
+        "root": asset.root.to_dict(),
+        "parts": [part.to_dict() for part in asset.parts.values()],
+        "materials": [material.to_dict() for material in asset.materials.values()],
         "report": asset.report.to_dict(),
     }
     _emit(ctx, result, f"{input_path}: {_format_stats(asset.stats())}; units={asset.units}")

@@ -133,6 +133,16 @@ def test_inspect_fixture_reports_stats() -> None:
     assert "1 parts" in result.output
     assert "units=millimetre" in result.output
 
+    json_result = runner.invoke(app, ["--json", "inspect", "tests/fixtures/spool-clamp-lid.step"])
+    assert json_result.exit_code == 0
+    payload = json.loads(json_result.output)
+    assert payload["options"]["name"] == "inspect-only"
+    assert payload["root"]["id"]
+    assert "children" in payload["root"]
+    assert payload["root"]["transform"][3] == [0.0, 0.0, 0.0, 1.0]
+    assert payload["parts"][0]["has_source_shape"] is True
+    assert "report" in payload
+
 
 @pytest.mark.requires_ocp
 @pytest.mark.requires_usd

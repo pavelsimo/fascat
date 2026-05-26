@@ -687,6 +687,8 @@ Unit tests:
 - Hole filling stays disabled for open planar sheets and limited to small non-planar boundaries.
 - Mesh preserves UVs and material indices through buffer optimization.
 - Mesh preserves material indices and face groups when filtering faces during repair.
+- Mesh preserves material indices and face groups when winding repair reorders faces.
+- Mesh validation rejects invalid face-group indices.
 - `xatlas` unwrap tests are marked with `pytest.mark.requires_xatlas`.
 
 Pipeline tests:
@@ -713,6 +715,8 @@ USD tests:
 - Assert materials bind correctly.
 - Assert UV0 primvars, normals, and sanitized-name original metadata are authored.
 - Assert non-identity node transforms are authored as USD Xform ops.
+- Assert mesh extents are authored.
+- Assert both `Asset.write_usd()` and `fc.write_usd()` write valid stages.
 - Assert `displayColor` fallback is authored.
 - Assert per-face material subsets are authored when material indices require them.
 - Assert LOD variants exist with `lod0` selected when requested.
@@ -734,6 +738,7 @@ CLI tests:
 
 - `fascat --help`
 - `fascat inspect fixture.step`
+- `fascat inspect --json fixture.step` exposes profile options, hierarchy root, transforms, parts, materials, and report data.
 - `fascat convert fixture.step output.usda`
 - `fascat validate output.usda`
 - `fascat convert` rejects `--debug` with binary `.usdc`.

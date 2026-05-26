@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import fascat as fc
 from fascat.asset import Asset, Node, Part
 from fascat.io.usd import validate_usd, write_usd
 from fascat.material import Material
@@ -78,6 +79,27 @@ def test_usd_export_authors_mesh_material_units_and_lods(tmp_path: Path) -> None
     mesh_prim = next(prim for prim in Usd.PrimRange(stage.GetDefaultPrim()) if prim.IsA(UsdGeom.Mesh))
     assert UsdGeom.Mesh(mesh_prim).GetSubdivisionSchemeAttr().Get() == "none"
     assert UsdGeom.Mesh(mesh_prim).GetDisplayColorAttr().Get()[0] == (1.0, 0.0, 0.0)
+    extent = UsdGeom.Mesh(mesh_prim).GetExtentAttr().Get()
+    assert len(extent) == 2
+    assert tuple(extent[0]) == (-1.0, -1.0, -1.0)
+    assert tuple(extent[1]) == (1.0, 1.0, 1.0)
+
+
+def test_public_usd_write_apis_export_valid_stages(tmp_path: Path) -> None:
+    mesh = cube_mesh()
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Cube", part_id="cube")]),
+        parts={"cube": Part(id="cube", name="Cube", mesh=mesh)},
+        materials={},
+    )
+    method_output = tmp_path / "method.usda"
+    function_output = tmp_path / "function.usda"
+
+    asset.write_usd(method_output)
+    fc.write_usd(asset, function_output)
+
+    assert validate_usd(method_output)["triangles"] == mesh.triangle_count
+    assert validate_usd(function_output)["triangles"] == mesh.triangle_count
 
 
 def test_usd_export_authors_uv0_normals_and_original_names(tmp_path: Path) -> None:

@@ -191,6 +191,28 @@ def test_repair_drops_non_finite_faces_without_losing_material_indices() -> None
     assert repaired.material_indices.tolist() == [1]
 
 
+def test_fix_winding_preserves_face_linked_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
+    trimesh = pytest.importorskip("trimesh")
+
+    def reverse_faces(tri: object, **_kwargs: object) -> None:
+        tri.faces = tri.faces[::-1]  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(trimesh.repair, "fix_normals", reverse_faces)
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [2, 1, 3]], dtype=int),
+        material_indices=np.array([4, 9], dtype=int),
+        face_groups={"second": np.array([1], dtype=int)},
+    )
+
+    fixed = mesh.fix_winding()
+
+    assert fixed.faces.tolist() == [[2, 1, 3], [0, 1, 2]]
+    assert fixed.material_indices is not None
+    assert fixed.material_indices.tolist() == [9, 4]
+    assert fixed.face_groups["second"].tolist() == [0]
+
+
 def test_filtering_faces_remaps_face_groups() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
@@ -201,6 +223,17 @@ def test_filtering_faces_remaps_face_groups() -> None:
     repaired = mesh.remove_degenerate_faces()
 
     assert repaired.face_groups["panel"].tolist() == [0, 1]
+
+
+def test_mesh_validation_rejects_invalid_face_group_indices() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+        face_groups={"bad": np.array([1], dtype=int)},
+    )
+
+    with pytest.raises(MeshValidationError, match="face group bad"):
+        mesh.validate()
 
 
 def test_fill_holes_is_limited_to_small_non_planar_boundaries() -> None:

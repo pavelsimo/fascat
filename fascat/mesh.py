@@ -94,6 +94,15 @@ class Mesh:
                 raise MeshValidationError(f"uv channel {channel} must not contain NaN or Inf values")
         if self.material_indices is not None and self.material_indices.shape != (self.triangle_count,):
             raise MeshValidationError("material_indices must match triangle count")
+        if self.material_indices is not None and self.material_indices.size and int(self.material_indices.min()) < 0:
+            raise MeshValidationError("material_indices must not contain negative values")
+        for name, face_indices in self.face_groups.items():
+            if face_indices.ndim != 1:
+                raise MeshValidationError(f"face group {name} must be a one-dimensional array")
+            if face_indices.size and int(face_indices.min()) < 0:
+                raise MeshValidationError(f"face group {name} must not contain negative face indices")
+            if face_indices.size and int(face_indices.max()) >= self.triangle_count:
+                raise MeshValidationError(f"face group {name} must not contain out-of-range face indices")
 
     def stats(self) -> dict[str, int]:
         return {"vertices": self.vertex_count, "triangles": self.triangle_count}
@@ -122,10 +131,10 @@ class Mesh:
         mesh = mesh.remove_duplicate_faces()
         if opts.delete_degenerate:
             mesh = mesh.remove_degenerate_faces(opts.area_epsilon)
-        if opts.fill_small_holes:
-            mesh = mesh.fill_holes()
         if opts.fix_winding:
             mesh = mesh.fix_winding()
+        if opts.fill_small_holes:
+            mesh = mesh.fill_holes()
         mesh = mesh.compute_normals()
         mesh.validate()
         return mesh
@@ -482,6 +491,7 @@ class Mesh:
             mesh = self.copy()
             mesh.points = np.asarray(tri.vertices, dtype=np.float64)
             mesh.faces = np.asarray(tri.faces, dtype=np.int64)
+            mesh._remap_face_attributes_from(self)
             return mesh
         except Exception:
             return self.copy()
@@ -557,6 +567,34 @@ class Mesh:
             for name, values in self.face_groups.items()
         }
         return mesh
+
+    def _remap_face_attributes_from(self, source: Mesh) -> None:
+        if source.triangle_count != self.triangle_count or (source.material_indices is None and not source.face_groups):
+            return
+
+        old_face_indices_by_key: dict[tuple[int, int, int], list[int]] = {}
+        for index, face in enumerate(source.faces.astype(int).tolist()):
+            old_face_indices_by_key.setdefault(tuple(sorted(face)), []).append(index)
+
+        new_to_old: list[int] = []
+        for face in self.faces.astype(int).tolist():
+            candidates = old_face_indices_by_key.get(tuple(sorted(face)))
+            if not candidates:
+                return
+            new_to_old.append(candidates.pop(0))
+
+        mapping = np.asarray(new_to_old, dtype=np.int64)
+        old_to_new = {int(old_index): new_index for new_index, old_index in enumerate(mapping.tolist())}
+        if source.material_indices is not None:
+            self.material_indices = source.material_indices[mapping].copy()
+        if source.face_groups:
+            self.face_groups = {
+                name: np.asarray(
+                    [old_to_new[int(value)] for value in values.astype(int).tolist() if int(value) in old_to_new],
+                    dtype=np.int64,
+                )
+                for name, values in source.face_groups.items()
+            }
 
     def _with_geometry(self, points: FloatArray, faces: IntArray) -> Mesh:
         return Mesh(
