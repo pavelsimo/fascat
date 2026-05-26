@@ -174,6 +174,21 @@ def test_inspect_missing_step_backend_exits_nonzero(
     assert "STEP import requires cadquery-ocp" in result.output
 
 
+def test_convert_missing_step_backend_exits_nonzero(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    block_imports(monkeypatch, "OCP")
+    step_file = tmp_path / "input.step"
+    output_file = tmp_path / "output.usdc"
+    step_file.write_text("ISO-10303-21;", encoding="utf-8")
+
+    result = runner.invoke(app, ["convert", str(step_file), str(output_file)])
+
+    assert result.exit_code == 1
+    assert "STEP import requires cadquery-ocp" in result.output
+
+
 @pytest.mark.requires_ocp
 def test_inspect_reads_step_from_stdin() -> None:
     step_data = Path("tests/fixtures/spool-clamp-lid.step").read_text(encoding="utf-8")
