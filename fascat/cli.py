@@ -20,10 +20,16 @@ from fascat.io.gltf import GLTF_SUFFIXES
 from fascat.io.step import read_step, read_step_bytes
 from fascat.options import (
     AtlasOptions,
+    BakeMaterialOptions,
     BrepHealOptions,
+    DecimateOptions,
+    LODGeneratorOptions,
+    LODLevel,
     LODOptions,
     MergeOptions,
     OptimizeOptions,
+    RemoveHolesOptions,
+    RemoveOccludedOptions,
     SceneOptimizeOptions,
     StageOptions,
     StepReadOptions,
@@ -149,6 +155,35 @@ class InstancePolicy(str, Enum):
     AUTO = "auto"
     PRESERVE = "preserve"
     EXPAND = "expand"
+
+
+class DecimateCriterion(str, Enum):
+    TARGET = "target"
+    QUALITY = "quality"
+
+
+class BudgetScope(str, Enum):
+    PART = "part"
+    SELECTION = "selection"
+
+
+class OcclusionStrategy(str, Enum):
+    CONSERVATIVE = "conservative"
+    EXTERIOR = "exterior"
+    ADVANCED = "advanced"
+
+
+class OcclusionLevel(str, Enum):
+    PARTS = "parts"
+    SUBMESHES = "submeshes"
+    TRIANGLES = "triangles"
+
+
+class LODPreset(str, Enum):
+    DESKTOP = "desktop"
+    WEB = "web"
+    MOBILE = "mobile"
+    VR = "vr"
 
 
 class MetadataMode(str, Enum):
@@ -510,6 +545,122 @@ def cmd_convert(
         InstancePolicy,
         typer.Option("--instance-policy", help="Instance policy: auto, preserve, or expand."),
     ] = InstancePolicy.AUTO,
+    bake_materials: Annotated[
+        bool,
+        typer.Option("--bake-materials", help="Bake selected materials into shared texture material metadata."),
+    ] = False,
+    maps_resolution: Annotated[
+        int,
+        typer.Option("--maps-resolution", help="Bake texture resolution in pixels."),
+    ] = 2048,
+    force_uv_generation: Annotated[
+        bool,
+        typer.Option("--force-uv-generation", help="Generate UVs before material baking when needed."),
+    ] = False,
+    bake: Annotated[
+        str,
+        typer.Option("--bake", help="Comma-separated material maps to bake, for example base-color,opacity."),
+    ] = "base-color",
+    decimate: Annotated[
+        bool,
+        typer.Option("--decimate", help="Run the explicit decimation action before profile optimization."),
+    ] = False,
+    decimate_criterion: Annotated[
+        DecimateCriterion,
+        typer.Option("--decimate-criterion", help="Decimation criterion: target or quality."),
+    ] = DecimateCriterion.TARGET,
+    surface_tolerance: Annotated[
+        float | None,
+        typer.Option("--surface-tolerance", help="Surface deviation tolerance metadata for decimation."),
+    ] = None,
+    line_tolerance: Annotated[
+        float | None,
+        typer.Option("--line-tolerance", help="Hard-edge deviation tolerance metadata for decimation."),
+    ] = None,
+    normal_tolerance: Annotated[
+        float,
+        typer.Option("--normal-tolerance", help="Normal angle tolerance for decimation preservation."),
+    ] = 15.0,
+    uv_tolerance: Annotated[
+        float | None,
+        typer.Option("--uv-tolerance", help="UV deviation tolerance metadata for decimation."),
+    ] = None,
+    protect_topology: Annotated[
+        bool,
+        typer.Option("--protect-topology/--no-protect-topology", help="Preserve topology-sensitive faces."),
+    ] = True,
+    budget_scope: Annotated[
+        BudgetScope,
+        typer.Option("--budget-scope", help="Decimation budget scope: part or selection."),
+    ] = BudgetScope.SELECTION,
+    remove_holes: Annotated[
+        bool,
+        typer.Option("--remove-holes", help="Remove small hole features with mesh fallback."),
+    ] = False,
+    hole_types: Annotated[
+        str,
+        typer.Option("--hole-types", help="Comma-separated hole types: through, blind, surface."),
+    ] = "through,blind,surface",
+    max_hole_diameter: Annotated[
+        float | None,
+        typer.Option("--max-hole-diameter", help="Maximum hole diameter to remove."),
+    ] = 3.0,
+    prefer_brep: Annotated[
+        bool,
+        typer.Option("--prefer-brep/--no-prefer-brep", help="Prefer BREP feature removal when available."),
+    ] = True,
+    remove_occluded: Annotated[
+        bool,
+        typer.Option("--remove-occluded", help="Remove selected nodes hidden inside larger opaque bounds."),
+    ] = False,
+    occlusion_strategy: Annotated[
+        OcclusionStrategy,
+        typer.Option("--occlusion-strategy", help="Occlusion strategy: conservative, exterior, or advanced."),
+    ] = OcclusionStrategy.ADVANCED,
+    occlusion_level: Annotated[
+        OcclusionLevel,
+        typer.Option("--occlusion-level", help="Occlusion processing level: parts, submeshes, or triangles."),
+    ] = OcclusionLevel.TRIANGLES,
+    occlusion_precision: Annotated[
+        int,
+        typer.Option("--occlusion-precision", help="Occlusion precision preset or sample resolution."),
+    ] = 2048,
+    hemi_evaluation: Annotated[
+        bool,
+        typer.Option("--hemi-evaluation", help="Use hemispherical top/side occlusion evaluation metadata."),
+    ] = False,
+    neighbors_preservation: Annotated[
+        int,
+        typer.Option("--neighbors-preservation", help="Visible-neighbor preservation rings for occlusion fallback."),
+    ] = 1,
+    consider_transparency_opaque: Annotated[
+        bool,
+        typer.Option("--consider-transparency-opaque", help="Treat transparent materials as occluders."),
+    ] = False,
+    preserve_cavities: Annotated[
+        bool,
+        typer.Option("--preserve-cavities/--no-preserve-cavities", help="Preserve large interior cavities."),
+    ] = True,
+    minimum_cavity_volume_m3: Annotated[
+        float,
+        typer.Option("--minimum-cavity-volume-m3", help="Minimum cavity volume to preserve."),
+    ] = 0.5,
+    run_lod_generators: Annotated[
+        bool,
+        typer.Option("--run-lod-generators", help="Run preset-driven LOD generation after optimization actions."),
+    ] = False,
+    lod_preset: Annotated[
+        LODPreset,
+        typer.Option("--lod-preset", help="LOD generator preset: desktop, web, mobile, or vr."),
+    ] = LODPreset.DESKTOP,
+    lod_screen_coverage: Annotated[
+        str | None,
+        typer.Option("--lod-screen-coverage", help="Comma-separated LOD screen coverage values."),
+    ] = None,
+    validate_lods: Annotated[
+        bool,
+        typer.Option("--validate-lods", help="Validate generated LOD monotonicity."),
+    ] = False,
     filters: Annotated[
         list[str] | None,
         typer.Option("--filter", help="Scope optimization and LOD work with selectors such as path=*/Fasteners/*."),
@@ -614,6 +765,35 @@ def cmd_convert(
         "index_buffer": index_buffer.value,
         "flatten": flatten.value,
         "instance_policy": instance_policy.value,
+        "bake_materials": bake_materials,
+        "maps_resolution": maps_resolution,
+        "force_uv_generation": force_uv_generation,
+        "bake": bake,
+        "decimate": decimate,
+        "decimate_criterion": decimate_criterion.value,
+        "surface_tolerance": surface_tolerance,
+        "line_tolerance": line_tolerance,
+        "normal_tolerance": normal_tolerance,
+        "uv_tolerance": uv_tolerance,
+        "protect_topology": protect_topology,
+        "budget_scope": budget_scope.value,
+        "remove_holes": remove_holes,
+        "hole_types": hole_types,
+        "max_hole_diameter": max_hole_diameter,
+        "prefer_brep": prefer_brep,
+        "remove_occluded": remove_occluded,
+        "occlusion_strategy": occlusion_strategy.value,
+        "occlusion_level": occlusion_level.value,
+        "occlusion_precision": occlusion_precision,
+        "hemi_evaluation": hemi_evaluation,
+        "neighbors_preservation": neighbors_preservation,
+        "consider_transparency_opaque": consider_transparency_opaque,
+        "preserve_cavities": preserve_cavities,
+        "minimum_cavity_volume_m3": minimum_cavity_volume_m3,
+        "run_lod_generators": run_lod_generators,
+        "lod_preset": lod_preset.value,
+        "lod_screen_coverage": lod_screen_coverage,
+        "validate_lods": validate_lods,
         "filters": filters or [],
         "exclude_filters": exclude_filters or [],
         "preserve_instances": preserve_instances,
@@ -632,7 +812,13 @@ def cmd_convert(
     }
     where = _parse_filter_options(filters, exclude_filters, ctx, payload)
     lod_values = _parse_lods(lods, ctx, payload)
+    bake_maps = _parse_bake_maps(bake, ctx, payload)
+    enabled_hole_types = _parse_hole_types(hole_types, ctx, payload)
+    lod_coverages = _parse_lod_screen_coverage(lod_screen_coverage, ctx, payload)
     payload["lods"] = lod_values
+    payload["bake"] = list(bake_maps)
+    payload["hole_types"] = list(enabled_hole_types)
+    payload["lod_screen_coverage"] = lod_coverages
     _validate_step_input(input_path, ctx, payload)
     output_path = _resolve_convert_output(input_path, output_path, ctx, payload)
     payload["output"] = str(output_path)
@@ -657,6 +843,8 @@ def cmd_convert(
         _fail(ctx, payload, "--max-sliver-area must be greater than or equal to 0.", code=2)
     if max_vertices_per_mesh is not None and max_vertices_per_mesh <= 0:
         _fail(ctx, payload, "--max-vertices-per-mesh must be greater than 0.", code=2)
+    if split_large_meshes and max_vertices_per_mesh is not None and max_vertices_per_mesh < 3:
+        _fail(ctx, payload, "--max-vertices-per-mesh must be at least 3 when splitting large meshes.", code=2)
     if hierarchy_level < 0:
         _fail(ctx, payload, "--hierarchy-level must be greater than or equal to 0.", code=2)
     if region_size is not None and region_size <= 0.0:
@@ -675,6 +863,38 @@ def cmd_convert(
         _fail(ctx, payload, "--max-stretch must be greater than or equal to 0.", code=2)
     if atlas_size <= 0:
         _fail(ctx, payload, "--atlas-size must be greater than 0.", code=2)
+    if maps_resolution <= 0:
+        _fail(ctx, payload, "--maps-resolution must be greater than 0.", code=2)
+    for option_name, value in {
+        "--surface-tolerance": surface_tolerance,
+        "--line-tolerance": line_tolerance,
+        "--uv-tolerance": uv_tolerance,
+    }.items():
+        if value is not None and value < 0.0:
+            _fail(ctx, payload, f"{option_name} must be greater than or equal to 0.", code=2)
+    if normal_tolerance <= 0.0 or normal_tolerance > 180.0:
+        _fail(ctx, payload, "--normal-tolerance must be greater than 0 and no more than 180.", code=2)
+    if max_hole_diameter is not None and max_hole_diameter <= 0.0:
+        _fail(ctx, payload, "--max-hole-diameter must be greater than 0.", code=2)
+    if occlusion_precision <= 0:
+        _fail(ctx, payload, "--occlusion-precision must be greater than 0.", code=2)
+    if neighbors_preservation < 0:
+        _fail(ctx, payload, "--neighbors-preservation must be greater than or equal to 0.", code=2)
+    if minimum_cavity_volume_m3 < 0.0:
+        _fail(ctx, payload, "--minimum-cavity-volume-m3 must be greater than or equal to 0.", code=2)
+    if (
+        run_lod_generators
+        and lod_coverages is not None
+        and lod_values is not None
+        and len(lod_coverages) != len(lod_values)
+    ):
+        _fail(ctx, payload, "--lod-screen-coverage and --lods must have the same number of values.", code=2)
+    if run_lod_generators and lod_coverages is not None and lod_values is None:
+        default_lod_count = len(LODGeneratorOptions(preset=cast(Any, lod_preset.value)).levels)
+        if len(lod_coverages) != default_lod_count:
+            _fail(
+                ctx, payload, "--lod-screen-coverage must match the preset LOD count or be paired with --lods.", code=2
+            )
     if debug and not _is_stdio(output_path) and output_path.suffix.lower() not in {".usd", ".usda"}:
         _fail(ctx, payload, "--debug requires .usd or .usda output.", code=2)
     if quality_report is not None and report is not None and quality_report.resolve() == report.resolve():
@@ -783,6 +1003,63 @@ def cmd_convert(
             )
             else None
         )
+        bake_options = (
+            BakeMaterialOptions(
+                maps_resolution=maps_resolution,
+                force_uv_generation=force_uv_generation,
+                uv_channel=0,
+                padding=uv_padding,
+                bake=cast(Any, bake_maps),
+                merge_output=True,
+            )
+            if bake_materials
+            else None
+        )
+        decimate_options = (
+            DecimateOptions(
+                criterion=decimate_criterion.value,
+                target_triangles=target_triangles,
+                target_ratio=ratio,
+                surface_tolerance=surface_tolerance,
+                line_tolerance=line_tolerance,
+                normal_tolerance=normal_tolerance,
+                uv_tolerance=uv_tolerance,
+                protect_topology=protect_topology,
+                budget_scope=budget_scope.value,
+            )
+            if decimate
+            else None
+        )
+        remove_holes_options = (
+            RemoveHolesOptions(
+                through="through" in enabled_hole_types,
+                blind="blind" in enabled_hole_types,
+                surface="surface" in enabled_hole_types,
+                max_diameter=max_hole_diameter,
+                prefer_brep=prefer_brep,
+            )
+            if remove_holes
+            else None
+        )
+        remove_occluded_options = (
+            RemoveOccludedOptions(
+                strategy=occlusion_strategy.value,
+                level=occlusion_level.value,
+                precision=occlusion_precision,
+                hemi_evaluation=hemi_evaluation,
+                neighbors_preservation=neighbors_preservation,
+                consider_transparency_opaque=consider_transparency_opaque,
+                preserve_cavities=preserve_cavities,
+                minimum_cavity_volume_m3=minimum_cavity_volume_m3,
+            )
+            if remove_occluded
+            else None
+        )
+        lod_generator_options = (
+            _lod_generator_options(lod_preset.value, lod_values, lod_coverages, validate_lods)
+            if run_lod_generators
+            else None
+        )
         lod_options = LODOptions(tuple(lod_values)) if lod_values is not None else profile_options.lods
         asset = _convert_for_cli(
             input_path,
@@ -794,6 +1071,11 @@ def cmd_convert(
             heal_brep=heal_options,
             merge=merge_options,
             scene=scene_options,
+            bake_materials=bake_options,
+            remove_holes=remove_holes_options,
+            remove_occluded=remove_occluded_options,
+            decimate=decimate_options,
+            lod_generator=lod_generator_options,
             optimize=optimize_options,
             lods=lod_options,
             where=where,
@@ -966,6 +1248,73 @@ def _parse_lods(value: str | None, ctx: typer.Context, payload: dict[str, Any]) 
     return ratios
 
 
+def _parse_bake_maps(value: str, ctx: typer.Context, payload: dict[str, Any]) -> tuple[str, ...]:
+    maps = tuple(item.strip().replace("-", "_") for item in value.split(",") if item.strip())
+    allowed = {"base_color", "opacity", "normal", "roughness", "metallic", "ao", "emissive"}
+    if not maps:
+        _fail(ctx, payload, "--bake must include at least one map.", code=2)
+    unknown = set(maps) - allowed
+    if unknown:
+        _fail(ctx, payload, f"Unsupported --bake maps: {', '.join(sorted(unknown))}.", code=2)
+    return maps
+
+
+def _parse_hole_types(value: str, ctx: typer.Context, payload: dict[str, Any]) -> tuple[str, ...]:
+    hole_types = tuple(item.strip().replace("-", "_") for item in value.split(",") if item.strip())
+    allowed = {"through", "blind", "surface"}
+    if not hole_types:
+        _fail(ctx, payload, "--hole-types must include at least one type.", code=2)
+    unknown = set(hole_types) - allowed
+    if unknown:
+        _fail(ctx, payload, f"Unsupported --hole-types values: {', '.join(sorted(unknown))}.", code=2)
+    return hole_types
+
+
+def _parse_lod_screen_coverage(
+    value: str | None,
+    ctx: typer.Context,
+    payload: dict[str, Any],
+) -> list[float] | None:
+    if value is None:
+        return None
+    try:
+        coverages = [float(item.strip()) for item in value.split(",") if item.strip()]
+    except ValueError as exc:
+        _fail(ctx, payload, "--lod-screen-coverage must be a comma-separated list of numbers.", code=2)
+        raise AssertionError("unreachable") from exc
+    if not coverages:
+        _fail(ctx, payload, "--lod-screen-coverage must include at least one value.", code=2)
+    if any(coverage <= 0.0 or coverage > 1.0 for coverage in coverages):
+        _fail(ctx, payload, "--lod-screen-coverage values must be greater than 0 and no more than 1.", code=2)
+    if coverages != sorted(coverages, reverse=True):
+        _fail(ctx, payload, "--lod-screen-coverage values must be sorted from highest to lowest.", code=2)
+    return coverages
+
+
+def _lod_generator_options(
+    preset: str,
+    lod_values: list[float] | None,
+    lod_coverages: list[float] | None,
+    validate_lods: bool,
+) -> LODGeneratorOptions:
+    if lod_values is None and lod_coverages is None:
+        return LODGeneratorOptions(preset=cast(Any, preset), validate=validate_lods)
+    default_levels = LODGeneratorOptions(preset=cast(Any, preset), validate=validate_lods).levels
+    ratios = lod_values if lod_values is not None else [level.target_ratio for level in default_levels]
+    if lod_coverages is None:
+        if len(ratios) == len(default_levels):
+            coverages = [level.screen_coverage for level in default_levels]
+        else:
+            coverages = [max(0.01, 0.5 / (index + 1)) for index in range(len(ratios))]
+    else:
+        coverages = lod_coverages
+    levels = tuple(
+        LODLevel(screen_coverage=coverage, target_ratio=ratio)
+        for coverage, ratio in zip(coverages, ratios, strict=True)
+    )
+    return LODGeneratorOptions(preset=cast(Any, preset), levels=levels, validate=validate_lods)
+
+
 def _parse_filter_options(
     filters: list[str] | None,
     exclude_filters: list[str] | None,
@@ -1088,6 +1437,11 @@ def _convert_for_cli(
     heal_brep: BrepHealOptions | None,
     merge: MergeOptions | None,
     scene: SceneOptimizeOptions | None,
+    bake_materials: BakeMaterialOptions | None,
+    remove_holes: RemoveHolesOptions | None,
+    remove_occluded: RemoveOccludedOptions | None,
+    decimate: DecimateOptions | None,
+    lod_generator: LODGeneratorOptions | None,
     optimize: OptimizeOptions | None,
     lods: LODOptions | None,
     where: Filter | None,
@@ -1109,6 +1463,11 @@ def _convert_for_cli(
                 heal_brep,
                 merge,
                 scene,
+                bake_materials,
+                remove_holes,
+                remove_occluded,
+                decimate,
+                lod_generator,
                 optimize,
                 lods,
                 where,
@@ -1125,6 +1484,11 @@ def _convert_for_cli(
         heal_brep,
         merge,
         scene,
+        bake_materials,
+        remove_holes,
+        remove_occluded,
+        decimate,
+        lod_generator,
         optimize,
         lods,
         where,
@@ -1143,6 +1507,11 @@ def _convert_output(
     heal_brep: BrepHealOptions | None,
     merge: MergeOptions | None,
     scene: SceneOptimizeOptions | None,
+    bake_materials: BakeMaterialOptions | None,
+    remove_holes: RemoveHolesOptions | None,
+    remove_occluded: RemoveOccludedOptions | None,
+    decimate: DecimateOptions | None,
+    lod_generator: LODGeneratorOptions | None,
     optimize: OptimizeOptions | None,
     lods: LODOptions | None,
     where: Filter | None,
@@ -1165,6 +1534,11 @@ def _convert_output(
                 stage=stage,
                 merge=merge,
                 scene=scene,
+                bake_materials=bake_materials,
+                remove_holes=remove_holes,
+                remove_occluded=remove_occluded,
+                decimate=decimate,
+                lod_generator=lod_generator,
                 optimize=optimize,
                 lods=lods,
                 where=where,
@@ -1185,6 +1559,11 @@ def _convert_output(
         stage=stage,
         merge=merge,
         scene=scene,
+        bake_materials=bake_materials,
+        remove_holes=remove_holes,
+        remove_occluded=remove_occluded,
+        decimate=decimate,
+        lod_generator=lod_generator,
         optimize=optimize,
         lods=lods,
         where=where,

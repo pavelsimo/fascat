@@ -23,6 +23,17 @@ MergeStrategy = Literal["all", "by_material"]
 IndexBufferMode = Literal["auto", "uint16", "uint32"]
 FlattenMode = Literal["none", "safe", "all"]
 InstancePolicy = Literal["auto", "preserve", "expand"]
+BakeMaterialMap = Literal["base_color", "opacity", "normal", "roughness", "metallic", "ao", "emissive"]
+DecimateCriterion = Literal["target", "quality"]
+BudgetScope = Literal["part", "selection"]
+HoleType = Literal["through", "blind", "surface"]
+OcclusionStrategy = Literal["conservative", "exterior", "advanced"]
+OcclusionLevel = Literal["parts", "submeshes", "triangles"]
+LODPreset = Literal["desktop", "web", "mobile", "vr"]
+LODOutput = Literal["variants", "extras", "separate"]
+
+_BAKE_MAPS = {"base_color", "opacity", "normal", "roughness", "metallic", "ao", "emissive"}
+_HOLE_TYPES = {"through", "blind", "surface"}
 
 _TESSELLATION_PART_SETTING_KEYS = {
     "sag",
@@ -325,6 +336,175 @@ class SceneOptimizeOptions:
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class BakeMaterialOptions:
+    maps_resolution: int = 2048
+    force_uv_generation: bool = False
+    uv_channel: int = 0
+    padding: int = 4
+    bake: tuple[BakeMaterialMap, ...] = ("base_color",)
+    merge_output: bool = True
+
+    def __post_init__(self) -> None:
+        maps = tuple(str(item).replace("-", "_") for item in self.bake)
+        object.__setattr__(self, "bake", maps)
+        if self.maps_resolution <= 0:
+            raise ValueError("maps_resolution must be greater than 0")
+        if self.uv_channel < 0:
+            raise ValueError("uv_channel must be greater than or equal to 0")
+        if self.padding < 0:
+            raise ValueError("padding must be greater than or equal to 0")
+        if not maps:
+            raise ValueError("bake must include at least one map")
+        unknown = set(maps) - _BAKE_MAPS
+        if unknown:
+            names = ", ".join(sorted(unknown))
+            raise ValueError(f"unsupported bake maps: {names}")
+
+    def to_dict(self) -> dict[str, object]:
+        return {**asdict(self), "bake": list(self.bake)}
+
+
+@dataclass(frozen=True)
+class DecimateOptions:
+    criterion: DecimateCriterion = "target"
+    target_triangles: int | None = None
+    target_ratio: float | None = 0.5
+    surface_tolerance: float | None = None
+    line_tolerance: float | None = None
+    normal_tolerance: float = 15.0
+    uv_tolerance: float | None = None
+    protect_topology: bool = True
+    preserve_painted_areas: bool = False
+    budget_scope: BudgetScope = "selection"
+
+    def __post_init__(self) -> None:
+        if self.criterion not in {"target", "quality"}:
+            raise ValueError("criterion must be one of: target, quality")
+        if self.target_triangles is not None and self.target_triangles <= 0:
+            raise ValueError("target_triangles must be greater than 0 when set")
+        if self.target_ratio is not None and (self.target_ratio <= 0.0 or self.target_ratio >= 1.0):
+            raise ValueError("target_ratio must be greater than 0 and less than 1 when set")
+        for name, value in {
+            "surface_tolerance": self.surface_tolerance,
+            "line_tolerance": self.line_tolerance,
+            "uv_tolerance": self.uv_tolerance,
+        }.items():
+            if value is not None and value < 0.0:
+                raise ValueError(f"{name} must be greater than or equal to 0 when set")
+        if self.normal_tolerance <= 0.0 or self.normal_tolerance > 180.0:
+            raise ValueError("normal_tolerance must be greater than 0 and no more than 180")
+        if self.budget_scope not in {"part", "selection"}:
+            raise ValueError("budget_scope must be one of: part, selection")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class RemoveHolesOptions:
+    through: bool = True
+    blind: bool = True
+    surface: bool = True
+    max_diameter: float | None = 3.0
+    prefer_brep: bool = True
+
+    def __post_init__(self) -> None:
+        if not (self.through or self.blind or self.surface):
+            raise ValueError("at least one hole type must be enabled")
+        if self.max_diameter is not None and self.max_diameter <= 0.0:
+            raise ValueError("max_diameter must be greater than 0 when set")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class RemoveOccludedOptions:
+    strategy: OcclusionStrategy = "advanced"
+    level: OcclusionLevel = "triangles"
+    precision: int = 2048
+    hemi_evaluation: bool = False
+    neighbors_preservation: int = 1
+    consider_transparency_opaque: bool = False
+    preserve_cavities: bool = True
+    minimum_cavity_volume_m3: float = 0.5
+
+    def __post_init__(self) -> None:
+        if self.strategy not in {"conservative", "exterior", "advanced"}:
+            raise ValueError("strategy must be one of: conservative, exterior, advanced")
+        if self.level not in {"parts", "submeshes", "triangles"}:
+            raise ValueError("level must be one of: parts, submeshes, triangles")
+        if self.precision <= 0:
+            raise ValueError("precision must be greater than 0")
+        if self.neighbors_preservation < 0:
+            raise ValueError("neighbors_preservation must be greater than or equal to 0")
+        if self.minimum_cavity_volume_m3 < 0.0:
+            raise ValueError("minimum_cavity_volume_m3 must be greater than or equal to 0")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class LODLevel:
+    screen_coverage: float
+    target_ratio: float
+
+    def __post_init__(self) -> None:
+        if self.screen_coverage <= 0.0 or self.screen_coverage > 1.0:
+            raise ValueError("screen_coverage must be greater than 0 and no more than 1")
+        if self.target_ratio <= 0.0 or self.target_ratio >= 1.0:
+            raise ValueError("target_ratio must be greater than 0 and less than 1")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class LODGeneratorOptions:
+    preset: LODPreset = "desktop"
+    levels: tuple[LODLevel, ...] = ()
+    validate: bool = True
+    output: LODOutput = "variants"
+    allow_non_monotonic: bool = False
+
+    def __post_init__(self) -> None:
+        if self.preset not in {"desktop", "web", "mobile", "vr"}:
+            raise ValueError("preset must be one of: desktop, web, mobile, vr")
+        levels = self.levels or _lod_preset_levels(self.preset)
+        object.__setattr__(self, "levels", tuple(levels))
+        if not self.levels:
+            raise ValueError("levels must include at least one LOD level")
+        coverages = tuple(level.screen_coverage for level in self.levels)
+        ratios = tuple(level.target_ratio for level in self.levels)
+        if coverages != tuple(sorted(coverages, reverse=True)):
+            raise ValueError("LOD screen coverage values must be sorted from highest to lowest")
+        if ratios != tuple(sorted(ratios, reverse=True)):
+            raise ValueError("LOD target ratios must be sorted from highest to lowest detail")
+        if self.output not in {"variants", "extras", "separate"}:
+            raise ValueError("output must be one of: variants, extras, separate")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "preset": self.preset,
+            "levels": [level.to_dict() for level in self.levels],
+            "validate": self.validate,
+            "output": self.output,
+            "allow_non_monotonic": self.allow_non_monotonic,
+        }
+
+
+def _lod_preset_levels(preset: LODPreset) -> tuple[LODLevel, ...]:
+    if preset == "web":
+        return (LODLevel(0.45, 0.5), LODLevel(0.15, 0.25))
+    if preset == "mobile":
+        return (LODLevel(0.4, 0.4), LODLevel(0.15, 0.2), LODLevel(0.05, 0.1))
+    if preset == "vr":
+        return (LODLevel(0.5, 0.5), LODLevel(0.2, 0.25), LODLevel(0.05, 0.1))
+    return (LODLevel(0.5, 0.5), LODLevel(0.25, 0.25), LODLevel(0.1, 0.1))
 
 
 @dataclass(frozen=True)

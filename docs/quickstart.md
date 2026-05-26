@@ -51,6 +51,14 @@ fascat convert motor.step motor.glb \
   --batch-by-material \
   --merge-compatible-meshes \
   --split-large-meshes \
+  --bake-materials \
+  --bake base-color,opacity \
+  --decimate \
+  --remove-holes \
+  --max-hole-diameter 3.0 \
+  --remove-occluded \
+  --run-lod-generators \
+  --lod-preset vr \
   --target-triangles 80000 \
   --report report.json
 ```

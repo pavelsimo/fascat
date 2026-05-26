@@ -124,6 +124,11 @@ def test_convert_help() -> None:
     assert "material boundaries" in plain(result.output)
     assert "--batch-by-material" in plain(result.output)
     assert "--index-buffer" in plain(result.output)
+    assert "--bake-materials" in plain(result.output)
+    assert "--decimate" in plain(result.output)
+    assert "--remove-holes" in plain(result.output)
+    assert "--remove-occluded" in plain(result.output)
+    assert "--run-lod-generators" in plain(result.output)
 
 
 def test_validate_help() -> None:

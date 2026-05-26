@@ -7,7 +7,19 @@ import pytest
 
 from fascat.asset import Asset, Node, Part
 from fascat.mesh import Mesh
-from fascat.options import ConversionProfile, LODOptions, OptimizeOptions, RepairOptions, StageOptions
+from fascat.options import (
+    BakeMaterialOptions,
+    ConversionProfile,
+    DecimateOptions,
+    LODGeneratorOptions,
+    LODLevel,
+    LODOptions,
+    OptimizeOptions,
+    RemoveHolesOptions,
+    RemoveOccludedOptions,
+    RepairOptions,
+    StageOptions,
+)
 from fascat.pipeline import convert
 from fascat.report import Report
 
@@ -156,6 +168,31 @@ def test_asset_operation_reports_include_options_and_before_after_counts() -> No
             "preserve_silhouette",
         },
         "lods": {"ratios", "mode"},
+        "bake_materials": {"maps_resolution", "force_uv_generation", "uv_channel", "padding", "bake", "merge_output"},
+        "decimate": {
+            "criterion",
+            "target_triangles",
+            "target_ratio",
+            "surface_tolerance",
+            "line_tolerance",
+            "normal_tolerance",
+            "uv_tolerance",
+            "protect_topology",
+            "preserve_painted_areas",
+            "budget_scope",
+        },
+        "remove_holes": {"through", "blind", "surface", "max_diameter", "prefer_brep"},
+        "remove_occluded": {
+            "strategy",
+            "level",
+            "precision",
+            "hemi_evaluation",
+            "neighbors_preservation",
+            "consider_transparency_opaque",
+            "preserve_cavities",
+            "minimum_cavity_volume_m3",
+        },
+        "run_lod_generators": {"preset", "levels", "validate", "output", "allow_non_monotonic"},
     }
     operations = [
         ("tessellate", lambda asset: asset.tessellate()),
@@ -163,6 +200,16 @@ def test_asset_operation_reports_include_options_and_before_after_counts() -> No
         ("stage", lambda asset: asset.stage(StageOptions(uv0="none", uv1=None))),
         ("optimize", lambda asset: asset.optimize()),
         ("lods", lambda asset: asset.lods(LODOptions((0.5,)))),
+        ("bake_materials", lambda asset: asset.bake_materials(BakeMaterialOptions(force_uv_generation=True))),
+        ("decimate", lambda asset: asset.decimate(DecimateOptions(target_ratio=0.5))),
+        ("remove_holes", lambda asset: asset.remove_holes(RemoveHolesOptions())),
+        ("remove_occluded", lambda asset: asset.remove_occluded(RemoveOccludedOptions(level="parts"))),
+        (
+            "run_lod_generators",
+            lambda asset: asset.run_lod_generators(
+                LODGeneratorOptions(levels=(LODLevel(screen_coverage=0.5, target_ratio=0.5),))
+            ),
+        ),
     ]
 
     for name, operation in operations:

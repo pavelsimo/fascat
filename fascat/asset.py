@@ -11,10 +11,15 @@ from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.metadata import Metadata, PmiAnnotation
 from fascat.options import (
+    BakeMaterialOptions,
     BrepHealOptions,
+    DecimateOptions,
+    LODGeneratorOptions,
     LODOptions,
     MergeOptions,
     OptimizeOptions,
+    RemoveHolesOptions,
+    RemoveOccludedOptions,
     RepairOptions,
     SceneOptimizeOptions,
     StageOptions,
@@ -361,6 +366,111 @@ class Asset:
         step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
             "optimize_scene",
+            options=_options_with_scope(opts.to_dict(), scope),
+            before=before,
+            after=_hierarchy_report_stats(asset),
+            duration=timer.duration,
+            warnings=step_warnings,
+        )
+        return asset
+
+    def bake_materials(self, options: BakeMaterialOptions | None = None, *, where: Any | None = None) -> Asset:
+        from fascat.ops.actions import bake_materials_asset
+
+        opts = options or BakeMaterialOptions()
+        scope = self._operation_scope(where)
+        before = _hierarchy_report_stats(self)
+        warning_count = len(self.report.warnings)
+        with timed_step() as timer:
+            asset = bake_materials_asset(scope.asset, opts, selected_part_ids=scope.selected_part_ids)
+        step_warnings = asset.report.warnings[warning_count:]
+        asset.report.add_step(
+            "bake_materials",
+            options=_options_with_scope(opts.to_dict(), scope),
+            before=before,
+            after=_hierarchy_report_stats(asset),
+            duration=timer.duration,
+            warnings=step_warnings,
+        )
+        return asset
+
+    def decimate(self, options: DecimateOptions | None = None, *, where: Any | None = None) -> Asset:
+        from fascat.ops.actions import decimate_asset
+
+        opts = options or DecimateOptions()
+        scope = self._operation_scope(where)
+        before = _hierarchy_report_stats(self)
+        warning_count = len(self.report.warnings)
+        with timed_step() as timer:
+            asset = decimate_asset(scope.asset, opts, selected_part_ids=scope.selected_part_ids)
+        step_warnings = asset.report.warnings[warning_count:]
+        asset.report.add_step(
+            "decimate",
+            options=_options_with_scope(opts.to_dict(), scope),
+            before=before,
+            after=_hierarchy_report_stats(asset),
+            duration=timer.duration,
+            warnings=step_warnings,
+        )
+        return asset
+
+    def remove_holes(self, options: RemoveHolesOptions | None = None, *, where: Any | None = None) -> Asset:
+        from fascat.ops.actions import remove_holes_asset
+
+        opts = options or RemoveHolesOptions()
+        scope = self._operation_scope(where)
+        before = _hierarchy_report_stats(self)
+        warning_count = len(self.report.warnings)
+        with timed_step() as timer:
+            asset = remove_holes_asset(scope.asset, opts, selected_part_ids=scope.selected_part_ids)
+        step_warnings = asset.report.warnings[warning_count:]
+        asset.report.add_step(
+            "remove_holes",
+            options=_options_with_scope(opts.to_dict(), scope),
+            before=before,
+            after=_hierarchy_report_stats(asset),
+            duration=timer.duration,
+            warnings=step_warnings,
+        )
+        return asset
+
+    def remove_occluded(self, options: RemoveOccludedOptions | None = None, *, where: Any | None = None) -> Asset:
+        from fascat.ops.actions import remove_occluded_asset
+
+        opts = options or RemoveOccludedOptions()
+        scope = self._operation_scope(where)
+        selected_node_ids = (
+            scope.selection.node_ids
+            if scope.selection is not None
+            else {node.id for node in scope.asset.root.walk() if node.part_id is not None}
+        )
+        before = _hierarchy_report_stats(self)
+        warning_count = len(self.report.warnings)
+        with timed_step() as timer:
+            asset = remove_occluded_asset(scope.asset, opts, selected_node_ids=selected_node_ids)
+        step_warnings = asset.report.warnings[warning_count:]
+        asset.report.add_step(
+            "remove_occluded",
+            options=_options_with_scope(opts.to_dict(), scope),
+            before=before,
+            after=_hierarchy_report_stats(asset),
+            duration=timer.duration,
+            warnings=step_warnings,
+        )
+        return asset
+
+    def run_lod_generators(self, options: LODGeneratorOptions | None = None, *, where: Any | None = None) -> Asset:
+        from fascat.ops.actions import run_lod_generators_asset
+
+        opts = options or LODGeneratorOptions()
+        scope = self._operation_scope(where)
+        before = _hierarchy_report_stats(self)
+        warning_count = len(self.report.warnings)
+        with timed_step() as timer:
+            asset = run_lod_generators_asset(scope.asset, opts, selected_part_ids=scope.selected_part_ids)
+        step_warnings = asset.report.warnings[warning_count:]
+        asset.report.add_step(
+            "run_lod_generators",
             options=_options_with_scope(opts.to_dict(), scope),
             before=before,
             after=_hierarchy_report_stats(asset),

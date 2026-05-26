@@ -313,6 +313,49 @@ asset = asset.optimize_scene(
 )
 ```
 
+## Optimization Actions
+
+Use explicit optimization actions when a realtime pipeline needs named preparation steps and separate report entries for each action.
+
+```python
+asset = asset.bake_materials(
+    fc.BakeMaterialOptions(
+        maps_resolution=2048,
+        force_uv_generation=True,
+        bake=("base_color", "opacity"),
+    )
+)
+
+asset = asset.decimate(
+    fc.DecimateOptions(
+        criterion="target",
+        target_triangles=250_000,
+        surface_tolerance=0.1,
+        line_tolerance=0.02,
+        normal_tolerance=15.0,
+        uv_tolerance=0.01,
+        protect_topology=True,
+        budget_scope="selection",
+    )
+)
+
+asset = asset.remove_holes(fc.RemoveHolesOptions(max_diameter=3.0, prefer_brep=True))
+asset = asset.remove_occluded(fc.RemoveOccludedOptions(strategy="advanced", level="triangles"))
+asset = asset.run_lod_generators(
+    fc.LODGeneratorOptions(
+        preset="vr",
+        levels=(
+            fc.LODLevel(screen_coverage=0.5, target_ratio=0.5),
+            fc.LODLevel(screen_coverage=0.2, target_ratio=0.25),
+            fc.LODLevel(screen_coverage=0.05, target_ratio=0.1),
+        ),
+        validate=True,
+    )
+)
+```
+
+Material baking currently creates a shared baked material and metadata for baked maps. Hole removal and occlusion removal use deterministic mesh-level fallbacks when BREP feature editing or visibility rendering is unavailable.
+
 ## One-shot conversion
 
 Use `fc.convert()` when you want the full default pipeline and output validation in one call.
@@ -342,7 +385,7 @@ fc.convert("motor.step", "motor.gltf", profile="realtime-web")
 ```
 
 `fc.convert()` validates generated output by default. Pass `validate_output=False` only when another step in your pipeline validates the asset.
-When `where` is provided to `fc.convert()`, tessellation, repair, and staging still run for the full asset, while merge, optimization, and LOD generation are scoped to the matched assembly subset.
+When `where` is provided to `fc.convert()`, tessellation, repair, and staging still run for the full asset, while merge, scene optimization, optimization actions, optimization, and LOD generation are scoped to the matched assembly subset.
 
 ## Profiles
 

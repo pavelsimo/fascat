@@ -14,11 +14,16 @@ from fascat.io.usd import validate_usd
 from fascat.io.usd import write_usd as _write_usd
 from fascat.options import (
     AtlasOptions,
+    BakeMaterialOptions,
     BrepHealOptions,
     ConversionProfile,
+    DecimateOptions,
+    LODGeneratorOptions,
     LODOptions,
     MergeOptions,
     OptimizeOptions,
+    RemoveHolesOptions,
+    RemoveOccludedOptions,
     SceneOptimizeOptions,
     StageOptions,
     StepReadOptions,
@@ -43,6 +48,11 @@ def convert(
     stage: StageOptions | None = None,
     merge: MergeOptions | None = None,
     scene: SceneOptimizeOptions | None = None,
+    bake_materials: BakeMaterialOptions | None = None,
+    remove_holes: RemoveHolesOptions | None = None,
+    remove_occluded: RemoveOccludedOptions | None = None,
+    decimate: DecimateOptions | None = None,
+    lod_generator: LODGeneratorOptions | None = None,
     optimize: OptimizeOptions | None = None,
     lods: LODOptions | None = None,
     progress: Callable[[str, dict[str, int]], None] | None = None,
@@ -80,13 +90,33 @@ def convert(
         asset = asset.optimize_scene(scene, where=where)
         if progress is not None:
             progress("optimize_scene", asset.stats())
+    if bake_materials is not None:
+        asset = asset.bake_materials(bake_materials, where=where)
+        if progress is not None:
+            progress("bake_materials", asset.stats())
+    if remove_holes is not None:
+        asset = asset.remove_holes(remove_holes, where=where)
+        if progress is not None:
+            progress("remove_holes", asset.stats())
+    if remove_occluded is not None:
+        asset = asset.remove_occluded(remove_occluded, where=where)
+        if progress is not None:
+            progress("remove_occluded", asset.stats())
+    if decimate is not None:
+        asset = asset.decimate(decimate, where=where)
+        if progress is not None:
+            progress("decimate", asset.stats())
     optimize_options = optimize if optimize is not None else selected.optimize
     if optimize_options is not None:
         asset = asset.optimize(optimize_options, where=where)
         if progress is not None:
             progress("optimize", asset.stats())
     lod_options = lods if lods is not None else selected.lods
-    if lod_options is not None:
+    if lod_generator is not None:
+        asset = asset.run_lod_generators(lod_generator, where=where)
+        if progress is not None:
+            progress("run_lod_generators", asset.stats())
+    elif lod_options is not None:
         asset = asset.lods(lod_options, where=where)
         if progress is not None:
             progress("lods", asset.stats())
@@ -357,6 +387,41 @@ def merge(asset: Asset, *, options: MergeOptions | None = None, where: Filter | 
 
 def optimize_scene(asset: Asset, *, options: SceneOptimizeOptions | None = None, where: Filter | None = None) -> Asset:
     return asset.optimize_scene(options or SceneOptimizeOptions(), where=where)
+
+
+def bake_materials(
+    asset: Asset,
+    *,
+    options: BakeMaterialOptions | None = None,
+    where: Filter | None = None,
+) -> Asset:
+    return asset.bake_materials(options or BakeMaterialOptions(), where=where)
+
+
+def decimate(asset: Asset, *, options: DecimateOptions | None = None, where: Filter | None = None) -> Asset:
+    return asset.decimate(options or DecimateOptions(), where=where)
+
+
+def remove_holes(asset: Asset, *, options: RemoveHolesOptions | None = None, where: Filter | None = None) -> Asset:
+    return asset.remove_holes(options or RemoveHolesOptions(), where=where)
+
+
+def remove_occluded(
+    asset: Asset,
+    *,
+    options: RemoveOccludedOptions | None = None,
+    where: Filter | None = None,
+) -> Asset:
+    return asset.remove_occluded(options or RemoveOccludedOptions(), where=where)
+
+
+def run_lod_generators(
+    asset: Asset,
+    *,
+    options: LODGeneratorOptions | None = None,
+    where: Filter | None = None,
+) -> Asset:
+    return asset.run_lod_generators(options or LODGeneratorOptions(), where=where)
 
 
 def lods(

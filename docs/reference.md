@@ -88,6 +88,35 @@ fascat inspect input.step --json
 | `--index-buffer` | `auto` | Index buffer mode: `auto`, `uint16`, or `uint32` |
 | `--flatten` | `safe` | Hierarchy flattening mode: `none`, `safe`, or `all` |
 | `--instance-policy` | `auto` | Instance policy: `auto`, `preserve`, or `expand` |
+| `--bake-materials` | `false` | Bake selected materials into a shared runtime material |
+| `--maps-resolution` | `2048` | Bake texture resolution in pixels |
+| `--force-uv-generation` | `false` | Generate UVs before baking when needed |
+| `--bake` | `base-color` | Maps to bake, such as `base-color,opacity` |
+| `--decimate` | `false` | Run explicit decimation before profile optimization |
+| `--decimate-criterion` | `target` | Decimation criterion: `target` or `quality` |
+| `--surface-tolerance` | unset | Surface deviation tolerance metadata for decimation |
+| `--line-tolerance` | unset | Hard-edge deviation tolerance metadata for decimation |
+| `--normal-tolerance` | `15` | Normal angle tolerance for decimation preservation |
+| `--uv-tolerance` | unset | UV deviation tolerance metadata for decimation |
+| `--protect-topology / --no-protect-topology` | `true` | Preserve topology-sensitive faces during decimation |
+| `--budget-scope` | `selection` | Decimation budget scope: `part` or `selection` |
+| `--remove-holes` | `false` | Remove small hole features with mesh fallback |
+| `--hole-types` | `through,blind,surface` | Hole types to remove |
+| `--max-hole-diameter` | `3.0` | Maximum hole diameter to remove |
+| `--prefer-brep / --no-prefer-brep` | `true` | Prefer BREP feature removal when available |
+| `--remove-occluded` | `false` | Remove selected nodes hidden inside larger opaque bounds |
+| `--occlusion-strategy` | `advanced` | Occlusion strategy: `conservative`, `exterior`, or `advanced` |
+| `--occlusion-level` | `triangles` | Requested occlusion level: `parts`, `submeshes`, or `triangles` |
+| `--occlusion-precision` | `2048` | Occlusion precision preset or sample resolution |
+| `--hemi-evaluation` | `false` | Record hemispherical top/side occlusion evaluation intent |
+| `--neighbors-preservation` | `1` | Visible-neighbor preservation rings for occlusion fallback |
+| `--consider-transparency-opaque` | `false` | Treat transparent materials as occluders |
+| `--preserve-cavities / --no-preserve-cavities` | `true` | Preserve large interior cavities |
+| `--minimum-cavity-volume-m3` | `0.5` | Minimum cavity volume to preserve |
+| `--run-lod-generators` | `false` | Run preset-driven LOD generation after optimization actions |
+| `--lod-preset` | `desktop` | LOD preset: `desktop`, `web`, `mobile`, or `vr` |
+| `--lod-screen-coverage` | unset | Screen coverage values for generated LODs |
+| `--validate-lods` | `false` | Validate generated LOD monotonicity |
 | `--preserve-instances / --no-preserve-instances` | `true` | Preserve repeated parts as shared instances, or duplicate per occurrence |
 | `--preserve-hard-edges` | `false` | Protect faces adjacent to hard edges during simplification |
 | `--hard-edge-angle` | `30` | Angle threshold for hard-edge preservation |
