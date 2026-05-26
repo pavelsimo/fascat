@@ -38,6 +38,26 @@ def _test_profile() -> ConversionProfile:
     )
 
 
+def test_asset_operation_reports_include_before_after_counts() -> None:
+    required_counts = {"nodes", "parts", "occurrences", "materials", "vertices", "triangles"}
+    operations = [
+        ("tessellate", lambda asset: asset.tessellate()),
+        ("repair", lambda asset: asset.repair(RepairOptions())),
+        ("stage", lambda asset: asset.stage(StageOptions(uv0="none", uv1=None))),
+        ("optimize", lambda asset: asset.optimize()),
+        ("lods", lambda asset: asset.lods(LODOptions((0.5,)))),
+    ]
+
+    for name, operation in operations:
+        result = operation(_triangle_asset())
+        step = result.report.steps[-1]
+
+        assert step.name == name
+        assert required_counts <= set(step.before)
+        assert required_counts <= set(step.after)
+        assert step.duration >= 0.0
+
+
 def test_convert_report_includes_timed_write_and_validate_steps(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     import fascat.pipeline as pipeline
 
