@@ -69,10 +69,11 @@ def test_node_copies_mutable_inputs() -> None:
 
     node = Node(id="node", name="node", children=children, transform=transform, metadata=metadata)
     children.append(Node(id="other", name="other"))
+    child.name = "changed"
     transform[0, 3] = 5.0
     metadata["source"] = "changed"
 
-    assert node.children == [child]
+    assert [node_child.name for node_child in node.children] == ["child"]
     assert node.transform[0, 3] == 0.0
     assert node.metadata == {"source": "cad"}
 

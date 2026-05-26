@@ -29,7 +29,7 @@ class Node:
     metadata: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.children = list(self.children)
+        self.children = [child.copy() for child in self.children]
         self.transform = np.asarray(self.transform, dtype=np.float64).copy()
         if self.transform.shape != (4, 4):
             raise ValueError("node transform must have shape (4, 4)")
