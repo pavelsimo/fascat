@@ -23,8 +23,10 @@ def optimize_asset(asset: Asset, options: OptimizeOptions) -> Asset:
         if options.simplify:
             target = targets.get(part.id) if targets is not None else None
             mesh = mesh.simplify(target_triangles=target, ratio=None if target is not None else options.ratio)
+            mesh.validate()
         if options.optimize_buffers:
             mesh = mesh.optimize_buffers()
+            mesh.validate()
         mesh = mesh.repair()
         part.mesh = mesh
         part.fingerprint = mesh.fingerprint()

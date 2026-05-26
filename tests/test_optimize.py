@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from fascat.asset import Asset, Node, Part
-from fascat.mesh import Mesh
+from fascat.mesh import Mesh, MeshValidationError
 from fascat.options import OptimizeOptions
 
 
@@ -67,6 +68,60 @@ def test_target_triangles_wins_over_ratio() -> None:
 
     assert optimized_mesh is not None
     assert optimized_mesh.triangle_count == 3
+
+
+def test_optimize_validates_simplified_mesh_before_buffer_optimization(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    order: list[str] = []
+
+    def fake_simplify(self: Mesh, *, target_triangles: int | None = None, ratio: float | None = None) -> Mesh:
+        order.append("simplify")
+        return Mesh(
+            points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+            faces=np.array([[0, 1, 9]], dtype=int),
+        )
+
+    def fail_optimize_buffers(self: Mesh) -> Mesh:
+        order.append("optimize_buffers")
+        raise AssertionError("buffer optimization must not run for invalid simplified meshes")
+
+    monkeypatch.setattr(Mesh, "simplify", fake_simplify)
+    monkeypatch.setattr(Mesh, "optimize_buffers", fail_optimize_buffers)
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh_with_triangles(2))},
+    )
+
+    with pytest.raises(MeshValidationError, match="out-of-range"):
+        asset.optimize(OptimizeOptions(target_triangles=1, optimize_buffers=True))
+
+    assert order == ["simplify"]
+
+
+def test_optimize_runs_buffer_optimization_after_simplification(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    order: list[str] = []
+
+    def fake_simplify(self: Mesh, *, target_triangles: int | None = None, ratio: float | None = None) -> Mesh:
+        order.append("simplify")
+        assert target_triangles == 1
+        assert ratio is None
+        return mesh_with_triangles(1)
+
+    def fake_optimize_buffers(self: Mesh) -> Mesh:
+        order.append("optimize_buffers")
+        assert self.triangle_count == 1
+        return self.copy()
+
+    monkeypatch.setattr(Mesh, "simplify", fake_simplify)
+    monkeypatch.setattr(Mesh, "optimize_buffers", fake_optimize_buffers)
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh_with_triangles(2))},
+    )
+
+    optimized = asset.optimize(OptimizeOptions(target_triangles=1, optimize_buffers=True))
+
+    assert optimized.triangle_count == 1
+    assert order == ["simplify", "optimize_buffers"]
 
 
 def test_target_triangle_budget_is_allocated_across_unique_parts(monkeypatch) -> None:  # type: ignore[no-untyped-def]

@@ -711,6 +711,7 @@ Pipeline tests:
 - Optimization tests assert target triangle budgets take precedence over ratio.
 - Optimization tests assert target triangle budgets are allocated across unique parts without overshooting when feasible.
 - Optimization reports warn when a target is below the one-triangle-per-unique-mesh minimum.
+- Optimization validates simplification output before buffer optimization and runs buffer optimization on decimated meshes.
 - LOD reports and final conversion output stats include generated LOD mesh, vertex, and triangle totals.
 - Staging tests assert `uv0=None` skips UV generation and `normals=False` does not generate missing normals.
 - Functional API wrappers cover tessellate, stage, optimize, and LOD operations.
