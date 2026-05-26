@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import math
+from typing import Any, cast
 
 import numpy as np
 
 from fascat._ocp import shape_fingerprint
-from fascat.asset import Asset
+from fascat.asset import Asset, Part
 from fascat.mesh import Mesh
 from fascat.metadata import Metadata
 from fascat.options import Tessellation
@@ -13,7 +15,7 @@ from fascat.options import Tessellation
 
 def tessellate_asset(asset: Asset, options: Tessellation, *, selected_part_ids: set[str] | None = None) -> Asset:
     result = asset.copy(keep_source=True)
-    mesh_by_source: dict[tuple[str, tuple[str, ...], tuple[int, ...] | None], Mesh] = {}
+    mesh_by_source: dict[tuple[str, tuple[str, ...], tuple[int, ...] | None, tuple[object, ...]], Mesh] = {}
     for part in result.parts.values():
         if selected_part_ids is not None and part.id not in selected_part_ids:
             continue
@@ -22,13 +24,19 @@ def tessellate_asset(asset: Asset, options: Tessellation, *, selected_part_ids: 
         if part.source_shape is None:
             result.report.add_warning(f"part has no source shape and cannot be tessellated: {part.name}")
             continue
+        part_options = _options_for_part(options, part)
         face_material_indices = _face_material_indices_from_metadata(part.metadata)
-        cache_key = _tessellation_cache_key(part.source_shape, part.material_ids, face_material_indices)
+        cache_key = _tessellation_cache_key(
+            part.source_shape,
+            part.material_ids,
+            face_material_indices,
+            part_options,
+        )
         cached_mesh = mesh_by_source.get(cache_key)
         if cached_mesh is None:
             part.mesh = tessellate_shape(
                 part.source_shape,
-                options,
+                part_options,
                 face_material_indices=face_material_indices,
             )
             if part.material_ids and part.mesh.material_indices is None:
@@ -38,7 +46,9 @@ def tessellate_asset(asset: Asset, options: Tessellation, *, selected_part_ids: 
         else:
             part.mesh = cached_mesh.copy()
         part.fingerprint = part.mesh.fingerprint()
-        if not options.keep_brep:
+        if part_options.quality_report:
+            _store_quality_report(part, part_options)
+        if not part_options.keep_brep:
             part.source_shape = None
     if selected_part_ids is not None:
         return result
@@ -54,6 +64,7 @@ def tessellate_shape(
     try:
         from OCP.BRep import BRep_Tool
         from OCP.BRepMesh import BRepMesh_IncrementalMesh
+        from OCP.IMeshTools import IMeshTools_Parameters
         from OCP.TopAbs import TopAbs_FACE, TopAbs_REVERSED
         from OCP.TopExp import TopExp_Explorer
         from OCP.TopLoc import TopLoc_Location
@@ -62,13 +73,8 @@ def tessellate_shape(
         raise RuntimeError("STEP tessellation requires cadquery-ocp") from exc
 
     brep_shape = shape
-    mesher = BRepMesh_IncrementalMesh(
-        brep_shape,
-        float(options.sag),
-        bool(options.relative),
-        math.radians(float(options.angle)),
-        True,
-    )
+    parameters = _occt_mesh_parameters(options, IMeshTools_Parameters)
+    mesher = BRepMesh_IncrementalMesh(brep_shape, parameters)
     mesher.Perform()
 
     points: list[tuple[float, float, float]] = []
@@ -111,8 +117,7 @@ def tessellate_shape(
         ),
         metadata={"occt_faces": str(face_index)},
     )
-    if options.max_edge_length is not None:
-        mesh = mesh.subdivide_long_edges(options.max_edge_length)
+    mesh = _apply_mesh_tessellation_controls(mesh, options)
     if options.create_normals:
         mesh = mesh.compute_normals()
     else:
@@ -128,17 +133,157 @@ def _face_material_indices_from_metadata(metadata: Metadata) -> list[int] | None
     return [int(item) for item in str(value).split(",") if item]
 
 
+def _options_for_part(options: Tessellation, part: Part) -> Tessellation:
+    overrides = options.part_settings.get(part.id) or options.part_settings.get(part.name)
+    if not overrides:
+        return options
+    values = options.to_dict()
+    values["part_settings"] = {}
+    values.update(overrides)
+    return Tessellation(**cast(Any, values))
+
+
+def _occt_mesh_parameters(options: Tessellation, parameters_factory: Any) -> Any:
+    parameters = parameters_factory()
+    parameters.Deflection = float(options.sag)
+    parameters.Relative = bool(options.relative)
+    parameters.Angle = math.radians(float(options.angle))
+    parameters.InParallel = True
+    parameters.InternalVerticesMode = bool(options.preserve_boundaries)
+    if options.min_edge_length is not None:
+        parameters.MinSize = float(options.min_edge_length)
+        parameters.AdjustMinSize = True
+    if options.curvature_adaptive:
+        parameters.ControlSurfaceDeflection = True
+        parameters.ForceFaceDeflection = True
+        parameters.DeflectionInterior = float(options.sag) * 0.5
+        parameters.AngleInterior = math.radians(max(0.1, float(options.angle) * 0.5))
+    return parameters
+
+
+def _apply_mesh_tessellation_controls(mesh: Mesh, options: Tessellation) -> Mesh:
+    result = mesh
+    if options.max_edge_length is not None:
+        result = result.subdivide_long_edges(options.max_edge_length)
+    if options.min_edge_length is not None:
+        result = result.collapse_short_edges(
+            options.min_edge_length,
+            preserve_boundaries=options.preserve_boundaries,
+        )
+    if options.avoid_skinny_triangles:
+        result = result.improve_skinny_triangles(preserve_boundaries=options.preserve_boundaries)
+    if options.max_edge_length is not None:
+        result = result.subdivide_long_edges(options.max_edge_length)
+    if options.min_edge_length is not None:
+        result = result.collapse_short_edges(
+            options.min_edge_length,
+            preserve_boundaries=options.preserve_boundaries,
+        )
+    result.metadata = {
+        **result.metadata,
+        "tessellation_feature_aware": str(options.curvature_adaptive or options.preserve_boundaries).lower(),
+        "preserve_boundaries": str(options.preserve_boundaries).lower(),
+    }
+    return result
+
+
+def _store_quality_report(part: Part, options: Tessellation) -> None:
+    if part.mesh is None:
+        return
+    metrics = part.mesh.quality_metrics(
+        min_edge_length=options.min_edge_length,
+        max_edge_length=options.max_edge_length,
+    )
+    payload = {
+        "part_id": part.id,
+        "part_name": part.name,
+        "options": _tessellation_mesh_options(options),
+        "metrics": metrics,
+    }
+    encoded = json.dumps(payload, sort_keys=True)
+    part.metadata["tessellation_quality"] = encoded
+    part.metadata["tessellation_short_edges"] = str(metrics["short_edges"])
+    part.metadata["tessellation_long_edges"] = str(metrics["long_edges"])
+    part.metadata["tessellation_skinny_triangles"] = str(metrics["skinny_triangles"])
+    part.mesh.metadata["tessellation_quality"] = encoded
+
+
+def _tessellation_mesh_options(options: Tessellation) -> dict[str, object]:
+    data = options.to_dict()
+    data.pop("part_settings", None)
+    data.pop("keep_brep", None)
+    return data
+
+
 def _tessellation_cache_key(
     shape: object,
     material_ids: list[str],
     face_material_indices: list[int] | None,
-) -> tuple[str, tuple[str, ...], tuple[int, ...] | None]:
+    options: Tessellation,
+) -> tuple[str, tuple[str, ...], tuple[int, ...] | None, tuple[object, ...]]:
     indices = None if face_material_indices is None else tuple(face_material_indices)
-    return (shape_fingerprint(shape), tuple(material_ids), indices)
+    return (shape_fingerprint(shape), tuple(material_ids), indices, _tessellation_settings_key(options))
+
+
+def _tessellation_settings_key(options: Tessellation) -> tuple[object, ...]:
+    return (
+        options.sag,
+        options.angle,
+        options.relative,
+        options.min_edge_length,
+        options.max_edge_length,
+        options.preserve_boundaries,
+        options.curvature_adaptive,
+        options.avoid_skinny_triangles,
+        options.create_normals,
+    )
+
+
+def build_tessellation_quality_report(asset: Asset) -> dict[str, object]:
+    parts: list[dict[str, object]] = []
+    for part in asset.parts.values():
+        payload = _stored_quality_payload(part)
+        if payload is None and part.mesh is not None:
+            payload = {
+                "part_id": part.id,
+                "part_name": part.name,
+                "options": {},
+                "metrics": part.mesh.quality_metrics(),
+            }
+        if payload is not None:
+            parts.append(payload)
+
+    metrics = [cast(dict[str, int | float], part["metrics"]) for part in parts]
+    summary = {
+        "parts": len(parts),
+        "triangles": int(sum(int(item["triangles"]) for item in metrics)),
+        "vertices": int(sum(int(item["vertices"]) for item in metrics)),
+        "short_edges": int(sum(int(item["short_edges"]) for item in metrics)),
+        "long_edges": int(sum(int(item["long_edges"]) for item in metrics)),
+        "skinny_triangles": int(sum(int(item["skinny_triangles"]) for item in metrics)),
+        "degenerate_triangles": int(sum(int(item["degenerate_triangles"]) for item in metrics)),
+        "boundary_edges": int(sum(int(item["boundary_edges"]) for item in metrics)),
+        "non_manifold_edges": int(sum(int(item["non_manifold_edges"]) for item in metrics)),
+        "min_edge_length": min((float(item["min_edge_length"]) for item in metrics), default=0.0),
+        "max_edge_length": max((float(item["max_edge_length"]) for item in metrics), default=0.0),
+        "max_aspect_ratio": max((float(item["max_aspect_ratio"]) for item in metrics), default=0.0),
+    }
+    return {"summary": summary, "parts": parts}
+
+
+def _stored_quality_payload(part: Part) -> dict[str, object] | None:
+    value = part.metadata.get("tessellation_quality")
+    if value is None:
+        return None
+    try:
+        payload = json.loads(str(value))
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def _deduplicate_parts_by_fingerprint(asset: Asset) -> Asset:
-    canonical_by_key: dict[tuple[str, tuple[str, ...], tuple[int, ...] | None], str] = {}
+    canonical_by_key: dict[tuple[str, tuple[str, ...], tuple[int, ...] | None, str], str] = {}
     replacements: dict[str, str] = {}
     for part_id, part in asset.parts.items():
         if part.fingerprint is None or part.mesh is None:
@@ -146,7 +291,7 @@ def _deduplicate_parts_by_fingerprint(asset: Asset) -> Asset:
         material_indices = None
         if part.mesh.material_indices is not None:
             material_indices = tuple(int(value) for value in part.mesh.material_indices.tolist())
-        key = (part.fingerprint, tuple(part.material_ids), material_indices)
+        key = (part.fingerprint, tuple(part.material_ids), material_indices, _metadata_key(part.metadata))
         canonical_id = canonical_by_key.get(key)
         if canonical_id is None:
             canonical_by_key[key] = part_id
@@ -160,3 +305,7 @@ def _deduplicate_parts_by_fingerprint(asset: Asset) -> Asset:
             node.part_id = replacements[node.part_id]
     asset.parts = {part_id: part for part_id, part in asset.parts.items() if part_id not in replacements}
     return asset
+
+
+def _metadata_key(metadata: Metadata) -> str:
+    return json.dumps(metadata, sort_keys=True, default=str)

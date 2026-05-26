@@ -60,7 +60,10 @@ fascat convert input.step output.usdc \
   --heal-tolerance 0.05 \
   --sag 0.1 \
   --angle 15 \
+  --min-edge-length 0.02 \
   --max-edge-length 25 \
+  --curvature-adaptive \
+  --quality-report tessellation-quality.json \
   --target-triangles 500000 \
   --materials display \
   --uv1 box \

@@ -44,7 +44,12 @@ fascat inspect input.step --json
 | `--angle` | profile value | CAD tessellation angle tolerance in degrees |
 | `--target-triangles` | profile value | Target triangle count for optimized LOD0 |
 | `--ratio` | unset | Simplification ratio when no triangle target is set |
+| `--min-edge-length` | unset | Collapse tessellated edges shorter than this length |
 | `--max-edge-length` | profile value | Split tessellated triangles longer than this length |
+| `--preserve-boundaries / --no-preserve-boundaries` | `true` | Preserve sharp/boundary edges during tessellation cleanup |
+| `--curvature-adaptive` | `false` | Use tighter interior meshing on curved CAD faces |
+| `--avoid-skinny-triangles` | `false` | Refine long skinny triangles after tessellation |
+| `--quality-report` | unset | Write per-part tessellation quality metrics as JSON |
 | `--heal-brep` | `false` | Run BREP healing before tessellation |
 | `--heal-tolerance` | `0.05` | BREP healing tolerance |
 | `--remove-sliver-faces` | `false` | Detect tiny sliver faces during BREP healing |

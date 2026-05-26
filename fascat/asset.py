@@ -206,6 +206,11 @@ class Asset:
             stats["lod_triangles"] = sum(mesh.triangle_count for mesh in lod_meshes)
         return stats
 
+    def tessellation_quality_report(self) -> dict[str, object]:
+        from fascat.ops.tessellate import build_tessellation_quality_report
+
+        return build_tessellation_quality_report(self)
+
     def _report_stats(self) -> dict[str, int]:
         return self.stats(include_lods=any(part.lod_meshes for part in self.parts.values()))
 

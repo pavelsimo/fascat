@@ -331,6 +331,29 @@ def cmd_convert(
         float | None,
         typer.Option("--max-edge-length", help="Split tessellated triangles longer than this length."),
     ] = None,
+    min_edge_length: Annotated[
+        float | None,
+        typer.Option("--min-edge-length", help="Collapse tessellated edges shorter than this length."),
+    ] = None,
+    preserve_boundaries: Annotated[
+        bool,
+        typer.Option(
+            "--preserve-boundaries/--no-preserve-boundaries",
+            help="Preserve sharp/boundary edges during tessellation cleanup.",
+        ),
+    ] = True,
+    curvature_adaptive: Annotated[
+        bool,
+        typer.Option("--curvature-adaptive", help="Use tighter interior meshing on curved CAD faces."),
+    ] = False,
+    avoid_skinny_triangles: Annotated[
+        bool,
+        typer.Option("--avoid-skinny-triangles", help="Refine long skinny triangles after tessellation."),
+    ] = False,
+    quality_report: Annotated[
+        Path | None,
+        typer.Option("--quality-report", help="Write per-part tessellation quality metrics as JSON."),
+    ] = None,
     heal_brep: Annotated[bool, typer.Option("--heal-brep", help="Run BREP healing before tessellation.")] = False,
     heal_tolerance: Annotated[float, typer.Option("--heal-tolerance", help="BREP healing tolerance.")] = 0.05,
     remove_sliver_faces: Annotated[
@@ -422,6 +445,11 @@ def cmd_convert(
         "target_triangles": target_triangles,
         "ratio": ratio,
         "max_edge_length": max_edge_length,
+        "min_edge_length": min_edge_length,
+        "preserve_boundaries": preserve_boundaries,
+        "curvature_adaptive": curvature_adaptive,
+        "avoid_skinny_triangles": avoid_skinny_triangles,
+        "quality_report": str(quality_report) if quality_report else None,
         "heal_brep": heal_brep,
         "heal_tolerance": heal_tolerance,
         "remove_sliver_faces": remove_sliver_faces,
@@ -464,8 +492,12 @@ def cmd_convert(
         _fail(ctx, payload, "--angle must be greater than 0 and no more than 180.", code=2)
     if target_triangles is not None and target_triangles <= 0:
         _fail(ctx, payload, "--target-triangles must be greater than 0.", code=2)
+    if min_edge_length is not None and min_edge_length <= 0.0:
+        _fail(ctx, payload, "--min-edge-length must be greater than 0.", code=2)
     if max_edge_length is not None and max_edge_length <= 0.0:
         _fail(ctx, payload, "--max-edge-length must be greater than 0.", code=2)
+    if min_edge_length is not None and max_edge_length is not None and min_edge_length > max_edge_length:
+        _fail(ctx, payload, "--min-edge-length must be less than or equal to --max-edge-length.", code=2)
     if heal_tolerance <= 0.0:
         _fail(ctx, payload, "--heal-tolerance must be greater than 0.", code=2)
     if max_sliver_area < 0.0:
@@ -480,6 +512,8 @@ def cmd_convert(
         _fail(ctx, payload, "--merge-mode regions requires --region-size.", code=2)
     if debug and not _is_stdio(output_path) and output_path.suffix.lower() not in {".usd", ".usda"}:
         _fail(ctx, payload, "--debug requires .usd or .usda output.", code=2)
+    if quality_report is not None and report is not None and quality_report.resolve() == report.resolve():
+        _fail(ctx, payload, "--quality-report must use a different path than --report.", code=2)
 
     if state.dry_run:
         _emit(ctx, payload, f"Would convert {input_path} to {output_path} with profile {profile.value}.")
@@ -498,7 +532,12 @@ def cmd_convert(
             base_tessellation,
             sag=sag if sag is not None else base_tessellation.sag,
             angle=angle if angle is not None else base_tessellation.angle,
+            min_edge_length=min_edge_length if min_edge_length is not None else base_tessellation.min_edge_length,
             max_edge_length=max_edge_length if max_edge_length is not None else base_tessellation.max_edge_length,
+            preserve_boundaries=preserve_boundaries,
+            curvature_adaptive=curvature_adaptive,
+            avoid_skinny_triangles=avoid_skinny_triangles,
+            quality_report=quality_report is not None or base_tessellation.quality_report,
         )
         optimize_options = profile_options.optimize
         if optimize_options is not None:
@@ -563,6 +602,8 @@ def cmd_convert(
 
     if report is not None:
         asset.report.write_json(report)
+    if quality_report is not None:
+        _write_tessellation_quality_report(asset, quality_report)
 
     if _is_stdio(output_path):
         return
@@ -756,6 +797,11 @@ def _brep_heal_options(
         max_sliver_area=max_sliver_area,
         fail_on_open_shells=fail_on_open_shells,
     )
+
+
+def _write_tessellation_quality_report(asset: Any, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(asset.tessellation_quality_report(), indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _metadata_summary(asset: Any) -> dict[str, int]:

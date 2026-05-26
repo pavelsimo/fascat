@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any, NamedTuple
 
+import numpy as np
 import pytest
 from typer.testing import CliRunner
 
@@ -109,7 +110,9 @@ def test_convert_help() -> None:
     result = runner.invoke(app, ["convert", "--help"])
     assert result.exit_code == 0
     assert "--target-triangles" in plain(result.output)
+    assert "--min-edge-length" in plain(result.output)
     assert "--max-edge-length" in plain(result.output)
+    assert "--quality-report" in plain(result.output)
     assert "--materials" in plain(result.output)
     assert "--uv1" in plain(result.output)
     assert "--no-preserve-instances" in plain(result.output)
@@ -613,6 +616,53 @@ def test_convert_existing_output_requires_force(tmp_path: Path) -> None:
     assert "Pass --force" in compact(result.output)
 
 
+def test_convert_writes_tessellation_quality_report(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    import fascat as fc
+    import fascat.cli as cli
+
+    input_file = tmp_path / "input.step"
+    output_file = tmp_path / "output.usdc"
+    quality_file = tmp_path / "quality.json"
+    input_file.write_text("ISO-10303-21;", encoding="utf-8")
+    mesh = fc.Mesh(
+        points=np.array([[0, 0, 0], [3, 0, 0], [0, 0.01, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    asset = fc.Asset(
+        root=fc.Node(id="root", name="root", children=[fc.Node(id="node", name="Part", part_id="part")]),
+        parts={"part": fc.Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    def fake_convert(*_args: object, **kwargs: object) -> fc.Asset:
+        tessellation = kwargs["tessellation"]
+        assert isinstance(tessellation, fc.Tessellation)
+        assert tessellation.min_edge_length == 0.01
+        assert tessellation.avoid_skinny_triangles is True
+        assert tessellation.quality_report is True
+        return asset
+
+    monkeypatch.setattr(cli, "_convert_for_cli", fake_convert)
+
+    result = runner.invoke(
+        app,
+        [
+            "convert",
+            str(input_file),
+            str(output_file),
+            "--min-edge-length",
+            "0.01",
+            "--avoid-skinny-triangles",
+            "--quality-report",
+            str(quality_file),
+        ],
+    )
+
+    assert result.exit_code == 0
+    quality = json.loads(quality_file.read_text(encoding="utf-8"))
+    assert quality["summary"]["parts"] == 1
+    assert quality["parts"][0]["part_id"] == "part"
+
+
 def test_convert_writes_failure_report_sidecar(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     import fascat.cli as cli
 
@@ -754,6 +804,30 @@ def test_convert_rejects_invalid_max_edge_length(capsys) -> None:  # type: ignor
     result = invoke_run(["--dry-run", "convert", "input.step", "output.usdc", "--max-edge-length", "0"], capsys)
     assert result.exit_code == 2
     assert "--max-edge-length must be greater than 0" in result.stderr
+
+
+def test_convert_rejects_invalid_min_edge_length(capsys) -> None:  # type: ignore[no-untyped-def]
+    result = invoke_run(["--dry-run", "convert", "input.step", "output.usdc", "--min-edge-length", "0"], capsys)
+    assert result.exit_code == 2
+    assert "--min-edge-length must be greater than 0" in result.stderr
+
+
+def test_convert_rejects_min_edge_above_max_edge(capsys) -> None:  # type: ignore[no-untyped-def]
+    result = invoke_run(
+        [
+            "--dry-run",
+            "convert",
+            "input.step",
+            "output.usdc",
+            "--min-edge-length",
+            "2",
+            "--max-edge-length",
+            "1",
+        ],
+        capsys,
+    )
+    assert result.exit_code == 2
+    assert "--min-edge-length must be less than or equal to --max-edge-length" in result.stderr
 
 
 def test_debug_requires_text_usd_output(capsys) -> None:  # type: ignore[no-untyped-def]

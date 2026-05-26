@@ -17,7 +17,12 @@ asset = asset.tessellate(
         sag=0.1,
         angle=15.0,
         relative=True,
+        min_edge_length=None,
         max_edge_length=None,
+        preserve_boundaries=True,
+        curvature_adaptive=False,
+        avoid_skinny_triangles=False,
+        quality_report=False,
     )
 )
 
@@ -174,6 +179,33 @@ asset = fc.read_step("motor.step").heal_brep(
 ```
 
 The operation stores per-part `brep_*` metadata and records a `heal_brep` report step. `fc.convert(..., heal_brep=fc.BrepHealOptions())` runs healing before tessellation.
+
+## Tessellation Controls
+
+Tessellation supports global and per-part settings for edge limits, boundary preservation, curvature-adaptive OCCT meshing, skinny-triangle cleanup, and per-part quality metrics.
+
+```python
+asset = fc.read_step("motor.step").tessellate(
+    fc.Tessellation(
+        sag=0.05,
+        angle=10.0,
+        min_edge_length=0.02,
+        max_edge_length=2.0,
+        preserve_boundaries=True,
+        curvature_adaptive=True,
+        avoid_skinny_triangles=True,
+        quality_report=True,
+        part_settings={
+            "housing": {"sag": 0.03, "max_edge_length": 1.0},
+            "Fastener": {"sag": 0.15},
+        },
+    )
+)
+
+quality = asset.tessellation_quality_report()
+```
+
+`part_settings` keys match a part id or part name. Quality reports include per-part edge length, triangle area, aspect ratio, skinny triangle, boundary edge, and non-manifold edge counts.
 
 ## One-shot conversion
 

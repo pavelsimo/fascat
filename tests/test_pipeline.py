@@ -103,7 +103,20 @@ def test_asset_operations_return_new_assets_without_mutating_originals() -> None
 def test_asset_operation_reports_include_options_and_before_after_counts() -> None:
     required_counts = {"nodes", "parts", "occurrences", "materials", "vertices", "triangles"}
     required_options = {
-        "tessellate": {"sag", "angle", "relative", "max_edge_length", "create_normals", "keep_brep"},
+        "tessellate": {
+            "sag",
+            "angle",
+            "relative",
+            "min_edge_length",
+            "max_edge_length",
+            "preserve_boundaries",
+            "curvature_adaptive",
+            "avoid_skinny_triangles",
+            "quality_report",
+            "create_normals",
+            "keep_brep",
+            "part_settings",
+        },
         "repair": {
             "tolerance",
             "merge_vertices",

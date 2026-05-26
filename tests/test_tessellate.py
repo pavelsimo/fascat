@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import numpy as np
 
 from fascat.asset import Asset, Node, Part
@@ -205,3 +207,52 @@ def test_tessellation_keep_brep_controls_source_shape_retention(monkeypatch) -> 
     assert calls == [source_shape, source_shape]
     assert dropped.parts["part"].source_shape is None
     assert kept.parts["part"].source_shape is source_shape
+
+
+def test_tessellate_cache_respects_per_part_settings_and_records_quality(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import fascat.ops.tessellate as tessellate_module
+
+    source_shape = object()
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="node_a", name="A", part_id="part_a"),
+                Node(id="node_b", name="B", part_id="part_b"),
+            ],
+        ),
+        parts={
+            "part_a": Part(id="part_a", name="Part A", source_shape=source_shape),
+            "part_b": Part(id="part_b", name="Part B", source_shape=source_shape),
+        },
+    )
+    calls: list[float] = []
+
+    def fake_tessellate_shape(
+        shape: object,
+        options: Tessellation,
+        *,
+        face_material_indices: list[int] | None = None,
+    ) -> Mesh:
+        assert shape is source_shape
+        assert face_material_indices is None
+        calls.append(options.sag)
+        return triangle_mesh()
+
+    monkeypatch.setattr(tessellate_module, "tessellate_shape", fake_tessellate_shape)
+
+    tessellated = asset.tessellate(
+        Tessellation(
+            sag=0.1,
+            quality_report=True,
+            part_settings={"part_b": {"sag": 0.25, "max_edge_length": 0.75}},
+        )
+    )
+
+    assert calls == [0.1, 0.25]
+    report = tessellated.tessellation_quality_report()
+    assert report["summary"]["parts"] == 2
+    part_b_payload = json.loads(str(tessellated.parts["part_b"].metadata["tessellation_quality"]))
+    assert part_b_payload["options"]["sag"] == 0.25
+    assert part_b_payload["options"]["max_edge_length"] == 0.75

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Literal
 
 UVMode = Literal["none", "box", "unwrap"]
@@ -18,23 +18,64 @@ MergeMode = Literal[
 MergeMetadataPolicy = Literal["preserve", "combine", "summarize", "drop"]
 MergeStrategy = Literal["all", "by_material"]
 
+_TESSELLATION_PART_SETTING_KEYS = {
+    "sag",
+    "angle",
+    "relative",
+    "min_edge_length",
+    "max_edge_length",
+    "preserve_boundaries",
+    "curvature_adaptive",
+    "avoid_skinny_triangles",
+    "quality_report",
+    "create_normals",
+    "keep_brep",
+}
+
+
+def _validate_part_settings(part_settings: dict[str, dict[str, object]]) -> None:
+    for selector, overrides in part_settings.items():
+        if not selector:
+            raise ValueError("part_settings keys must not be empty")
+        if not isinstance(overrides, dict):
+            raise ValueError("part_settings values must be dictionaries")
+        unknown = set(overrides) - _TESSELLATION_PART_SETTING_KEYS
+        if unknown:
+            names = ", ".join(sorted(unknown))
+            raise ValueError(f"unsupported part_settings keys: {names}")
+
 
 @dataclass(frozen=True)
 class Tessellation:
     sag: float = 0.1
     angle: float = 15.0
     relative: bool = True
+    min_edge_length: float | None = None
     max_edge_length: float | None = None
+    preserve_boundaries: bool = True
+    curvature_adaptive: bool = False
+    avoid_skinny_triangles: bool = False
+    quality_report: bool = False
     create_normals: bool = True
     keep_brep: bool = False
+    part_settings: dict[str, dict[str, object]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.sag <= 0.0:
             raise ValueError("tessellation sag must be greater than 0")
         if self.angle <= 0.0 or self.angle > 180.0:
             raise ValueError("tessellation angle must be greater than 0 and no more than 180")
+        if self.min_edge_length is not None and self.min_edge_length <= 0.0:
+            raise ValueError("min_edge_length must be greater than 0 when set")
         if self.max_edge_length is not None and self.max_edge_length <= 0.0:
             raise ValueError("max_edge_length must be greater than 0 when set")
+        if (
+            self.min_edge_length is not None
+            and self.max_edge_length is not None
+            and self.min_edge_length > self.max_edge_length
+        ):
+            raise ValueError("min_edge_length must be less than or equal to max_edge_length")
+        _validate_part_settings(self.part_settings)
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

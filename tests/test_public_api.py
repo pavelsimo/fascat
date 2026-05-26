@@ -40,9 +40,15 @@ def test_functional_api_wraps_tessellation_options() -> None:
         sag=0.2,
         angle=20.0,
         relative=False,
+        min_edge_length=0.25,
         max_edge_length=5.0,
+        preserve_boundaries=False,
+        curvature_adaptive=True,
+        avoid_skinny_triangles=True,
+        quality_report=True,
         create_normals=False,
         keep_brep=True,
+        part_settings={"Part": {"sag": 0.3}},
     )
     step = tessellated.report.steps[-1]
 
@@ -51,9 +57,15 @@ def test_functional_api_wraps_tessellation_options() -> None:
         "sag": 0.2,
         "angle": 20.0,
         "relative": False,
+        "min_edge_length": 0.25,
         "max_edge_length": 5.0,
+        "preserve_boundaries": False,
+        "curvature_adaptive": True,
+        "avoid_skinny_triangles": True,
+        "quality_report": True,
         "create_normals": False,
         "keep_brep": True,
+        "part_settings": {"Part": {"sag": 0.3}},
     }
     assert step.warnings == ["part has no source shape and cannot be tessellated: Part"]
 

@@ -210,6 +210,50 @@ def test_subdivide_long_edges_enforces_limit_and_preserves_materials() -> None:
     assert set(subdivided.material_indices.tolist()) == {1}
 
 
+def test_collapse_short_edges_respects_boundary_preservation() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [0.01, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 3], [1, 2, 3]], dtype=int),
+    )
+
+    preserved = mesh.collapse_short_edges(0.1, preserve_boundaries=True)
+    collapsed = mesh.collapse_short_edges(0.1, preserve_boundaries=False)
+
+    assert preserved.vertex_count == mesh.vertex_count
+    assert collapsed.vertex_count < mesh.vertex_count
+
+
+def test_improve_skinny_triangles_splits_long_internal_edges_and_reports_quality() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [10, 0, 0], [0.1, 1, 0], [9.9, -1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [1, 0, 3]], dtype=int),
+        material_indices=np.array([2, 2], dtype=int),
+    )
+
+    before = mesh.quality_metrics(skinny_aspect_ratio=6.0)
+    improved = mesh.improve_skinny_triangles(max_aspect_ratio=6.0, preserve_boundaries=True)
+    after = improved.quality_metrics(skinny_aspect_ratio=6.0)
+
+    assert before["skinny_triangles"] > after["skinny_triangles"]
+    assert improved.triangle_count > mesh.triangle_count
+    assert improved.material_indices is not None
+    assert set(improved.material_indices.tolist()) == {2}
+
+
+def test_quality_metrics_counts_edge_and_topology_risks() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [3, 0, 0], [0, 0.01, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [0, 2, 3]], dtype=int),
+    )
+
+    metrics = mesh.quality_metrics(min_edge_length=0.05, max_edge_length=2.0, skinny_aspect_ratio=20.0)
+
+    assert metrics["short_edges"] > 0
+    assert metrics["long_edges"] > 0
+    assert metrics["skinny_triangles"] > 0
+    assert metrics["boundary_edges"] > 0
+
+
 def test_optimize_buffers_preserves_uvs_and_material_indices() -> None:
     mesh = Mesh(
         points=np.array(

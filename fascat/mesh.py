@@ -200,6 +200,65 @@ class Mesh:
         keep = np.flatnonzero(areas > area_epsilon)
         return self._filter_faces(keep).remove_unreferenced_vertices()
 
+    def quality_metrics(
+        self,
+        *,
+        min_edge_length: float | None = None,
+        max_edge_length: float | None = None,
+        skinny_aspect_ratio: float = 20.0,
+        area_epsilon: float = 1e-12,
+    ) -> dict[str, int | float]:
+        if self.triangle_count == 0:
+            return {
+                "vertices": self.vertex_count,
+                "triangles": 0,
+                "min_edge_length": 0.0,
+                "max_edge_length": 0.0,
+                "mean_edge_length": 0.0,
+                "min_triangle_area": 0.0,
+                "max_triangle_area": 0.0,
+                "mean_triangle_area": 0.0,
+                "max_aspect_ratio": 0.0,
+                "skinny_triangles": 0,
+                "degenerate_triangles": 0,
+                "short_edges": 0,
+                "long_edges": 0,
+                "boundary_edges": 0,
+                "non_manifold_edges": 0,
+            }
+
+        lengths = self._triangle_edge_lengths()
+        flat_lengths = lengths.reshape(-1)
+        areas = self._triangle_areas()
+        min_lengths = lengths.min(axis=1)
+        max_lengths = lengths.max(axis=1)
+        aspect_ratios = np.divide(
+            max_lengths,
+            min_lengths,
+            out=np.full(max_lengths.shape, np.inf, dtype=np.float64),
+            where=min_lengths > 0.0,
+        )
+        finite_aspects = aspect_ratios[np.isfinite(aspect_ratios)]
+        _edges, counts = self._undirected_edges_and_counts()
+
+        return {
+            "vertices": self.vertex_count,
+            "triangles": self.triangle_count,
+            "min_edge_length": float(flat_lengths.min()) if flat_lengths.size else 0.0,
+            "max_edge_length": float(flat_lengths.max()) if flat_lengths.size else 0.0,
+            "mean_edge_length": float(flat_lengths.mean()) if flat_lengths.size else 0.0,
+            "min_triangle_area": float(areas.min()) if areas.size else 0.0,
+            "max_triangle_area": float(areas.max()) if areas.size else 0.0,
+            "mean_triangle_area": float(areas.mean()) if areas.size else 0.0,
+            "max_aspect_ratio": float(finite_aspects.max()) if finite_aspects.size else 0.0,
+            "skinny_triangles": int(np.count_nonzero(aspect_ratios > skinny_aspect_ratio)),
+            "degenerate_triangles": int(np.count_nonzero(areas <= area_epsilon)),
+            "short_edges": 0 if min_edge_length is None else int(np.count_nonzero(flat_lengths < min_edge_length)),
+            "long_edges": 0 if max_edge_length is None else int(np.count_nonzero(flat_lengths > max_edge_length)),
+            "boundary_edges": int(np.count_nonzero(counts == 1)),
+            "non_manifold_edges": int(np.count_nonzero(counts > 2)),
+        }
+
     def compute_normals(self, *, angle_weighted: bool = True) -> Mesh:
         normals = np.zeros_like(self.points, dtype=np.float64)
         if self.triangle_count > 0 and self.vertex_count > 0:
@@ -284,6 +343,127 @@ class Mesh:
             for channel in mesh.uvs:
                 result = result.box_uv(channel)
         return result.compute_normals()
+
+    def collapse_short_edges(self, min_edge_length: float, *, preserve_boundaries: bool = True) -> Mesh:
+        if min_edge_length <= 0.0:
+            raise ValueError("min_edge_length must be greater than 0")
+        if self.triangle_count == 0 or self.vertex_count == 0:
+            return self.copy()
+
+        boundary_edges = self._boundary_edges_set() if preserve_boundaries else set()
+        parent = np.arange(self.vertex_count, dtype=np.int64)
+        rank = np.zeros(self.vertex_count, dtype=np.int64)
+        merged = False
+
+        def find(index: int) -> int:
+            while int(parent[index]) != index:
+                parent[index] = parent[int(parent[index])]
+                index = int(parent[index])
+            return index
+
+        def union(left: int, right: int) -> None:
+            nonlocal merged
+            left_root = find(left)
+            right_root = find(right)
+            if left_root == right_root:
+                return
+            if rank[left_root] < rank[right_root]:
+                left_root, right_root = right_root, left_root
+            parent[right_root] = left_root
+            if rank[left_root] == rank[right_root]:
+                rank[left_root] += 1
+            merged = True
+
+        for start, end in self._face_edges().astype(int).tolist():
+            edge = (min(start, end), max(start, end))
+            if edge in boundary_edges:
+                continue
+            if float(np.linalg.norm(self.points[end] - self.points[start])) < min_edge_length:
+                union(start, end)
+
+        if not merged:
+            return self.copy()
+
+        roots = np.asarray([find(index) for index in range(self.vertex_count)], dtype=np.int64)
+        unique_roots, inverse = np.unique(roots, return_inverse=True)
+        new_points = np.empty((unique_roots.shape[0], 3), dtype=np.float64)
+        for new_index, root in enumerate(unique_roots.astype(int).tolist()):
+            new_points[new_index] = self.points[roots == root].mean(axis=0)
+
+        mesh = self.copy()
+        mesh.points = new_points
+        mesh.faces = inverse[self.faces]
+        mesh.normals = None
+        mesh.uvs = {}
+        mesh = mesh.remove_degenerate_faces().remove_unreferenced_vertices()
+        mesh.metadata = {**self.metadata, "min_edge_length": str(min_edge_length)}
+        return mesh
+
+    def improve_skinny_triangles(
+        self,
+        *,
+        max_aspect_ratio: float = 20.0,
+        preserve_boundaries: bool = True,
+        max_iterations: int = 4,
+    ) -> Mesh:
+        if max_aspect_ratio <= 1.0:
+            raise ValueError("max_aspect_ratio must be greater than 1")
+        mesh = self.copy()
+        if mesh.triangle_count == 0:
+            return mesh
+
+        points = mesh.points.tolist()
+        faces: list[list[int]] = mesh.faces.astype(int).tolist()
+        material_indices = None if mesh.material_indices is None else mesh.material_indices.astype(int).tolist()
+
+        for _iteration in range(max_iterations):
+            changed = False
+            boundary_edges = _boundary_edges_from_faces(faces) if preserve_boundaries else set()
+            next_faces: list[list[int]] = []
+            next_materials: list[int] = []
+            for face_index, face in enumerate(faces):
+                triangle = np.asarray([points[index] for index in face], dtype=np.float64)
+                edge_pairs = ((0, 1), (1, 2), (2, 0))
+                lengths = [float(np.linalg.norm(triangle[b] - triangle[a])) for a, b in edge_pairs]
+                shortest = min(lengths)
+                longest = max(lengths)
+                if shortest <= 0.0 or longest / shortest <= max_aspect_ratio:
+                    next_faces.append(face)
+                    if material_indices is not None:
+                        next_materials.append(material_indices[face_index])
+                    continue
+                longest_index = int(np.argmax(lengths))
+                a_corner, b_corner = edge_pairs[longest_index]
+                a = face[a_corner]
+                b = face[b_corner]
+                edge = (min(a, b), max(a, b))
+                if edge in boundary_edges:
+                    next_faces.append(face)
+                    if material_indices is not None:
+                        next_materials.append(material_indices[face_index])
+                    continue
+                changed = True
+                c_corner = next(corner for corner in range(3) if corner not in {a_corner, b_corner})
+                c = face[c_corner]
+                midpoint = ((np.asarray(points[a]) + np.asarray(points[b])) * 0.5).tolist()
+                midpoint_index = len(points)
+                points.append(midpoint)
+                next_faces.append([a, midpoint_index, c])
+                next_faces.append([midpoint_index, b, c])
+                if material_indices is not None:
+                    next_materials.extend([material_indices[face_index], material_indices[face_index]])
+            faces = next_faces
+            material_indices = next_materials if material_indices is not None else None
+            if not changed:
+                break
+
+        result = Mesh(
+            points=np.asarray(points, dtype=np.float64),
+            faces=np.asarray(faces, dtype=np.int64),
+            material_indices=None if material_indices is None else np.asarray(material_indices, dtype=np.int64),
+            metadata={**mesh.metadata, "skinny_triangle_max_aspect_ratio": str(max_aspect_ratio)},
+        )
+        return result.remove_degenerate_faces().remove_unreferenced_vertices()
 
     def box_uv(self, channel: int = 0) -> Mesh:
         mesh = self.copy()
@@ -507,15 +687,7 @@ class Mesh:
     def _boundary_loops(self) -> list[list[int]]:
         if self.triangle_count == 0:
             return []
-        directed_edges = np.concatenate(
-            [
-                self.faces[:, [0, 1]],
-                self.faces[:, [1, 2]],
-                self.faces[:, [2, 0]],
-            ]
-        )
-        undirected = np.sort(directed_edges, axis=1)
-        edges, counts = np.unique(undirected, axis=0, return_counts=True)
+        edges, counts = self._undirected_edges_and_counts()
         boundary_edges = edges[counts == 1]
         if boundary_edges.size == 0:
             return []
@@ -553,6 +725,58 @@ class Mesh:
                 if len(loop) >= 3:
                     loops.append(loop)
         return loops
+
+    def _triangle_edge_lengths(self) -> FloatArray:
+        if self.triangle_count == 0:
+            return np.empty((0, 3), dtype=np.float64)
+        triangles = self.points[self.faces]
+        return cast(
+            FloatArray,
+            np.linalg.norm(
+                np.stack(
+                    [
+                        triangles[:, 1] - triangles[:, 0],
+                        triangles[:, 2] - triangles[:, 1],
+                        triangles[:, 0] - triangles[:, 2],
+                    ],
+                    axis=1,
+                ),
+                axis=2,
+            ),
+        )
+
+    def _triangle_areas(self) -> FloatArray:
+        if self.triangle_count == 0:
+            return np.empty((0,), dtype=np.float64)
+        p0 = self.points[self.faces[:, 0]]
+        p1 = self.points[self.faces[:, 1]]
+        p2 = self.points[self.faces[:, 2]]
+        return cast(FloatArray, np.linalg.norm(np.cross(p1 - p0, p2 - p0), axis=1) * 0.5)
+
+    def _face_edges(self) -> IntArray:
+        if self.triangle_count == 0:
+            return np.empty((0, 2), dtype=np.int64)
+        return cast(
+            IntArray,
+            np.concatenate(
+                [
+                    self.faces[:, [0, 1]],
+                    self.faces[:, [1, 2]],
+                    self.faces[:, [2, 0]],
+                ]
+            ),
+        )
+
+    def _undirected_edges_and_counts(self) -> tuple[IntArray, IntArray]:
+        if self.triangle_count == 0:
+            return np.empty((0, 2), dtype=np.int64), np.empty((0,), dtype=np.int64)
+        undirected = np.sort(self._face_edges(), axis=1)
+        edges, counts = np.unique(undirected, axis=0, return_counts=True)
+        return edges, counts
+
+    def _boundary_edges_set(self) -> set[tuple[int, int]]:
+        edges, counts = self._undirected_edges_and_counts()
+        return {(int(edge[0]), int(edge[1])) for edge in edges[counts == 1].astype(int).tolist()}
 
     def _drop_non_finite(self) -> Mesh:
         finite = np.asarray(np.isfinite(self.points).all(axis=1), dtype=np.bool_)
@@ -640,3 +864,12 @@ class Mesh:
             },
             "metadata": dict(self.metadata),
         }
+
+
+def _boundary_edges_from_faces(faces: list[list[int]]) -> set[tuple[int, int]]:
+    counts: dict[tuple[int, int], int] = {}
+    for face in faces:
+        for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
+            edge = (min(start, end), max(start, end))
+            counts[edge] = counts.get(edge, 0) + 1
+    return {edge for edge, count in counts.items() if count == 1}
