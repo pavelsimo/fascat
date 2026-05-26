@@ -38,8 +38,22 @@ def _test_profile() -> ConversionProfile:
     )
 
 
-def test_asset_operation_reports_include_before_after_counts() -> None:
+def test_asset_operation_reports_include_options_and_before_after_counts() -> None:
     required_counts = {"nodes", "parts", "occurrences", "materials", "vertices", "triangles"}
+    required_options = {
+        "tessellate": {"sag", "angle", "relative", "max_edge_length", "create_normals", "keep_brep"},
+        "repair": {
+            "tolerance",
+            "merge_vertices",
+            "delete_degenerate",
+            "fix_winding",
+            "fill_small_holes",
+            "area_epsilon",
+        },
+        "stage": {"materials", "normals", "uv0", "uv1"},
+        "optimize": {"target_triangles", "ratio", "preserve_instances", "simplify", "optimize_buffers"},
+        "lods": {"ratios", "mode"},
+    }
     operations = [
         ("tessellate", lambda asset: asset.tessellate()),
         ("repair", lambda asset: asset.repair(RepairOptions())),
@@ -53,6 +67,7 @@ def test_asset_operation_reports_include_before_after_counts() -> None:
         step = result.report.steps[-1]
 
         assert step.name == name
+        assert required_options[name] <= set(step.options)
         assert required_counts <= set(step.before)
         assert required_counts <= set(step.after)
         assert step.duration >= 0.0
