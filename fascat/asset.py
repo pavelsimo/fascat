@@ -117,6 +117,7 @@ class Asset:
     def __post_init__(self) -> None:
         self.parts = dict(self.parts)
         self.materials = dict(self.materials)
+        self.report = self.report.copy()
 
     @property
     def part_count(self) -> int:

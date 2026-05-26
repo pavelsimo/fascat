@@ -8,6 +8,7 @@ import pytest
 from fascat.asset import Asset, Node, Part
 from fascat.material import Material
 from fascat.mesh import Mesh
+from fascat.report import Report, ReportStep
 
 
 def test_material_copies_input_metadata() -> None:
@@ -78,6 +79,58 @@ def test_part_and_asset_copy_mutable_containers_on_construction() -> None:
     assert part.lod_meshes[0] is lod_mesh
     assert set(asset.parts) == {"part"}
     assert set(asset.materials) == {"red"}
+
+
+def test_report_models_copy_mutable_inputs_on_construction() -> None:
+    options: dict[str, object] = {"mode": "cad"}
+    before = {"parts": 1}
+    after = {"parts": 2}
+    step_warnings = ["step warning"]
+    step = ReportStep("stage", options=options, before=before, after=after, warnings=step_warnings)
+    steps = [step]
+    warnings = ["report warning"]
+    errors = ["report error"]
+    input_stats = {"triangles": 10}
+    output_stats = {"triangles": 5}
+
+    report = Report(
+        steps=steps,
+        warnings=warnings,
+        errors=errors,
+        input_stats=input_stats,
+        output_stats=output_stats,
+    )
+    options["mode"] = "changed"
+    before["parts"] = 3
+    after["parts"] = 4
+    step_warnings.append("changed")
+    step.options["mode"] = "local change"
+    steps.append(ReportStep("write"))
+    warnings.append("changed")
+    errors.append("changed")
+    input_stats["triangles"] = 99
+    output_stats["triangles"] = 100
+
+    assert report.steps[0].options == {"mode": "cad"}
+    assert report.steps[0].before == {"parts": 1}
+    assert report.steps[0].after == {"parts": 2}
+    assert report.steps[0].warnings == ["step warning"]
+    assert [step.name for step in report.steps] == ["stage"]
+    assert report.warnings == ["report warning"]
+    assert report.errors == ["report error"]
+    assert report.input_stats == {"triangles": 10}
+    assert report.output_stats == {"triangles": 5}
+
+
+def test_asset_copies_report_on_construction() -> None:
+    report = Report(warnings=["outside"], input_stats={"parts": 1})
+
+    asset = Asset(root=Node(id="root", name="root"), report=report)
+    report.add_warning("changed")
+    report.input_stats["parts"] = 2
+
+    assert asset.report.warnings == ["outside"]
+    assert asset.report.input_stats == {"parts": 1}
 
 
 def test_asset_write_usd_records_report_step(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

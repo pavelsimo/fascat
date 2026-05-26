@@ -20,6 +20,22 @@ class ReportStep:
     after: dict[str, int] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        self.options = dict(self.options)
+        self.before = dict(self.before)
+        self.after = dict(self.after)
+        self.warnings = list(self.warnings)
+
+    def copy(self) -> ReportStep:
+        return ReportStep(
+            name=self.name,
+            options=dict(self.options),
+            duration=self.duration,
+            before=dict(self.before),
+            after=dict(self.after),
+            warnings=list(self.warnings),
+        )
+
     def to_dict(self) -> dict[str, object]:
         return {
             "name": self.name,
@@ -42,22 +58,19 @@ class Report:
     input_stats: dict[str, int] = field(default_factory=dict)
     output_stats: dict[str, int] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        self.steps = [step.copy() for step in self.steps]
+        self.warnings = list(self.warnings)
+        self.errors = list(self.errors)
+        self.input_stats = dict(self.input_stats)
+        self.output_stats = dict(self.output_stats)
+
     def copy(self) -> Report:
         return Report(
             source_path=self.source_path,
             started_at=self.started_at,
             finished_at=self.finished_at,
-            steps=[
-                ReportStep(
-                    name=step.name,
-                    options=dict(step.options),
-                    duration=step.duration,
-                    before=dict(step.before),
-                    after=dict(step.after),
-                    warnings=list(step.warnings),
-                )
-                for step in self.steps
-            ],
+            steps=[step.copy() for step in self.steps],
             warnings=list(self.warnings),
             errors=list(self.errors),
             input_stats=dict(self.input_stats),
