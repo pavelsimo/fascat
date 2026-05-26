@@ -21,6 +21,17 @@ def test_stage_material_modes_control_bindings_and_display_color() -> None:
         materials={"red": Material(id="red", name="Red", base_color=(1.0, 0.0, 0.0, 1.0))},
     )
 
+    cad = asset.stage(StageOptions(materials="cad", uv0="none", uv1=None))
+    cad_part = cad.parts["part"]
+    cad_mesh = cad_part.mesh
+
+    assert set(cad.materials) == {"red"}
+    assert cad_part.material_ids == ["red"]
+    assert "display_color" not in cad_part.metadata
+    assert cad_mesh is not None
+    assert cad_mesh.material_indices is not None
+    assert cad_mesh.material_indices.tolist() == [0]
+
     display = asset.stage(StageOptions(materials="display", uv0="none", uv1=None))
     display_part = display.parts["part"]
     display_mesh = display_part.mesh
