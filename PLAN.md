@@ -776,7 +776,7 @@ CLI tests:
 - `fascat convert --dry-run` rejects unsorted LOD ratios.
 - `fascat convert` emits source, tessellate, repair, stage, optimize, LOD, write, and validate progress with count stats on stderr.
 - `fascat convert` validates generated USD before reporting success.
-- `fascat convert --report` writes a failure report sidecar when conversion exposes one, including generated USD validation failures.
+- `fascat convert --report` writes successful report sidecars with source counts, output counts, warnings, errors, and timings, plus failure report sidecars when conversion exposes one, including generated USD validation failures.
 - `fascat convert --materials` exercises CAD material binding, displayColor-only, and no-material staging modes through generated USD output.
 
 ## 15. Milestones

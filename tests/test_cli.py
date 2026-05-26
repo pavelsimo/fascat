@@ -312,9 +312,18 @@ def test_convert_fixture_writes_usd_and_report(tmp_path: Path) -> None:
     step_names = [step["name"] for step in report["steps"]]
     assert "write" in step_names
     assert "validate" in step_names
+    assert report["source_path"].endswith("spool-clamp-lid.step")
     assert report["finished_at"] is not None
+    assert report["warnings"] == []
+    assert report["errors"] == []
+    assert report["input_stats"]["parts"] == 1
+    assert report["input_stats"]["materials"] == 1
+    assert report["output_stats"]["parts"] == 1
     assert report["output_stats"]["materials"] == 0
     assert report["output_stats"]["triangles"] <= 120
+    assert all(isinstance(step["warnings"], list) for step in report["steps"])
+    assert all(step["duration"] >= 0.0 for step in report["steps"])
+    assert all(isinstance(step["before"], dict) and isinstance(step["after"], dict) for step in report["steps"])
 
 
 @pytest.mark.requires_ocp
