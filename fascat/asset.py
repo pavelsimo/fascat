@@ -74,9 +74,11 @@ class Part:
     lod_meshes: list[Mesh] = field(default_factory=list)
 
     def __post_init__(self) -> None:
+        if self.mesh is not None:
+            self.mesh = self.mesh.copy()
         self.material_ids = list(self.material_ids)
         self.metadata = dict(self.metadata)
-        self.lod_meshes = list(self.lod_meshes)
+        self.lod_meshes = [mesh.copy() for mesh in self.lod_meshes]
 
     def copy(self, *, keep_source: bool = True) -> Part:
         return Part(

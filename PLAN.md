@@ -676,7 +676,7 @@ Initial profile defaults:
 
 Unit tests:
 
-- Asset, node, part, mesh, and material constructors/copies isolate mutable containers, child nodes, arrays, and asset-owned objects while preserving new-asset semantics.
+- Asset, node, part, mesh, and material constructors/copies isolate mutable containers, child nodes, arrays, part-owned meshes, and asset-owned objects while preserving new-asset semantics.
 - Material validates RGBA length plus finite base-color, metallic, roughness, and opacity unit ranges.
 - Report and report-step constructors/copies isolate mutable step, warning, error, and stats containers.
 - Report summary and JSON output expose source, output stats, steps, and step warnings.

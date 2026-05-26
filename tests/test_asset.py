@@ -83,6 +83,22 @@ def test_node_rejects_invalid_transform_shape() -> None:
         Node(id="node", name="node", transform=np.eye(3, dtype=float))
 
 
+def test_part_copies_owned_meshes_on_construction() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    lod_mesh = mesh.copy()
+
+    part = Part(id="part", name="Part", mesh=mesh, lod_meshes=[lod_mesh])
+    mesh.points[0, 0] = 9.0
+    lod_mesh.faces[0, 0] = 2
+
+    assert part.mesh is not None
+    assert part.mesh.points[0, 0] == 0.0
+    assert part.lod_meshes[0].faces.tolist() == [[0, 1, 2]]
+
+
 def test_part_and_asset_copy_mutable_containers_on_construction() -> None:
     material_ids = ["red"]
     metadata = {"source": "cad"}
@@ -104,6 +120,7 @@ def test_part_and_asset_copy_mutable_containers_on_construction() -> None:
     material_ids.append("blue")
     metadata["source"] = "changed"
     lod_meshes.append(lod_mesh.copy())
+    lod_mesh.points[0, 0] = 9.0
     parts["other"] = Part(id="other", name="Other")
     part.name = "Changed"
     part.mesh = mesh
@@ -116,7 +133,8 @@ def test_part_and_asset_copy_mutable_containers_on_construction() -> None:
     assert part.material_ids == ["red"]
     assert part.metadata == {"source": "cad"}
     assert len(part.lod_meshes) == 1
-    assert part.lod_meshes[0] is lod_mesh
+    assert part.lod_meshes[0] is not lod_mesh
+    assert part.lod_meshes[0].points[0, 0] == 0.0
     assert set(asset.parts) == {"part"}
     assert set(asset.materials) == {"red"}
     assert asset.parts["part"].name == "Part"
