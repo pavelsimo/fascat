@@ -816,7 +816,6 @@ JT tests:
 - Test `fc.has_native_jt_backend()` exposes native backend availability.
 - Test direct native JT reader integration with a license-clean fixture when `OCP.JTCAFControl` is available.
 - Allow native JT integration tests to read a local license-clean sample through `FASCAT_JT_SAMPLE`.
-- Provide a `make jt-samples` / `make jt-test` workflow for reproducible sample download and native JT verification.
 - Mark native JT-backed tests with `pytest.mark.requires_jt`.
 
 CLI tests:

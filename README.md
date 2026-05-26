@@ -150,15 +150,6 @@ Use `fc.read_jt("motor.jt")` for direct JT input when the JT backend is installe
 
 Use `fc.has_native_jt_backend()` to check whether the current Python environment can read JT directly.
 
-To verify native JT import with sample files:
-
-```bash
-make jt-samples
-make jt-test
-```
-
-The sample files are downloaded to `dist/jt-samples/` and are not committed.
-
 ## Docs
 
 Full documentation at **[pavelsimo.github.io/fascat](https://pavelsimo.github.io/fascat)**.

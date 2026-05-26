@@ -76,8 +76,6 @@ Direct JT import requires Open Cascade JT Import-Export bindings exposed as `OCP
 
 The Python API exposes `fc.has_native_jt_backend()` for checking whether the current environment can read JT files directly.
 
-For development verification, `make jt-samples` downloads public JT2Go sample files into `dist/jt-samples/`, and `make jt-test` runs the native JT integration test against them.
-
 `--debug` is only valid with `.usd` or `.usda` output. Binary `.usdc`, `.gltf`, and `.glb` output is rejected when debug mode is enabled.
 
 `convert` validates the generated asset before reporting success. If validation fails, the command exits non-zero.
@@ -96,8 +94,6 @@ When `--json` is active, expected runtime errors are reported as JSON payloads o
 | Variable | Description |
 |----------|-------------|
 | `NO_COLOR` | Set to any non-empty value to disable color output |
-| `FASCAT_JT_SAMPLE` | Test-only path to one license-clean `.jt` file for `tests/test_jt_integration.py` |
-| `FASCAT_JT_SAMPLE_DIR` | Test-only directory of license-clean `.jt` files for `tests/test_jt_integration.py` |
 
 Color is also disabled when `--no-color` is passed, `TERM=dumb`, or the relevant stream is not a TTY.
 

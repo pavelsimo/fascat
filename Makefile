@@ -1,8 +1,7 @@
 TOOL_NAME := fascat
 MODULE    := fascat
-JT_SAMPLE_DIR ?= dist/jt-samples
 
-.PHONY: install build test coverage lint fmt fmt-check docs ci publish clean jt-samples jt-test tools help
+.PHONY: install build test coverage lint fmt fmt-check docs ci publish clean tools help
 
 install: ## Install project and dev dependencies
 	uv sync --dev
@@ -39,12 +38,6 @@ publish: ## Publish to PyPI (requires PyPI credentials or OIDC in CI)
 
 clean: ## Remove build artifacts
 	rm -rf dist/ htmlcov/ .coverage .mypy_cache .ruff_cache __pycache__ $(MODULE)/__pycache__ tests/__pycache__
-
-jt-samples: ## Download public JT sample files for native-backend integration testing
-	JT_SAMPLE_DIR="$(JT_SAMPLE_DIR)" bash scripts/download-jt-samples.sh
-
-jt-test: jt-samples ## Run native JT integration tests against downloaded sample files
-	FASCAT_JT_SAMPLE_DIR="$(JT_SAMPLE_DIR)" uv run pytest tests/test_jt_integration.py --no-cov -q
 
 tools: ## Install development tools (lefthook)
 	pip install lefthook --user 2>/dev/null || brew install lefthook
