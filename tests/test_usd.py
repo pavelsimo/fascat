@@ -59,6 +59,56 @@ def author_triangle_mesh(stage: object, path: str, indices: list[int]) -> None:
     mesh.CreateFaceVertexIndicesAttr(indices)
 
 
+@pytest.mark.parametrize(
+    ("case", "message"),
+    [
+        ("no_default_prim", "no defaultPrim"),
+        ("no_meshes", "contains no meshes"),
+        ("non_triangle", "non-triangle faces"),
+        ("invalid_index_count", "invalid face index count"),
+        ("out_of_range_indices", "out-of-range face indices"),
+        ("bad_subdivision", "subdivisionScheme"),
+    ],
+)
+def test_validate_usd_rejects_invalid_stage_structure(tmp_path: Path, case: str, message: str) -> None:
+    output = tmp_path / f"{case}.usda"
+    stage = Usd.Stage.CreateNew(str(output))
+    assert stage is not None
+
+    if case == "no_default_prim":
+        author_triangle_mesh(stage, "/Scene/Mesh", [0, 1, 2])
+    else:
+        scene = UsdGeom.Xform.Define(stage, "/Scene")
+        stage.SetDefaultPrim(scene.GetPrim())
+        if case == "non_triangle":
+            mesh = UsdGeom.Mesh.Define(stage, "/Scene/Mesh")
+            mesh.CreateSubdivisionSchemeAttr("none")
+            mesh.CreatePointsAttr(
+                [
+                    (0.0, 0.0, 0.0),
+                    (1.0, 0.0, 0.0),
+                    (1.0, 1.0, 0.0),
+                    (0.0, 1.0, 0.0),
+                ]
+            )
+            mesh.CreateFaceVertexCountsAttr([4])
+            mesh.CreateFaceVertexIndicesAttr([0, 1, 2, 3])
+        elif case == "invalid_index_count":
+            author_triangle_mesh(stage, "/Scene/Mesh", [0, 1])
+        elif case == "out_of_range_indices":
+            author_triangle_mesh(stage, "/Scene/Mesh", [0, 1, 9])
+        elif case == "bad_subdivision":
+            mesh = UsdGeom.Mesh.Define(stage, "/Scene/Mesh")
+            mesh.CreateSubdivisionSchemeAttr("catmullClark")
+            mesh.CreatePointsAttr([(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)])
+            mesh.CreateFaceVertexCountsAttr([3])
+            mesh.CreateFaceVertexIndicesAttr([0, 1, 2])
+
+    assert stage.GetRootLayer().Save()
+    with pytest.raises(RuntimeError, match=message):
+        validate_usd(output)
+
+
 def test_usd_export_authors_mesh_material_units_and_lods(tmp_path: Path) -> None:
     mesh = cube_mesh()
     root = Node(id="root", name="root", children=[Node(id="n1", name="Cube Occurrence", part_id="cube")])

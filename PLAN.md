@@ -736,6 +736,7 @@ USD tests:
 - Assert USD validation follows instanceable repeated-part prototypes.
 - Assert per-face material subsets are authored when material indices require them.
 - Assert LOD variants exist with `lod0` selected when requested.
+- Assert USD validation rejects missing default prims, empty default prims, non-triangle faces, invalid face index counts, out-of-range indices, and bad subdivision schemes.
 - Assert USD validation checks every authored `lod` variant, not only the selected default variant.
 - Mark USD-backed tests with `pytest.mark.requires_usd`.
 
