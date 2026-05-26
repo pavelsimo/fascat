@@ -60,11 +60,21 @@ def test_lod_options_normalize_list_ratios() -> None:
     ("factory", "message"),
     [
         (lambda: fc.Tessellation(sag=0), "sag"),
+        (lambda: fc.Tessellation(angle=0), "angle"),
         (lambda: fc.Tessellation(angle=181), "angle"),
+        (lambda: fc.Tessellation(max_edge_length=0), "max_edge_length"),
         (lambda: fc.RepairOptions(tolerance=-1), "tolerance"),
+        (lambda: fc.RepairOptions(area_epsilon=-1), "area_epsilon"),
         (lambda: fc.StageOptions(materials="bad"), "materials"),
+        (lambda: fc.StageOptions(uv0="bad"), "uv0"),
+        (lambda: fc.StageOptions(uv1="bad"), "uv1"),
+        (lambda: fc.OptimizeOptions(target_triangles=0), "target_triangles"),
+        (lambda: fc.OptimizeOptions(ratio=0), "ratio"),
         (lambda: fc.OptimizeOptions(ratio=1), "ratio"),
+        (lambda: fc.LODOptions(()), "at least one"),
+        (lambda: fc.LODOptions((1.0,)), "greater than 0"),
         (lambda: fc.LODOptions((0.25, 0.5)), "sorted"),
+        (lambda: fc.LODOptions((0.5,), mode="payloads"), "variant-based"),
     ],
 )
 def test_options_validate_bad_inputs(factory: object, message: str) -> None:
