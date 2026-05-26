@@ -83,6 +83,22 @@ def test_no_color_flag() -> None:
     assert result.exit_code == 0
 
 
+def test_quiet_suppresses_nonessential_dry_run_output(capsys) -> None:  # type: ignore[no-untyped-def]
+    result = invoke_run(["--quiet", "--dry-run", "convert", "input.step", "output.usdc"], capsys)
+
+    assert result.exit_code == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_quiet_does_not_suppress_errors(capsys) -> None:  # type: ignore[no-untyped-def]
+    result = invoke_run(["--quiet", "validate", "missing.usdc"], capsys)
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "Missing output file: missing.usdc" in result.stderr
+
+
 def test_inspect_help() -> None:
     result = runner.invoke(app, ["inspect", "--help"])
     assert result.exit_code == 0
