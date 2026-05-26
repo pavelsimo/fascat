@@ -721,7 +721,7 @@ USD tests:
 - Assert face counts, indices, and points are valid.
 - Assert materials bind correctly.
 - Assert UV0 primvars, normals, and sanitized-name original metadata are authored.
-- Assert sanitized prototype and material prims preserve original names and IDs in metadata.
+- Assert sanitized prototype, material, and per-face subset prims preserve original names and IDs in metadata.
 - Assert non-identity node transforms are authored as USD Xform ops.
 - Assert mesh extents are authored.
 - Assert both `Asset.write_usd()` and `fc.write_usd()` write valid stages.

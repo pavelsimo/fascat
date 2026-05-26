@@ -201,7 +201,7 @@ def _write_mesh(
         primvar.Set([Gf.Vec2f(*uv) for uv in mesh.uvs[0].tolist()])
     _write_display_color(usd_mesh, part, materials)
     if part.material_ids:
-        _bind_materials(stage, usd_mesh, part, mesh, material_paths)
+        _bind_materials(stage, usd_mesh, part, mesh, materials, material_paths)
     usd_mesh.GetPrim().SetCustomDataByKey("fascat:partId", part.id)
     usd_mesh.GetPrim().SetCustomDataByKey("fascat:originalName", part.name)
 
@@ -222,7 +222,14 @@ def _write_display_color(usd_mesh: Any, part: Part, materials: dict[str, Materia
     usd_mesh.CreateDisplayOpacityAttr([float(base_color[3])])
 
 
-def _bind_materials(stage: Any, usd_mesh: Any, part: Part, mesh: Any, material_paths: dict[str, str]) -> None:
+def _bind_materials(
+    stage: Any,
+    usd_mesh: Any,
+    part: Part,
+    mesh: Any,
+    materials: dict[str, Material],
+    material_paths: dict[str, str],
+) -> None:
     from pxr import UsdGeom, UsdShade
 
     first_material_path = material_paths.get(part.material_ids[0])
@@ -245,6 +252,9 @@ def _bind_materials(stage: Any, usd_mesh: Any, part: Part, mesh: Any, material_p
             face_indices,
             "materialBind",
         )
+        subset.GetPrim().SetCustomDataByKey("fascat:materialId", material_id)
+        material_name = materials[material_id].name if material_id in materials else material_id
+        subset.GetPrim().SetCustomDataByKey("fascat:originalName", material_name)
         material = UsdShade.Material.Get(stage, material_path)
         UsdShade.MaterialBindingAPI(subset.GetPrim()).Bind(material)
 

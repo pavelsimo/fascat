@@ -231,12 +231,12 @@ def test_usd_export_authors_face_material_subsets(tmp_path: Path) -> None:
         material_indices=np.array([0, 1], dtype=int),
     )
     root = Node(id="root", name="root", children=[Node(id="node", name="Panel", part_id="panel")])
-    red = Material(id="red", name="Red", base_color=(1.0, 0.0, 0.0, 1.0))
-    blue = Material(id="blue", name="Blue", base_color=(0.0, 0.0, 1.0, 1.0))
+    red = Material(id="red metal!", name="red material source!", base_color=(1.0, 0.0, 0.0, 1.0))
+    blue = Material(id="2 blue paint", name="blue material source!", base_color=(0.0, 0.0, 1.0, 1.0))
     asset = Asset(
         root=root,
-        parts={"panel": Part(id="panel", name="Panel", mesh=mesh, material_ids=["red", "blue"])},
-        materials={"red": red, "blue": blue},
+        parts={"panel": Part(id="panel", name="Panel", mesh=mesh, material_ids=[red.id, blue.id])},
+        materials={red.id: red, blue.id: blue},
     )
     output = tmp_path / "subsets.usda"
 
@@ -250,10 +250,17 @@ def test_usd_export_authors_face_material_subsets(tmp_path: Path) -> None:
     subset_bindings = [
         UsdShade.MaterialBindingAPI(prim).ComputeBoundMaterial()[0].GetPath().pathString for prim in subsets
     ]
+    subset_metadata = {
+        prim.GetCustomDataByKey("fascat:materialId"): prim.GetCustomDataByKey("fascat:originalName") for prim in subsets
+    }
 
     assert len(subsets) == 2
     assert subset_indices == [0, 1]
-    assert sorted(subset_bindings) == ["/Materials/blue", "/Materials/red"]
+    assert sorted(subset_bindings) == ["/Materials/_2_blue_paint", "/Materials/red_metal"]
+    assert subset_metadata == {
+        "red metal!": "red material source!",
+        "2 blue paint": "blue material source!",
+    }
 
 
 def test_usd_export_does_not_instance_when_instances_are_not_preserved(tmp_path: Path) -> None:
