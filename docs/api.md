@@ -819,7 +819,7 @@ Export option parameters:
 
 ## Profiles
 
-Profiles provide practical defaults for tessellation, staging, optimization, and LODs.
+Profiles provide practical defaults for tessellation, staging, optimization, LODs, and platform budget checks.
 
 ```python
 profile = fc.profiles.realtime_web(
@@ -834,14 +834,14 @@ asset = fc.convert("motor.step", "motor.glb", profile=profile)
 
 Available profiles:
 
-| Profile | Use |
-|---------|-----|
-| `inspect-only` | inspect STEP input without conversion |
-| `realtime-desktop` | higher-detail OpenUSD or glTF output |
-| `realtime-web` | lower triangle budgets for web delivery |
-| `virtual-reality` | balanced triangle budgets and LODs for VR runtimes |
+| Profile | Use | Target FPS | Triangle budget | Draw-call budget |
+|---------|-----|------------|-----------------|------------------|
+| `inspect-only` | inspect STEP input without conversion | unset | unset | unset |
+| `realtime-desktop` | higher-detail OpenUSD or glTF output | 60 | 1,000,000 | 2,000 |
+| `realtime-web` | lower triangle budgets for web delivery | 60 | 250,000 | 500 |
+| `virtual-reality` | balanced triangle budgets and LODs for VR runtimes | 90 | 500,000 | 250 |
 
-You can pass either a profile name or a `ConversionProfile` returned by `fc.profiles`.
+You can pass either a profile name or a `ConversionProfile` returned by `fc.profiles`. Conversion reports include a `profile_budget` step when the selected profile has a budget. That step records target FPS, triangle, vertex, and draw-call budgets, plus any amount over budget as report warnings.
 
 ## Functional wrappers
 

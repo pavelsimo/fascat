@@ -17,6 +17,7 @@ from fascat.options import (
     LODLevel,
     LODOptions,
     OptimizeOptions,
+    PlatformBudget,
     RemoveHolesOptions,
     RemoveOccludedOptions,
     RepairOptions,
@@ -327,7 +328,13 @@ mode = "bounding_box"
     assert part.mesh is not None
     assert part.mesh.triangle_count == 12
     steps = {step.name: step for step in converted.report.steps}
-    assert [step.name for step in converted.report.steps[1:]] == ["repair", "replace", "write", "validate"]
+    assert [step.name for step in converted.report.steps[1:]] == [
+        "repair",
+        "replace",
+        "write",
+        "validate",
+        "profile_budget",
+    ]
     assert steps["replace"].options["where"]["criteria"] == {"part_id": ["part"], "max_triangles": 12}
     assert steps["replace"].options["matched"]["parts"] == 1
 
@@ -566,7 +573,8 @@ op = "repair"
     assert import_options.pmi is False
     assert export_options.metadata.mode == "summary"
     assert export_options.metadata.pmi == "none"
-    assert converted.report.steps[-2].options["metadata"] == {"mode": "summary", "pmi": "none"}
+    write_step = next(step for step in converted.report.steps if step.name == "write")
+    assert write_step.options["metadata"] == {"mode": "summary", "pmi": "none"}
 
 
 def test_convert_dispatches_gltf_writer_and_validator(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
@@ -629,6 +637,44 @@ def test_convert_report_output_stats_include_lod_totals(monkeypatch, tmp_path: P
     assert write_step.before["lod_triangles"] == 1
     assert converted.report.output_stats["lod_meshes"] == 1
     assert converted.report.output_stats["lod_triangles"] == 1
+
+
+def test_convert_report_checks_profile_budget(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.pipeline as pipeline
+
+    profile = ConversionProfile(
+        name="strict",
+        tessellation=None,
+        repair=RepairOptions(),
+        stage=StageOptions(uv0="none", uv1=None),
+        optimize=None,
+        lods=None,
+        budget=PlatformBudget(target_fps=60, max_triangles=1, max_vertices=2, max_draw_calls=1),
+    )
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False, options=None: None)
+
+    converted = convert("input.step", tmp_path / "output.usdc", profile=profile, validate_output=False)
+    budget_step = converted.report.steps[-1]
+
+    assert budget_step.name == "profile_budget"
+    assert budget_step.options == {
+        "profile": "strict",
+        "target_fps": 60,
+        "max_triangles": 1,
+        "max_vertices": 2,
+        "max_draw_calls": 1,
+    }
+    assert budget_step.before["triangles"] == 1
+    assert budget_step.before["vertices"] == 3
+    assert budget_step.before["draw_calls"] == 1
+    assert budget_step.after["profile_target_fps"] == 60
+    assert budget_step.after["profile_triangles_over_budget"] == 0
+    assert budget_step.after["profile_vertices_over_budget"] == 1
+    assert budget_step.after["profile_draw_calls_over_budget"] == 0
+    assert budget_step.after["profile_budget_violations"] == 1
+    assert budget_step.warnings == ["profile budget exceeded for strict: vertices 3 > 2"]
+    assert converted.report.warnings[-1] == budget_step.warnings[0]
 
 
 def test_convert_report_finishes_when_validation_is_disabled(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]

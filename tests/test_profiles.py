@@ -8,12 +8,12 @@ from fascat.options import ConversionProfile
 
 
 @pytest.mark.parametrize(
-    ("profile", "name", "sag", "angle", "target_triangles", "uv0", "lods"),
+    ("profile", "name", "sag", "angle", "target_triangles", "uv0", "lods", "target_fps", "max_draw_calls"),
     [
-        (profiles.inspect_only(), "inspect-only", None, None, None, "none", None),
-        (profiles.realtime_desktop(), "realtime-desktop", 0.1, 15.0, 1_000_000, "box", (0.5, 0.25, 0.1)),
-        (profiles.realtime_web(), "realtime-web", 0.2, 20.0, 250_000, "box", (0.5, 0.25)),
-        (profiles.virtual_reality(), "virtual-reality", 0.15, 15.0, 500_000, "box", (0.5, 0.25, 0.125)),
+        (profiles.inspect_only(), "inspect-only", None, None, None, "none", None, None, None),
+        (profiles.realtime_desktop(), "realtime-desktop", 0.1, 15.0, 1_000_000, "box", (0.5, 0.25, 0.1), 60, 2_000),
+        (profiles.realtime_web(), "realtime-web", 0.2, 20.0, 250_000, "box", (0.5, 0.25), 60, 500),
+        (profiles.virtual_reality(), "virtual-reality", 0.15, 15.0, 500_000, "box", (0.5, 0.25, 0.125), 90, 250),
     ],
 )
 def test_profiles_match_documented_default_table(
@@ -24,6 +24,8 @@ def test_profiles_match_documented_default_table(
     target_triangles: int | None,
     uv0: str,
     lods: tuple[float, ...] | None,
+    target_fps: int | None,
+    max_draw_calls: int | None,
 ) -> None:
     assert profile.to_dict()["name"] == name
     assert profiles.by_name(name).to_dict() == profile.to_dict()
@@ -49,6 +51,15 @@ def test_profiles_match_documented_default_table(
         assert profile.lods is not None
         assert profile.lods.ratios == lods
 
+    if target_fps is None:
+        assert profile.budget is None
+    else:
+        assert profile.budget is not None
+        assert profile.budget.target_fps == target_fps
+        assert profile.budget.max_triangles == target_triangles
+        assert profile.budget.max_vertices == target_triangles * 3
+        assert profile.budget.max_draw_calls == max_draw_calls
+
 
 def test_lod_options_normalize_list_ratios() -> None:
     options = fc.LODOptions(ratios=[0.5, 0.25, 0.1])
@@ -69,6 +80,10 @@ def test_lod_options_normalize_list_ratios() -> None:
         (lambda: fc.Tessellation(max_polygon_length=0), "max_polygon_length"),
         (lambda: fc.Tessellation(min_edge_length=2, max_edge_length=1), "min_edge_length"),
         (lambda: fc.Tessellation(part_settings={"part": {"bad": True}}), "unsupported part_settings"),
+        (lambda: fc.PlatformBudget(target_fps=0), "target_fps"),
+        (lambda: fc.PlatformBudget(max_triangles=0), "max_triangles"),
+        (lambda: fc.PlatformBudget(max_vertices=0), "max_vertices"),
+        (lambda: fc.PlatformBudget(max_draw_calls=0), "max_draw_calls"),
         (lambda: fc.RepairOptions(tolerance=-1), "tolerance"),
         (lambda: fc.RepairOptions(area_epsilon=-1), "area_epsilon"),
         (lambda: fc.StageOptions(materials="bad"), "materials"),

@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from fascat.options import ConversionProfile, LODOptions, OptimizeOptions, RepairOptions, StageOptions, Tessellation
+from fascat.options import (
+    ConversionProfile,
+    LODOptions,
+    OptimizeOptions,
+    PlatformBudget,
+    RepairOptions,
+    StageOptions,
+    Tessellation,
+)
 
 
 def inspect_only() -> ConversionProfile:
@@ -11,6 +19,7 @@ def inspect_only() -> ConversionProfile:
         stage=StageOptions(uv0="none", uv1=None),
         optimize=None,
         lods=None,
+        budget=None,
     )
 
 
@@ -28,6 +37,9 @@ def realtime_desktop(
         stage=StageOptions(uv0="box", uv1=None),
         optimize=OptimizeOptions(target_triangles=max_triangles, simplify=True, optimize_buffers=True),
         lods=LODOptions(ratios=tuple(lod_ratios)) if lod_ratios else None,
+        budget=PlatformBudget(
+            target_fps=60, max_triangles=max_triangles, max_vertices=max_triangles * 3, max_draw_calls=2_000
+        ),
     )
 
 
@@ -45,6 +57,9 @@ def realtime_web(
         stage=StageOptions(uv0="box", uv1=None),
         optimize=OptimizeOptions(target_triangles=max_triangles, simplify=True, optimize_buffers=True),
         lods=LODOptions(ratios=tuple(lod_ratios)) if lod_ratios else None,
+        budget=PlatformBudget(
+            target_fps=60, max_triangles=max_triangles, max_vertices=max_triangles * 3, max_draw_calls=500
+        ),
     )
 
 
@@ -62,6 +77,9 @@ def virtual_reality(
         stage=StageOptions(uv0="box", uv1=None),
         optimize=OptimizeOptions(target_triangles=max_triangles, simplify=True, optimize_buffers=True),
         lods=LODOptions(ratios=tuple(lod_ratios)) if lod_ratios else None,
+        budget=PlatformBudget(
+            target_fps=90, max_triangles=max_triangles, max_vertices=max_triangles * 3, max_draw_calls=250
+        ),
     )
 
 

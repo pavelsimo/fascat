@@ -734,6 +734,27 @@ class StlExportOptions:
 
 
 @dataclass(frozen=True)
+class PlatformBudget:
+    target_fps: int | None = None
+    max_triangles: int | None = None
+    max_vertices: int | None = None
+    max_draw_calls: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.target_fps is not None and self.target_fps <= 0:
+            raise ValueError("target_fps must be greater than 0 when set")
+        if self.max_triangles is not None and self.max_triangles <= 0:
+            raise ValueError("max_triangles must be greater than 0 when set")
+        if self.max_vertices is not None and self.max_vertices <= 0:
+            raise ValueError("max_vertices must be greater than 0 when set")
+        if self.max_draw_calls is not None and self.max_draw_calls <= 0:
+            raise ValueError("max_draw_calls must be greater than 0 when set")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class ConversionProfile:
     name: str
     tessellation: Tessellation | None
@@ -741,6 +762,7 @@ class ConversionProfile:
     stage: StageOptions
     optimize: OptimizeOptions | None
     lods: LODOptions | None
+    budget: PlatformBudget | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -750,4 +772,5 @@ class ConversionProfile:
             "stage": self.stage.to_dict(),
             "optimize": self.optimize.to_dict() if self.optimize else None,
             "lods": self.lods.to_dict() if self.lods else None,
+            "budget": self.budget.to_dict() if self.budget else None,
         }

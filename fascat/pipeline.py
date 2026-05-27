@@ -244,6 +244,7 @@ def convert(
         )
         if progress is not None:
             progress("validate", asset.stats())
+    _add_profile_budget_report(asset, selected)
     asset.report.finish(_report_stats(asset))
     return asset
 
@@ -272,6 +273,52 @@ def _record_failed_step(
 
 def _report_stats(asset: Asset) -> dict[str, int]:
     return asset.stats(include_lods=any(part.lod_meshes for part in asset.parts.values()))
+
+
+def _add_profile_budget_report(asset: Asset, profile: ConversionProfile) -> None:
+    budget = profile.budget
+    if budget is None:
+        return
+    before = {**_report_stats(asset), "draw_calls": asset.draw_call_count}
+    after = dict(before)
+    options = {"profile": profile.name, **budget.to_dict()}
+    warnings: list[str] = []
+
+    violations = 0
+    if budget.target_fps is not None:
+        after["profile_target_fps"] = budget.target_fps
+    if budget.max_triangles is not None:
+        after["profile_triangle_budget"] = budget.max_triangles
+        over = max(0, asset.triangle_count - budget.max_triangles)
+        after["profile_triangles_over_budget"] = over
+        if over:
+            violations += 1
+            warnings.append(
+                f"profile budget exceeded for {profile.name}: triangles {asset.triangle_count} > {budget.max_triangles}"
+            )
+    if budget.max_vertices is not None:
+        after["profile_vertex_budget"] = budget.max_vertices
+        over = max(0, asset.vertex_count - budget.max_vertices)
+        after["profile_vertices_over_budget"] = over
+        if over:
+            violations += 1
+            warnings.append(
+                f"profile budget exceeded for {profile.name}: vertices {asset.vertex_count} > {budget.max_vertices}"
+            )
+    if budget.max_draw_calls is not None:
+        after["profile_draw_call_budget"] = budget.max_draw_calls
+        over = max(0, asset.draw_call_count - budget.max_draw_calls)
+        after["profile_draw_calls_over_budget"] = over
+        if over:
+            violations += 1
+            warnings.append(
+                f"profile budget exceeded for {profile.name}: draw calls {asset.draw_call_count} > {budget.max_draw_calls}"
+            )
+
+    after["profile_budget_violations"] = violations
+    for warning in warnings:
+        asset.report.add_warning(warning)
+    asset.report.add_step("profile_budget", options=options, before=before, after=after, warnings=warnings)
 
 
 def _file_size_budget(
