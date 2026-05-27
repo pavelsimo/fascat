@@ -84,7 +84,7 @@ Parity gaps to track:
    - Remaining work: add a preflight parity checklist before expensive operations run, with missing prerequisites and missing optional backends called out before conversion starts.
 
 2. Import controls
-   - Add a supported-format parity matrix. Unity's baseline covers many CAD and mesh formats; Fascat currently centers on STEP, so non-STEP CAD, mesh, and multi-format assembly imports need an explicit in-scope or out-of-scope decision.
+   - Reference docs now include a supported-format parity matrix. Unity's baseline covers many CAD and mesh formats; Fascat currently centers on STEP input and USD/glTF/OBJ/STL output, with IGES, Parasolid, JT, native CAD, IFC, 3MF, and QIF explicitly deferred.
    - Add explicit import toggles for design variants, PMI, product metadata, existing mesh preference, and multi-file imports.
    - Add cleanup operations for free points, line geometry, and post-tessellation BREP patch deletion.
    - Decide whether line geometry should be deleted, preserved as metadata, or tessellated into renderable tubes.

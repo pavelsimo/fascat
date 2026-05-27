@@ -37,6 +37,25 @@ Dry-run JSON for `convert` includes `operation_diagnostics`, a list of planned o
 | `fascat help [command]` | Show top-level or command-specific help |
 | `fascat version` | Print version and exit |
 
+## Format support matrix
+
+This matrix is scoped to Fascat's current importer/exporter surface. It is meant
+to make Unity Asset Transformer-style format parity explicit, not to imply that
+all listed formats are implemented.
+
+| Format family | Input support | Output support | Current decision |
+|---------------|---------------|----------------|------------------|
+| STEP `.step`, `.stp` | Supported | Not emitted as CAD | Primary neutral CAD input path |
+| OpenUSD `.usd`, `.usda`, `.usdc`, `.usdz` | Not imported | Supported | Runtime and scene-composition delivery |
+| glTF `.gltf`, `.glb` | Not imported | Supported | Preferred web/mobile runtime delivery |
+| OBJ `.obj` | Not imported | Supported | Mesh-only interchange output |
+| STL `.stl` | Not imported | Supported | Mesh-only manufacturing or inspection output |
+| IGES `.igs`, `.iges` | Not supported | Not supported | Legacy CAD import candidate, not in scope yet |
+| Parasolid `.x_t`, `.x_b` | Not supported | Not supported | Native-kernel CAD import candidate, not in scope yet |
+| JT `.jt` | Not supported | Not supported | Visualization/CAD hybrid import candidate, not in scope yet |
+| CATIA, NX, SolidWorks, Inventor | Not supported | Not supported | Native CAD coverage is deferred |
+| IFC, 3MF, QIF | Not supported | Not supported | Adjacent workflow formats, deferred unless a user need changes priority |
+
 ## Convert flags
 
 | Flag | Default | Description |
