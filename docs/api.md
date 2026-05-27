@@ -305,7 +305,7 @@ asset = fc.read_step("motor.step").heal_brep(
 )
 ```
 
-The operation stores per-part `brep_*` metadata and records a `heal_brep` report step. `fc.convert(..., heal_brep=fc.BrepHealOptions())` runs healing before tessellation.
+The operation stores per-part `brep_*` metadata and records a `heal_brep` report step. `fc.convert(..., heal_brep=fc.BrepHealOptions())` runs healing before tessellation. Sliver-face removal is requested through the BREP backend, but the current backend reports a warning when that removal path is unavailable instead of silently claiming that the source shape changed.
 
 Brep healing parameters:
 
@@ -314,7 +314,7 @@ Brep healing parameters:
 | `tolerance` | Working tolerance used for sewing, edge fixes, and tolerance unification. Must be greater than zero. |
 | `sew_faces` | Attempt to sew adjacent faces into shells before tessellation. |
 | `fix_edges` | Attempt to repair bad trims and edge curves where supported by the backend. |
-| `remove_sliver_faces` | Remove tiny sliver faces before tessellation when source BREP data is available. |
+| `remove_sliver_faces` | Request tiny sliver-face removal before tessellation. Current backend support is limited and reports a warning when removal is unavailable. |
 | `max_sliver_area` | Area threshold for sliver-face removal. |
 | `unify_tolerances` | Normalize shape tolerances to the requested working tolerance. |
 | `fail_on_open_shells` | Raise when healing detects open shells instead of reporting a warning. |
@@ -474,7 +474,7 @@ asset = asset.stage(
 )
 ```
 
-Atlas support currently records atlas and texture-bake metadata on materials and meshes. Dedicated material baking is a separate optimization step.
+Atlas support currently records atlas and texture-bake metadata on materials and meshes. It does not write atlas images. Dedicated material baking is a separate optimization step, and it currently creates a shared flat material plus bake metadata rather than texture files.
 
 Staging, UV, and material parameters:
 
@@ -606,6 +606,50 @@ Optimization action parameters:
 | `LODGeneratorOptions` | `allow_non_monotonic` | Permit non-monotonic LODs without failing validation. |
 | `LODLevel` | `screen_coverage` | Screen fraction at which this LOD becomes appropriate. |
 | `LODLevel` | `target_ratio` | Fraction of source triangles to keep for this LOD. |
+
+Report examples for destructive and approximate operations:
+
+```json
+{
+  "name": "merge",
+  "before": {"parts": 42, "triangles": 120000, "draw_calls": 42},
+  "after": {"parts": 8, "triangles": 120000, "draw_calls": 8},
+  "warnings": []
+}
+```
+
+```json
+{
+  "name": "bake_materials",
+  "before": {"materials": 12, "draw_calls": 18},
+  "after": {"materials": 1, "draw_calls": 1},
+  "warnings": [
+    "bake_materials creates a flat merged material; texture image baking is not implemented"
+  ]
+}
+```
+
+```json
+{
+  "name": "remove_holes",
+  "before": {"triangles": 8400},
+  "after": {"triangles": 8412},
+  "warnings": [
+    "BREP hole removal is not implemented; using mesh boundary-fill fallback"
+  ]
+}
+```
+
+```json
+{
+  "name": "remove_occluded",
+  "before": {"parts": 120, "triangles": 300000},
+  "after": {"parts": 118, "triangles": 296000},
+  "warnings": [
+    "occlusion level triangles uses part-level AABB containment fallback; submesh and triangle removal are not implemented"
+  ]
+}
+```
 
 ## One-shot conversion
 
@@ -791,7 +835,7 @@ for step in asset.report.steps:
 asset.report.write_json("report.json")
 ```
 
-The report records options, before/after counts, warnings, errors, and timings for each pipeline step.
+The report records options, before/after counts, warnings, errors, and timings for each pipeline step. Approximate operations put the limitation on the step that produced it, so callers can distinguish exact geometry changes from fallbacks or metadata-only intent.
 
 Use `Asset.analyze()` when you need geometry quality risks beyond raw part and triangle totals.
 

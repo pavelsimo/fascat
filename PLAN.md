@@ -1,66 +1,55 @@
-# Fascat Implementation Plan
+# Fascat Plan
 
-## 1. Goal
+This is the single planning document for Fascat. It replaces the older long-form
+implementation plan, TODO list, and gap analysis.
 
-Fascat is a Python library and CLI for converting CAD data into realtime-ready OpenUSD and glTF assets.
+## Current Status
 
-The first version should support one focused pipeline:
+Fascat is a Python library and CLI for converting CAD data into realtime-ready
+OpenUSD, glTF, OBJ, and STL assets.
 
-```text
-STEP CAD -> imported assembly -> tessellated meshes -> repaired meshes -> staged materials and UVs -> optimized LODs -> OpenUSD/glTF
-```
-
-Fascat takes guidance from Unity Asset Transformer SDK / Pixyz, but it is not a Pixyz clone. The goal is to define the minimum useful subset for high-quality CAD-to-realtime conversion, while relying on proven geometry libraries instead of reimplementing CAD kernels, tessellators, decimators, UV packers, or USD authoring from scratch.
-
-The public API should feel Pythonic and composable, closer to libraries like Shapely than to the procedural Pixyz-style API.
-
-## 2. Current Repository State
-
-The repository now contains the V1 package, CLI, tests, docs, and release/build wiring described by this plan:
+The V1 pipeline is implemented:
 
 ```text
-fascat/
-  fascat/                  # Python package and CLI implementation
-  tests/                   # unit, CLI, STEP, USD, and backend-gated tests
-  docs/                    # documentation source
-  scripts/                 # documentation build tooling
-  .github/workflows/       # CI, release, and pages workflows
-  pyproject.toml
-  Makefile
+STEP CAD -> assembly -> tessellation -> healing/repair -> staging -> optimization -> LODs -> export
 ```
 
-The license is MIT. `AGENTS.md` is the canonical repository instruction file.
+Working baseline:
 
-## 3. Design Principles
+- STEP import with assembly hierarchy, names, transforms, colors, metadata, and repeated-part handling.
+- Mesh repair, staging, UV generation, normals, tangents, optimization, LODs, and scene operations.
+- Export to USD, USDZ, glTF/GLB, OBJ, and STL.
+- glTF quantization, meshopt compression, `MSFT_lod` metadata, and file-size budget reporting.
+- OBJ vertex normals and smoothing directives.
+- Analysis reports with topology, sliver, tiny-part, draw-call, and actual triangle self-intersection checks.
+- CLI, Python API, TOML pipelines, docs site, release/build workflows, and CI coverage.
 
-- Keep the API small, explicit, and Pythonic.
-- Preserve CAD structure by default: hierarchy, transforms, names, colors, metadata, and repeated parts.
-- Use proven third-party libraries for hard geometry work.
-- Make every destructive or lossy step explicit in options and visible in reports.
-- Optimize unique parts, not repeated occurrences.
-- Generate OpenUSD and glTF that are inspectable, standards-aligned, and friendly to realtime runtimes.
-- Prefer robust partial success with warnings over silent data loss.
-- Keep V1 narrow: STEP in, realtime OpenUSD or glTF out.
+The project is no longer in "scaffold V1" mode. The next phase is polish:
+make option behavior exact, document limitations clearly, and improve algorithms
+that are currently conservative approximations.
 
-## 4. Research Summary
+## Principles
 
-Unity Asset Transformer guidance suggests this high-level order:
+- Keep the public API small, explicit, and Pythonic.
+- Preserve CAD hierarchy, transforms, names, colors, metadata, and instancing by default.
+- Make lossy or approximate steps explicit in options, docs, and reports.
+- Prefer warnings and partial success over silent data loss.
+- Use proven geometry libraries for CAD kernels, tessellation, simplification, UV packing, and USD authoring.
+- Work one feature at a time: implement, test, document, commit, push, and verify GitHub CI/docs before moving on.
 
-1. Import source data while preserving hierarchy, metadata, materials, and instancing.
-2. Clean and repair imported data before aggressive polygon operations.
-3. Tessellate CAD BREP data into renderable meshes.
-4. Stage render data: materials, UVs, normals, tangents, and optional baked data.
-5. Optimize LOD0 first.
-6. Generate LODs from optimized LOD0.
-7. Export to the target realtime format.
+## Recently Finished
 
-Fascat should adapt that flow to OpenUSD and glTF:
+- API parameter documentation was expanded so examples are backed by option descriptions.
+- Docs rendering issues were fixed, including Python highlighting, heading anchors, and sidebar branding.
+- Unsupported Draco compression now raises instead of silently writing uncompressed output.
+- Export file-size budgets are recorded and warn when outputs exceed the budget.
+- glTF LODs now include node-level `MSFT_lod` references in addition to Fascat extras.
+- OBJ export writes normals, `f v//vn` faces, and smoothing directives.
+- Self-intersection analysis now performs bounded triangle-triangle checks instead of counting AABB candidates.
 
-```text
-import -> tessellate -> repair -> stage -> optimize -> lods -> export
-```
+## Unity Asset Transformer Parity
 
-Important Unity references:
+References reviewed on 2026-05-27:
 
 - Import: https://docs.unity.com/en-us/asset-transformer-sdk/2026.1/manual/sdktips/import-guidelines
 - Stage: https://docs.unity.com/en-us/asset-transformer-sdk/2026.1/manual/sdktips/stage-guidelines
@@ -74,817 +63,176 @@ Important Unity references:
 - Decimate to target: https://docs.unity.com/en-us/asset-transformer-sdk/2026.1/manual/functions/decimatetotarget
 - Unwrap UV: https://docs.unity.com/en-us/asset-transformer-sdk/2026.1/manual/functions/unwrap-uv
 
-## 5. V1 Scope
-
-### Included
-
-- STEP import.
-- Assembly hierarchy preservation.
-- Part names, transforms, units, colors, and simple metadata where available.
-- Repeated part detection and OpenUSD instancing.
-- CAD BREP tessellation with sag and angle controls.
-- Triangle mesh cleanup:
-  - remove unreferenced vertices
-  - merge close vertices
-  - remove duplicate faces
-  - remove degenerate faces
-  - fix winding where possible
-  - compute normals
-  - optional conservative hole filling
-- Realtime staging:
-  - CAD color to basic PBR material
-  - display color fallback
-  - optional box-projected UV0
-  - optional xatlas UV unwrap/repack
-- Optimization:
-  - triangle target or ratio decimation
-  - preserve instances by default
-  - vertex/index buffer optimization
-  - geometry/material statistics report
-- LOD generation:
-  - decimated LOD chain
-  - OpenUSD `lod` variant set
-- Export:
-  - `.usdc` default
-  - `.usda` debug output
-  - OpenUSD `UsdGeomMesh`, `UsdShade`, `UsdGeomXform`, stage units, up-axis, and default prim
-  - `.gltf` and `.glb` glTF 2.0 export
-  - glTF hierarchy, shared mesh references, PBR materials, normals, UVs, and basic validation
-  - glTF export converts authored geometry to metres and Y-up while preserving original unit/up-axis metadata in extras
-
-### Deferred
-
-- More CAD formats.
-- Occlusion removal.
-- Visual footprint.
-- AO baking.
-- Texture and material baking.
-- Billboards.
-- Proxy meshes.
-- Dual contouring.
-- Advanced retopology.
-- Convex decomposition.
-- Filleting.
-- Loop subdivision.
-- Region/material merge workflows.
-- Texture compression.
-- `.usdz` packaging.
-
-## 6. Architecture
-
-```mermaid
-flowchart TD
-    A["STEP file"] --> B["STEP importer<br/>OCP / OCCT XDE"]
-    B --> C["Fascat Asset<br/>scene tree, parts, metadata"]
-    C --> D["Tessellator<br/>OCCT BRepMesh"]
-    D --> E["Mesh Store<br/>NumPy arrays"]
-    E --> F["Repair<br/>trimesh + Fascat cleanup"]
-    F --> G["Stage<br/>materials, normals, UVs"]
-    G --> H["Optimize<br/>decimation + meshoptimizer"]
-    H --> I["LOD Builder"]
-    I --> J["Export dispatch"]
-    J --> K["USD Writer<br/>usd-core"]
-    J --> L["glTF Writer<br/>native"]
-    K --> M["OpenUSD .usdc/.usda"]
-    L --> N["glTF .gltf/.glb"]
-```
-
-```mermaid
-flowchart LR
-    subgraph PublicAPI["fascat public API"]
-        Convert["convert()"]
-        ReadStep["read_step()"]
-        Asset["Asset"]
-        Profiles["profiles"]
-    end
-
-    subgraph Core["fascat core"]
-        Scene["scene graph"]
-        Mesh["mesh model"]
-        Ops["pipeline ops"]
-        Report["reporting"]
-    end
-
-    subgraph Backends["backend adapters"]
-        OCP["cadquery-ocp / OCCT"]
-        Trimesh["trimesh"]
-        Simplify["fast-simplification"]
-        Meshopt["meshoptimizer"]
-        Xatlas["xatlas"]
-        USD["usd-core"]
-    end
-
-    Convert --> ReadStep
-    ReadStep --> Asset
-    Asset --> Ops
-    Ops --> Scene
-    Ops --> Mesh
-    Ops --> Report
-    Ops --> OCP
-    Ops --> Trimesh
-    Ops --> Simplify
-    Ops --> Meshopt
-    Ops --> Xatlas
-    Ops --> USD
-```
-
-## 7. Proposed Package Layout
-
-```text
-fascat/
-  pyproject.toml
-  README.md
-  PLAN.md
-  src/
-    fascat/
-      __init__.py
-      asset.py
-      mesh.py
-      material.py
-      options.py
-      profiles.py
-      report.py
-      pipeline.py
-      cli.py
-      io/
-        __init__.py
-        step.py
-        usd.py
-      ops/
-        __init__.py
-        tessellate.py
-        repair.py
-        stage.py
-        optimize.py
-        lod.py
-        uv.py
-      backends/
-        __init__.py
-        ocp.py
-        trimesh.py
-        usd.py
-        xatlas.py
-  tests/
-    test_mesh_repair.py
-    test_profiles.py
-    test_pipeline_options.py
-    test_usd_export.py
-    fixtures/
-```
-
-This is an implementation target, not a requirement to scaffold all files at once.
-
-## 8. Dependencies
-
-Target Python version:
-
-- Python `>=3.10`
-
-Core dependencies:
-
-- `numpy`: mesh arrays and numeric operations.
-- `typing-extensions`: compatibility for modern typing features.
-- `rich`: CLI progress and reports.
-- `typer`: CLI commands.
-
-Geometry and asset dependencies:
-
-- `cadquery-ocp`: Python bindings to Open CASCADE for STEP import and CAD tessellation.
-- `trimesh`: mesh validation and repair helpers.
-- `fast-simplification`: triangle reduction.
-- `meshoptimizer`: vertex/index optimization.
-- `usd-core`: OpenUSD authoring.
-
-Optional dependency:
-
-- `xatlas`: UV unwrap/repack.
-
-Dependency policy:
-
-- Avoid GPL runtime dependencies in core.
-- Do not include PyMeshLab in V1 core because of licensing concerns.
-- Consider PyMeshLab later as an explicitly optional plugin if the project needs more advanced mesh processing.
-- Optional backends must fail with clear errors when requested but unavailable.
-
-## 9. Data Model
-
-### Asset
-
-Top-level object returned by import and pipeline operations.
-
-Fields:
-
-- `root: Node`
-- `parts: dict[str, Part]`
-- `materials: dict[str, Material]`
-- `units: str`
-- `meters_per_unit: float`
-- `up_axis: Literal["Y", "Z"]`
-- `source_path: Path | None`
-- `report: Report`
-
-Behavior:
-
-- Methods return a new `Asset` by default.
-- `inplace=True` can be added later only if profiling shows it is needed.
-- Large mesh arrays may be shared internally when unchanged.
-
-### Node
-
-Represents assembly hierarchy.
-
-Fields:
-
-- `id: str`
-- `name: str`
-- `children: list[Node]`
-- `part_id: str | None`
-- `transform: np.ndarray`
-- `metadata: dict[str, str]`
-
-### Part
-
-Represents reusable geometry.
-
-Fields:
-
-- `id: str`
-- `name: str`
-- `source_shape: object | None`
-- `mesh: Mesh | None`
-- `material_ids: list[str]`
-- `metadata: dict[str, str]`
-- `fingerprint: str | None`
-
-### Mesh
-
-Triangle mesh container.
-
-Fields:
-
-- `points: np.ndarray`
-- `faces: np.ndarray`
-- `normals: np.ndarray | None`
-- `uvs: dict[int, np.ndarray]`
-- `material_indices: np.ndarray | None`
-- `face_groups: dict[str, np.ndarray]`
-- `metadata: dict[str, str]`
-
-Rules:
-
-- `points` shape is `(N, 3)`, float64 internally.
-- `faces` shape is `(M, 3)`, int64 internally.
-- USD export can cast to appropriate USD value types.
-- Meshes must not contain NaNs, negative face indices, or out-of-range indices after repair.
-
-### Material
-
-Fields:
-
-- `id: str`
-- `name: str`
-- `base_color: tuple[float, float, float, float]`
-- `metallic: float = 0.0`
-- `roughness: float = 0.5`
-- `opacity: float = 1.0`
-- `metadata: dict[str, str]`
-
-### Report
-
-Every pipeline step should append structured entries.
-
-Fields:
-
-- `source_path`
-- `started_at`
-- `finished_at`
-- `steps`
-- `warnings`
-- `errors`
-- `input_stats`
-- `output_stats`
-
-Each step should record:
-
-- step name
-- options used
-- duration
-- before/after triangle count
-- before/after part count
-- warnings
-
-## 10. Public Python API
-
-Primary fluent workflow:
-
-```python
-import fascat as fc
-
-asset = fc.read_step("motor.step")
-
-asset = asset.tessellate(
-    fc.Tessellation(
-        sag=0.1,
-        angle=15.0,
-        relative=True,
-        max_edge_length=None,
-    )
-)
-
-asset = asset.repair(
-    fc.RepairOptions(
-        tolerance=0.05,
-        merge_vertices=True,
-        delete_degenerate=True,
-        fix_winding=True,
-        fill_small_holes=False,
-    )
-)
-
-asset = asset.stage(
-    fc.StageOptions(
-        materials="cad",
-        normals=True,
-        uv0="box",
-        uv1=None,
-    )
-)
-
-asset = asset.optimize(
-    fc.OptimizeOptions(
-        target_triangles=500_000,
-        preserve_instances=True,
-        simplify=True,
-        optimize_buffers=True,
-    )
-)
-
-asset = asset.lods(
-    fc.LODOptions(
-        ratios=[0.5, 0.25, 0.1],
-        mode="variants",
-    )
-)
-
-asset.write_usd("motor.usdc")
-asset.write_gltf("motor.glb")
-```
-
-One-shot conversion:
-
-```python
-import fascat as fc
-
-fc.convert(
-    "pump.step",
-    "pump.glb",
-    profile=fc.profiles.virtual_reality(
-        tessellation_sag=0.1,
-        max_triangles=500_000,
-        lod_ratios=[0.5, 0.25, 0.1],
-    ),
-)
-```
-
-Functional style:
-
-```python
-import fascat as fc
-
-asset = fc.read_step("assembly.step")
-asset = fc.tessellate(asset, sag=0.1, angle=15)
-asset = fc.repair(asset, tolerance=0.05)
-asset = fc.optimize(asset, ratio=0.4)
-fc.write_usd(asset, "assembly.usdc")
-fc.write_gltf(asset, "assembly.glb")
-```
-
-Inspection:
-
-```python
-asset = fc.read_step("gearbox.step")
-
-print(asset.report.summary())
-print(asset.triangle_count)
-print(asset.part_count)
-```
-
-## 11. CLI
-
-Commands:
-
-```bash
-fascat inspect input.step
-fascat convert input.step output.usdc
-fascat convert input.step output.glb --profile virtual-reality
-fascat validate output.usdc
-fascat validate output.glb
-```
-
-Convert example:
-
-```bash
-fascat convert input.step
-fascat convert input.step output.usdc \
-  --profile realtime-desktop \
-  --sag 0.1 \
-  --angle 15 \
-  --target-triangles 500000 \
-  --lods 0.5,0.25,0.1
-```
-
-Debug output example:
-
-```bash
-fascat convert input.step output.usda --debug
-```
-
-CLI behavior:
-
-- Default output path is the input path with a `.usdc` suffix when converting a file input.
-- Print source stats before processing.
-- Print triangle/material/part stats after each major stage.
-- Exit non-zero on invalid input, missing backend, or failed generated-output validation.
-- Write a sidecar JSON report when `--report report.json` is supplied.
-
-## 12. Pipeline Details
-
-### Import
-
-Use `cadquery-ocp` and OCCT XDE APIs.
-
-Implementation targets:
-
-- Use `STEPCAFControl_Reader` for STEP assemblies.
-- Preserve labels, names, colors, transforms, and units where exposed.
-- Traverse XDE document labels into `Node` and `Part`.
-- Keep source BREP shapes attached to `Part.source_shape` until tessellation.
-- Generate stable IDs from source path, label path, and occurrence index.
-- Detect repeated parts by source label first, then by shape/mesh fingerprint later.
-
-### Tessellation
-
-Use OCCT tessellation through OCP.
-
-Options:
-
-```python
-Tessellation(
-    sag: float = 0.1,
-    angle: float = 15.0,
-    relative: bool = True,
-    max_edge_length: float | None = None,
-    create_normals: bool = True,
-    keep_brep: bool = False,
-)
-```
-
-Rules:
-
-- Tessellate each unique `Part` once.
-- Reuse tessellated mesh for repeated occurrences.
-- Default UV generation is disabled during tessellation.
-- Drop BREP after tessellation unless `keep_brep=True`.
-
-### Repair
-
-Repair runs after tessellation and before decimation.
-
-Default repair sequence:
-
-1. Remove NaN/Inf points and affected faces.
-2. Remove unreferenced vertices.
-3. Merge vertices within tolerance.
-4. Remove duplicate faces.
-5. Remove degenerate faces by area threshold.
-6. Fix winding where topology allows.
-7. Compute or refresh normals.
-8. Optionally fill small simple holes.
-
-Hole filling must be conservative. It should be disabled by default and limited to small boundary loops when enabled.
-
-### Stage
-
-Staging prepares render data before optimization and LOD export.
-
-Material rules:
-
-- Convert CAD colors to simple `Material`.
-- Honor material staging modes:
-  - `materials="cad"` keeps material bindings.
-  - `materials="display"` keeps imported colors as `displayColor` only.
-  - `materials="none"` clears imported materials.
-- Use `UsdPreviewSurface` on export.
-- Bind materials per mesh or per face subset if needed.
-- Use `displayColor` as fallback.
-
-UV rules:
-
-- `uv0="box"` generates local AABB box-projected UVs.
-- `uv0=None` skips UV generation.
-- `uv1="unwrap"` requires `xatlas`.
-- Repacking and normalization are only implemented for xatlas-backed UVs in V1.
-
-Normals:
-
-- Generate smooth normals by default.
-- Preserve hard edges later.
-- V1 can use angle-weighted normals.
-
-### Optimize
-
-Options:
-
-```python
-OptimizeOptions(
-    target_triangles: int | None = None,
-    ratio: float | None = None,
-    preserve_instances: bool = True,
-    simplify: bool = True,
-    optimize_buffers: bool = True,
-)
-```
-
-Rules:
-
-- Optimize LOD0 before generating LODs.
-- If both `target_triangles` and `ratio` are set, `target_triangles` wins.
-- Preserve repeated parts unless explicitly disabled.
-- Decimate each unique mesh, not each occurrence.
-- Run mesh validation after simplification.
-- Run meshoptimizer after decimation.
-
-### LODs
-
-Options:
-
-```python
-LODOptions(
-    ratios: list[float] = [0.5, 0.25, 0.1],
-    mode: Literal["variants"] = "variants",
-)
-```
-
-Rules:
-
-- LOD0 is the optimized asset.
-- LOD1+ are generated by simplifying unique meshes from LOD0.
-- Triangle counts must be monotonic.
-- Export as an OpenUSD `lod` variant set with variants `lod0`, `lod1`, `lod2`, etc.
-- glTF export writes LOD0 as the displayed mesh and preserves generated LOD mesh indices in Fascat extras.
-- Default selected variant is `lod0`.
-
-### USD Export
-
-Use `usd-core`.
-
-Rules:
-
-- Default output is `.usdc`.
-- `.usda` is supported for debugging.
-- Stage metadata:
-  - `defaultPrim`
-  - `metersPerUnit`
-  - `upAxis`
-
-### glTF Export
-
-Use the native Fascat glTF writer.
-
-Rules:
-
-- `.gltf` writes JSON with an embedded binary data URI.
-- `.glb` writes a binary glTF 2.0 container.
-- Geometry is exported in metres and Y-up for glTF runtime conventions.
-- Original asset units and source up-axis are preserved in top-level Fascat extras.
-- Part occurrences share glTF mesh indices where possible.
-- Per-face material assignments become separate glTF primitives.
-- Materials use glTF PBR base color, metallic, roughness, and alpha mode.
-- Generated LOD meshes are included in the mesh table and referenced from node extras.
-- Mesh prims:
-  - `UsdGeomMesh`
-  - `points`
-  - `faceVertexCounts`
-  - `faceVertexIndices`
-  - `subdivisionScheme = "none"`
-  - normals when available
-  - `primvars:st` for UV0
-  - material bindings
-  - extent
-- Materials:
-  - `UsdShade.Material`
-  - `UsdPreviewSurface`
-- Instances:
-  - identical parts should export as references or instanceable prims.
-- Names:
-  - sanitize all names into valid USD identifiers while preserving original names in metadata.
-
-## 13. Profiles
-
-Profiles provide practical defaults.
-
-```python
-fc.profiles.inspect_only()
-fc.profiles.realtime_desktop()
-fc.profiles.realtime_web()
-fc.profiles.virtual_reality()
-```
-
-Initial profile defaults:
-
-| Profile | Sag | Angle | Target Triangles | UVs | LODs |
-| --- | ---: | ---: | ---: | --- | --- |
-| `inspect-only` | none | none | none | none | none |
-| `realtime-desktop` | `0.1` | `15` | `1_000_000` | box UV0 | `0.5, 0.25, 0.1` |
-| `realtime-web` | `0.2` | `20` | `250_000` | box UV0 | `0.5, 0.25` |
-| `virtual-reality` | `0.15` | `15` | `500_000` | box UV0 | `0.5, 0.25, 0.125` |
-
-## 14. Test Plan
-
-Unit tests:
-
-- Asset, node, part, mesh, and material constructors/copies isolate mutable containers, child nodes, arrays, part-owned meshes, and asset-owned objects while preserving new-asset semantics.
-- Material validates RGBA length plus finite base-color, metallic, roughness, and opacity unit ranges.
-- Report and report-step constructors/copies isolate mutable step, warning, error, and stats containers.
-- Report summary and JSON output expose source, output stats, steps, and step warnings.
-- Missing backend tests assert OCP, USD, and xatlas paths fail with clear errors.
-- Mesh removes unreferenced vertices.
-- Mesh removes degenerate triangles.
-- Mesh merges close vertices using tolerance.
-- Mesh removes duplicate faces.
-- Mesh computes normals without NaNs.
-- Mesh repair removes negative and out-of-range face indices before later cleanup.
-- Mesh validation rejects malformed arrays, non-finite values, negative or out-of-range indices, invalid normals, invalid UVs, and invalid material indices.
-- Mesh enforces `max_edge_length` subdivision.
-- Hole filling stays disabled for open planar sheets and limited to small non-planar boundaries.
-- Repair sequence computes normals before optional hole filling and refreshes them when holes are filled.
-- Mesh dictionaries expose material-index and face-group summaries.
-- Mesh preserves UVs and material indices through buffer optimization.
-- Mesh preserves material indices and face groups when filtering faces during repair.
-- Mesh preserves material indices and face groups when winding repair reorders faces.
-- Mesh validation rejects invalid face-group indices.
-- `xatlas` unwrap tests are marked with `pytest.mark.requires_xatlas`.
-
-Pipeline tests:
-
-- `Tessellation`, `RepairOptions`, `StageOptions`, `OptimizeOptions`, and `LODOptions` validate representative bad inputs for all option fields.
-- Profiles produce deterministic option sets matching the documented default table.
-- Asset operations return new assets without mutating original mesh, LOD, warning, or report state.
-- Operation reports include options and before/after counts across tessellate, repair, stage, optimize, and LOD operations.
-- Import and validation report steps retain asset-level before/after statistics.
-- Operation reports attach warnings to the step that produced them.
-- Conversion reports include timed write and validation steps.
-- Both direct `Asset.write_usd()` and public `fc.write_usd()` calls record timed write steps and attach failure reports.
-- Conversion reports record errors and the failed write or validation step before raising.
-- Conversion progress callbacks receive source and per-stage stats.
-- Repeated parts can be preserved or duplicated per occurrence.
-- Optimization tests assert target triangle budgets take precedence over ratio.
-- Optimization tests assert target triangle budgets are allocated across unique parts without overshooting when feasible.
-- Optimization reports warn when a target is below the one-triangle-per-unique-mesh minimum.
-- Optimization validates simplification output before buffer optimization and runs buffer optimization on decimated meshes.
-- LOD reports and final conversion output stats include generated LOD mesh, vertex, and triangle totals.
-- Staging tests assert `materials="cad"` preserves material bindings, `materials="display"` preserves displayColor only, `materials="none"` clears materials, `uv0=None` skips UV generation, and `normals=False` does not generate missing normals.
-- Functional API wrappers cover tessellate, stage, optimize, and LOD operations.
-- Public node dictionaries preserve transforms.
-
-USD tests:
-
-- Export a generated cube mesh to `.usda` and binary `.usdc`.
-- Reopen with `usd-core`.
-- Assert `subdivisionScheme = "none"`.
-- Assert stage units and up-axis are authored.
-- Assert face counts, indices, and points are valid.
-- Assert materials bind correctly through applied `MaterialBindingAPI` schemas and authored `UsdPreviewSurface` shader inputs.
-- Assert UV0 primvars, normals, and sanitized-name original metadata are authored.
-- Assert sanitized occurrence prims preserve original names and node IDs in metadata.
-- Assert sanitized prototype, material, and per-face subset prims preserve original names and IDs in metadata.
-- Assert sanitized occurrence, prototype, material, and per-face subset name collisions are disambiguated.
-- Assert non-identity node transforms are authored as USD Xform ops.
-- Assert mesh extents are authored.
-- Assert both `Asset.write_usd()` and `fc.write_usd()` write valid stages.
-- Assert `displayColor` fallback is authored.
-- Assert USD validation follows instanceable repeated-part prototypes.
-- Assert per-face material subsets are authored when material indices require them.
-- Assert LOD variants exist with `lod0` selected when requested.
-- Assert USD validation rejects missing default prims, empty default prims, non-triangle faces, invalid face index counts, out-of-range indices, and bad subdivision schemes.
-- Assert USD validation checks every authored `lod` variant, not only the selected default variant.
-- Mark USD-backed tests with `pytest.mark.requires_usd`.
-
-glTF tests:
-
-- Export generated meshes to `.gltf` and `.glb`.
-- Validate generated glTF without external backends.
-- Assert hierarchy nodes, shared meshes, transforms, materials, normals, UVs, and LOD extras are authored.
-- Assert per-face material assignments become separate glTF primitives.
-- Assert unknown glTF suffixes and meshless scene validation fail clearly.
-
-STEP tests:
-
-- Add fixtures only if license-clean.
-- Start with generated/simple STEP fixtures.
-- Test hierarchy, root/node/part names, units, source metadata, color import, and repeated part detection.
-- Test generated STEP assemblies preserve repeated occurrences and non-identity transforms through USD instancing.
-- Test a colored STEP fixture imports CAD colors and exports them as visible USD material/displayColor data.
-- Test `Tessellation.max_edge_length` on a STEP-backed tessellation path.
-- Test `Tessellation.keep_brep` controls source-shape retention after tessellation.
-- Test stable STEP IDs include source identity.
-- Test STEP shape fingerprints are stable across repeated imports of the same file.
-- Test importer part identity prefers matching source labels, then matching shape and material fingerprints before tessellation.
-- Test STEP face color material plans map to mesh material indices for USD subsets.
-- Test tessellation reuses matching source-shape meshes while keeping distinct face-material assignments separate.
-- Test tessellation dedupe preserves distinct per-face material assignments.
-- Mark OCP-backed tests with `pytest.mark.requires_ocp`.
-
-CLI tests:
-
-- `fascat --help`
-- `fascat inspect fixture.step`
-- `fascat inspect --json fixture.step` exposes profile options, hierarchy root, transforms, parts, material payloads, and import report data.
-- `fascat --quiet` suppresses nonessential human output while errors still go to stderr.
-- `fascat convert missing.step output.usdc` exits non-zero before processing.
-- `fascat convert --profile inspect-only` exits non-zero before processing.
-- `fascat inspect`, `fascat convert`, and `fascat validate` missing-backend failures exit non-zero with clear errors.
-- `fascat inspect -`, `fascat convert - -`, and `fascat validate -` exercise real process stdin/stdout streams.
-- `fascat convert fixture.step` defaults to binary `.usdc` output and validates it.
-- `fascat convert fixture.step output.usdc` writes binary `.usdc` output and validates it.
-- `fascat convert fixture.step output.glb --profile virtual-reality` writes binary `.glb` output and validates it.
-- `fascat --json convert fixture.step output.usda` emits conversion stats and embedded report data on stdout.
-- `fascat convert fixture.step output.usda --debug` writes debug USD metadata and validates.
-- `fascat validate output.usda`
-- `fascat validate output.glb`
-- `fascat convert` rejects `--debug` with binary `.usdc`, `.gltf`, or `.glb`.
-- `fascat convert --dry-run` rejects unsorted LOD ratios.
-- `fascat convert` emits source, tessellate, repair, stage, optimize, LOD, write, and validate progress with count stats on stderr.
-- `fascat convert` validates generated output before reporting success.
-- `fascat convert --report` writes successful report sidecars with source counts, output counts, warnings, errors, and timings, plus failure report sidecars when conversion exposes one, including generated output validation failures.
-- `fascat convert --materials` exercises CAD material binding, displayColor-only, and no-material staging modes through generated USD output.
-
-## 15. Milestones
-
-### Milestone 1: Package Skeleton
-
-- Add `pyproject.toml`.
-- Add `fascat`.
-- Add typed core dataclasses.
-- Add `pytest`, `ruff`, and basic CI-ready config.
-- Add README quickstart.
-
-### Milestone 2: Mesh Core
-
-- Implement `Mesh`.
-- Implement validation and repair basics.
-- Add generated cube/sphere fixtures.
-- Add mesh tests.
-
-### Milestone 3: USD Export
-
-- Implement `.usda` and `.usdc` export.
-- Implement `.gltf` and `.glb` export.
-- Add material export.
-- Add stage units and up-axis.
-- Add USD and glTF validation tests.
-
-### Milestone 4: STEP Import and Tessellation
-
-- Implement OCP backend.
-- Import STEP assembly tree.
-- Extract colors, names, transforms, and units.
-- Tessellate unique parts.
-- Add OCP-gated integration tests.
-
-### Milestone 5: Optimization and LODs
-
-- Add decimation.
-- Add meshoptimizer path.
-- Add OpenUSD LOD variants.
-- Add monotonic LOD tests.
-
-### Milestone 6: CLI and Reports
-
-- Implement `fascat inspect`, `fascat convert`, and `fascat validate`.
-- Add JSON report output.
-- Document profiles and examples.
-
-## 16. Acceptance Criteria for V1
-
-Fascat V1 is done when:
-
-- A user can run `fascat convert model.step model.usdc`.
-- A user can run `fascat convert model.step model.glb --profile virtual-reality`.
-- The output USD opens through `usd-core`.
-- The output glTF validates through Fascat's glTF validator.
-- Meshes are polygonal USD meshes with `subdivisionScheme = "none"`.
-- CAD hierarchy is represented with USD Xforms.
-- CAD colors become visible materials or display colors.
-- Repeated CAD parts are not blindly duplicated.
-- LOD variants are generated when requested.
-- The pipeline emits a useful report with source counts, output counts, warnings, and timings.
-- Backend-free core tests pass without CAD/USD/xatlas backends installed.
-- OCP/USD/xatlas integration tests pass when backend dependencies are installed.
-
-## 17. Open Questions
-
-- Should V1 default to preserving CAD Z-up, or convert to Y-up for certain realtime engines?
-- Should generated LODs live in variant sets only, or should Fascat also support separate payload files per LOD?
-- Should material assignment stay purely color-based in V1, or include simple heuristics for metal/roughness based on CAD metadata?
-- Should `.usdz` packaging be a near-term V1.1 milestone or wait until texture/material baking exists?
+Fascat is aligned with the broad Unity workflow: import, repair, tessellate,
+orient/stage attributes, optimize LOD0, generate LODs, and export. The parity
+gap is depth: Unity exposes more CAD import toggles, BREP repair paths, UV
+preparation tools, material/AO baking, real visibility processing, richer
+decimation controls, and final export compression.
+
+Parity gaps to track:
+
+1. Import controls
+   - Add explicit import toggles for design variants, PMI, product metadata, existing mesh preference, and multi-file imports.
+   - Add cleanup operations for free points, line geometry, and post-tessellation BREP patch deletion.
+   - Decide whether line geometry should be deleted, preserved as metadata, or tessellated into renderable tubes.
+
+2. CAD and mesh repair depth
+   - Add an open-shell repair workflow: detect single open-shell parts, merge or group them before BREP healing, and keep separate warnings for unstitched faces.
+   - Improve BREP healing beyond the current sewing/fix-edge path: sliver-face removal, duplicate face handling, tolerance unification, and visible report warnings for unsupported backend work.
+   - Extend mesh repair with true T-junction sewing, non-manifold edge cracking, and configurable face-orientation strategies for closed solids versus open shells.
+
+3. Tessellation controls
+   - Expose a separate sag-ratio option instead of overloading `relative=True`.
+   - Support explicit override/reuse of existing tessellation when imported data already contains meshes.
+   - Investigate CAD-parametric UV and tangent generation during tessellation, plus free-edge extraction for diagnostics.
+
+4. UV staging
+   - Add UV segmentation and seam planning, including sharp-edge seams and lines of interest.
+   - Expose unwrap solver intent where the backend supports it: conformal versus isometric.
+   - Add UV island merge, alignment, overlap checks, repack, normalize, and per-channel validation.
+   - Make UV0 tileable and UV1 baking requirements explicit: UV0 may overlap; UV1 must fit in `[0,1]` with padding and no overlaps.
+
+5. Materials and baking
+   - Add material-library import and CAD-material-to-PBR mapping, including CSV or TOML mapping tables.
+   - Replace current bake metadata with actual texture output for base color, opacity, roughness, metallic, normal, AO, and emissive maps.
+   - Add ambient occlusion baking to textures and optionally to vertex colors for downstream decimation weights.
+   - Add image cleanup: merge duplicate images, remove unused images, resize textures to platform budgets.
+
+6. Optimization and draw-call reduction
+   - Replace AABB containment with real occlusion/visibility removal.
+   - Add loose and precise instance reconstruction for similar, separately modeled parts.
+   - Improve merge planning so reports show draw-call savings, instance loss, memory growth, and culling impact.
+   - Add retopology or proxy-mesh paths for cases where decimation and occlusion are not enough.
+
+7. Decimation parity
+   - Add iterative decimation thresholds for large meshes to control memory use.
+   - Replace quality-criterion heuristics with measured geometric error.
+   - Add texture-coordinate importance modes: preserve islands, preserve seams only, or ignore UVs.
+   - Make topology protection explicit and measured, especially for holes and singularities.
+   - Support AO or user-painted vertex weights as simplification constraints.
+
+8. LOD parity
+   - Preserve occurrence-level LOD chains and instance relationships across all LOD levels.
+   - Add far-LOD generation that can merge to one mesh and one baked material for one-draw-call distant rendering.
+   - Add LOD validation for screen coverage, monotonic triangle reduction, material simplification, and export runtime behavior.
+
+9. Export parity
+   - Add a real Draco encoder path with compression level and quantization settings, or keep `draco=True` rejected.
+   - Add real KTX2/Basis texture output with quality, compression level, and max-resolution controls.
+   - Add export cleanup for unused images/materials and file-size reports broken down by geometry, textures, and metadata.
+   - Keep GLB as the preferred web/mobile runtime target while preserving USD/USDZ for OpenUSD workflows.
+
+10. Platform budgets
+   - Turn desktop, mobile, VR, and WebGL target triangle/draw-call budgets into documented profile checks.
+   - Report when output exceeds the selected profile budget, not only an optional file-size budget.
+
+## Near-Term Polish
+
+These are the next small-to-medium tasks. They should be handled before larger
+algorithmic work because they improve trust in the current tool.
+
+1. Documentation completeness
+   - Audit `docs/api.md` and `docs/reference.md` for every public option class and CLI flag.
+   - Explain parameter units, defaults, warnings, and unsupported behavior.
+   - Add short before/after report examples for destructive operations.
+
+2. Report honesty and CLI diagnostics
+   - Surface BREP sliver-face no-op warnings consistently through public reports.
+   - Ensure `remove_holes`, `remove_occluded`, `bake_materials`, and quality decimation always report their approximation level.
+   - Make dry-run output show which operations are exact, approximate, or metadata-only.
+
+3. Pipeline TOML validation
+   - Validate operation names, unknown keys, and incompatible option combinations at parse time.
+   - Return line-oriented diagnostics where possible.
+   - Add focused tests for malformed pipelines.
+
+4. Tangent and normal correctness
+   - Compute tangent handedness (`w`) instead of always writing `+1`.
+   - Add regression tests for hard-edge normals after repair and material-index changes.
+   - Verify glTF and OBJ normal behavior on flat, smooth, and mixed meshes.
+
+5. Analysis polish
+   - Add clearer lower-bound reporting when self-intersection checks hit `max_self_intersection_pairs`.
+   - Add tests for coplanar overlap, endpoint contact, and adjacent-triangle exclusions.
+   - Keep compatibility keys only where needed and document their migration path.
+
+6. Unity parity matrix
+   - Add a compact docs table that maps Unity-inspired capabilities to Fascat status: implemented, approximate, unsupported, deferred.
+   - Link each approximate feature to its report warning and next implementation step.
+
+## Larger Algorithmic Work
+
+These need more design and should not be mixed into documentation or diagnostics commits.
+
+1. True occlusion removal
+   - Replace AABB containment with visibility testing.
+   - Support part, submesh, and triangle granularity.
+   - Make strategy and hemispherical evaluation change the algorithm, not just metadata.
+
+2. Better hole removal
+   - Add a real BREP path for cylindrical or feature-level holes when source shape data is available.
+   - Respect through, blind, and surface hole options.
+   - Improve diameter measurement beyond boundary-loop max distance.
+
+3. Material baking
+   - Generate actual texture atlas files, not only flat merged materials.
+   - Reuse xatlas UVs where possible.
+   - Export atlas references through glTF and USD material bindings.
+   - Include AO baking and texture resizing/compression prep.
+
+4. Error-bounded simplification
+   - Replace `criterion="quality"` ratio heuristics with measured geometric error.
+   - Preserve hard edges, boundary edges, material seams, UV seams, and selected CAD features.
+   - Report achieved error and triangle reduction.
+   - Add iterative processing and vertex-weight constraints for very large meshes.
+
+5. BREP healing depth
+   - Implement or delegate sliver-face removal.
+   - Improve sewing, small edge handling, and face/wire repair before tessellation.
+   - Add open-shell detection and unstitched-face handling before repair.
+   - Keep warnings visible when a backend cannot perform a requested operation.
+
+6. PMI and metadata output
+   - Add STEP AP242 PMI import tests.
+   - Decide how PMI should appear in USD and glTF: metadata only, annotation geometry, or both.
+   - Preserve stable metadata paths through merge, replace, and export operations.
+
+7. Large assembly scaling
+   - Reduce full-asset copying in operations that only touch selected parts.
+   - Add memory and time benchmarks for large assemblies.
+   - Consider streaming or lazy mesh payloads for heavy STEP imports.
+
+8. Runtime compression
+   - Add a real Draco backend only if there is a reliable Python encoder path.
+   - Treat texture compression as a packaging step with emitted files, not metadata-only intent.
+   - Add KTX2/Basis output only after texture assets are real files in the export graph.
+
+9. UV pipeline depth
+   - Add seam segmentation, unwrap method selection, island merging, packing, normalization, and overlap checks.
+   - Keep UV1 baking constraints separate from UV0 tileable texture constraints.
+
+10. Instance reconstruction
+   - Detect similar separately modeled parts and rebuild shared mesh instances where safe.
+   - Report memory/file-size savings and any metadata or material differences that prevent instancing.
+
+## Correct Deferrals
+
+These are intentionally outside the immediate plan unless a user need changes the priority:
+
+- Full Unity-level CAD format coverage such as IGES, Parasolid, JT, CATIA, NX, and native SolidWorks.
+- Convex decomposition and physics proxy generation.
+- Advanced retopology and subdivision workflows.
+- GPU-specific runtime packaging beyond standards-aligned glTF/USD output.
+- Animation and time-varying CAD data.
+
+## Operating Checklist
+
+For each planned feature:
+
+1. Confirm the intended behavior in docs or tests first.
+2. Keep the change scoped to one user-visible outcome.
+3. Add or update focused tests.
+4. Update API/reference docs when public behavior changes.
+5. Run `make fmt-check`, `make lint`, `make docs`, and `make ci`.
+6. Commit with the repo convention.
+7. Push and verify GitHub CI and Docs workflows are green.

@@ -53,7 +53,7 @@ fascat inspect input.step --json
 | `--quality-report` | unset | Write per-part tessellation quality metrics as JSON |
 | `--heal-brep` | `false` | Run BREP healing before tessellation |
 | `--heal-tolerance` | `0.05` | BREP healing tolerance |
-| `--remove-sliver-faces` | `false` | Detect tiny sliver faces during BREP healing |
+| `--remove-sliver-faces` | `false` | Request tiny sliver-face removal during BREP healing; current backend support is limited and reports warnings when unavailable |
 | `--max-sliver-area` | `1e-4` | Area threshold for sliver-face reporting |
 | `--fail-on-open-shells` | `false` | Fail if healed BREP still contains open shells |
 | `--lods` | profile value | Comma-separated LOD ratios, for example `0.5,0.25,0.1` |
@@ -98,10 +98,10 @@ fascat inspect input.step --json
 | `--index-buffer` | `auto` | Index buffer mode: `auto`, `uint16`, or `uint32` |
 | `--flatten` | `safe` | Hierarchy flattening mode: `none`, `safe`, or `all` |
 | `--instance-policy` | `auto` | Instance policy: `auto`, `preserve`, or `expand` |
-| `--bake-materials` | `false` | Bake selected materials into a shared runtime material |
-| `--maps-resolution` | `2048` | Bake texture resolution in pixels |
-| `--force-uv-generation` | `false` | Generate UVs before baking when needed |
-| `--bake` | `base-color` | Maps to bake, such as `base-color,opacity` |
+| `--bake-materials` | `false` | Create a shared flat material plus bake metadata; texture image baking is not implemented yet |
+| `--maps-resolution` | `2048` | Requested bake texture resolution in pixels, recorded as metadata until texture baking exists |
+| `--force-uv-generation` | `false` | Generate UVs before material bake metadata is recorded |
+| `--bake` | `base-color` | Maps requested for future baking, such as `base-color,opacity` |
 | `--decimate` | `false` | Run explicit decimation before profile optimization |
 | `--decimate-criterion` | `target` | Decimation criterion: `target` or `quality` |
 | `--surface-tolerance` | unset | Surface deviation tolerance metadata for decimation |
@@ -137,7 +137,7 @@ fascat inspect input.step --json
 | `--quantize` | `false` | Write glTF `KHR_mesh_quantization` accessors and node dequantization transforms |
 | `--meshopt` | `false` | Write glTF `EXT_meshopt_compression` bufferView payloads with fallback data |
 | `--draco` | `false` | Unsupported until a Draco encoder backend is integrated |
-| `--texture-compression` | unset | Texture compression intent: `ktx2` or `basisu` |
+| `--texture-compression` | unset | Texture compression intent: `ktx2` or `basisu`; no compressed texture files are written yet |
 | `--package` | `default` | USD package mode: `default` or packaged `.usdz` |
 | `--file-size-budget-mb` | unset | Warn in reports when output exceeds this size |
 | `--obj-materials / --no-obj-materials` | `true` | Write OBJ material assignments |
@@ -149,6 +149,17 @@ fascat inspect input.step --json
 | `--report` | unset | Write a JSON conversion report sidecar |
 | `--force` | `false` | Overwrite an existing output file |
 
+Units and behavior notes:
+
+- Linear tolerances and sizes such as `--sag`, `--min-edge-length`, `--max-edge-length`, `--heal-tolerance`, `--max-sliver-area`, `--region-size`, and `--max-hole-diameter` use the source asset's working units unless the option explicitly says otherwise.
+- Angles such as `--angle`, `--normal-tolerance`, and `--hard-edge-angle` are degrees.
+- Ratios such as `--ratio`, `--lods`, and decimation target ratios are fractions between `0` and `1`; LOD ratios must be sorted from highest to lowest detail.
+- Screen coverage values are fractions between `0` and `1`; file-size budgets are megabytes; atlas and bake sizes are pixels.
+- `--decimate-criterion quality` currently maps tolerances to a target ratio and reports a warning because error-bounded simplification is not implemented.
+- `--remove-holes` uses mesh boundary filling when BREP hole removal is unavailable; `--hole-types` are recorded as intent by the mesh fallback.
+- `--remove-occluded` currently uses part-level AABB containment even when submesh, triangle, advanced, or hemispherical modes are requested, and records warnings for those fallbacks.
+- `--draco` is rejected until a Draco encoder backend is integrated.
+
 ## Inspect flags
 
 | Flag | Default | Description |
@@ -158,7 +169,7 @@ fascat inspect input.step --json
 | `--pmi` | `summary` | PMI output mode: `none`, `summary`, `full`, `metadata`, or `metadata-and-visuals` |
 | `--heal-brep` | `false` | Run BREP healing before inspection output |
 | `--heal-tolerance` | `0.05` | BREP healing tolerance |
-| `--remove-sliver-faces` | `false` | Detect tiny sliver faces during BREP healing |
+| `--remove-sliver-faces` | `false` | Request tiny sliver-face removal during BREP healing; current backend support is limited and reports warnings when unavailable |
 | `--max-sliver-area` | `1e-4` | Area threshold for sliver-face reporting |
 | `--filter` | unset | Report matched assembly nodes and parts |
 | `--exclude-filter` | unset | Exclude selector matches from `--filter` results |
@@ -232,7 +243,7 @@ fascat convert motor.step motor.glb --pipeline realtime.toml
 | `--geometry-quality` | `false` | Enable all geometry quality checks in the validation report |
 | `--non-manifold-edges` | `false` | Report non-manifold edge counts |
 | `--open-boundaries` | `false` | Report open boundary counts |
-| `--self-intersections` | `false` | Report self-intersection risk warnings |
+| `--self-intersections` | `false` | Report detected self-intersections with bounded triangle-triangle checks |
 | `--sliver-triangles` | `false` | Report degenerate and sliver triangle stats |
 | `--tiny-parts` | `false` | Report tiny part stats |
 | `--draw-call-estimate` | `false` | Report material count and draw-call estimate |
