@@ -32,6 +32,27 @@ from fascat.options import (
     UnwrapOptions,
 )
 
+_SUPPORTED_STEP_OPS = frozenset(
+    {
+        "heal_brep",
+        "tessellate",
+        "repair",
+        "stage",
+        "merge",
+        "explode",
+        "replace",
+        "optimize_scene",
+        "scene",
+        "bake_materials",
+        "decimate",
+        "remove_holes",
+        "remove_occluded",
+        "run_lod_generators",
+        "optimize",
+        "lods",
+    }
+)
+
 
 @dataclass(frozen=True)
 class PipelineStep:
@@ -41,7 +62,10 @@ class PipelineStep:
     def __post_init__(self) -> None:
         if not self.op:
             raise ValueError("pipeline step op must not be empty")
-        object.__setattr__(self, "op", self.op.replace("-", "_"))
+        normalized_op = self.op.replace("-", "_")
+        if normalized_op not in _SUPPORTED_STEP_OPS:
+            raise ValueError(f"unsupported pipeline step op: {normalized_op}")
+        object.__setattr__(self, "op", normalized_op)
         object.__setattr__(self, "values", {_normalize_key(key): value for key, value in self.values.items()})
 
     def to_dict(self) -> dict[str, object]:

@@ -85,6 +85,17 @@ def test_obj_export_writes_mesh_and_mtl_sidecar(tmp_path) -> None:  # type: igno
     assert (tmp_path / "triangle.mtl").exists()
 
 
+def test_mesh_only_exports_report_file_size_budget_warnings(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    obj_asset = _asset()
+    stl_asset = _asset()
+
+    obj_asset.write_obj(tmp_path / "budget.obj", options=ObjExportOptions(file_size_budget_mb=0.000001))
+    stl_asset.write_stl(tmp_path / "budget.stl", options=StlExportOptions(file_size_budget_mb=0.000001))
+
+    assert "file size budget exceeded" in obj_asset.report.warnings[-1]
+    assert "file size budget exceeded" in stl_asset.report.warnings[-1]
+
+
 def test_stl_export_writes_binary_mesh(tmp_path) -> None:  # type: ignore[no-untyped-def]
     output = tmp_path / "triangle.stl"
 
@@ -120,6 +131,24 @@ def test_cli_convert_accepts_runtime_export_options_during_dry_run() -> None:
     assert payload["quantize"] is True
     assert payload["meshopt"] is True
     assert payload["file_size_budget_mb"] == 50
+
+
+def test_cli_convert_rejects_unsupported_draco_option_during_dry_run() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "--dry-run",
+            "convert",
+            "input.step",
+            "output.glb",
+            "--draco",
+        ],
+    )
+
+    assert result.exit_code == 2
+    payload = json.loads(result.output)
+    assert "draco" in payload["error"]
 
 
 def test_cli_validate_writes_geometry_quality_report(tmp_path) -> None:  # type: ignore[no-untyped-def]

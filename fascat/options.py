@@ -638,6 +638,8 @@ class GltfExportOptions:
     def __post_init__(self) -> None:
         if self.texture_compression not in {None, "ktx2", "basisu"}:
             raise ValueError("texture_compression must be one of: ktx2, basisu")
+        if self.draco:
+            raise ValueError("draco compression is not supported because no Draco encoder backend is integrated")
         if self.file_size_budget_mb is not None and self.file_size_budget_mb <= 0.0:
             raise ValueError("file_size_budget_mb must be greater than 0 when set")
 

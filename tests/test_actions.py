@@ -91,6 +91,7 @@ def test_bake_materials_merges_selected_material_slots() -> None:
     assert 0 in part.mesh.uvs
     assert baked.report.steps[-1].before["draw_calls"] == 2
     assert baked.report.steps[-1].after["draw_calls"] == 1
+    assert "texture image baking is not implemented" in baked.report.steps[-1].warnings[0]
 
 
 def test_decimate_uses_selection_budget() -> None:
@@ -122,6 +123,27 @@ def test_remove_holes_fills_small_boundary_loop() -> None:
     assert filled.parts["shell"].mesh.triangle_count == 4
     assert filled.parts["shell"].metadata["removed_holes"] == "1"
     assert filled.metadata["removed_holes"] == "1"
+    assert "BREP hole removal is not implemented" in filled.report.steps[-1].warnings[0]
+
+
+def test_remove_holes_warns_when_hole_type_filtering_is_metadata_only() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="shell", name="Shell", part_id="shell")]),
+        parts={
+            "shell": Part(
+                id="shell",
+                name="Shell",
+                mesh=Mesh(
+                    points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+                    faces=np.asarray([[0, 1, 2]], dtype=int),
+                ),
+            )
+        },
+    )
+
+    result = asset.remove_holes(RemoveHolesOptions(through=True, blind=False, surface=False, prefer_brep=False))
+
+    assert any("cannot classify through, blind, or surface holes" in item for item in result.report.steps[-1].warnings)
 
 
 def test_remove_occluded_removes_contained_part_nodes() -> None:
@@ -145,6 +167,19 @@ def test_remove_occluded_removes_contained_part_nodes() -> None:
     assert visible.occurrence_count == 1
     assert "inner" not in visible.parts
     assert visible.metadata["removed_occluded_nodes"] == "1"
+
+
+def test_remove_occluded_warns_when_using_part_level_aabb_fallback() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="part", name="Part", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=_cube_mesh(1.0))},
+    )
+
+    result = asset.remove_occluded(RemoveOccludedOptions(level="triangles", hemi_evaluation=True))
+
+    warnings = result.report.steps[-1].warnings
+    assert any("part-level AABB containment fallback" in item for item in warnings)
+    assert any("hemi_evaluation" in item for item in warnings)
 
 
 def test_run_lod_generators_records_screen_coverage_metadata() -> None:

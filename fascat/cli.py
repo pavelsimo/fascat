@@ -785,7 +785,7 @@ def cmd_convert(
     ] = False,
     draco: Annotated[
         bool,
-        typer.Option("--draco", help="Record glTF Draco compression intent in export metadata."),
+        typer.Option("--draco", help="Unsupported until a Draco encoder backend is integrated."),
     ] = False,
     texture_compression: Annotated[
         str | None,
@@ -1048,6 +1048,8 @@ def cmd_convert(
         _fail(ctx, payload, "--lod-tiny-part-screen-size must be greater than or equal to 0.", code=2)
     if texture_compression not in {None, "ktx2", "basisu"}:
         _fail(ctx, payload, "--texture-compression must be one of: ktx2, basisu.", code=2)
+    if draco:
+        _fail(ctx, payload, "--draco is not supported because no Draco encoder backend is integrated.", code=2)
     if file_size_budget_mb is not None and file_size_budget_mb <= 0.0:
         _fail(ctx, payload, "--file-size-budget-mb must be greater than 0.", code=2)
     if package == UsdPackage.USDZ and not _is_stdio(output_path) and output_path.suffix.lower() != ".usdz":

@@ -153,6 +153,35 @@ def test_tangents_are_generated_from_uv0_and_normals() -> None:
     assert np.allclose(np.linalg.norm(tangent_mesh.tangents[:, :3], axis=1), 1.0)
 
 
+def test_tangent_handedness_tracks_mirrored_uvs() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+        uvs={0: np.array([[0, 0], [0, 1], [1, 0]], dtype=float)},
+    ).compute_normals()
+
+    tangent_mesh = mesh.compute_tangents()
+
+    assert tangent_mesh.tangents is not None
+    assert np.all(tangent_mesh.tangents[:, 3] == -1.0)
+
+
+def test_hard_edge_normals_and_repair_preserve_face_material_assignments() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float),
+        faces=np.array([[0, 1, 2], [0, 3, 1]], dtype=int),
+        material_indices=np.array([0, 1], dtype=int),
+        face_groups={"bottom": np.array([0], dtype=int), "side": np.array([1], dtype=int)},
+    )
+
+    repaired = mesh.compute_hard_edge_normals(hard_edge_angle=30.0).repair()
+
+    assert repaired.material_indices is not None
+    assert repaired.material_indices.tolist() == [0, 1]
+    assert repaired.face_groups["bottom"].tolist() == [0]
+    assert repaired.face_groups["side"].tolist() == [1]
+
+
 def test_mesh_validation_rejects_out_of_range_indices() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0]], dtype=float),

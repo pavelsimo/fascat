@@ -324,6 +324,11 @@ mode = "bounding_box"
     assert steps["replace"].options["matched"]["parts"] == 1
 
 
+def test_pipeline_rejects_unknown_operation_during_parse() -> None:
+    with pytest.raises(ValueError, match="unsupported pipeline step op: tesselate"):
+        PipelineSpec.from_dict({"steps": [{"op": "tesselate"}]})
+
+
 def test_convert_pipeline_file_can_set_import_and_export_metadata(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

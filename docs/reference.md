@@ -136,7 +136,7 @@ fascat inspect input.step --json
 | `--preserve-silhouette` | `false` | Protect faces on bounding-box silhouette extremes |
 | `--quantize` | `false` | Write glTF `KHR_mesh_quantization` accessors and node dequantization transforms |
 | `--meshopt` | `false` | Write glTF `EXT_meshopt_compression` bufferView payloads with fallback data |
-| `--draco` | `false` | Record glTF Draco compression intent in export metadata |
+| `--draco` | `false` | Unsupported until a Draco encoder backend is integrated |
 | `--texture-compression` | unset | Texture compression intent: `ktx2` or `basisu` |
 | `--package` | `default` | USD package mode: `default` or packaged `.usdz` |
 | `--file-size-budget-mb` | unset | Warn in reports when output exceeds this size |

@@ -566,35 +566,35 @@ asset = asset.run_lod_generators(
 )
 ```
 
-Material baking currently creates a shared baked material and metadata for baked maps. Hole removal and occlusion removal use deterministic mesh-level fallbacks when BREP feature editing or visibility rendering is unavailable.
+Material baking currently creates a shared flat material and metadata for baked maps; it does not write texture images. Hole removal and occlusion removal use deterministic mesh-level fallbacks when BREP feature editing or visibility rendering is unavailable, and the report records warnings when requested options require unavailable backends.
 
 Optimization action parameters:
 
 | Option | Parameter | Meaning |
 |--------|-----------|---------|
-| `BakeMaterialOptions` | `maps_resolution` | Output texture size in pixels for generated bake metadata. |
+| `BakeMaterialOptions` | `maps_resolution` | Requested texture size recorded in bake metadata; texture image output is not implemented yet. |
 | `BakeMaterialOptions` | `force_uv_generation` | Generate UVs first when selected meshes do not have the required UV channel. |
 | `BakeMaterialOptions` | `uv_channel` | UV channel used for baking. |
 | `BakeMaterialOptions` | `padding` | Texture padding between islands in pixels. |
 | `BakeMaterialOptions` | `bake` | Maps to bake, such as `base_color`, `opacity`, `normal`, `roughness`, `metallic`, `ao`, or `emissive`. |
 | `BakeMaterialOptions` | `merge_output` | Replace selected materials with a shared baked output material. |
-| `DecimateOptions` | `criterion` | `target` prioritizes a triangle budget. `quality` prioritizes tolerance-driven reduction. |
+| `DecimateOptions` | `criterion` | `target` prioritizes a triangle budget. `quality` maps tolerances to a target ratio and warns because error-bounded reduction is not implemented. |
 | `DecimateOptions` | `target_triangles` | Absolute triangle target for selected geometry. |
 | `DecimateOptions` | `target_ratio` | Fraction of source triangles to keep when no absolute target is set. |
-| `DecimateOptions` | `surface_tolerance` | Maximum surface deviation tolerance. |
-| `DecimateOptions` | `line_tolerance` | Maximum hard-edge or line-feature deviation tolerance. |
+| `DecimateOptions` | `surface_tolerance` | Tolerance input used by `criterion="quality"` to derive a reduction ratio; it is not an enforced geometric error bound. |
+| `DecimateOptions` | `line_tolerance` | Line-feature tolerance input used by `criterion="quality"` ratio derivation. |
 | `DecimateOptions` | `normal_tolerance` | Maximum normal deviation in degrees. |
-| `DecimateOptions` | `uv_tolerance` | Maximum UV deviation tolerance. |
+| `DecimateOptions` | `uv_tolerance` | UV tolerance input used by `criterion="quality"` ratio derivation. |
 | `DecimateOptions` | `protect_topology` | Avoid topology changes that would remove important boundaries. |
 | `DecimateOptions` | `preserve_painted_areas` | Preserve metadata-marked or painted regions where present. |
 | `DecimateOptions` | `budget_scope` | `part` budgets each part separately. `selection` lets dense selected parts absorb more reduction. |
-| `RemoveHolesOptions` | `through`, `blind`, `surface` | Select which hole types are eligible for removal. |
-| `RemoveHolesOptions` | `max_diameter` | Only remove holes at or below this diameter. |
-| `RemoveHolesOptions` | `prefer_brep` | Try BREP-level feature removal before falling back to mesh-level removal. |
-| `RemoveOccludedOptions` | `strategy` | Occlusion strategy: `conservative`, `exterior`, or `advanced`. |
-| `RemoveOccludedOptions` | `level` | Removal granularity: `parts`, `submeshes`, or `triangles`. |
-| `RemoveOccludedOptions` | `precision` | Sampling or raster precision used by occlusion estimation. |
-| `RemoveOccludedOptions` | `hemi_evaluation` | Limit evaluation to hemispherical top or side viewing. |
+| `RemoveHolesOptions` | `through`, `blind`, `surface` | Requested hole-type filters. Mesh fallback cannot classify these types and records them as intent. |
+| `RemoveHolesOptions` | `max_diameter` | Only fill detected open boundary loops at or below this measured boundary diameter. |
+| `RemoveHolesOptions` | `prefer_brep` | Request BREP-level feature removal. Current implementation warns and uses mesh boundary filling. |
+| `RemoveOccludedOptions` | `strategy` | Requested occlusion strategy. Current implementation warns when non-conservative options are requested and uses AABB containment. |
+| `RemoveOccludedOptions` | `level` | Requested removal granularity. Current implementation supports part-level removal only. |
+| `RemoveOccludedOptions` | `precision` | Reserved for raster or sampling backends; not used by the AABB fallback. |
+| `RemoveOccludedOptions` | `hemi_evaluation` | Reserved for view-dependent visibility backends; not used by the AABB fallback. |
 | `RemoveOccludedOptions` | `neighbors_preservation` | Keep this many rings around visible triangles to reduce cracks. |
 | `RemoveOccludedOptions` | `consider_transparency_opaque` | Treat transparent materials as opaque for conservative visibility. |
 | `RemoveOccludedOptions` | `preserve_cavities` | Preserve interior cavities above the configured volume threshold. |
@@ -706,7 +706,7 @@ asset.write_obj("motor.obj", options=fc.ObjExportOptions(materials=True, write_m
 asset.write_stl("motor.stl", options=fc.StlExportOptions(binary=True, merge=True))
 ```
 
-`quantize=True` writes `KHR_mesh_quantization` accessors and composes the dequantization transform into referencing nodes. `meshopt=True` writes `EXT_meshopt_compression` bufferView payloads while keeping fallback buffer data for validators and loaders that ignore the extension. USDZ output is built by writing a temporary USD stage and packaging it as `.usdz`. Draco and texture compression flags are recorded in glTF extras for downstream packaging. Write report steps include output file size and file-size budget warnings when a budget is provided.
+`quantize=True` writes `KHR_mesh_quantization` accessors and composes the dequantization transform into referencing nodes. `meshopt=True` writes `EXT_meshopt_compression` bufferView payloads while keeping fallback buffer data for validators and loaders that ignore the extension. USDZ output is built by writing a temporary USD stage and packaging it as `.usdz`. Texture compression flags are recorded in glTF extras for downstream packaging. Draco compression is not implemented yet, and `draco=True` raises instead of silently writing an uncompressed file. Write report steps include output file size and file-size budget warnings when a budget is provided.
 
 Export option parameters:
 
@@ -714,7 +714,7 @@ Export option parameters:
 |--------|-----------|---------|
 | `GltfExportOptions` | `quantize` | Write `KHR_mesh_quantization` accessors and dequantization transforms. |
 | `GltfExportOptions` | `meshopt` | Write `EXT_meshopt_compression` payloads with fallback uncompressed data. |
-| `GltfExportOptions` | `draco` | Record Draco compression intent for downstream packaging. |
+| `GltfExportOptions` | `draco` | Unsupported until a Draco encoder backend is integrated; `True` raises `ValueError`. |
 | `GltfExportOptions` | `texture_compression` | Record `ktx2` or `basisu` texture-compression intent. |
 | `GltfExportOptions` | `file_size_budget_mb` | Add report warnings when the output exceeds this size. |
 | `GltfExportOptions` | `metadata` | `MetadataExportOptions` controlling metadata and PMI in `extras.fascat`. |

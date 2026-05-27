@@ -438,6 +438,7 @@ class Mesh:
         assert mesh.normals is not None
         uv = mesh.uvs[0]
         tangents = np.zeros((mesh.vertex_count, 3), dtype=np.float64)
+        bitangents = np.zeros((mesh.vertex_count, 3), dtype=np.float64)
         for face in mesh.faces.astype(int).tolist():
             i0, i1, i2 = face
             p0, p1, p2 = mesh.points[[i0, i1, i2]]
@@ -450,15 +451,21 @@ class Mesh:
             if abs(denom) <= 1e-12:
                 continue
             tangent = (edge1 * duv2[1] - edge2 * duv1[1]) / denom
+            bitangent = (edge2 * duv1[0] - edge1 * duv2[0]) / denom
             np.add.at(tangents, face, tangent)
+            np.add.at(bitangents, face, bitangent)
+        handedness = np.ones(mesh.vertex_count, dtype=np.float64)
         for index, normal in enumerate(mesh.normals):
             tangent = tangents[index]
             tangent = tangent - normal * float(np.dot(normal, tangent))
             length = float(np.linalg.norm(tangent))
             tangent = _fallback_tangent(normal) if length <= 0.0 else tangent / length
             tangents[index] = tangent
+            bitangent = bitangents[index]
+            if float(np.linalg.norm(bitangent)) > 0.0 and float(np.dot(np.cross(normal, tangent), bitangent)) < 0.0:
+                handedness[index] = -1.0
         result = mesh.copy()
-        result.tangents = np.column_stack([tangents, np.ones(mesh.vertex_count, dtype=np.float64)])
+        result.tangents = np.column_stack([tangents, handedness])
         result.metadata = {**result.metadata, "tangents": "mikktspace_like"}
         result.validate_normals(require_tangents=True)
         return result

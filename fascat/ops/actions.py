@@ -34,6 +34,7 @@ def bake_materials_asset(
     if not part_ids:
         result.report.add_warning("bake_materials matched no mesh-bearing parts")
         return result
+    result.report.add_warning("bake_materials creates a flat merged material; texture image baking is not implemented")
 
     source_material_ids = sorted(
         {
@@ -106,11 +107,21 @@ def decimate_asset(
             ),
             selected_part_ids=selected_part_ids,
         )
+        if options.criterion == "quality":
+            result.report.add_warning(
+                "decimate quality criterion uses a tolerance-derived target ratio; "
+                "error-bounded simplification is not implemented"
+            )
         _enforce_triangle_budget(result, options, selected_part_ids=selected_part_ids)
         return result
 
     result = asset.copy(keep_source=True)
     ratio = _decimate_ratio(options)
+    if options.criterion == "quality":
+        result.report.add_warning(
+            "decimate quality criterion uses a tolerance-derived target ratio; "
+            "error-bounded simplification is not implemented"
+        )
     for part in result.parts.values():
         if selected_part_ids is not None and part.id not in selected_part_ids:
             continue
@@ -151,6 +162,12 @@ def remove_holes_asset(
     selected_part_ids: set[str] | None = None,
 ) -> Asset:
     result = asset.copy(keep_source=True)
+    if options.prefer_brep:
+        result.report.add_warning("BREP hole removal is not implemented; using mesh boundary-fill fallback")
+    if not (options.through and options.blind and options.surface):
+        result.report.add_warning(
+            "mesh hole removal cannot classify through, blind, or surface holes; enabled hole types are recorded only"
+        )
     removed_count = 0
     diameters: list[float] = []
     for part in result.parts.values():
@@ -189,6 +206,16 @@ def remove_occluded_asset(
     selected_node_ids: set[str],
 ) -> Asset:
     result = asset.copy(keep_source=True)
+    if options.level != "parts":
+        result.report.add_warning(
+            f"occlusion level {options.level} uses part-level AABB containment fallback; "
+            "submesh and triangle removal are not implemented"
+        )
+    if options.strategy != "conservative" or options.hemi_evaluation:
+        result.report.add_warning(
+            "remove_occluded uses conservative AABB containment; strategy and hemi_evaluation "
+            "do not change visibility sampling"
+        )
     occurrences = _world_occurrences(result)
     selected_occurrences = [item for item in occurrences if item.node.id in selected_node_ids]
     removed_node_ids: set[str] = set()
@@ -209,8 +236,6 @@ def remove_occluded_asset(
     if removed_node_ids:
         _remove_part_nodes(result.root, removed_node_ids)
         _drop_unreferenced_parts(result)
-    if options.level != "parts" and removed_node_ids:
-        result.report.add_warning(f"occlusion level {options.level} used part-level mesh fallback")
     result.metadata["removed_occluded_nodes"] = str(len(removed_node_ids))
     result.metadata["occlusion_strategy"] = options.strategy
     result.metadata["occlusion_level"] = options.level
