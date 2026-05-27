@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import struct
+import zlib
 from dataclasses import dataclass
 from typing import cast
 
@@ -34,7 +38,9 @@ def bake_materials_asset(
     if not part_ids:
         result.report.add_warning("bake_materials matched no mesh-bearing parts")
         return result
-    result.report.add_warning("bake_materials creates a flat merged material; texture image baking is not implemented")
+    result.report.add_warning(
+        "bake_materials emits constant embedded texture maps from material factors; raster texture baking is not implemented"
+    )
 
     source_material_ids = sorted(
         {
@@ -363,6 +369,17 @@ def _baked_material(
         metallic = float(np.mean([material.metallic for material in materials]))
         roughness = float(np.mean([material.roughness for material in materials]))
         opacity = float(np.mean([material.opacity for material in materials]))
+    maps = {str(item) for item in options.bake}
+    metadata: dict[str, object] = {
+        "baked": "true",
+        "baked_maps": ",".join(options.bake),
+        "maps_resolution": str(options.maps_resolution),
+        "padding": str(options.padding),
+        "source_material_ids": ",".join(source_material_ids),
+        "baked_texture_kind": "constant",
+        "baked_texture_resolution": str(options.maps_resolution),
+    }
+    metadata.update(_baked_texture_metadata(base_color, metallic, roughness, maps))
     return Material(
         id=material_id,
         name="Baked Material",
@@ -370,14 +387,50 @@ def _baked_material(
         metallic=metallic,
         roughness=roughness,
         opacity=opacity,
-        metadata={
-            "baked": "true",
-            "baked_maps": ",".join(options.bake),
-            "maps_resolution": str(options.maps_resolution),
-            "padding": str(options.padding),
-            "source_material_ids": ",".join(source_material_ids),
-        },
+        metadata=metadata,
     )
+
+
+def _baked_texture_metadata(
+    base_color: tuple[float, float, float, float],
+    metallic: float,
+    roughness: float,
+    maps: set[str],
+) -> dict[str, str]:
+    metadata: dict[str, str] = {}
+    if {"base_color", "opacity"} & maps:
+        metadata["baked_texture_base_color_uri"] = _solid_png_data_uri(base_color)
+    if {"metallic", "roughness"} & maps:
+        metadata["baked_texture_metallic_roughness_uri"] = _solid_png_data_uri((1.0, roughness, metallic, 1.0))
+    if "normal" in maps:
+        metadata["baked_texture_normal_uri"] = _solid_png_data_uri((0.5, 0.5, 1.0, 1.0))
+    if "ao" in maps:
+        metadata["baked_texture_occlusion_uri"] = _solid_png_data_uri((1.0, 1.0, 1.0, 1.0))
+    if "emissive" in maps:
+        metadata["baked_texture_emissive_uri"] = _solid_png_data_uri((0.0, 0.0, 0.0, 1.0))
+    return metadata
+
+
+def _solid_png_data_uri(color: tuple[float, float, float, float]) -> str:
+    pixel = bytes(_color_byte(value) for value in color)
+    raw = b"\x00" + pixel
+    payload = (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0))
+        + _png_chunk(b"IDAT", zlib.compress(raw))
+        + _png_chunk(b"IEND", b"")
+    )
+    return "data:image/png;base64," + base64.b64encode(payload).decode("ascii")
+
+
+def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
+    checksum = binascii.crc32(chunk_type)
+    checksum = binascii.crc32(data, checksum) & 0xFFFFFFFF
+    return struct.pack(">I", len(data)) + chunk_type + data + struct.pack(">I", checksum)
+
+
+def _color_byte(value: float) -> int:
+    return max(0, min(255, int(round(value * 255.0))))
 
 
 def _decimate_ratio(options: DecimateOptions) -> float | None:

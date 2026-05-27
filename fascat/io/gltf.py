@@ -184,7 +184,9 @@ def _build_document(
     export_space = _export_space(asset)
     quantization = _part_quantization(asset, export_space) if quantize else {}
     builder = _BufferBuilder()
-    material_indices = _write_materials(asset.materials, metadata_options)
+    images: list[dict[str, object]] = []
+    textures: list[dict[str, object]] = []
+    material_indices = _write_materials(asset.materials, metadata_options, images, textures)
     meshes: list[dict[str, Any]] = []
     part_meshes: dict[str, int] = {}
     part_lods: dict[str, list[dict[str, object]]] = {}
@@ -253,6 +255,9 @@ def _build_document(
             {key: value for key, value in material.items() if key != "_fascat_index"}
             for material in material_indices.values()
         ]
+    if images:
+        document["images"] = images
+        document["textures"] = textures
     if quantization:
         _add_extension_used(document, _KHR_MESH_QUANTIZATION)
         _add_extension_required(document, _KHR_MESH_QUANTIZATION)
@@ -264,6 +269,8 @@ def _build_document(
 def _write_materials(
     materials: dict[str, Material],
     metadata_options: MetadataExportOptions,
+    images: list[dict[str, object]],
+    textures: list[dict[str, object]],
 ) -> dict[str, dict[str, Any]]:
     written: dict[str, dict[str, Any]] = {}
     for index, material in enumerate(materials.values()):
@@ -278,11 +285,67 @@ def _write_materials(
             },
             "extras": {"fascat": fascat_extras},
         }
+        _add_baked_textures(gltf_material, material, images, textures)
         if material.opacity < 1.0 or material.base_color[3] < 1.0:
             gltf_material["alphaMode"] = "BLEND"
         gltf_material["_fascat_index"] = index
         written[material.id] = gltf_material
     return written
+
+
+def _add_baked_textures(
+    gltf_material: dict[str, Any],
+    material: Material,
+    images: list[dict[str, object]],
+    textures: list[dict[str, object]],
+) -> None:
+    pbr = cast(dict[str, Any], gltf_material["pbrMetallicRoughness"])
+    base_color_uri = _metadata_uri(material, "baked_texture_base_color_uri")
+    if base_color_uri is not None:
+        pbr["baseColorTexture"] = {
+            "index": _append_image_texture(images, textures, f"{material.id}_base_color", base_color_uri)
+        }
+    metallic_roughness_uri = _metadata_uri(material, "baked_texture_metallic_roughness_uri")
+    if metallic_roughness_uri is not None:
+        pbr["metallicRoughnessTexture"] = {
+            "index": _append_image_texture(
+                images,
+                textures,
+                f"{material.id}_metallic_roughness",
+                metallic_roughness_uri,
+            )
+        }
+    normal_uri = _metadata_uri(material, "baked_texture_normal_uri")
+    if normal_uri is not None:
+        gltf_material["normalTexture"] = {
+            "index": _append_image_texture(images, textures, f"{material.id}_normal", normal_uri)
+        }
+    occlusion_uri = _metadata_uri(material, "baked_texture_occlusion_uri")
+    if occlusion_uri is not None:
+        gltf_material["occlusionTexture"] = {
+            "index": _append_image_texture(images, textures, f"{material.id}_occlusion", occlusion_uri)
+        }
+    emissive_uri = _metadata_uri(material, "baked_texture_emissive_uri")
+    if emissive_uri is not None:
+        gltf_material["emissiveTexture"] = {
+            "index": _append_image_texture(images, textures, f"{material.id}_emissive", emissive_uri)
+        }
+
+
+def _append_image_texture(
+    images: list[dict[str, object]],
+    textures: list[dict[str, object]],
+    name: str,
+    uri: str,
+) -> int:
+    images.append({"name": name, "uri": uri})
+    textures.append({"source": len(images) - 1})
+    return len(textures) - 1
+
+
+def _metadata_uri(material: Material, key: str) -> str | None:
+    value = material.metadata.get(key)
+    return value if isinstance(value, str) and value.startswith("data:image/") else None
 
 
 def _asset_metadata_extras(asset: Asset, options: MetadataExportOptions) -> dict[str, object]:

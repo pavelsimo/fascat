@@ -474,7 +474,7 @@ asset = asset.stage(
 )
 ```
 
-Atlas support currently records atlas and texture-bake metadata on materials and meshes. It does not write atlas images. Dedicated material baking is a separate optimization step, and it currently creates a shared flat material plus bake metadata rather than texture files.
+Atlas support currently records atlas and texture-bake metadata on materials and meshes. It does not write atlas images. Dedicated material baking is a separate optimization step; it emits constant embedded texture maps from material factors and glTF can export those maps as material textures.
 
 Staging, UV, and material parameters:
 
@@ -566,13 +566,13 @@ asset = asset.run_lod_generators(
 )
 ```
 
-Material baking currently creates a shared flat material and metadata for baked maps; it does not write texture images. Hole removal uses deterministic mesh boundary classification and filling when BREP feature editing is unavailable. Occlusion removal uses deterministic visibility sampling, so the report records that thin occluders can require higher precision.
+Material baking currently creates a shared flat material and constant embedded texture maps from material factors; it does not rasterize source textures into atlases. Hole removal uses deterministic mesh boundary classification and filling when BREP feature editing is unavailable. Occlusion removal uses deterministic visibility sampling, so the report records that thin occluders can require higher precision.
 
 Optimization action parameters:
 
 | Option | Parameter | Meaning |
 |--------|-----------|---------|
-| `BakeMaterialOptions` | `maps_resolution` | Requested texture size recorded in bake metadata; texture image output is not implemented yet. |
+| `BakeMaterialOptions` | `maps_resolution` | Requested texture size recorded in bake metadata for downstream atlas generation. Current embedded maps are constant factor textures. |
 | `BakeMaterialOptions` | `force_uv_generation` | Generate UVs first when selected meshes do not have the required UV channel. |
 | `BakeMaterialOptions` | `uv_channel` | UV channel used for baking. |
 | `BakeMaterialOptions` | `padding` | Texture padding between islands in pixels. |
@@ -624,7 +624,7 @@ Report examples for destructive and approximate operations:
   "before": {"materials": 12, "draw_calls": 18},
   "after": {"materials": 1, "draw_calls": 1},
   "warnings": [
-    "bake_materials creates a flat merged material; texture image baking is not implemented"
+    "bake_materials emits constant embedded texture maps from material factors; raster texture baking is not implemented"
   ]
 }
 ```

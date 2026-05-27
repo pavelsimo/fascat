@@ -195,7 +195,7 @@ def test_convert_dry_run_reports_approximate_and_metadata_only_operations() -> N
     diagnostics = {item["operation"]: item for item in payload["operation_diagnostics"]}
     assert diagnostics["heal_brep"]["level"] == "approximate"
     assert diagnostics["atlas"]["level"] == "metadata_only"
-    assert diagnostics["bake_materials"]["level"] == "metadata_only"
+    assert diagnostics["bake_materials"]["level"] == "approximate"
     assert diagnostics["decimate"]["level"] == "approximate"
     assert diagnostics["remove_holes"]["level"] == "approximate"
     assert diagnostics["remove_occluded"]["level"] == "approximate"

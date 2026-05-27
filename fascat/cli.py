@@ -614,7 +614,7 @@ def cmd_convert(
     ] = InstancePolicy.AUTO,
     bake_materials: Annotated[
         bool,
-        typer.Option("--bake-materials", help="Create a shared flat material and bake metadata; no texture files yet."),
+        typer.Option("--bake-materials", help="Create a shared baked material with constant embedded textures."),
     ] = False,
     maps_resolution: Annotated[
         int,
@@ -622,7 +622,7 @@ def cmd_convert(
     ] = 2048,
     force_uv_generation: Annotated[
         bool,
-        typer.Option("--force-uv-generation", help="Generate UVs before recording bake metadata when needed."),
+        typer.Option("--force-uv-generation", help="Generate UVs before recording baked material textures."),
     ] = False,
     bake: Annotated[
         str,
@@ -1590,7 +1590,9 @@ def _convert_operation_diagnostics(payload: dict[str, Any]) -> list[dict[str, st
         add("optimize_scene", "exact", "scene batching, splitting, flattening, and instance policy options are applied")
     if payload["bake_materials"]:
         add(
-            "bake_materials", "metadata_only", "material baking creates a flat material and metadata, not texture files"
+            "bake_materials",
+            "approximate",
+            "material baking emits constant embedded texture maps from material factors, not rasterized source textures",
         )
     if payload["remove_holes"]:
         add(

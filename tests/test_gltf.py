@@ -13,6 +13,7 @@ from fascat.asset import Asset, Node, Part
 from fascat.io.gltf import validate_gltf, write_gltf
 from fascat.material import Material
 from fascat.mesh import Mesh
+from fascat.options import BakeMaterialOptions
 
 
 def _asset_with_materials_and_lods() -> Asset:
@@ -130,6 +131,31 @@ def test_glb_export_writes_valid_scene_materials_uvs_and_lod_metadata(tmp_path: 
     assert lod_node["matrix"] == occurrence["matrix"]
     assert lod_node["extras"]["fascat"] == {"nodeId": "node_lod1", "sourceNodeId": "node", "lod": 1}
     assert len(binary) >= document["buffers"][0]["byteLength"]
+
+
+def test_glb_export_writes_embedded_baked_material_textures(tmp_path: Path) -> None:
+    output = tmp_path / "baked.glb"
+    asset = _asset_with_materials_and_lods().bake_materials(
+        BakeMaterialOptions(
+            bake=("base_color", "roughness", "metallic", "normal", "ao", "emissive"),
+            force_uv_generation=False,
+        )
+    )
+
+    write_gltf(asset, output)
+
+    document, _binary = _read_glb(output)
+    material = document["materials"][0]
+    pbr = material["pbrMetallicRoughness"]
+
+    assert len(document["images"]) == 5
+    assert len(document["textures"]) == 5
+    assert all(image["uri"].startswith("data:image/png;base64,") for image in document["images"])
+    assert pbr["baseColorTexture"]["index"] == 0
+    assert pbr["metallicRoughnessTexture"]["index"] == 1
+    assert material["normalTexture"]["index"] == 2
+    assert material["occlusionTexture"]["index"] == 3
+    assert material["emissiveTexture"]["index"] == 4
 
 
 def test_glb_export_preserves_normals_and_tangent_handedness(tmp_path: Path) -> None:

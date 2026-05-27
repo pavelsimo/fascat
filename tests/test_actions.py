@@ -150,9 +150,13 @@ def test_bake_materials_merges_selected_material_slots() -> None:
     assert part.mesh is not None
     assert part.mesh.material_indices is None
     assert 0 in part.mesh.uvs
+    assert (
+        baked.materials["baked_material"].metadata["baked_texture_base_color_uri"].startswith("data:image/png;base64,")
+    )
+    assert baked.materials["baked_material"].metadata["baked_texture_resolution"] == "2048"
     assert baked.report.steps[-1].before["draw_calls"] == 2
     assert baked.report.steps[-1].after["draw_calls"] == 1
-    assert "texture image baking is not implemented" in baked.report.steps[-1].warnings[0]
+    assert "constant embedded texture maps" in baked.report.steps[-1].warnings[0]
 
 
 def test_decimate_uses_selection_budget() -> None:
@@ -500,7 +504,7 @@ def test_cli_convert_accepts_optimization_action_options_during_dry_run() -> Non
     assert payload["lod_per_part_budget"] is True
     assert payload["lod_drop_tiny_parts"] is True
     diagnostics = {item["operation"]: item for item in payload["operation_diagnostics"]}
-    assert diagnostics["bake_materials"]["level"] == "metadata_only"
+    assert diagnostics["bake_materials"]["level"] == "approximate"
     assert diagnostics["remove_holes"]["level"] == "approximate"
     assert diagnostics["remove_occluded"]["level"] == "approximate"
     assert diagnostics["decimate"]["level"] == "exact"

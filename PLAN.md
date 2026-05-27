@@ -99,8 +99,8 @@ Parity gaps to track:
 
 5. Materials and baking
    - Add material-library import and CAD-material-to-PBR mapping, including CSV or TOML mapping tables.
-   - Replace current bake metadata with actual texture output for base color, opacity, roughness, metallic, normal, AO, and emissive maps.
-   - Add ambient occlusion baking to textures and optionally to vertex colors for downstream decimation weights.
+   - Replace constant embedded factor maps with real atlas/raster texture output for base color, opacity, roughness, metallic, normal, AO, and emissive maps.
+   - Add real ambient occlusion baking to textures and optionally to vertex colors for downstream decimation weights.
    - Add image cleanup: merge duplicate images, remove unused images, resize textures to platform budgets.
 
 6. Optimization and draw-call reduction
@@ -152,11 +152,10 @@ These need more design and should not be mixed into documentation or diagnostics
    - Diameter filtering now uses planar-span measurement instead of boundary-loop diagonal distance.
    - Remaining polish: add real BREP feature-level removal for closed cylindrical holes and blind pockets when source shape data is available.
 
-3. Material baking
-   - Generate actual texture atlas files, not only flat merged materials.
-   - Reuse xatlas UVs where possible.
-   - Export atlas references through glTF and USD material bindings.
-   - Include AO baking and texture resizing/compression prep.
+3. Material baking - first embedded-texture pass complete
+   - `bake_materials` now emits constant embedded texture maps from material factors.
+   - glTF export writes baked base-color/opacity, metallic-roughness, normal, AO, and emissive texture bindings when present.
+   - Remaining polish: generate real atlas textures from source texture/material inputs, reuse xatlas UVs where possible, add USD texture bindings, AO baking, and texture resizing/compression prep.
 
 4. Error-bounded simplification
    - Replace `criterion="quality"` ratio heuristics with measured geometric error.

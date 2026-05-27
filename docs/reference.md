@@ -100,10 +100,10 @@ Dry-run JSON for `convert` includes `operation_diagnostics`, a list of planned o
 | `--index-buffer` | `auto` | Index buffer mode: `auto`, `uint16`, or `uint32` |
 | `--flatten` | `safe` | Hierarchy flattening mode: `none`, `safe`, or `all` |
 | `--instance-policy` | `auto` | Instance policy: `auto`, `preserve`, or `expand` |
-| `--bake-materials` | `false` | Create a shared flat material plus bake metadata; texture image baking is not implemented yet |
-| `--maps-resolution` | `2048` | Requested bake texture resolution in pixels, recorded as metadata until texture baking exists |
-| `--force-uv-generation` | `false` | Generate UVs before material bake metadata is recorded |
-| `--bake` | `base-color` | Maps requested for future baking, such as `base-color,opacity` |
+| `--bake-materials` | `false` | Create a shared baked material with constant embedded texture maps |
+| `--maps-resolution` | `2048` | Requested bake texture resolution in pixels, recorded for downstream atlas generation |
+| `--force-uv-generation` | `false` | Generate UVs before material bake metadata and textures are recorded |
+| `--bake` | `base-color` | Maps to bake as constant embedded textures, such as `base-color,opacity` |
 | `--decimate` | `false` | Run explicit decimation before profile optimization |
 | `--decimate-criterion` | `target` | Decimation criterion: `target` or `quality` |
 | `--surface-tolerance` | unset | Surface deviation tolerance metadata for decimation |
@@ -257,7 +257,7 @@ warnings to distinguish exact work from fallbacks.
 | Tessellation | Implemented | `tessellate` report options and quality metadata | Add separate sag-ratio option, existing tessellation reuse, CAD UV/tangent extraction, and free-edge diagnostics |
 | Mesh repair | Implemented for core cleanup | `repair` report step | Add T-junction sewing, non-manifold cracking, and configurable orientation strategies |
 | Staging, normals, tangents, UV metadata | Partial | `stage` report step; tangents require UV0 | Add seam planning, unwrap method selection, UV overlap checks, repack, normalize, and per-channel validation |
-| Material baking | Metadata-only | `bake_materials` warns texture image baking is not implemented | Generate real base-color, opacity, roughness, metallic, normal, AO, and emissive textures |
+| Material baking | Approximate | `bake_materials` emits constant embedded texture maps from material factors and warns that raster baking is not implemented | Generate real atlas textures from source texture/material inputs |
 | Hole removal | Approximate | `remove_holes` warns when it falls back to mesh boundary classification and filling | Add BREP feature-level removal for closed cylindrical and pocket holes |
 | Occlusion removal | Approximate | `remove_occluded` warns that sampled visibility may require higher precision for thin occluders | Add acceleration structures, measured confidence, and raster/GPU backends for high-poly production scenes |
 | Decimation | Partial | `decimate`; quality criterion is reported as heuristic in dry-run diagnostics | Add measured geometric error, topology protection metrics, iterative limits, and UV/AO importance modes |
