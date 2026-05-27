@@ -87,6 +87,19 @@ asset.write_gltf("motor.glb")
 
 Pipeline operations return new `Asset` instances instead of mutating the previous asset. Write calls attach a final write step to the asset report.
 
+Core pipeline calls:
+
+| API | Parameters | Purpose |
+|-----|------------|---------|
+| `fc.read_step(path, options=None)` | `path` is a STEP file path or `-` for stdin. `options` is `StepReadOptions`. | Import STEP assembly hierarchy, metadata, materials, and source BREP handles when the backend exposes them. |
+| `asset.tessellate(options, where=None)` | `options` is `Tessellation`. `where` optionally scopes the operation with a `Filter`. | Convert source BREP geometry into meshes. |
+| `asset.repair(options, where=None)` | `options` is `RepairOptions`. `where` optionally scopes selected parts. | Clean mesh-level issues after tessellation. |
+| `asset.stage(options, where=None)` | `options` is `StageOptions`. `where` optionally scopes selected parts. | Prepare materials, normals, tangents, and UV metadata for runtime export. |
+| `asset.optimize(options, where=None)` | `options` is `OptimizeOptions`. `where` optionally scopes selected parts. | Reduce mesh complexity while preserving selected mechanical features. |
+| `asset.lods(options, where=None)` | `options` is `LODOptions`. `where` optionally scopes selected parts. | Generate lower-detail runtime meshes. |
+| `asset.write_usd(path, options=None)` | `path` ends in `.usd`, `.usda`, `.usdc`, or `.usdz`. `options` is `UsdExportOptions`. | Write OpenUSD output and append a write step to the report. |
+| `asset.write_gltf(path, options=None)` | `path` ends in `.gltf` or `.glb`. `options` is `GltfExportOptions`. | Write glTF 2.0 output and append a write step to the report. |
+
 ## Assembly filters
 
 Use `Filter` selectors to inspect or process one branch of an assembly while leaving the rest unchanged.
@@ -120,6 +133,27 @@ asset = asset.stage(
 ```
 
 Filters support node path, node name, part id, part name, material, metadata, bounding box, size, triangle count, vertex count, and logical `all`, `any`, and `not_` composition. If a selected occurrence shares a part with an unmatched occurrence, Fascat duplicates the selected occurrence's part before applying the operation so the unmatched branch stays intact. Report steps include `where` and `matched` fields when an operation is scoped.
+
+Filter parameters:
+
+| Parameter | Meaning |
+|-----------|---------|
+| `path` | Match the full assembly node path with shell-style patterns such as `*/Fasteners/*`. |
+| `name` | Match node names. Accepts a string or list of patterns. |
+| `part_name` | Match the source part name. |
+| `part_id` | Match the stable Fascat part id. `Filter.part(value)` is shorthand for this. |
+| `material` | Match any material assigned to the selected part. |
+| `metadata` | Require metadata key/value matches on the node, part, material, or asset context. |
+| `min_bounds`, `max_bounds` | Match parts whose bounding box lies inside the supplied coordinate bounds. |
+| `min_diagonal`, `max_diagonal` | Match by bounding-box diagonal size. |
+| `min_triangles`, `max_triangles` | Match by mesh triangle count. `Filter.triangle_count()` builds these criteria. |
+| `min_vertices`, `max_vertices` | Match by mesh vertex count. `Filter.vertex_count()` builds these criteria. |
+| `include` | Require at least one nested filter to match before criteria are accepted. |
+| `exclude` | Drop matches selected by nested filters. |
+| `Filter.all(...)` | Require every child filter to match. |
+| `Filter.any(...)` | Require at least one child filter to match. |
+| `Filter.not_(...)` | Invert one child filter. |
+| `where` | Most pipeline methods accept `where=Filter(...)` to scope an operation without destroying unmatched hierarchy. |
 
 ## Hierarchy merge
 
@@ -160,6 +194,28 @@ asset = asset.replace(
 
 `ReplaceOptions(mode="external_asset", external_path="proxy.glb")` records an external proxy reference while keeping a bounding-box mesh fallback in the asset.
 
+Hierarchy option parameters:
+
+| Option | Parameter | Meaning |
+|--------|-----------|---------|
+| `MergeOptions` | `mode` | Merge strategy: `all`, `by_material`, `by_node_name`, `by_part_name`, `hierarchy_level`, `parent_children`, `final_level`, or `regions`. |
+| `MergeOptions` | `keep_parent` | Keep a selected parent node and place merged geometry under it instead of flattening the selected branch completely. |
+| `MergeOptions` | `metadata` | Metadata policy: `preserve`, `combine`, `summarize`, or `drop`. |
+| `MergeOptions` | `max_vertices_per_mesh` | Split merged output before it exceeds this vertex count. Use `65_535` for 16-bit index friendly meshes. |
+| `MergeOptions` | `preserve_materials` | Keep material slots and face material assignments in merged geometry. |
+| `MergeOptions` | `hierarchy_level` | Level used by `mode="hierarchy_level"`. `0` starts at the selected root. |
+| `MergeOptions` | `region_size` | Spatial cell size used by `mode="regions"`. Required for region merging. |
+| `MergeOptions` | `merge_strategy` | Sub-strategy inside region merging: `all` or `by_material`. |
+| `MergeOptions` | `remove_empty_nodes` | Remove hierarchy nodes left empty after merging. |
+| `ExplodeOptions` | `mode` | Split selected meshes by `by_material` or `connected_components`. |
+| `ExplodeOptions` | `metadata` | Metadata policy applied to exploded parts. |
+| `ExplodeOptions` | `remove_empty_nodes` | Remove empty source nodes after selected geometry is replaced by exploded children. |
+| `ReplaceOptions` | `mode` | Replacement style: `bounding_box`, `proxy_mesh`, or `external_asset`. |
+| `ReplaceOptions` | `preserve_transform` | Keep the selected occurrence transform on the replacement. |
+| `ReplaceOptions` | `metadata` | Metadata policy applied to replacement parts. |
+| `ReplaceOptions` | `proxy_mesh` | Mesh object required when `mode="proxy_mesh"`. |
+| `ReplaceOptions` | `external_path` | External asset path recorded when `mode="external_asset"`. |
+
 ## Metadata and PMI
 
 Fascat keeps top-level asset metadata and typed PMI records alongside node, part, material, and mesh metadata.
@@ -194,6 +250,25 @@ asset.pmi.append(
 ```
 
 glTF export writes metadata and PMI into `extras.fascat`. USD export writes Fascat metadata into `customData` on the scene, nodes, prototypes, materials, meshes, and `/PMI/*` annotation prims.
+
+Metadata and PMI parameters:
+
+| Option | Parameter | Meaning |
+|--------|-----------|---------|
+| `StepReadOptions` | `metadata` | Enables general source metadata import. If `False`, the more specific metadata import groups are disabled by default. |
+| `StepReadOptions` | `product_metadata` | Import product and assembly-level metadata where the STEP backend exposes it. |
+| `StepReadOptions` | `properties` | Import user and product properties. |
+| `StepReadOptions` | `layers` | Import layer assignments as metadata. |
+| `StepReadOptions` | `validation_properties` | Import STEP validation properties such as source counts or checksums when available. |
+| `StepReadOptions` | `pmi` | Import typed PMI records when the backend exposes them. |
+| `PmiAnnotation` | `id` | Stable annotation id used for references from parts or mesh groups. |
+| `PmiAnnotation` | `kind` | Annotation type such as `dimension`, `datum`, `tolerance`, `note`, or backend-specific kinds. |
+| `PmiAnnotation` | `text` | Human-readable annotation text. |
+| `PmiAnnotation` | `value`, `unit` | Numeric measurement value and unit when available. |
+| `PmiAnnotation` | `tolerance` | `Tolerance(upper=..., lower=...)` values for dimensional or GD&T annotations. |
+| `PmiAnnotation` | `applies_to` | Target ids such as part ids, node ids, face groups, edge groups, or material ids. |
+| `MetadataExportOptions` | `mode` | Export metadata as `full`, count-only `summary`, or `none`. |
+| `MetadataExportOptions` | `pmi` | Export PMI as `none`, `summary`, `metadata`, `metadata_and_visuals`, or `full`. |
 
 ```python
 asset.write_gltf(
@@ -232,6 +307,19 @@ asset = fc.read_step("motor.step").heal_brep(
 
 The operation stores per-part `brep_*` metadata and records a `heal_brep` report step. `fc.convert(..., heal_brep=fc.BrepHealOptions())` runs healing before tessellation.
 
+Brep healing parameters:
+
+| Parameter | Meaning |
+|-----------|---------|
+| `tolerance` | Working tolerance used for sewing, edge fixes, and tolerance unification. Must be greater than zero. |
+| `sew_faces` | Attempt to sew adjacent faces into shells before tessellation. |
+| `fix_edges` | Attempt to repair bad trims and edge curves where supported by the backend. |
+| `remove_sliver_faces` | Remove tiny sliver faces before tessellation when source BREP data is available. |
+| `max_sliver_area` | Area threshold for sliver-face removal. |
+| `unify_tolerances` | Normalize shape tolerances to the requested working tolerance. |
+| `fail_on_open_shells` | Raise when healing detects open shells instead of reporting a warning. |
+| `where` | Optional filter that limits healing to selected assembly occurrences. |
+
 ## Tessellation Controls
 
 Tessellation supports global and per-part settings for edge limits, boundary preservation, curvature-adaptive OCCT meshing, skinny-triangle cleanup, and per-part quality metrics.
@@ -259,6 +347,34 @@ quality = asset.tessellation_quality_report()
 
 `part_settings` keys match a part id or part name. Quality reports include per-part edge length, triangle area, aspect ratio, skinny triangle, boundary edge, and non-manifold edge counts.
 
+Tessellation parameters:
+
+| Parameter | Meaning |
+|-----------|---------|
+| `sag` | Maximum chordal deviation between source surface and tessellated mesh. Lower values produce more triangles. |
+| `angle` | Angular deviation limit in degrees. Lower values preserve curved surfaces with more triangles. |
+| `relative` | Interpret sag relative to part size where the backend supports relative tessellation. |
+| `min_edge_length` | Collapse or avoid edges shorter than this length during post-processing. |
+| `max_edge_length` | Split long triangle edges to keep mesh density bounded. |
+| `preserve_boundaries` | Preserve CAD face and boundary edges during tessellation cleanup. |
+| `curvature_adaptive` | Request curvature-aware meshing from the backend when available. |
+| `avoid_skinny_triangles` | Run a cleanup pass that reduces long skinny triangles. |
+| `quality_report` | Record per-part tessellation quality metrics for later reporting. |
+| `create_normals` | Generate normals during tessellation when the backend can provide them. |
+| `keep_brep` | Keep source BREP handles on parts after tessellation for later BREP-aware operations. |
+| `part_settings` | Per-part overrides keyed by part id or part name. Supports the same tessellation option names. |
+
+Repair parameters:
+
+| Parameter | Meaning |
+|-----------|---------|
+| `tolerance` | Merge tolerance for nearby vertices. `0.0` disables distance-based merging beyond exact duplicates. |
+| `merge_vertices` | Deduplicate vertices after tessellation. |
+| `delete_degenerate` | Remove triangles with repeated vertices or near-zero area. |
+| `fix_winding` | Normalize triangle winding where a consistent orientation can be inferred. |
+| `fill_small_holes` | Fill small mesh boundary loops as a fallback mesh repair step. |
+| `area_epsilon` | Area threshold used to classify degenerate triangles. |
+
 ## Feature-Preserving Simplification
 
 Optimization can protect mechanical features while reducing triangle count. Preservation flags keep protected faces from being dropped when a target would otherwise remove them.
@@ -283,6 +399,24 @@ asset = asset.optimize(
 
 Protected-feature counts are stored as part metadata under `simplification_preserved_features`. Parts below `small_part_triangle_threshold` are left unsimplified when `preserve_small_parts=True`.
 
+Optimization parameters:
+
+| Parameter | Meaning |
+|-----------|---------|
+| `target_triangles` | Absolute triangle budget for selected geometry. |
+| `ratio` | Fraction of original triangles to keep. Use this instead of `target_triangles` for proportional simplification. |
+| `preserve_instances` | Keep repeated part instances sharing geometry instead of expanding them unnecessarily. |
+| `simplify` | Enable triangle-count reduction. Disable to run only metadata and buffer optimization steps. |
+| `optimize_buffers` | Reorder and compact mesh buffers after simplification. |
+| `preserve_hard_edges` | Protect faces around hard normal edges from simplification. |
+| `hard_edge_angle` | Edge angle threshold in degrees used to detect hard edges. |
+| `preserve_holes` | Protect hole boundary loops and nearby faces. |
+| `preserve_material_boundaries` | Avoid collapsing across material boundaries. |
+| `preserve_uv_seams` | Avoid collapsing across UV seams. |
+| `preserve_small_parts` | Leave small parts unsimplified instead of spending budget on them. |
+| `small_part_triangle_threshold` | Parts at or below this triangle count are treated as small when preservation is enabled. |
+| `preserve_silhouette` | Protect bounding-box silhouette extremes to reduce visible shape loss. |
+
 ## Hard-Edge Normals And Tangents
 
 Staging can generate smooth, flat, or hard-edge normals and glTF-ready tangents. Hard-edge mode splits vertices across hard normal edges, material boundaries, and optional CAD face-group boundaries.
@@ -303,6 +437,17 @@ asset = asset.stage(
 ```
 
 Tangents require UV0. glTF export writes a `TANGENT` vertex attribute when staged meshes contain tangent data.
+
+Normal and tangent parameters:
+
+| Parameter | Meaning |
+|-----------|---------|
+| `normals` | Generate or preserve vertex normals. Automatically disabled when `normal_mode="none"`. |
+| `normal_mode` | `smooth` averages face normals, `flat` keeps face normals, `hard_edges` splits vertices along hard edges, and `none` omits normals. |
+| `hard_edge_angle` | Edge angle threshold in degrees for `normal_mode="hard_edges"`. |
+| `preserve_face_boundaries` | Treat CAD face-group boundaries as hard normal boundaries. |
+| `tangents` | Generate glTF-ready tangent vectors. Requires UV0. |
+| `validate_normals` | Check for missing, zero-length, or invalid normals after staging. |
 
 ## UV And Material Pipeline
 
@@ -331,6 +476,23 @@ asset = asset.stage(
 
 Atlas support currently records atlas and texture-bake metadata on materials and meshes. Dedicated material baking is a separate optimization step.
 
+Staging, UV, and material parameters:
+
+| Option | Parameter | Meaning |
+|--------|-----------|---------|
+| `StageOptions` | `materials` | Material source policy: `cad` preserves CAD materials, `display` creates display materials, and `none` omits materials. |
+| `StageOptions` | `material_mode` | `cad` keeps source-style materials. `pbr` normalizes simple CAD colors into PBR-friendly material values. |
+| `StageOptions` | `merge_equivalent_materials` | Merge materials with equivalent visual values to reduce material count. |
+| `StageOptions` | `uv0` | Primary UV channel mode: `none`, `box`, `unwrap`, or `lightmap`. |
+| `StageOptions` | `uv1` | Secondary UV channel mode. Commonly `lightmap` for baked lighting. |
+| `StageOptions` | `unwrap` | `UnwrapOptions` used when a UV channel uses `unwrap`. |
+| `StageOptions` | `atlas` | `AtlasOptions` used to record atlas layout and baking intent. |
+| `UnwrapOptions` | `texel_density` | Desired texture density for generated UVs. |
+| `UnwrapOptions` | `padding` | Padding between UV islands in pixels. |
+| `UnwrapOptions` | `max_stretch` | Maximum tolerated UV stretch before reporting unwrap risk. |
+| `AtlasOptions` | `enabled` | Record atlas metadata and prepare materials for later baking. |
+| `AtlasOptions` | `max_size` | Maximum atlas texture size in pixels. |
+
 ## Scene Optimization
 
 Use scene optimization to reduce draw calls after staging and optional hierarchy merging. It batches compatible meshes, can batch by material, splits large merged meshes, simplifies empty hierarchy, and annotates the intended index-buffer width.
@@ -349,6 +511,19 @@ asset = asset.optimize_scene(
     )
 )
 ```
+
+Scene optimization parameters:
+
+| Parameter | Meaning |
+|-----------|---------|
+| `batch_by_material` | Group compatible geometry by material to reduce draw calls. |
+| `merge_compatible_meshes` | Merge meshes that can share buffers and material assignments safely. |
+| `split_large_meshes` | Split merged output that exceeds the configured vertex limit. |
+| `max_vertices_per_mesh` | Vertex limit used for splitting and index-buffer planning. |
+| `index_buffer` | `auto` chooses 16-bit or 32-bit indices. `uint16` and `uint32` force a width. |
+| `flatten` | `none` preserves hierarchy, `safe` removes only safe empty structure, and `all` aggressively flattens. |
+| `remove_empty_nodes` | Remove hierarchy nodes with no part and no children. |
+| `instance_policy` | `auto` preserves useful instances, `preserve` keeps all repeated part instances, and `expand` duplicates instances. |
 
 ## Optimization Actions
 
@@ -393,6 +568,45 @@ asset = asset.run_lod_generators(
 
 Material baking currently creates a shared baked material and metadata for baked maps. Hole removal and occlusion removal use deterministic mesh-level fallbacks when BREP feature editing or visibility rendering is unavailable.
 
+Optimization action parameters:
+
+| Option | Parameter | Meaning |
+|--------|-----------|---------|
+| `BakeMaterialOptions` | `maps_resolution` | Output texture size in pixels for generated bake metadata. |
+| `BakeMaterialOptions` | `force_uv_generation` | Generate UVs first when selected meshes do not have the required UV channel. |
+| `BakeMaterialOptions` | `uv_channel` | UV channel used for baking. |
+| `BakeMaterialOptions` | `padding` | Texture padding between islands in pixels. |
+| `BakeMaterialOptions` | `bake` | Maps to bake, such as `base_color`, `opacity`, `normal`, `roughness`, `metallic`, `ao`, or `emissive`. |
+| `BakeMaterialOptions` | `merge_output` | Replace selected materials with a shared baked output material. |
+| `DecimateOptions` | `criterion` | `target` prioritizes a triangle budget. `quality` prioritizes tolerance-driven reduction. |
+| `DecimateOptions` | `target_triangles` | Absolute triangle target for selected geometry. |
+| `DecimateOptions` | `target_ratio` | Fraction of source triangles to keep when no absolute target is set. |
+| `DecimateOptions` | `surface_tolerance` | Maximum surface deviation tolerance. |
+| `DecimateOptions` | `line_tolerance` | Maximum hard-edge or line-feature deviation tolerance. |
+| `DecimateOptions` | `normal_tolerance` | Maximum normal deviation in degrees. |
+| `DecimateOptions` | `uv_tolerance` | Maximum UV deviation tolerance. |
+| `DecimateOptions` | `protect_topology` | Avoid topology changes that would remove important boundaries. |
+| `DecimateOptions` | `preserve_painted_areas` | Preserve metadata-marked or painted regions where present. |
+| `DecimateOptions` | `budget_scope` | `part` budgets each part separately. `selection` lets dense selected parts absorb more reduction. |
+| `RemoveHolesOptions` | `through`, `blind`, `surface` | Select which hole types are eligible for removal. |
+| `RemoveHolesOptions` | `max_diameter` | Only remove holes at or below this diameter. |
+| `RemoveHolesOptions` | `prefer_brep` | Try BREP-level feature removal before falling back to mesh-level removal. |
+| `RemoveOccludedOptions` | `strategy` | Occlusion strategy: `conservative`, `exterior`, or `advanced`. |
+| `RemoveOccludedOptions` | `level` | Removal granularity: `parts`, `submeshes`, or `triangles`. |
+| `RemoveOccludedOptions` | `precision` | Sampling or raster precision used by occlusion estimation. |
+| `RemoveOccludedOptions` | `hemi_evaluation` | Limit evaluation to hemispherical top or side viewing. |
+| `RemoveOccludedOptions` | `neighbors_preservation` | Keep this many rings around visible triangles to reduce cracks. |
+| `RemoveOccludedOptions` | `consider_transparency_opaque` | Treat transparent materials as opaque for conservative visibility. |
+| `RemoveOccludedOptions` | `preserve_cavities` | Preserve interior cavities above the configured volume threshold. |
+| `RemoveOccludedOptions` | `minimum_cavity_volume_m3` | Cavity volume threshold used when `preserve_cavities=True`. |
+| `LODGeneratorOptions` | `preset` | Default LOD level set: `desktop`, `web`, `mobile`, or `vr`. |
+| `LODGeneratorOptions` | `levels` | Explicit `LODLevel` entries overriding the preset. |
+| `LODGeneratorOptions` | `validate` | Validate monotonic triangle, material, and draw-call counts after generation. |
+| `LODGeneratorOptions` | `output` | LOD representation: `variants`, `extras`, or `separate`. |
+| `LODGeneratorOptions` | `allow_non_monotonic` | Permit non-monotonic LODs without failing validation. |
+| `LODLevel` | `screen_coverage` | Screen fraction at which this LOD becomes appropriate. |
+| `LODLevel` | `target_ratio` | Fraction of source triangles to keep for this LOD. |
+
 ## One-shot conversion
 
 Use `fc.convert()` when you want the full default pipeline and output validation in one call.
@@ -423,6 +637,29 @@ fc.convert("motor.step", "motor.gltf", profile="realtime-web")
 
 `fc.convert()` validates generated output by default. Pass `validate_output=False` only when another step in your pipeline validates the asset.
 When `where` is provided to `fc.convert()`, tessellation, repair, and staging still run for the full asset, while merge, scene optimization, optimization actions, optimization, and LOD generation are scoped to the matched assembly subset.
+
+Conversion parameters:
+
+| Parameter | Meaning |
+|-----------|---------|
+| `input_path` | STEP input path or `-` for stdin. |
+| `output_path` | Output path. Suffix selects USD, glTF, OBJ, or STL. |
+| `profile` | Profile name or `ConversionProfile` that supplies default tessellation, repair, stage, optimize, and LOD options. |
+| `import_options` | `StepReadOptions` for STEP metadata and PMI import. |
+| `tessellation` | Overrides the profile tessellation step. |
+| `heal_brep` | Optional BREP healing step before tessellation. |
+| `stage` | Overrides the profile staging step. |
+| `merge`, `explode`, `replace` | Optional hierarchy operations run after staging. |
+| `scene` | Optional scene optimization step. |
+| `bake_materials`, `remove_holes`, `remove_occluded`, `decimate`, `lod_generator` | Optional explicit optimization actions. |
+| `optimize` | Overrides the profile simplification step. |
+| `lods` | Overrides the profile ratio-based LOD step. |
+| `progress` | Callback receiving `(step_name, stats)` after major conversion steps. |
+| `validate_output` | Reopen and validate generated output before returning. Defaults to `True`. |
+| `debug` | Prefer debuggable USDA conventions. Only valid for `.usd` or `.usda` outputs. |
+| `gltf_options`, `usd_options`, `obj_options`, `stl_options` | Format-specific write options. |
+| `pipeline` | `PipelineSpec` loaded from TOML. When present, ordered pipeline steps drive the conversion. |
+| `where` | Optional `Filter` applied to scoped hierarchy, optimization, and LOD steps. |
 
 For multiple branch-specific steps, load the same TOML pipeline format used by `fascat convert --pipeline`:
 
@@ -470,6 +707,27 @@ asset.write_stl("motor.stl", options=fc.StlExportOptions(binary=True, merge=True
 ```
 
 `quantize=True` writes `KHR_mesh_quantization` accessors and composes the dequantization transform into referencing nodes. `meshopt=True` writes `EXT_meshopt_compression` bufferView payloads while keeping fallback buffer data for validators and loaders that ignore the extension. USDZ output is built by writing a temporary USD stage and packaging it as `.usdz`. Draco and texture compression flags are recorded in glTF extras for downstream packaging. Write report steps include output file size and file-size budget warnings when a budget is provided.
+
+Export option parameters:
+
+| Option | Parameter | Meaning |
+|--------|-----------|---------|
+| `GltfExportOptions` | `quantize` | Write `KHR_mesh_quantization` accessors and dequantization transforms. |
+| `GltfExportOptions` | `meshopt` | Write `EXT_meshopt_compression` payloads with fallback uncompressed data. |
+| `GltfExportOptions` | `draco` | Record Draco compression intent for downstream packaging. |
+| `GltfExportOptions` | `texture_compression` | Record `ktx2` or `basisu` texture-compression intent. |
+| `GltfExportOptions` | `file_size_budget_mb` | Add report warnings when the output exceeds this size. |
+| `GltfExportOptions` | `metadata` | `MetadataExportOptions` controlling metadata and PMI in `extras.fascat`. |
+| `UsdExportOptions` | `package` | `default` writes normal USD. `usdz` writes a packaged `.usdz` file. |
+| `UsdExportOptions` | `file_size_budget_mb` | Add report warnings when the output exceeds this size. |
+| `UsdExportOptions` | `metadata` | `MetadataExportOptions` controlling USD custom data and PMI prims. |
+| `ObjExportOptions` | `materials` | Write OBJ `usemtl` assignments when material data exists. |
+| `ObjExportOptions` | `write_mtl` | Write an `.mtl` sidecar next to the OBJ. |
+| `ObjExportOptions` | `preserve_groups` | Write OBJ group/object names from Fascat hierarchy and parts. |
+| `ObjExportOptions` | `file_size_budget_mb` | Add report warnings when the output exceeds this size. |
+| `StlExportOptions` | `binary` | Write binary STL when `True`; ASCII STL when `False`. |
+| `StlExportOptions` | `merge` | Merge selected triangles into one STL stream. STL does not preserve hierarchy or materials. |
+| `StlExportOptions` | `file_size_budget_mb` | Add report warnings when the output exceeds this size. |
 
 ## Profiles
 
@@ -553,6 +811,22 @@ report.write_json("quality-report.json")
 ```
 
 The analysis report includes per-part topology counts, degenerate and sliver triangle stats, tiny-part stats, material count, draw-call estimate, and visual-risk warnings derived from mesh quality and before/after pipeline report steps.
+
+Analysis parameters:
+
+| Parameter | Meaning |
+|-----------|---------|
+| `non_manifold_edges` | Count edges shared by more than two triangles. |
+| `open_boundaries` | Count boundary loops and boundary edges. |
+| `self_intersections` | Report candidate self-intersection risks. |
+| `sliver_triangles` | Report degenerate and high-aspect-ratio triangles. |
+| `tiny_parts` | Report parts below the configured diagonal threshold. |
+| `draw_call_estimate` | Include material count and estimated draw calls. |
+| `visual_risk` | Enable risk-oriented warnings from geometry quality and report steps. |
+| `sliver_aspect_ratio` | Aspect-ratio threshold used to classify sliver triangles. |
+| `degenerate_area_epsilon` | Triangle area threshold used to classify degenerates. |
+| `tiny_part_diagonal` | Bounding-box diagonal threshold used to classify tiny parts. |
+| `max_self_intersection_pairs` | Maximum candidate pairs checked during self-intersection risk analysis. |
 
 ## Validation
 
