@@ -202,6 +202,22 @@ def test_merge_vertices_classifies_non_manifold_candidate_buckets() -> None:
     assert merged.metadata["merge_vertices_candidate_boundary_buckets"] == "1"
     assert merged.metadata["merge_vertices_candidate_non_manifold_buckets"] == "1"
     assert merged.metadata["merge_vertices_candidate_hard_edge_buckets"] == "0"
+    assert merged.metadata["merge_vertices_tolerance_risk"] == "exact_only"
+
+
+def test_merge_vertices_reports_tolerance_scale_risk() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+
+    merged = mesh.merge_vertices(MergeVerticesOptions(tolerance=0.3))
+
+    assert merged.metadata["merge_vertices_bbox_diagonal"] == "1.41421356"
+    assert merged.metadata["merge_vertices_min_edge_length"] == "1"
+    assert merged.metadata["merge_vertices_tolerance_bbox_ratio"] == "0.212132034"
+    assert merged.metadata["merge_vertices_tolerance_min_edge_ratio"] == "0.3"
+    assert merged.metadata["merge_vertices_tolerance_risk"] == "high_relative_to_min_edge"
 
 
 def test_merge_vertices_can_ignore_attributes_and_remove_degenerates() -> None:

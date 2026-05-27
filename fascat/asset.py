@@ -364,6 +364,7 @@ class Asset:
         opts = options or MergeVerticesOptions()
         scope = self._operation_scope(where)
         before = self.stats()
+        warning_count = len(self.report.warnings)
         tolerance_policy = _tolerance_policy(
             scope.asset,
             length_tolerance=opts.tolerance,
@@ -388,13 +389,17 @@ class Asset:
                     continue
                 part.mesh = part.mesh.merge_vertices(opts)
                 part.mesh.metadata = {**part.mesh.metadata, **merge_unit_metadata}
+                for warning in _merge_vertices_tolerance_warnings(part):
+                    asset.report.add_warning(warning)
                 part.fingerprint = part.mesh.fingerprint()
+        step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
             "merge_vertices",
             options=_options_with_scope({**opts.to_dict(), "tolerance_policy": tolerance_policy}, scope),
             before=before,
             after=_merge_vertices_report_stats(asset),
             duration=timer.duration,
+            warnings=step_warnings,
         )
         return asset
 
@@ -1184,7 +1189,35 @@ def _merge_vertices_report_stats(asset: Asset) -> dict[str, int]:
         for key in merge_metadata_keys:
             merge_metadata_totals[key] += _metadata_int(part.mesh.metadata.get(key), 0)
     stats.update(merge_metadata_totals)
+    high_risk_parts = 0
+    for part in asset.parts.values():
+        if part.mesh is None:
+            continue
+        if str(part.mesh.metadata.get("merge_vertices_tolerance_risk", "")) in {
+            "high_relative_to_min_edge",
+            "high_relative_to_bbox",
+        }:
+            high_risk_parts += 1
+    stats["merge_vertices_tolerance_high_risk_parts"] = high_risk_parts
     return stats
+
+
+def _merge_vertices_tolerance_warnings(part: Part) -> list[str]:
+    mesh = part.mesh
+    if mesh is None:
+        return []
+    risk = str(mesh.metadata.get("merge_vertices_tolerance_risk", ""))
+    if risk == "high_relative_to_min_edge":
+        return [
+            f"part {part.id} merge_vertices tolerance is high relative to its shortest mesh edge; "
+            "nearby distinct features may collapse"
+        ]
+    if risk == "high_relative_to_bbox":
+        return [
+            f"part {part.id} merge_vertices tolerance is high relative to its bounding-box diagonal; "
+            "verify broad tolerance merging is intended"
+        ]
+    return []
 
 
 def _delete_degenerate_polygons_report_stats(asset: Asset) -> dict[str, int]:

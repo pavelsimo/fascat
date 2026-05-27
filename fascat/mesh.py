@@ -322,6 +322,7 @@ class Mesh:
         before_triangle_count = self.triangle_count
         material_signatures = self._vertex_material_signatures() if opts.preserve_material_boundaries else None
         skip_diagnostics = self._merge_vertex_skip_diagnostics(opts, material_signatures)
+        tolerance_diagnostics = self._merge_vertex_tolerance_diagnostics(opts.tolerance)
         old_to_new = np.empty(self.vertex_count, dtype=np.int64)
         representative_indices: list[int] = []
         key_to_new: dict[tuple[object, ...], int] = {}
@@ -367,9 +368,34 @@ class Mesh:
             "merge_vertices_preserve_uvs": str(opts.preserve_uvs).lower(),
             "merge_vertices_preserve_material_boundaries": str(opts.preserve_material_boundaries).lower(),
             **{key: str(value) for key, value in skip_diagnostics.items()},
+            **tolerance_diagnostics,
         }
         mesh.validate()
         return mesh
+
+    def _merge_vertex_tolerance_diagnostics(self, tolerance: float) -> dict[str, str]:
+        mins, maxs = self.bounds()
+        diagonal = float(np.linalg.norm(maxs - mins))
+        edge_lengths = self._triangle_edge_lengths().reshape(-1)
+        positive_edges = edge_lengths[edge_lengths > 0.0]
+        min_edge = float(positive_edges.min()) if positive_edges.size else 0.0
+        bbox_ratio = tolerance / diagonal if tolerance > 0.0 and diagonal > 0.0 else 0.0
+        min_edge_ratio = tolerance / min_edge if tolerance > 0.0 and min_edge > 0.0 else 0.0
+        risk = "exact_only"
+        if tolerance > 0.0:
+            if min_edge_ratio >= 0.25:
+                risk = "high_relative_to_min_edge"
+            elif bbox_ratio >= 0.01:
+                risk = "high_relative_to_bbox"
+            else:
+                risk = "nominal"
+        return {
+            "merge_vertices_bbox_diagonal": f"{diagonal:.9g}",
+            "merge_vertices_min_edge_length": f"{min_edge:.9g}",
+            "merge_vertices_tolerance_bbox_ratio": f"{bbox_ratio:.9g}",
+            "merge_vertices_tolerance_min_edge_ratio": f"{min_edge_ratio:.9g}",
+            "merge_vertices_tolerance_risk": risk,
+        }
 
     def _merge_vertex_skip_diagnostics(
         self,
