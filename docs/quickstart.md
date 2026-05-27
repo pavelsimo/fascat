@@ -30,6 +30,7 @@ cat motor.step | fascat inspect -
 fascat convert motor.step
 fascat convert motor.step motor.usdc --profile realtime-desktop
 fascat convert motor.step motor.glb --profile virtual-reality
+fascat convert motor.step motor.glb --profile realtime-mobile
 fascat convert motor.step motor.usda --debug --report report.json
 fascat convert motor.step - --dry-run
 ```

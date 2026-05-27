@@ -265,14 +265,14 @@ def test_convert_dry_run_accepts_tangent_uv_channel() -> None:
     assert payload["override_tangents"] is True
 
 
-def test_convert_dry_run_accepts_gltf_output_and_virtual_reality_profile() -> None:
+def test_convert_dry_run_accepts_gltf_output_and_mobile_profile() -> None:
     result = runner.invoke(
         app,
-        ["--json", "--dry-run", "convert", "input.step", "output.glb", "--profile", "virtual-reality"],
+        ["--json", "--dry-run", "convert", "input.step", "output.glb", "--profile", "realtime-mobile"],
     )
     assert result.exit_code == 0
     assert '"output": "output.glb"' in result.output
-    assert '"profile": "virtual-reality"' in result.output
+    assert '"profile": "realtime-mobile"' in result.output
 
 
 def test_convert_dry_run_accepts_pipeline_file(tmp_path: Path) -> None:

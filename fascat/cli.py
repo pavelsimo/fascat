@@ -101,6 +101,7 @@ class Profile(str, Enum):
     INSPECT_ONLY = "inspect-only"
     REALTIME_DESKTOP = "realtime-desktop"
     REALTIME_WEB = "realtime-web"
+    REALTIME_MOBILE = "realtime-mobile"
     VIRTUAL_REALITY = "virtual-reality"
 
 

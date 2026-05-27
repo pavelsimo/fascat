@@ -63,6 +63,26 @@ def realtime_web(
     )
 
 
+def realtime_mobile(
+    *,
+    tessellation_sag: float = 0.25,
+    angle: float = 20.0,
+    max_triangles: int = 150_000,
+    lod_ratios: list[float] | tuple[float, ...] = (0.5, 0.25),
+) -> ConversionProfile:
+    return ConversionProfile(
+        name="realtime-mobile",
+        tessellation=Tessellation(sag=tessellation_sag, angle=angle),
+        repair=RepairOptions(tolerance=1e-7),
+        stage=StageOptions(uv0="box", uv1=None),
+        optimize=OptimizeOptions(target_triangles=max_triangles, simplify=True, optimize_buffers=True),
+        lods=LODOptions(ratios=tuple(lod_ratios)) if lod_ratios else None,
+        budget=PlatformBudget(
+            target_fps=60, max_triangles=max_triangles, max_vertices=max_triangles * 3, max_draw_calls=250
+        ),
+    )
+
+
 def virtual_reality(
     *,
     tessellation_sag: float = 0.15,
@@ -90,6 +110,8 @@ def by_name(name: str) -> ConversionProfile:
         return realtime_desktop()
     if name == "realtime-web":
         return realtime_web()
+    if name == "realtime-mobile":
+        return realtime_mobile()
     if name == "virtual-reality":
         return virtual_reality()
     raise ValueError(f"unknown profile: {name}")

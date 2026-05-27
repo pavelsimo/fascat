@@ -13,6 +13,7 @@ from fascat.options import ConversionProfile
         (profiles.inspect_only(), "inspect-only", None, None, None, "none", None, None, None),
         (profiles.realtime_desktop(), "realtime-desktop", 0.1, 15.0, 1_000_000, "box", (0.5, 0.25, 0.1), 60, 2_000),
         (profiles.realtime_web(), "realtime-web", 0.2, 20.0, 250_000, "box", (0.5, 0.25), 60, 500),
+        (profiles.realtime_mobile(), "realtime-mobile", 0.25, 20.0, 150_000, "box", (0.5, 0.25), 60, 250),
         (profiles.virtual_reality(), "virtual-reality", 0.15, 15.0, 500_000, "box", (0.5, 0.25, 0.125), 90, 250),
     ],
 )

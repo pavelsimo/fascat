@@ -716,6 +716,7 @@ The output format is selected from the output suffix:
 fc.convert("motor.step", "motor.usdc")
 fc.convert("motor.step", "motor.usda", debug=True)
 fc.convert("motor.step", "motor.glb", profile="virtual-reality")
+fc.convert("motor.step", "motor.glb", profile="realtime-mobile")
 fc.convert("motor.step", "motor.gltf", profile="realtime-web")
 ```
 
@@ -839,6 +840,7 @@ Available profiles:
 | `inspect-only` | inspect STEP input without conversion | unset | unset | unset |
 | `realtime-desktop` | higher-detail OpenUSD or glTF output | 60 | 1,000,000 | 2,000 |
 | `realtime-web` | lower triangle budgets for web delivery | 60 | 250,000 | 500 |
+| `realtime-mobile` | tighter mobile runtime budget for app-store builds | 60 | 150,000 | 250 |
 | `virtual-reality` | balanced triangle budgets and LODs for VR runtimes | 90 | 500,000 | 250 |
 
 You can pass either a profile name or a `ConversionProfile` returned by `fc.profiles`. Conversion reports include a `profile_budget` step when the selected profile has a budget. That step records target FPS, triangle, vertex, and draw-call budgets, plus any amount over budget as report warnings.

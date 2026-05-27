@@ -41,7 +41,7 @@ Dry-run JSON for `convert` includes `operation_diagnostics`, a list of planned o
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--profile` | `realtime-desktop` | Conversion profile: `inspect-only`, `realtime-desktop`, `realtime-web`, or `virtual-reality` |
+| `--profile` | `realtime-desktop` | Conversion profile: `inspect-only`, `realtime-desktop`, `realtime-web`, `realtime-mobile`, or `virtual-reality` |
 | `--pipeline` | unset | TOML pipeline file with named filters and ordered conversion steps |
 | `--sag` | profile value | CAD tessellation sag tolerance |
 | `--sag-ratio` | unset | Relative CAD tessellation sag ratio; enables explicit relative deflection when set |
