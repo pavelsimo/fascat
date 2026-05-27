@@ -387,6 +387,41 @@ supported_runtime_extensions = ["KHR_mesh_quantization", "EXT_meshopt_compressio
     assert payload["profile_options"]["optimize"]["target_triangles"] == 42_000
 
 
+def test_convert_dry_run_seeds_decimation_from_target_device_profile(tmp_path: Path) -> None:
+    profile_file = tmp_path / "factory-tablet.toml"
+    profile_file.write_text(
+        """
+name = "factory-tablet"
+
+[budget]
+max_triangles = 42000
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "--dry-run",
+            "convert",
+            "input.step",
+            "output.glb",
+            "--profile",
+            "realtime-mobile",
+            "--target-device-profile",
+            str(profile_file),
+            "--decimate",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["target_triangles"] is None
+    assert payload["decimate_target_triangles"] == 42_000
+    assert payload["decimate_target_source"] == "profile_budget"
+
+
 def test_convert_dry_run_accepts_pipeline_file(tmp_path: Path) -> None:
     pipeline_file = tmp_path / "realtime.toml"
     pipeline_file.write_text(

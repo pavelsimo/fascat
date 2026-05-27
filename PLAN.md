@@ -125,6 +125,9 @@ that are currently conservative approximations.
 - Explicit decimation now reports topology/material/UV protection pressure with
   protected hard-edge, hole-boundary, material-boundary, UV-seam, silhouette,
   and total feature-face counts.
+- Explicit decimation now uses the selected profile or target-device triangle
+  budget as its target when `--decimate` is enabled without a manual
+  `--target-triangles` or `--ratio`.
 
 ## Unity Asset Transformer Parity
 
@@ -191,9 +194,10 @@ Second-pass gaps from the Unity references:
 - Add export comparison reports that show unoptimized GLB, optimized GLB,
   geometry-compressed GLB, and geometry-plus-texture-compressed GLB deltas once
   real Draco and KTX2 outputs exist.
-- Connect target-device budgets to actual pipeline choices, not only reports:
-  the selected device should drive decimation targets, LOD ratios, texture
-  resize limits, compression choices, and cleanup defaults.
+- Target-device/profile triangle budgets now seed explicit decimation targets
+  when `--decimate` is enabled without a manual target or ratio. Remaining
+  work: selected devices should also drive LOD ratios, texture resize limits,
+  compression choices, and cleanup defaults.
 - Conversion reports now include a resolved conversion manifest that records the
   effective import, tessellation, staging, optimization, LOD, and export
   settings so Unity-style module-property choices are reproducible from a
@@ -336,7 +340,7 @@ Parity gaps to track:
 8. Decimation parity
    - Add Unity-style global target allocation across a selected assembly while decimating at part level, so sparse/simple parts stay intact and dense parts carry most of the reduction, with before/after allocation reports.
    - Decimation now records RAM estimates using the Unity 5 GB per million polygons rule of thumb, reports global versus per-part budget allocation, exposes a configurable iterative threshold, and records actual simplification and iterative pass counts.
-   - Add target-device decimation presets, including XR/HoloLens-style triangle caps, so platform targets can drive simplification before export.
+   - Target-device/profile triangle budgets now seed explicit decimation targets when `--decimate` has no manual target or ratio. Remaining work: named XR/HoloLens-style decimation presets and more device-specific simplification policy.
    - Replace quality-criterion heuristics with measured geometric error.
    - Explicit decimation now supports UV importance modes: preserve full UV islands, preserve seam topology only, or ignore UVs by stripping UV/tangent attributes before simplification.
    - Pre-decimation cleanup now removes unused UV channels and tangents, records removed/preserved attribute metadata, and reports when preserved UVs can make simplification less efficient. Remaining work is vertex-color/weight cleanup and measured efficiency deltas.
@@ -376,7 +380,7 @@ Parity gaps to track:
    - Profile budgets now include explicit Unity reference ranges for each broad profile so users can see how Fascat's stricter defaults compare with Unity's desktop, mobile, VR, and WebGL guideline ranges.
    - Augmented-reality and mixed-reality profiles now model stricter AR/XR device caps, and custom target-device overrides are supported through profile files.
    - Custom target-device profiles can now be loaded from TOML/JSON as budget overlays and surfaced in reports with resolved FPS, triangle, vertex, draw-call, texture, load-time, compression-support, and runtime-extension caps.
-   - Custom target-device triangle budgets now seed profile optimization targets instead of only warning after conversion. Remaining work: use selected platform budgets to seed explicit decimation defaults, LOD choices, texture-resize choices, and export-compression defaults.
+   - Custom target-device triangle budgets now seed profile optimization targets and explicit decimation targets instead of only warning after conversion. Remaining work: use selected platform budgets to seed LOD choices, texture-resize choices, and export-compression defaults.
    - The platform-budget checklist is complete at diagnostic-report level; future work is measured engine/runtime load profiling.
 
 ## Near-Term Polish

@@ -1447,6 +1447,15 @@ def cmd_convert(
     if target_device_profile is not None:
         payload["base_profile"] = profile.value
         payload["profile_options"] = profile_options.to_dict()
+    decimate_target_triangles, decimate_target_source = _decimate_target_for_cli(
+        decimate=decimate,
+        criterion=decimate_criterion.value,
+        requested_target=target_triangles,
+        requested_ratio=ratio,
+        profile_options=profile_options,
+    )
+    payload["decimate_target_triangles"] = decimate_target_triangles
+    payload["decimate_target_source"] = decimate_target_source
 
     payload["operation_diagnostics"] = _convert_operation_diagnostics(payload)
     if state.dry_run:
@@ -1641,7 +1650,7 @@ def cmd_convert(
         decimate_options = (
             DecimateOptions(
                 criterion=decimate_criterion.value,
-                target_triangles=target_triangles,
+                target_triangles=decimate_target_triangles,
                 target_ratio=ratio,
                 surface_tolerance=surface_tolerance,
                 line_tolerance=line_tolerance,
@@ -2283,6 +2292,27 @@ def _profile_for_cli(
     except Exception as exc:
         _fail(ctx, payload, f"Invalid target device profile: {exc}", code=2)
     raise AssertionError("unreachable")
+
+
+def _decimate_target_for_cli(
+    *,
+    decimate: bool,
+    criterion: str,
+    requested_target: int | None,
+    requested_ratio: float | None,
+    profile_options: ConversionProfile,
+) -> tuple[int | None, str | None]:
+    if not decimate:
+        return None, None
+    if requested_target is not None:
+        return requested_target, "user"
+    if requested_ratio is not None:
+        return None, "ratio"
+    if criterion == "quality":
+        return None, "quality_tolerances"
+    if profile_options.optimize is not None and profile_options.optimize.target_triangles is not None:
+        return profile_options.optimize.target_triangles, "profile_budget"
+    return None, "default_ratio"
 
 
 def _read_pipeline_for_cli(path: Path, ctx: typer.Context, payload: dict[str, Any]) -> PipelineSpec:

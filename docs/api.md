@@ -675,7 +675,7 @@ Optimization action parameters:
 | `BakeMaterialOptions` | `bake` | Maps to bake, such as `base_color`, `opacity`, `normal`, `roughness`, `metallic`, `ao`, or `emissive`. |
 | `BakeMaterialOptions` | `merge_output` | Replace selected materials with a shared baked output material. |
 | `DecimateOptions` | `criterion` | `target` prioritizes a triangle budget. `quality` maps tolerances to a target ratio, records measured vertex error, and warns because tolerance bounds are not enforced. |
-| `DecimateOptions` | `target_triangles` | Absolute triangle target for selected geometry. |
+| `DecimateOptions` | `target_triangles` | Absolute triangle target for selected geometry. In the CLI, `--decimate` uses the selected profile or target-device triangle budget when no explicit target or ratio is supplied. |
 | `DecimateOptions` | `target_ratio` | Fraction of source triangles to keep when no absolute target is set. Ratios below 20% produce an LOD0 distortion warning. |
 | `DecimateOptions` | `surface_tolerance` | Tolerance input used by `criterion="quality"` to derive a reduction ratio; post-run metadata records measured vertex error but does not enforce this value. |
 | `DecimateOptions` | `line_tolerance` | Line-feature tolerance input used by `criterion="quality"` ratio derivation and reporting. |
@@ -940,7 +940,7 @@ profile = fc.profiles.from_file("factory-tablet.toml", base="realtime-mobile")
 asset = fc.convert("motor.step", "motor.glb", profile=profile)
 ```
 
-The CLI equivalent is `fascat convert motor.step motor.glb --profile realtime-mobile --target-device-profile factory-tablet.toml`. Profile files may be TOML or JSON and currently act as target-device budget overlays; tessellation, repair, staging, and LOD defaults still come from the selected base profile. When a file overrides `max_triangles`, Fascat also uses that value as the profile optimization target and derives `max_vertices` as three times the triangle budget unless `max_vertices` is set explicitly. `supported_compression` and `supported_runtime_extensions` are optional caps for glTF-oriented target devices; when the write report emits compression methods or runtime extensions outside those lists, the profile budget report records a violation.
+The CLI equivalent is `fascat convert motor.step motor.glb --profile realtime-mobile --target-device-profile factory-tablet.toml`. Profile files may be TOML or JSON and currently act as target-device budget overlays; tessellation, repair, staging, and LOD defaults still come from the selected base profile. When a file overrides `max_triangles`, Fascat uses that value as the profile optimization target, uses it as the explicit decimation target when `--decimate` is enabled without `--target-triangles` or `--ratio`, and derives `max_vertices` as three times the triangle budget unless `max_vertices` is set explicitly. `supported_compression` and `supported_runtime_extensions` are optional caps for glTF-oriented target devices; when the write report emits compression methods or runtime extensions outside those lists, the profile budget report records a violation.
 
 ## Functional wrappers
 

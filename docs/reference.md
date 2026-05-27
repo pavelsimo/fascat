@@ -227,6 +227,7 @@ Units and behavior notes:
 - Ratios such as `--ratio`, `--lods`, and decimation target ratios are fractions between `0` and `1`; LOD ratios must be sorted from highest to lowest detail.
 - Explicit decimation requests that keep less than 20% of source triangles emit an LOD0 distortion warning. Use those aggressive ratios primarily for distant LODs unless visual validation says otherwise.
 - Explicit decimation report metadata includes estimated RAM using the Unity rule of thumb of 5 GB per million source triangles, the iterative threshold, whether iterative decimation is recommended, actual simplification and iterative pass counts, and whether the target was allocated globally across the selection or per part.
+- When `--decimate` is enabled without `--target-triangles` or `--ratio`, the selected profile or `--target-device-profile` triangle budget seeds the explicit decimation target when available.
 - Screen coverage values are fractions between `0` and `1`; file-size budgets are megabytes; atlas and bake sizes are pixels.
 - `--decimate-criterion quality` maps tolerances to a target ratio, records measured nearest-vertex error and achieved triangle reduction, and reports a warning because tolerance bounds are not enforced.
 - Explicit decimation reports protected hard-edge, hole-boundary, material-boundary, UV-seam, silhouette, and total feature-face counts so topology/material/UV preservation pressure is visible.
