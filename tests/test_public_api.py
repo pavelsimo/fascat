@@ -22,11 +22,16 @@ def test_functional_api_wraps_asset_operations() -> None:
     staged = fc.stage(repaired, uv0="box", uv1="box")
     optimized = fc.optimize(staged, target_triangles=1, preserve_instances=True)
     with_lods = fc.lods(optimized, ratios=(0.5,))
+    lod_part = with_lods.parts["part"]
+    assert lod_part.mesh is not None
+    assert sorted(lod_part.mesh.uvs) == [0, 1]
+    assert len(lod_part.lod_meshes) == 1
 
-    part = with_lods.parts["part"]
+    replaced = fc.replace(with_lods, options=fc.ReplaceOptions(mode="bounding_box"))
+
+    part = next(iter(replaced.parts.values()))
     assert part.mesh is not None
-    assert sorted(part.mesh.uvs) == [0, 1]
-    assert len(part.lod_meshes) == 1
+    assert part.mesh.triangle_count == 12
 
 
 def test_public_api_exposes_quality_analysis() -> None:

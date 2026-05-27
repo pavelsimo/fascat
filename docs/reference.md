@@ -88,6 +88,9 @@ fascat inspect input.step --json
 | `--region-size` | unset | Spatial region size for `--merge-mode regions` |
 | `--merge-strategy` | `all` | Region merge strategy: `all` or `by-material` |
 | `--hierarchy-level` | `1` | Hierarchy level used by `--merge-mode hierarchy-level` |
+| `--explode` | unset | Explode selected geometry by `by-material` or `connected-components` |
+| `--replace` | unset | Replace selected geometry with `bounding-box` or `external-asset` proxies |
+| `--external-asset` | unset | External asset path recorded by `--replace external-asset` |
 | `--batch-by-material` | `false` | Batch compatible scene geometry by material |
 | `--merge-compatible-meshes` | `false` | Merge compatible scene meshes to reduce draw calls |
 | `--split-large-meshes` | `false` | Split scene-optimized meshes above the vertex limit |

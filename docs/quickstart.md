@@ -48,6 +48,8 @@ fascat convert motor.step motor.glb \
   --filter 'path=*/Fasteners/*' \
   --merge \
   --merge-mode by-material \
+  --explode connected-components \
+  --replace bounding-box \
   --batch-by-material \
   --merge-compatible-meshes \
   --split-large-meshes \

@@ -128,6 +128,8 @@ def test_convert_help() -> None:
     assert "--decimate" in plain(result.output)
     assert "--remove-holes" in plain(result.output)
     assert "--remove-occluded" in plain(result.output)
+    assert "--explode" in plain(result.output)
+    assert "--replace" in plain(result.output)
     assert "--run-lod-generators" in plain(result.output)
     assert "--lod-mode" in plain(result.output)
     assert "--lod-per-part-budget" in plain(result.output)

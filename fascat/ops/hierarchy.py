@@ -11,7 +11,7 @@ from numpy.typing import NDArray
 from fascat.asset import Asset, Node, Part, identity_transform
 from fascat.mesh import Mesh
 from fascat.metadata import Metadata
-from fascat.options import MergeOptions
+from fascat.options import ExplodeOptions, MergeOptions, ReplaceOptions
 
 FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int64]
@@ -79,6 +79,85 @@ def merge_asset(asset: Asset, options: MergeOptions, *, selected_node_ids: set[s
     if options.remove_empty_nodes:
         _remove_empty_nodes(result.root)
     result.parts.update(merged_parts)
+    _drop_unreferenced_parts(result)
+    return result
+
+
+def explode_asset(asset: Asset, options: ExplodeOptions, *, selected_node_ids: set[str]) -> Asset:
+    result = asset.copy(keep_source=True)
+    occurrences = [
+        occurrence
+        for occurrence in _walk_occurrences(result)
+        if occurrence.node.id in selected_node_ids and occurrence.part.mesh is not None
+    ]
+    if not occurrences:
+        result.report.add_warning("explode matched no mesh-bearing part occurrences")
+        return result
+
+    exploded = 0
+    for occurrence in occurrences:
+        mesh = occurrence.part.mesh
+        if mesh is None:
+            continue
+        groups = _explode_face_groups(occurrence.part, mesh, options.mode)
+        if len(groups) <= 1:
+            continue
+        parts = _exploded_parts(result.parts, occurrence, groups, options)
+        for part in parts:
+            result.parts[part.id] = part
+        occurrence.node.part_id = None
+        occurrence.node.children = [
+            Node(
+                id=_exploded_node_id(result.root, occurrence.node.id, index),
+                name=part.name,
+                part_id=part.id,
+                transform=identity_transform(),
+                metadata=dict(part.metadata),
+            )
+            for index, part in enumerate(parts, start=1)
+        ]
+        exploded += 1
+
+    if exploded == 0:
+        result.report.add_warning("explode found no selected mesh that could be split")
+        return result
+    if options.remove_empty_nodes:
+        _remove_empty_nodes(result.root)
+    _drop_unreferenced_parts(result)
+    return result
+
+
+def replace_asset(asset: Asset, options: ReplaceOptions, *, selected_node_ids: set[str]) -> Asset:
+    result = asset.copy(keep_source=True)
+    occurrences = [
+        occurrence
+        for occurrence in _walk_occurrences(result)
+        if occurrence.node.id in selected_node_ids and occurrence.part.mesh is not None
+    ]
+    if not occurrences:
+        result.report.add_warning("replace matched no mesh-bearing part occurrences")
+        return result
+
+    for occurrence in occurrences:
+        mesh = occurrence.part.mesh
+        if mesh is None:
+            continue
+        replacement_mesh = _replacement_mesh(occurrence, options)
+        part_id = _replacement_part_id(result.parts, occurrence.part.id, occurrence.node.id)
+        metadata = _replacement_metadata(occurrence, options)
+        replacement_part = Part(
+            id=part_id,
+            name=_replacement_name(occurrence.part, options),
+            mesh=replacement_mesh,
+            material_ids=list(occurrence.part.material_ids),
+            metadata=metadata,
+            fingerprint=replacement_mesh.fingerprint(),
+        )
+        result.parts[part_id] = replacement_part
+        occurrence.node.part_id = part_id
+        if not options.preserve_transform:
+            occurrence.node.transform = identity_transform()
+
     _drop_unreferenced_parts(result)
     return result
 
@@ -394,12 +473,260 @@ def _drop_unreferenced_parts(asset: Asset) -> None:
     asset.parts = {part_id: part for part_id, part in asset.parts.items() if part_id in referenced}
 
 
+def _explode_face_groups(part: Part, mesh: Mesh, mode: str) -> list[tuple[str, IntArray, str | None]]:
+    if mesh.triangle_count == 0:
+        return []
+    if mode == "by_material":
+        if mesh.material_indices is None:
+            material_id = part.material_ids[0] if part.material_ids else None
+            return [("material_none", np.arange(mesh.triangle_count, dtype=np.int64), material_id)]
+        groups: list[tuple[str, IntArray, str | None]] = []
+        for material_index in sorted(set(mesh.material_indices.astype(int).tolist())):
+            material_id = part.material_ids[material_index] if material_index < len(part.material_ids) else None
+            groups.append(
+                (
+                    f"material_{material_index}",
+                    np.flatnonzero(mesh.material_indices == material_index).astype(np.int64),
+                    material_id,
+                )
+            )
+        return groups
+    return [
+        (f"component_{index}", face_indices, None)
+        for index, face_indices in enumerate(_connected_face_components(mesh), start=1)
+    ]
+
+
+def _connected_face_components(mesh: Mesh) -> list[IntArray]:
+    faces_by_vertex: dict[int, list[int]] = {}
+    for face_index, face in enumerate(mesh.faces.astype(int).tolist()):
+        for vertex in face:
+            faces_by_vertex.setdefault(vertex, []).append(face_index)
+    components: list[IntArray] = []
+    remaining = set(range(mesh.triangle_count))
+    while remaining:
+        start = remaining.pop()
+        component = [start]
+        stack = [start]
+        while stack:
+            face_index = stack.pop()
+            for vertex in mesh.faces[face_index].astype(int).tolist():
+                for neighbor in faces_by_vertex.get(vertex, []):
+                    if neighbor not in remaining:
+                        continue
+                    remaining.remove(neighbor)
+                    component.append(neighbor)
+                    stack.append(neighbor)
+        components.append(np.asarray(sorted(component), dtype=np.int64))
+    return components
+
+
+def _exploded_parts(
+    parts: dict[str, Part],
+    occurrence: _Occurrence,
+    groups: list[tuple[str, IntArray, str | None]],
+    options: ExplodeOptions,
+) -> list[Part]:
+    result: list[Part] = []
+    for index, (label, face_indices, material_id) in enumerate(groups, start=1):
+        part_id = _exploded_part_id(parts, occurrence.part.id, occurrence.node.id, index)
+        mesh = _mesh_subset(occurrence.part.mesh, face_indices)
+        assert mesh is not None
+        material_ids = list(occurrence.part.material_ids)
+        if options.mode == "by_material" and material_id is not None:
+            material_ids = [material_id]
+            if mesh.material_indices is not None:
+                mesh.material_indices = np.zeros(mesh.triangle_count, dtype=np.int64)
+        metadata = _exploded_metadata(occurrence, label, options.metadata)
+        mesh.metadata = {**mesh.metadata, "explode_label": label}
+        mesh.validate()
+        result.append(
+            Part(
+                id=part_id,
+                name=f"{occurrence.part.name} {label.replace('_', ' ')}",
+                mesh=mesh.compute_normals(),
+                material_ids=material_ids,
+                metadata=metadata,
+                fingerprint=mesh.fingerprint(),
+            )
+        )
+    return result
+
+
+def _mesh_subset(mesh: Mesh | None, face_indices: IntArray) -> Mesh | None:
+    if mesh is None or face_indices.size == 0:
+        return None
+    used = np.unique(mesh.faces[face_indices].reshape(-1))
+    remap = np.full(mesh.vertex_count, -1, dtype=np.int64)
+    remap[used] = np.arange(used.shape[0], dtype=np.int64)
+    result = Mesh(
+        points=mesh.points[used].copy(),
+        faces=remap[mesh.faces[face_indices]],
+        normals=None if mesh.normals is None else mesh.normals[used].copy(),
+        tangents=None if mesh.tangents is None else mesh.tangents[used].copy(),
+        uvs={channel: values[used].copy() for channel, values in mesh.uvs.items()},
+        material_indices=None if mesh.material_indices is None else mesh.material_indices[face_indices].copy(),
+        face_groups={
+            name: _remap_face_group(values, face_indices)
+            for name, values in mesh.face_groups.items()
+            if np.isin(values, face_indices).any()
+        },
+        metadata=dict(mesh.metadata),
+    )
+    return result
+
+
+def _remap_face_group(values: IntArray, face_indices: IntArray) -> IntArray:
+    face_position = {int(face_index): index for index, face_index in enumerate(face_indices.astype(int).tolist())}
+    return np.asarray(
+        [face_position[int(value)] for value in values.astype(int).tolist() if int(value) in face_position]
+    )
+
+
+def _exploded_metadata(occurrence: _Occurrence, label: str, policy: str) -> Metadata:
+    if policy == "drop":
+        return {}
+    if policy == "summarize":
+        return {
+            "source_part_ids": occurrence.part.id,
+            "source_node_ids": occurrence.node.id,
+            "explode_label": label,
+        }
+    return {
+        **occurrence.part.metadata,
+        "source_part_ids": occurrence.part.id,
+        "source_node_ids": occurrence.node.id,
+        "explode_label": label,
+    }
+
+
+def _replacement_mesh(occurrence: _Occurrence, options: ReplaceOptions) -> Mesh:
+    source = occurrence.part.mesh
+    if source is None:
+        return Mesh(points=np.empty((0, 3), dtype=np.float64), faces=np.empty((0, 3), dtype=np.int64))
+    if options.mode == "proxy_mesh":
+        if not isinstance(options.proxy_mesh, Mesh):
+            raise TypeError("proxy_mesh replacement requires a Mesh")
+        mesh = options.proxy_mesh.copy()
+    else:
+        mesh = _bounding_box_mesh(source)
+    if not options.preserve_transform:
+        parent_inverse = np.asarray(np.linalg.inv(occurrence.parent_world_transform), dtype=np.float64)
+        mesh.points = _transform_points(mesh.points, parent_inverse @ occurrence.world_transform)
+    mesh.metadata = {
+        **mesh.metadata,
+        "replacement_mode": options.mode,
+        "source_part_id": occurrence.part.id,
+        "source_node_id": occurrence.node.id,
+    }
+    if options.external_path is not None:
+        mesh.metadata["external_path"] = options.external_path
+    mesh.validate()
+    return mesh.compute_normals()
+
+
+def _bounding_box_mesh(mesh: Mesh) -> Mesh:
+    mins, maxs = mesh.bounds()
+    mins = mins.copy()
+    maxs = maxs.copy()
+    for axis in range(3):
+        if np.isclose(mins[axis], maxs[axis]):
+            mins[axis] -= 1e-6
+            maxs[axis] += 1e-6
+    x0, y0, z0 = mins.tolist()
+    x1, y1, z1 = maxs.tolist()
+    points = np.asarray(
+        [
+            [x0, y0, z0],
+            [x1, y0, z0],
+            [x1, y1, z0],
+            [x0, y1, z0],
+            [x0, y0, z1],
+            [x1, y0, z1],
+            [x1, y1, z1],
+            [x0, y1, z1],
+        ],
+        dtype=np.float64,
+    )
+    faces = np.asarray(
+        [
+            [0, 1, 2],
+            [0, 2, 3],
+            [4, 6, 5],
+            [4, 7, 6],
+            [0, 4, 5],
+            [0, 5, 1],
+            [1, 5, 6],
+            [1, 6, 2],
+            [2, 6, 7],
+            [2, 7, 3],
+            [3, 7, 4],
+            [3, 4, 0],
+        ],
+        dtype=np.int64,
+    )
+    return Mesh(points=points, faces=faces, metadata={"proxy": "bounding_box"})
+
+
+def _replacement_metadata(occurrence: _Occurrence, options: ReplaceOptions) -> Metadata:
+    if options.metadata == "drop":
+        metadata: Metadata = {}
+    elif options.metadata == "summarize":
+        metadata = {"source_part_ids": occurrence.part.id, "source_node_ids": occurrence.node.id}
+    else:
+        metadata = {
+            **occurrence.part.metadata,
+            "source_part_ids": occurrence.part.id,
+            "source_node_ids": occurrence.node.id,
+        }
+    metadata["replacement_mode"] = options.mode
+    if options.external_path is not None:
+        metadata["external_path"] = options.external_path
+    return metadata
+
+
+def _replacement_name(part: Part, options: ReplaceOptions) -> str:
+    if options.mode == "bounding_box":
+        return f"{part.name} Bounding Box"
+    if options.mode == "external_asset":
+        return f"{part.name} External Proxy"
+    return f"{part.name} Proxy"
+
+
 def _merged_part_id(parts: dict[str, Part], key: tuple[object, ...], chunk_index: int) -> str:
     digest = hashlib.sha1(repr((key, chunk_index)).encode("utf-8")).hexdigest()[:12]
     candidate = f"merged_{digest}"
     suffix = 2
     while candidate in parts:
         candidate = f"merged_{digest}_{suffix}"
+        suffix += 1
+    return candidate
+
+
+def _exploded_part_id(parts: dict[str, Part], part_id: str, node_id: str, index: int) -> str:
+    candidate = f"{part_id}_{node_id}_exploded_{index}"
+    suffix = 2
+    while candidate in parts:
+        candidate = f"{part_id}_{node_id}_exploded_{index}_{suffix}"
+        suffix += 1
+    return candidate
+
+
+def _exploded_node_id(root: Node, node_id: str, index: int) -> str:
+    existing = {node.id for node in root.walk()}
+    candidate = f"{node_id}_exploded_{index}"
+    suffix = 2
+    while candidate in existing:
+        candidate = f"{node_id}_exploded_{index}_{suffix}"
+        suffix += 1
+    return candidate
+
+
+def _replacement_part_id(parts: dict[str, Part], part_id: str, node_id: str) -> str:
+    candidate = f"{part_id}_{node_id}_replacement"
+    suffix = 2
+    while candidate in parts:
+        candidate = f"{part_id}_{node_id}_replacement_{suffix}"
         suffix += 1
     return candidate
 

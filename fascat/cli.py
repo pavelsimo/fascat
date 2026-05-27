@@ -4,7 +4,8 @@ import json
 import os
 import sys
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
+from dataclasses import replace as dataclass_replace
 from difflib import get_close_matches
 from enum import Enum
 from pathlib import Path
@@ -27,6 +28,7 @@ from fascat.options import (
     BakeMaterialOptions,
     BrepHealOptions,
     DecimateOptions,
+    ExplodeOptions,
     GltfExportOptions,
     LODGeneratorOptions,
     LODLevel,
@@ -36,6 +38,7 @@ from fascat.options import (
     OptimizeOptions,
     RemoveHolesOptions,
     RemoveOccludedOptions,
+    ReplaceOptions,
     SceneOptimizeOptions,
     StageOptions,
     StepReadOptions,
@@ -145,6 +148,16 @@ class MergeMetadata(str, Enum):
 class MergeStrategy(str, Enum):
     ALL = "all"
     BY_MATERIAL = "by-material"
+
+
+class ExplodeMode(str, Enum):
+    BY_MATERIAL = "by-material"
+    CONNECTED_COMPONENTS = "connected-components"
+
+
+class ReplaceMode(str, Enum):
+    BOUNDING_BOX = "bounding-box"
+    EXTERNAL_ASSET = "external-asset"
 
 
 class IndexBufferMode(str, Enum):
@@ -556,6 +569,18 @@ def cmd_convert(
         int,
         typer.Option("--hierarchy-level", help="Hierarchy level used by --merge-mode hierarchy-level."),
     ] = 1,
+    explode: Annotated[
+        ExplodeMode | None,
+        typer.Option("--explode", help="Explode selected geometry by material or connected-components."),
+    ] = None,
+    replace: Annotated[
+        ReplaceMode | None,
+        typer.Option("--replace", help="Replace selected geometry with bounding-box or external-asset proxies."),
+    ] = None,
+    external_asset: Annotated[
+        str | None,
+        typer.Option("--external-asset", help="External asset path recorded by --replace external-asset."),
+    ] = None,
     batch_by_material: Annotated[
         bool,
         typer.Option("--batch-by-material", help="Batch compatible scene geometry by material."),
@@ -842,6 +867,9 @@ def cmd_convert(
         "region_size": region_size,
         "merge_strategy": merge_strategy.value,
         "hierarchy_level": hierarchy_level,
+        "explode": None if explode is None else explode.value,
+        "replace": None if replace is None else replace.value,
+        "external_asset": external_asset,
         "batch_by_material": batch_by_material,
         "merge_compatible_meshes": merge_compatible_meshes,
         "split_large_meshes": split_large_meshes,
@@ -945,6 +973,8 @@ def cmd_convert(
         _fail(ctx, payload, "--region-size must be greater than 0.", code=2)
     if merge and merge_mode == MergeMode.REGIONS and region_size is None:
         _fail(ctx, payload, "--merge-mode regions requires --region-size.", code=2)
+    if replace == ReplaceMode.EXTERNAL_ASSET and not external_asset:
+        _fail(ctx, payload, "--replace external-asset requires --external-asset.", code=2)
     if hard_edge_angle <= 0.0 or hard_edge_angle > 180.0:
         _fail(ctx, payload, "--hard-edge-angle must be greater than 0 and no more than 180.", code=2)
     if small_part_triangle_threshold < 0:
@@ -1022,7 +1052,7 @@ def cmd_convert(
         base_tessellation = profile_options.tessellation
         if base_tessellation is None:
             _fail(ctx, payload, "The inspect-only profile cannot be used for conversion.", code=2)
-        tessellation = replace(
+        tessellation = dataclass_replace(
             base_tessellation,
             sag=sag if sag is not None else base_tessellation.sag,
             angle=angle if angle is not None else base_tessellation.angle,
@@ -1035,7 +1065,7 @@ def cmd_convert(
         )
         optimize_options = profile_options.optimize
         if optimize_options is not None:
-            optimize_options = replace(
+            optimize_options = dataclass_replace(
                 optimize_options,
                 target_triangles=target_triangles
                 if target_triangles is not None
@@ -1051,7 +1081,7 @@ def cmd_convert(
                 small_part_triangle_threshold=small_part_triangle_threshold,
                 preserve_silhouette=preserve_silhouette,
             )
-        stage_options = replace(
+        stage_options = dataclass_replace(
             profile_options.stage,
             materials=materials.value,
             material_mode=material_mode.value,
@@ -1089,6 +1119,20 @@ def cmd_convert(
                 hierarchy_level=hierarchy_level,
             )
             if merge
+            else None
+        )
+        explode_options = (
+            ExplodeOptions(mode=cast(Any, explode.value.replace("-", "_")), metadata=merge_metadata.value)
+            if explode is not None
+            else None
+        )
+        replace_options = (
+            ReplaceOptions(
+                mode=cast(Any, replace.value.replace("-", "_")),
+                metadata=merge_metadata.value,
+                external_path=external_asset,
+            )
+            if replace is not None
             else None
         )
         scene_options = (
@@ -1204,6 +1248,8 @@ def cmd_convert(
             import_options=import_options,
             heal_brep=heal_options,
             merge=merge_options,
+            explode=explode_options,
+            replace=replace_options,
             scene=scene_options,
             bake_materials=bake_options,
             remove_holes=remove_holes_options,
@@ -1705,6 +1751,8 @@ def _convert_for_cli(
     import_options: StepReadOptions,
     heal_brep: BrepHealOptions | None,
     merge: MergeOptions | None,
+    explode: ExplodeOptions | None,
+    replace: ReplaceOptions | None,
     scene: SceneOptimizeOptions | None,
     bake_materials: BakeMaterialOptions | None,
     remove_holes: RemoveHolesOptions | None,
@@ -1735,6 +1783,8 @@ def _convert_for_cli(
                 import_options,
                 heal_brep,
                 merge,
+                explode,
+                replace,
                 scene,
                 bake_materials,
                 remove_holes,
@@ -1760,6 +1810,8 @@ def _convert_for_cli(
         import_options,
         heal_brep,
         merge,
+        explode,
+        replace,
         scene,
         bake_materials,
         remove_holes,
@@ -1787,6 +1839,8 @@ def _convert_output(
     import_options: StepReadOptions,
     heal_brep: BrepHealOptions | None,
     merge: MergeOptions | None,
+    explode: ExplodeOptions | None,
+    replace: ReplaceOptions | None,
     scene: SceneOptimizeOptions | None,
     bake_materials: BakeMaterialOptions | None,
     remove_holes: RemoveHolesOptions | None,
@@ -1818,6 +1872,8 @@ def _convert_output(
                 heal_brep=heal_brep,
                 stage=stage,
                 merge=merge,
+                explode=explode,
+                replace=replace,
                 scene=scene,
                 bake_materials=bake_materials,
                 remove_holes=remove_holes,
@@ -1847,6 +1903,8 @@ def _convert_output(
         heal_brep=heal_brep,
         stage=stage,
         merge=merge,
+        explode=explode,
+        replace=replace,
         scene=scene,
         bake_materials=bake_materials,
         remove_holes=remove_holes,

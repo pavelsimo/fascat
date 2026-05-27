@@ -20,6 +20,8 @@ MergeMode = Literal[
 ]
 MergeMetadataPolicy = Literal["preserve", "combine", "summarize", "drop"]
 MergeStrategy = Literal["all", "by_material"]
+ExplodeMode = Literal["by_material", "connected_components"]
+ReplaceMode = Literal["bounding_box", "proxy_mesh", "external_asset"]
 IndexBufferMode = Literal["auto", "uint16", "uint32"]
 FlattenMode = Literal["none", "safe", "all"]
 InstancePolicy = Literal["auto", "preserve", "expand"]
@@ -335,6 +337,50 @@ class MergeOptions:
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class ExplodeOptions:
+    mode: ExplodeMode = "connected_components"
+    metadata: MergeMetadataPolicy = "preserve"
+    remove_empty_nodes: bool = True
+
+    def __post_init__(self) -> None:
+        if self.mode not in {"by_material", "connected_components"}:
+            raise ValueError("explode mode must be one of: by_material, connected_components")
+        if self.metadata not in {"preserve", "combine", "summarize", "drop"}:
+            raise ValueError("explode metadata must be one of: preserve, combine, summarize, drop")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class ReplaceOptions:
+    mode: ReplaceMode = "bounding_box"
+    preserve_transform: bool = True
+    metadata: MergeMetadataPolicy = "preserve"
+    proxy_mesh: object | None = None
+    external_path: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.mode not in {"bounding_box", "proxy_mesh", "external_asset"}:
+            raise ValueError("replace mode must be one of: bounding_box, proxy_mesh, external_asset")
+        if self.metadata not in {"preserve", "combine", "summarize", "drop"}:
+            raise ValueError("replace metadata must be one of: preserve, combine, summarize, drop")
+        if self.mode == "proxy_mesh" and self.proxy_mesh is None:
+            raise ValueError("proxy_mesh is required for proxy_mesh replacement")
+        if self.mode == "external_asset" and not self.external_path:
+            raise ValueError("external_path is required for external_asset replacement")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "mode": self.mode,
+            "preserve_transform": self.preserve_transform,
+            "metadata": self.metadata,
+            "proxy_mesh": self.proxy_mesh is not None,
+            "external_path": self.external_path,
+        }
 
 
 @dataclass(frozen=True)

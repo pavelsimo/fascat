@@ -144,6 +144,22 @@ asset = asset.merge(
 
 Merge modes include `all`, `by_material`, `by_node_name`, `by_part_name`, `hierarchy_level`, `parent_children`, `final_level`, and `regions`. Merging bakes node transforms into merged vertex positions, keeps material slots when requested, removes replaced empty nodes, and records before/after `draw_calls` in the merge report step.
 
+Use `explode()` when runtime tools need separate meshes by material or connected component, and `replace()` when a selected part should become a proxy.
+
+```python
+asset = asset.explode(
+    fc.ExplodeOptions(mode="connected_components"),
+    where=fc.Filter.material("rubber"),
+)
+
+asset = asset.replace(
+    fc.ReplaceOptions(mode="bounding_box", preserve_transform=True),
+    where=fc.Filter.triangle_count(max=12),
+)
+```
+
+`ReplaceOptions(mode="external_asset", external_path="proxy.glb")` records an external proxy reference while keeping a bounding-box mesh fallback in the asset.
+
 ## Metadata and PMI
 
 Fascat keeps top-level asset metadata and typed PMI records alongside node, part, material, and mesh metadata.

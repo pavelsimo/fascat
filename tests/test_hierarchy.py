@@ -10,7 +10,7 @@ from fascat.cli import app
 from fascat.filter import Filter
 from fascat.material import Material
 from fascat.mesh import Mesh
-from fascat.options import MergeOptions
+from fascat.options import ExplodeOptions, MergeOptions, ReplaceOptions
 
 runner = CliRunner()
 
@@ -26,6 +26,37 @@ def _triangle(material_index: int = 0) -> Mesh:
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
         faces=np.array([[0, 1, 2]], dtype=int),
         material_indices=np.array([material_index], dtype=int),
+    )
+
+
+def _two_material_mesh() -> Mesh:
+    return Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [1, 1, 0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [2, 1, 3]], dtype=int),
+        material_indices=np.array([0, 1], dtype=int),
+    )
+
+
+def _box_mesh() -> Mesh:
+    return Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [2, 0, 0],
+                [0, 3, 0],
+                [0, 0, 4],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]], dtype=int),
     )
 
 
@@ -126,6 +157,80 @@ def test_merge_respects_max_vertices_per_mesh() -> None:
     assert all(part.mesh is not None and part.mesh.vertex_count == 3 for part in merged_parts)
 
 
+def test_explode_by_material_replaces_selected_occurrence_with_child_parts() -> None:
+    asset = _asset()
+    asset.parts["panel"] = Part(
+        id="panel",
+        name="Panel",
+        mesh=_two_material_mesh(),
+        material_ids=["red", "blue"],
+        metadata={"kind": "panel"},
+    )
+    asset.materials["red"] = Material(id="red", name="Red", base_color=(1.0, 0.0, 0.0, 1.0))
+    asset.materials["blue"] = Material(id="blue", name="Blue", base_color=(0.0, 0.0, 1.0, 1.0))
+    asset.root.children.append(Node(id="panel_node", name="Panel", part_id="panel"))
+
+    exploded = asset.explode(ExplodeOptions(mode="by_material"), where=Filter.part("panel"))
+    panel_node = next(node for node in exploded.root.walk() if node.id == "panel_node")
+    child_parts = [exploded.parts[child.part_id or ""] for child in panel_node.children]
+
+    assert panel_node.part_id is None
+    assert len(child_parts) == 2
+    assert sorted(part.material_ids for part in child_parts) == [["blue"], ["red"]]
+    assert all(part.mesh is not None and part.mesh.triangle_count == 1 for part in child_parts)
+    assert "panel" not in exploded.parts
+    assert exploded.report.steps[-1].name == "explode"
+    assert exploded.report.steps[-1].after["parts"] == exploded.part_count
+
+
+def test_explode_connected_components_splits_disconnected_faces() -> None:
+    asset = _asset()
+    asset.parts["loose"] = Part(
+        id="loose",
+        name="Loose",
+        mesh=Mesh(
+            points=np.array(
+                [[0, 0, 0], [1, 0, 0], [0, 1, 0], [10, 0, 0], [11, 0, 0], [10, 1, 0]],
+                dtype=float,
+            ),
+            faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=int),
+        ),
+    )
+    asset.root.children.append(Node(id="loose_node", name="Loose", part_id="loose"))
+
+    exploded = asset.explode(ExplodeOptions(mode="connected_components"), where=Filter.part("loose"))
+    loose_node = next(node for node in exploded.root.walk() if node.id == "loose_node")
+
+    assert len(loose_node.children) == 2
+    assert all(exploded.parts[child.part_id or ""].mesh.triangle_count == 1 for child in loose_node.children)
+
+
+def test_replace_selected_part_with_bounding_box_proxy() -> None:
+    asset = _asset()
+    asset.parts["block"] = Part(
+        id="block",
+        name="Block",
+        mesh=_box_mesh(),
+        material_ids=["steel"],
+        metadata={"kind": "block"},
+    )
+    asset.root.children.append(Node(id="block_node", name="Block", part_id="block", transform=_translation(5.0)))
+
+    replaced = asset.replace(ReplaceOptions(mode="bounding_box"), where=Filter.part("block"))
+    node = next(node for node in replaced.root.walk() if node.id == "block_node")
+    part = replaced.parts[node.part_id or ""]
+
+    assert node.transform[0, 3] == 5.0
+    assert part.id != "block"
+    assert part.mesh is not None
+    assert part.mesh.vertex_count == 8
+    assert part.mesh.triangle_count == 12
+    assert part.metadata["replacement_mode"] == "bounding_box"
+    assert part.metadata["source_part_ids"] == "block"
+    assert "block" not in replaced.parts
+    assert replaced.report.steps[-1].name == "replace"
+
+
 def test_cli_convert_accepts_merge_options_during_dry_run() -> None:
     result = runner.invoke(
         app,
@@ -152,6 +257,30 @@ def test_cli_convert_accepts_merge_options_during_dry_run() -> None:
     assert payload["merge"] is True
     assert payload["merge_mode"] == "by-material"
     assert payload["merge_metadata"] == "combine"
+
+
+def test_cli_convert_accepts_explode_and_replace_options_during_dry_run() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "--dry-run",
+            "convert",
+            "input.step",
+            "output.usdc",
+            "--filter",
+            "material=rubber",
+            "--explode",
+            "connected-components",
+            "--replace",
+            "bounding-box",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["explode"] == "connected-components"
+    assert payload["replace"] == "bounding-box"
 
 
 def test_cli_convert_requires_region_size_for_region_merge() -> None:

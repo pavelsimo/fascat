@@ -15,6 +15,7 @@ from fascat.options import (
     BakeMaterialOptions,
     BrepHealOptions,
     DecimateOptions,
+    ExplodeOptions,
     GltfExportOptions,
     LODGeneratorOptions,
     LODOptions,
@@ -24,6 +25,7 @@ from fascat.options import (
     RemoveHolesOptions,
     RemoveOccludedOptions,
     RepairOptions,
+    ReplaceOptions,
     SceneOptimizeOptions,
     StageOptions,
     StlExportOptions,
@@ -356,6 +358,56 @@ class Asset:
         step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
             "merge",
+            options=_options_with_scope(opts.to_dict(), scope),
+            before=before,
+            after=_hierarchy_report_stats(asset),
+            duration=timer.duration,
+            warnings=step_warnings,
+        )
+        return asset
+
+    def explode(self, options: ExplodeOptions | None = None, *, where: Any | None = None) -> Asset:
+        from fascat.ops.hierarchy import explode_asset
+
+        opts = options or ExplodeOptions()
+        scope = self._operation_scope(where)
+        selected_node_ids = (
+            scope.selection.node_ids
+            if scope.selection is not None
+            else {node.id for node in scope.asset.root.walk() if node.part_id is not None}
+        )
+        before = _hierarchy_report_stats(self)
+        warning_count = len(self.report.warnings)
+        with timed_step() as timer:
+            asset = explode_asset(scope.asset, opts, selected_node_ids=selected_node_ids)
+        step_warnings = asset.report.warnings[warning_count:]
+        asset.report.add_step(
+            "explode",
+            options=_options_with_scope(opts.to_dict(), scope),
+            before=before,
+            after=_hierarchy_report_stats(asset),
+            duration=timer.duration,
+            warnings=step_warnings,
+        )
+        return asset
+
+    def replace(self, options: ReplaceOptions | None = None, *, where: Any | None = None) -> Asset:
+        from fascat.ops.hierarchy import replace_asset
+
+        opts = options or ReplaceOptions()
+        scope = self._operation_scope(where)
+        selected_node_ids = (
+            scope.selection.node_ids
+            if scope.selection is not None
+            else {node.id for node in scope.asset.root.walk() if node.part_id is not None}
+        )
+        before = _hierarchy_report_stats(self)
+        warning_count = len(self.report.warnings)
+        with timed_step() as timer:
+            asset = replace_asset(scope.asset, opts, selected_node_ids=selected_node_ids)
+        step_warnings = asset.report.warnings[warning_count:]
+        asset.report.add_step(
+            "replace",
             options=_options_with_scope(opts.to_dict(), scope),
             before=before,
             after=_hierarchy_report_stats(asset),

@@ -23,6 +23,7 @@ from fascat.options import (
     BrepHealOptions,
     ConversionProfile,
     DecimateOptions,
+    ExplodeOptions,
     GltfExportOptions,
     LODGeneratorOptions,
     LODOptions,
@@ -31,6 +32,7 @@ from fascat.options import (
     OptimizeOptions,
     RemoveHolesOptions,
     RemoveOccludedOptions,
+    ReplaceOptions,
     SceneOptimizeOptions,
     StageOptions,
     StepReadOptions,
@@ -59,6 +61,8 @@ def convert(
     heal_brep: BrepHealOptions | None = None,
     stage: StageOptions | None = None,
     merge: MergeOptions | None = None,
+    explode: ExplodeOptions | None = None,
+    replace: ReplaceOptions | None = None,
     scene: SceneOptimizeOptions | None = None,
     bake_materials: BakeMaterialOptions | None = None,
     remove_holes: RemoveHolesOptions | None = None,
@@ -103,6 +107,14 @@ def convert(
         asset = asset.merge(merge, where=where)
         if progress is not None:
             progress("merge", asset.stats())
+    if explode is not None:
+        asset = asset.explode(explode, where=where)
+        if progress is not None:
+            progress("explode", asset.stats())
+    if replace is not None:
+        asset = asset.replace(replace, where=where)
+        if progress is not None:
+            progress("replace", asset.stats())
     if scene is not None:
         asset = asset.optimize_scene(scene, where=where)
         if progress is not None:
@@ -518,6 +530,14 @@ def optimize(
 
 def merge(asset: Asset, *, options: MergeOptions | None = None, where: Filter | None = None) -> Asset:
     return asset.merge(options or MergeOptions(), where=where)
+
+
+def explode(asset: Asset, *, options: ExplodeOptions | None = None, where: Filter | None = None) -> Asset:
+    return asset.explode(options or ExplodeOptions(), where=where)
+
+
+def replace(asset: Asset, *, options: ReplaceOptions | None = None, where: Filter | None = None) -> Asset:
+    return asset.replace(options or ReplaceOptions(), where=where)
 
 
 def optimize_scene(asset: Asset, *, options: SceneOptimizeOptions | None = None, where: Filter | None = None) -> Asset:

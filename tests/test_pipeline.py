@@ -11,6 +11,7 @@ from fascat.options import (
     BakeMaterialOptions,
     ConversionProfile,
     DecimateOptions,
+    ExplodeOptions,
     LODGeneratorOptions,
     LODLevel,
     LODOptions,
@@ -18,6 +19,7 @@ from fascat.options import (
     RemoveHolesOptions,
     RemoveOccludedOptions,
     RepairOptions,
+    ReplaceOptions,
     StageOptions,
 )
 from fascat.pipeline import convert
@@ -176,6 +178,8 @@ def test_asset_operation_reports_include_options_and_before_after_counts() -> No
             "tiny_part_screen_size",
             "validate",
         },
+        "explode": {"mode", "metadata", "remove_empty_nodes"},
+        "replace": {"mode", "preserve_transform", "metadata", "proxy_mesh", "external_path"},
         "bake_materials": {"maps_resolution", "force_uv_generation", "uv_channel", "padding", "bake", "merge_output"},
         "decimate": {
             "criterion",
@@ -208,6 +212,8 @@ def test_asset_operation_reports_include_options_and_before_after_counts() -> No
         ("stage", lambda asset: asset.stage(StageOptions(uv0="none", uv1=None))),
         ("optimize", lambda asset: asset.optimize()),
         ("lods", lambda asset: asset.lods(LODOptions((0.5,)))),
+        ("explode", lambda asset: asset.explode(ExplodeOptions())),
+        ("replace", lambda asset: asset.replace(ReplaceOptions())),
         ("bake_materials", lambda asset: asset.bake_materials(BakeMaterialOptions(force_uv_generation=True))),
         ("decimate", lambda asset: asset.decimate(DecimateOptions(target_ratio=0.5))),
         ("remove_holes", lambda asset: asset.remove_holes(RemoveHolesOptions())),
