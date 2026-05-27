@@ -528,6 +528,7 @@ def stage(
     atlas: AtlasOptions | None = None,
     uv0: UV0Mode = "box",
     uv1: UV1Mode | None = None,
+    normalize_uvs: tuple[int, ...] = (),
     where: Filter | None = None,
 ) -> Asset:
     return asset.stage(
@@ -545,6 +546,7 @@ def stage(
             atlas=atlas or AtlasOptions(),
             uv0=uv0,
             uv1=uv1,
+            normalize_uvs=normalize_uvs,
         ),
         where=where,
     )

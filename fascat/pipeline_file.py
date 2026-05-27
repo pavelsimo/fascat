@@ -144,6 +144,7 @@ _STAGE_KEYS = frozenset(
         "max_size",
         "uv0",
         "uv1",
+        "normalize_uvs",
     }
 )
 _MERGE_KEYS = frozenset(
@@ -792,6 +793,7 @@ def _stage_options(values: dict[str, object]) -> StageOptions:
         ),
         uv0=cast(Any, _literal(values.get("uv0", "box"))),
         uv1=cast(Any, _literal(values.get("uv1"))),
+        normalize_uvs=_int_list(values.get("normalize_uvs", [])),
     )
 
 
@@ -955,6 +957,16 @@ def _string_list(value: object) -> list[str]:
     if isinstance(value, list):
         return [str(item) for item in value]
     raise ValueError("pipeline value must be a string or list")
+
+
+def _int_list(value: object) -> tuple[int, ...]:
+    if isinstance(value, str):
+        values = [item.strip() for item in value.split(",") if item.strip()]
+    elif isinstance(value, list):
+        values = value
+    else:
+        raise ValueError("pipeline value must be a string or list")
+    return tuple(dict.fromkeys(_as_int(item) for item in values))
 
 
 def _as_float(value: object) -> float:

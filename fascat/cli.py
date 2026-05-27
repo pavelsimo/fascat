@@ -553,6 +553,10 @@ def cmd_convert(
     ] = False,
     uv0: Annotated[UV0Mode, typer.Option("--uv0", help="UV0 generation mode.")] = UV0Mode.BOX,
     uv1: Annotated[UV1Mode, typer.Option("--uv1", help="UV1 generation mode.")] = UV1Mode.NONE,
+    normalize_uvs: Annotated[
+        str | None,
+        typer.Option("--normalize-uvs", help="Comma-separated UV channels to normalize into 0..1, for example 1."),
+    ] = None,
     materials: Annotated[
         MaterialMode,
         typer.Option("--materials", help="Material staging mode: cad, display, or none."),
@@ -916,6 +920,7 @@ def cmd_convert(
         "validate_normals": validate_normals,
         "uv0": uv0.value,
         "uv1": uv1.value,
+        "normalize_uvs": normalize_uvs,
         "materials": materials.value,
         "material_mode": material_mode.value,
         "merge_equivalent_materials": merge_equivalent_materials,
@@ -1019,10 +1024,12 @@ def cmd_convert(
     bake_maps = _parse_bake_maps(bake, ctx, payload)
     enabled_hole_types = _parse_hole_types(hole_types, ctx, payload)
     lod_coverages = _parse_lod_screen_coverage(lod_screen_coverage, ctx, payload)
+    normalized_uv_channels = _parse_uv_channels(normalize_uvs, ctx, payload)
     payload["lods"] = lod_values
     payload["bake"] = list(bake_maps)
     payload["hole_types"] = list(enabled_hole_types)
     payload["lod_screen_coverage"] = lod_coverages
+    payload["normalize_uvs"] = list(normalized_uv_channels)
     _validate_step_input(input_path, ctx, payload)
     output_path = _resolve_convert_output(input_path, output_path, ctx, payload)
     payload["output"] = str(output_path)
@@ -1209,6 +1216,7 @@ def cmd_convert(
             atlas=AtlasOptions(enabled=atlas, max_size=atlas_size),
             uv0=uv0.value,
             uv1=cast(Any, uv1.value.replace("-", "_")),
+            normalize_uvs=normalized_uv_channels,
         )
         import_options = (
             pipeline_spec.import_options
@@ -1741,6 +1749,21 @@ def _parse_hole_types(value: str, ctx: typer.Context, payload: dict[str, Any]) -
     if unknown:
         _fail(ctx, payload, f"Unsupported --hole-types values: {', '.join(sorted(unknown))}.", code=2)
     return hole_types
+
+
+def _parse_uv_channels(value: str | None, ctx: typer.Context, payload: dict[str, Any]) -> tuple[int, ...]:
+    if value is None:
+        return ()
+    try:
+        channels = tuple(dict.fromkeys(int(item.strip()) for item in value.split(",") if item.strip()))
+    except ValueError as exc:
+        _fail(ctx, payload, "--normalize-uvs must be a comma-separated list of UV channel indices.", code=2)
+        raise AssertionError("unreachable") from exc
+    if not channels:
+        _fail(ctx, payload, "--normalize-uvs must include at least one UV channel.", code=2)
+    if any(channel < 0 for channel in channels):
+        _fail(ctx, payload, "--normalize-uvs values must be greater than or equal to 0.", code=2)
+    return channels
 
 
 def _parse_lod_screen_coverage(

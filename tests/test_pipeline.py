@@ -160,6 +160,7 @@ def test_asset_operation_reports_include_options_and_before_after_counts() -> No
             "atlas",
             "uv0",
             "uv1",
+            "normalize_uvs",
         },
         "optimize": {
             "target_triangles",

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import numpy as np
+
 from fascat.asset import Asset
 from fascat.material import Material
 from fascat.mesh import Mesh
@@ -75,6 +77,10 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
                 _tag_uv_metadata(mesh, 1, "copy_uv0", options)
                 uv_modes[1] = "copy_uv0"
                 edited_uv_channels.add(1)
+        for channel in options.normalize_uvs:
+            mesh = _normalize_uv_channel(result, part.id, mesh, channel)
+            if channel in mesh.uvs:
+                edited_uv_channels.add(channel)
         mesh = _stage_tangents(
             result,
             part.id,
@@ -215,6 +221,34 @@ def _copy_uv_channel(asset: Asset, part_id: str, mesh: Mesh, *, source: int, tar
         asset.report.add_warning(f"part {part_id} requested UV{target} copy from UV{source}, but UV{source} is missing")
         return result
     result.uvs[target] = result.uvs[source].copy()
+    return result
+
+
+def _normalize_uv_channel(asset: Asset, part_id: str, mesh: Mesh, channel: int) -> Mesh:
+    result = mesh.copy()
+    prefix = f"uv{channel}"
+    if channel not in result.uvs:
+        result.metadata[f"{prefix}_normalize_status"] = "missing_channel"
+        asset.report.add_warning(f"part {part_id} requested UV{channel} normalization, but UV{channel} is missing")
+        return result
+    uv = result.uvs[channel]
+    if uv.shape[0] == 0:
+        result.metadata[f"{prefix}_normalize_status"] = "empty"
+        return result
+    mins = uv.min(axis=0)
+    maxs = uv.max(axis=0)
+    span = maxs - mins
+    normalized = np.zeros_like(uv)
+    active = span > 0.0
+    normalized[:, active] = (uv[:, active] - mins[active]) / span[active]
+    result.uvs[channel] = normalized
+    if channel == 0:
+        result.tangents = None
+    result.metadata[f"{prefix}_normalize_status"] = "normalized"
+    result.metadata[f"{prefix}_normalize_bounds_before"] = ",".join(f"{value:.9g}" for value in (*mins, *maxs))
+    if not bool(np.all(active)):
+        zero_axes = [axis for axis, enabled in zip(("u", "v"), active.tolist(), strict=True) if not enabled]
+        result.metadata[f"{prefix}_normalize_zero_axes"] = ",".join(zero_axes)
     return result
 
 

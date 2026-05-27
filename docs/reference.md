@@ -75,6 +75,7 @@ Dry-run JSON for `convert` includes `operation_diagnostics`, a list of planned o
 | `--validate-normals` | `false` | Validate staged normals and tangents |
 | `--uv0` | `box` | UV0 generation mode: `none`, `box`, `unwrap`, or `lightmap` |
 | `--uv1` | `none` | UV1 generation mode: `none`, `box`, `unwrap`, `lightmap`, or `copy-uv0` |
+| `--normalize-uvs` | unset | Comma-separated UV channels to rescale into 0..1 after UV generation or copy |
 | `--materials` | `cad` | Material staging mode: `cad`, `display`, or `none` |
 | `--material-mode` | `cad` | Material normalization mode: `cad` or `pbr` |
 | `--merge-equivalent-materials` | `false` | Merge CAD materials with matching PBR values |
@@ -270,7 +271,7 @@ warnings to distinguish exact work from fallbacks.
 | BREP healing | Partial | `heal_brep`; records open shells, free/unstitched edges, small edges, and sliver counts; sliver removal warns that the backend leaves shapes unchanged | Implement sliver-face removal, duplicate-face cleanup, and deeper face/wire repair |
 | Tessellation | Implemented | `tessellate` report options, explicit sag-ratio, existing mesh reuse/retessellation controls, max-polygon-length diagnostics, free-edge diagnostics, and quality metadata | Add CAD UV/tangent extraction |
 | Mesh repair | Implemented for core cleanup | `repair` report step; mesh metadata records before/after duplicate polygon, degenerate triangle, boundary edge, and non-manifold edge counts | Add T-junction sewing, non-manifold cracking, and configurable orientation strategies |
-| Staging, normals, tangents, UV metadata | Partial | `stage` report step; tangents require UV0; mesh and asset metadata report generated, regenerated, missing, invalidated, or dropped tangent states; UV metadata records bounds, degenerates, overlap counts, UV0-to-UV1 copy status, and unwrap solver intent, with warnings for UV1/lightmap bake violations and unsupported solver controls | Add seam planning, backend-enforced unwrap solver controls, island merge, repack, normalize, and deeper per-channel validation |
+| Staging, normals, tangents, UV metadata | Partial | `stage` report step; tangents require UV0; mesh and asset metadata report generated, regenerated, missing, invalidated, or dropped tangent states; UV metadata records bounds, degenerates, overlap counts, UV0-to-UV1 copy status, explicit normalization status, and unwrap solver intent, with warnings for UV1/lightmap bake violations and unsupported solver controls | Add seam planning, backend-enforced unwrap solver controls, island merge, repack, and deeper per-channel validation |
 | Material baking | Approximate | `bake_materials` emits constant embedded texture maps from material factors and warns that raster baking is not implemented | Generate real atlas textures from source texture/material inputs |
 | Hole removal | Approximate | `remove_holes` warns when it falls back to mesh boundary classification and filling | Add BREP feature-level removal for closed cylindrical and pocket holes |
 | Occlusion removal | Approximate | `remove_occluded` warns that sampled visibility may require higher precision and records candidate counts, sampled face coverage, direction coverage, and confidence metadata | Add acceleration structures and optional raster/GPU backends for high-poly production scenes |

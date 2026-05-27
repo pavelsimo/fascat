@@ -187,6 +187,48 @@ def test_stage_warns_when_uv1_copy_source_is_missing() -> None:
     assert "requested UV1 copy from UV0, but UV0 is missing" in warnings[0]
 
 
+def test_stage_normalizes_requested_uv_channels() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+        uvs={1: np.array([[2, -1], [4, -1], [2, 3]], dtype=float)},
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    staged = asset.stage(StageOptions(uv0="none", uv1=None, normalize_uvs=(1,)))
+    staged_mesh = staged.parts["part"].mesh
+
+    assert staged_mesh is not None
+    assert np.allclose(staged_mesh.uvs[1], np.array([[0, 0], [1, 0], [0, 1]], dtype=float))
+    assert staged_mesh.metadata["uv1_normalize_status"] == "normalized"
+    assert staged_mesh.metadata["uv1_normalize_bounds_before"] == "2,-1,4,3"
+    assert staged_mesh.metadata["uv1_out_of_unit_vertices"] == "0"
+    assert staged.report.steps[-1].warnings == []
+
+
+def test_stage_warns_when_normalize_uv_channel_is_missing() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    staged = asset.stage(StageOptions(uv0="none", uv1=None, normalize_uvs=(1,)))
+    staged_mesh = staged.parts["part"].mesh
+    warnings = staged.report.steps[-1].warnings
+
+    assert staged_mesh is not None
+    assert staged_mesh.metadata["uv1_normalize_status"] == "missing_channel"
+    assert len(warnings) == 1
+    assert "requested UV1 normalization, but UV1 is missing" in warnings[0]
+
+
 def test_stage_records_uv_layout_quality_and_warns_for_uv1_overlap() -> None:
     mesh = Mesh(
         points=np.array(

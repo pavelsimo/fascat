@@ -112,7 +112,7 @@ Parity gaps to track:
    - Add UV segmentation and seam planning, including sharp-edge seams and lines of interest.
    - Unwrap solver intent is now accepted across Python, CLI, TOML pipelines, metadata, and reports with `default`, `conformal`, and `isometric` values. The current xatlas backend records non-default solver methods as intent and warns that it cannot enforce them directly.
    - Unwrap iteration and tolerance controls are now accepted across Python, CLI, TOML pipelines, metadata, and reports. Remaining work: add a backend that enforces those controls and reports solver failure or excessive distortion.
-   - UV0-to-UV1 copy is now supported through `uv1="copy_uv0"` / `--uv1 copy-uv0`, with copied/missing-source metadata and warnings. Remaining work: UV island merge, alignment, repack, normalize, and deeper per-channel validation.
+   - UV0-to-UV1 copy is now supported through `uv1="copy_uv0"` / `--uv1 copy-uv0`, with copied/missing-source metadata and warnings. UV normalization is now explicit through `normalize_uvs=(...)` / `--normalize-uvs`, with original-bounds metadata and missing-channel warnings. Remaining work: UV island merge, alignment, repack, and deeper per-channel validation.
    - Make UV0 tileable and UV1 baking requirements explicit: UV0 may overlap; UV1 must fit in `[0,1]` with padding and no overlaps.
    - Tangent lifecycle validation now warns when UV0 is missing, invalidates tangents after UV edits, and records generated, regenerated, invalidated, missing, or dropped tangent states on mesh and asset metadata.
    - Explicit decimation can now strip UV/tangent attributes through `uv_importance="ignore"` or preserve seams and then drop UVs with `uv_importance="preserve_seams"`.
@@ -224,7 +224,8 @@ These need more design and should not be mixed into documentation or diagnostics
    - Unwrap method, iteration, and tolerance controls are now represented as solver intent; non-default values warn when xatlas cannot enforce them directly.
    - Tangent lifecycle validation now reports generated, regenerated, invalidated, missing-UV0, and dropped tangent states.
    - UV0-to-UV1 copy now records source-channel and missing-source metadata, and emits a warning when the source channel is unavailable.
-   - Remaining polish: add seam segmentation, backend-enforced solver controls, island merging, packing, normalization, and deeper per-channel validation.
+   - UV normalization now rescales selected channels into 0..1 and records original bounds plus missing-channel warnings.
+   - Remaining polish: add seam segmentation, backend-enforced solver controls, island merging, packing, and deeper per-channel validation.
 
 10. Instance reconstruction - exact mesh pass complete
    - `optimize_scene(instance_policy="auto"|"preserve")` now reconstructs shared instances for separately modeled parts with matching mesh fingerprints, vertex attributes, material assignments, and metadata.

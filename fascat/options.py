@@ -227,10 +227,15 @@ class StageOptions:
     atlas: AtlasOptions = field(default_factory=AtlasOptions)
     uv0: UV0Mode | None = "box"
     uv1: UV1Mode | None = None
+    normalize_uvs: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         if self.uv0 is None:
             object.__setattr__(self, "uv0", "none")
+        if isinstance(self.normalize_uvs, str):
+            raise ValueError("normalize_uvs must be a sequence of UV channel indices")
+        normalize_uvs = tuple(dict.fromkeys(int(channel) for channel in self.normalize_uvs))
+        object.__setattr__(self, "normalize_uvs", normalize_uvs)
         if self.normal_mode == "none":
             object.__setattr__(self, "normals", False)
         if self.materials not in {"cad", "display", "none"}:
@@ -245,9 +250,11 @@ class StageOptions:
             raise ValueError("uv0 must be one of: none, box, unwrap, lightmap")
         if self.uv1 not in {None, "none", "box", "unwrap", "lightmap", "copy_uv0"}:
             raise ValueError("uv1 must be one of: none, box, unwrap, lightmap, copy_uv0")
+        if any(channel < 0 for channel in self.normalize_uvs):
+            raise ValueError("normalize_uvs values must be greater than or equal to 0")
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        return {**asdict(self), "normalize_uvs": list(self.normalize_uvs)}
 
 
 @dataclass(frozen=True)

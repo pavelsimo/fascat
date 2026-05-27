@@ -124,6 +124,7 @@ def test_convert_help() -> None:
     assert "--normals" in plain(result.output)
     assert "--tangents" in plain(result.output)
     assert "--uv1" in plain(result.output)
+    assert "--normalize-uvs" in plain(result.output)
     assert "--no-preserve-instances" in plain(result.output)
     assert "--preserve-hard-edges" in plain(result.output)
     assert "material boundaries" in plain(result.output)
@@ -234,6 +235,13 @@ def test_convert_dry_run_accepts_uv1_copy_mode() -> None:
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["uv1"] == "copy-uv0"
+
+
+def test_convert_dry_run_accepts_uv_normalization_channels() -> None:
+    result = runner.invoke(app, ["--json", "--dry-run", "convert", "input.step", "--normalize-uvs", "1,0,1"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["normalize_uvs"] == [1, 0]
 
 
 def test_convert_dry_run_accepts_gltf_output_and_virtual_reality_profile() -> None:
