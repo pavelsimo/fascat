@@ -85,6 +85,10 @@ def test_optimize_scene_batches_by_material_and_annotates_index_buffers() -> Non
     assert step.after["draw_call_mesh_instances"] == 2
     assert step.after["draw_call_reused_instances"] == 0
     assert step.after["draw_call_merged_batches"] == 2
+    advisor = step.options["export_advisor"]
+    assert advisor["lost_reused_instances"] == 1
+    assert advisor["draw_call_savings"] == 1
+    assert "preserve or reconstruct instances" in advisor["recommendation"]
 
 
 def test_optimize_scene_splits_large_merged_meshes() -> None:

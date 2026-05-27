@@ -130,6 +130,11 @@ def test_merge_selected_geometry_bakes_transforms_and_keeps_parent() -> None:
     assert merged.report.steps[-1].before["draw_calls"] == 3
     assert merged.report.steps[-1].after["draw_calls"] == 2
     assert merged.report.steps[-1].options["matched"]["occurrences"] == 2
+    advisor = merged.report.steps[-1].options["export_advisor"]
+    assert advisor["lost_reused_instances"] == 1
+    assert advisor["draw_call_savings"] == 1
+    assert advisor["added_merged_batches"] == 1
+    assert any("preserving or reconstructing instances" in warning for warning in merged.report.steps[-1].warnings)
 
 
 def test_merge_by_material_creates_one_part_per_material() -> None:

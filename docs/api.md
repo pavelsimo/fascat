@@ -182,7 +182,7 @@ asset = asset.merge(
 )
 ```
 
-Merge modes include `all`, `by_material`, `by_node_name`, `by_part_name`, `hierarchy_level`, `parent_children`, `final_level`, and `regions`. Merging bakes node transforms into merged vertex positions, keeps material slots when requested, removes replaced empty nodes, and records before/after draw-call breakdown fields in the merge report step: `draw_calls`, `draw_call_meshes`, `draw_call_materials`, `draw_call_submesh_slots`, `draw_call_material_slots`, `draw_call_mesh_instances`, `draw_call_reused_instances`, `draw_call_instanced_meshes`, and `draw_call_merged_batches`.
+Merge modes include `all`, `by_material`, `by_node_name`, `by_part_name`, `hierarchy_level`, `parent_children`, `final_level`, and `regions`. Merging bakes node transforms into merged vertex positions, keeps material slots when requested, removes replaced empty nodes, and records before/after draw-call breakdown fields in the merge report step: `draw_calls`, `draw_call_meshes`, `draw_call_materials`, `draw_call_submesh_slots`, `draw_call_material_slots`, `draw_call_mesh_instances`, `draw_call_reused_instances`, `draw_call_instanced_meshes`, and `draw_call_merged_batches`. When merging reduces reusable instances, report steps include an `export_advisor` entry and warning so GLB file-size, memory, and culling tradeoffs are explicit.
 
 Use `explode()` when runtime tools need separate meshes by material or connected component, and `replace()` when a selected part should become a proxy.
 
@@ -569,7 +569,7 @@ Staging, UV, and material parameters:
 
 ## Scene Optimization
 
-Use scene optimization to reduce draw calls after staging and optional hierarchy merging. It batches compatible meshes, can batch by material, reconstructs exact repeated mesh instances when vertex attributes, materials, and metadata match, reports duplicate mesh payload savings, splits large merged meshes, simplifies empty hierarchy, annotates the intended index-buffer width, and records how mesh count, material count, submesh/material slots, instances, and merged batches contributed to the draw-call estimate.
+Use scene optimization to reduce draw calls after staging and optional hierarchy merging. It batches compatible meshes, can batch by material, reconstructs exact repeated mesh instances when vertex attributes, materials, and metadata match, reports duplicate mesh payload savings, splits large merged meshes, simplifies empty hierarchy, annotates the intended index-buffer width, and records how mesh count, material count, submesh/material slots, instances, and merged batches contributed to the draw-call estimate. When batching removes reusable instances, the report includes the same export advisor used by explicit merge operations.
 
 ```python
 asset = asset.optimize_scene(

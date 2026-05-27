@@ -432,12 +432,15 @@ class Asset:
         warning_count = len(self.report.warnings)
         with timed_step() as timer:
             asset = merge_asset(scope.asset, opts, selected_node_ids=selected_node_ids)
+        after = _hierarchy_report_stats(asset)
+        step_options = _options_with_scope(opts.to_dict(), scope)
+        _add_export_merge_advisor(asset, step_options, before, after)
         step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
             "merge",
-            options=_options_with_scope(opts.to_dict(), scope),
+            options=step_options,
             before=before,
-            after=_hierarchy_report_stats(asset),
+            after=after,
             duration=timer.duration,
             warnings=step_warnings,
         )
@@ -507,12 +510,16 @@ class Asset:
         warning_count = len(self.report.warnings)
         with timed_step() as timer:
             asset = optimize_scene_asset(scope.asset, opts, selected_node_ids=selected_node_ids)
+        after = _hierarchy_report_stats(asset)
+        step_options = _options_with_scope(opts.to_dict(), scope)
+        if opts.merge_compatible_meshes or opts.batch_by_material:
+            _add_export_merge_advisor(asset, step_options, before, after)
         step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
             "optimize_scene",
-            options=_options_with_scope(opts.to_dict(), scope),
+            options=step_options,
             before=before,
-            after=_hierarchy_report_stats(asset),
+            after=after,
             duration=timer.duration,
             warnings=step_warnings,
         )
@@ -845,6 +852,40 @@ def _options_with_scope(options: dict[str, object], scope: _OperationScope) -> d
         "where": scope.selection.filter.to_dict(),
         "matched": scope.selection.stats(),
     }
+
+
+def _add_export_merge_advisor(
+    asset: Asset,
+    options: dict[str, object],
+    before: dict[str, int],
+    after: dict[str, int],
+) -> None:
+    lost_reused_instances = max(
+        0,
+        before.get("draw_call_reused_instances", 0) - after.get("draw_call_reused_instances", 0),
+    )
+    if lost_reused_instances <= 0:
+        return
+
+    draw_call_savings = max(0, before.get("draw_calls", 0) - after.get("draw_calls", 0))
+    added_merged_batches = max(
+        0,
+        after.get("draw_call_merged_batches", 0) - before.get("draw_call_merged_batches", 0),
+    )
+    advisory = {
+        "lost_reused_instances": lost_reused_instances,
+        "draw_call_savings": draw_call_savings,
+        "added_merged_batches": added_merged_batches,
+        "recommendation": (
+            "preserve or reconstruct instances when GLB file size, memory use, or culling granularity "
+            "matters more than reducing draw calls"
+        ),
+    }
+    options["export_advisor"] = advisory
+    asset.report.add_warning(
+        "merge reduced reusable instances; preserving or reconstructing instances can reduce GLB file size, "
+        "memory use, and culling loss when draw-call reduction is not the primary export goal"
+    )
 
 
 def _tolerance_policy(

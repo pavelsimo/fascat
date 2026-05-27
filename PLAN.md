@@ -75,6 +75,9 @@ that are currently conservative approximations.
   orientation and warns when Mobius-like topology cannot be fixed by winding.
 - Draw-call reports now separate mesh count, referenced material count,
   submesh/material slots, instances, reused instances, and merged batches.
+- Merge and scene-batching reports now warn when draw-call reduction removes
+  reusable instances and record export-advisor metrics for GLB size, memory, and
+  culling tradeoffs.
 - Mesh repair now records before/after T-junction counts and warns that
   remaining T-junctions still need a sewing backend.
 - Mesh repair now records before/after nearby boundary-gap counts and warns
@@ -220,8 +223,8 @@ Parity gaps to track:
    - Add acceleration structures, confidence metrics, and optional raster/GPU backends to the new sampled occlusion removal.
    - Expose standard versus advanced occlusion-removal parameters such as resolution, sphere count or ray direction set, adjacency depth, hemisphere-only evaluation, cavity preservation, and GPU/backend requirements.
    - Add loose and precise instance reconstruction for similar, separately modeled parts.
-   - Improve merge planning so reports show draw-call savings, instance loss, memory growth, culling impact, and export file-size risk when merging destroys repeated geometry.
-   - Add an export-aware merge advisor that recommends preserving or reconstructing instances when file size, memory, or culling is more important than reducing draw calls.
+   - Merge and scene-batching reports now show draw-call savings, lost reusable instances, added merged batches, and export-advisor warnings when merging destroys repeated geometry.
+   - Export-aware merge advisors now recommend preserving or reconstructing instances when file size, memory, or culling is more important than reducing draw calls.
    - Draw-call budget analysis now separates mesh count, referenced material count, submesh/material slots, instances, reused instances, and merged batches.
    - Add retopology or proxy-mesh paths for cases where decimation and occlusion are not enough.
    - Add dedicated cleanup for unused texture coordinates, duplicate materials, and duplicate images before draw-call and file-size optimization.
