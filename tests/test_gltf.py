@@ -86,6 +86,18 @@ def _read_glb(path: Path) -> tuple[dict[str, Any], bytes]:
     return document, payload[bin_offset + 8 : bin_offset + 8 + bin_length]
 
 
+def _accessor_array(document: dict[str, Any], binary: bytes, accessor_index: int) -> np.ndarray:
+    widths = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4}
+    dtypes = {5126: np.float32}
+    accessor = document["accessors"][accessor_index]
+    buffer_view = document["bufferViews"][accessor["bufferView"]]
+    width = widths[accessor["type"]]
+    dtype = dtypes[accessor["componentType"]]
+    offset = buffer_view.get("byteOffset", 0) + accessor.get("byteOffset", 0)
+    count = accessor["count"] * width
+    return np.frombuffer(binary, dtype=dtype, count=count, offset=offset).reshape((accessor["count"], width)).copy()
+
+
 def test_glb_export_writes_valid_scene_materials_uvs_and_lod_metadata(tmp_path: Path) -> None:
     output = tmp_path / "panel.glb"
 
@@ -118,6 +130,32 @@ def test_glb_export_writes_valid_scene_materials_uvs_and_lod_metadata(tmp_path: 
     assert lod_node["matrix"] == occurrence["matrix"]
     assert lod_node["extras"]["fascat"] == {"nodeId": "node_lod1", "sourceNodeId": "node", "lod": 1}
     assert len(binary) >= document["buffers"][0]["byteLength"]
+
+
+def test_glb_export_preserves_normals_and_tangent_handedness(tmp_path: Path) -> None:
+    mesh = Mesh(
+        points=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+        uvs={0: np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0]], dtype=float)},
+    ).compute_normals()
+    mesh = mesh.compute_tangents()
+    asset = Asset(
+        root=Node(id="root", name="Root", children=[Node(id="node", name="Triangle", part_id="part")]),
+        parts={"part": Part(id="part", name="Triangle", mesh=mesh)},
+        up_axis="Y",
+    )
+    output = tmp_path / "mirrored.glb"
+
+    write_gltf(asset, output)
+
+    document, binary = _read_glb(output)
+    attributes = document["meshes"][0]["primitives"][0]["attributes"]
+    normals = _accessor_array(document, binary, attributes["NORMAL"])
+    tangents = _accessor_array(document, binary, attributes["TANGENT"])
+
+    assert np.allclose(normals, np.array([[0.0, 0.0, 1.0]] * 3, dtype=np.float32))
+    assert np.allclose(np.linalg.norm(tangents[:, :3], axis=1), 1.0)
+    assert np.all(tangents[:, 3] == -1.0)
 
 
 def test_gltf_export_embeds_buffer_data_uri_and_validates(tmp_path: Path) -> None:

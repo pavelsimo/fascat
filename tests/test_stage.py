@@ -87,6 +87,34 @@ def test_stage_merges_equivalent_materials_and_normalizes_pbr_metadata() -> None
     assert material.metadata["pbr_normalized"] == "true"
 
 
+def test_stage_hard_edge_normals_follow_remapped_material_indices() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [2, 1, 3]], dtype=int),
+        material_indices=np.array([0, 1], dtype=int),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Panel", part_id="panel")]),
+        parts={"panel": Part(id="panel", name="Panel", mesh=mesh, material_ids=["red_a", "red_b"])},
+        materials={
+            "red_a": Material(id="red_a", name="Red A", base_color=(1.0, 0.0, 0.0, 1.0)),
+            "red_b": Material(id="red_b", name="Red B", base_color=(1.0, 0.0, 0.0, 1.0)),
+        },
+    )
+
+    split = asset.stage(StageOptions(normal_mode="hard_edges", merge_equivalent_materials=False, uv0="none", uv1=None))
+    merged = asset.stage(StageOptions(normal_mode="hard_edges", merge_equivalent_materials=True, uv0="none", uv1=None))
+    split_mesh = split.parts["panel"].mesh
+    merged_mesh = merged.parts["panel"].mesh
+
+    assert split_mesh is not None
+    assert merged_mesh is not None
+    assert split_mesh.vertex_count == 6
+    assert merged_mesh.vertex_count == 4
+    assert merged_mesh.material_indices is not None
+    assert merged_mesh.material_indices.tolist() == [0, 0]
+
+
 def test_stage_records_uv_and_atlas_workflow_metadata() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
