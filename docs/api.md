@@ -863,15 +863,15 @@ asset = fc.convert("motor.step", "motor.glb", profile=profile)
 
 Available profiles:
 
-| Profile | Use | Target FPS | Triangle budget | Per-mesh vertex budget | Texture resolution budget | Texture memory budget | Load-time budget | Draw-call budget |
-|---------|-----|------------|-----------------|------------------------|---------------------------|-----------------------|------------------|------------------|
-| `inspect-only` | inspect STEP input without conversion | unset | unset | unset | unset | unset | unset | unset |
-| `realtime-desktop` | higher-detail OpenUSD or glTF output | 60 | 1,000,000 | 65,535 | 4,096px | 512 MB | 2,000 ms | 2,000 |
-| `realtime-web` | lower triangle budgets for web delivery | 60 | 250,000 | 65,535 | 2,048px | 128 MB | 3,000 ms | 500 |
-| `realtime-mobile` | tighter mobile runtime budget for app-store builds | 60 | 150,000 | 65,535 | 2,048px | 128 MB | 2,500 ms | 250 |
-| `virtual-reality` | balanced triangle budgets and LODs for VR runtimes | 90 | 500,000 | 65,535 | 2,048px | 256 MB | 1,500 ms | 250 |
+| Profile | Use | Target FPS | Triangle budget | Per-mesh vertex budget | Texture resolution budget | Texture memory budget | Load-time budget | Draw-call budget | Unity reference range |
+|---------|-----|------------|-----------------|------------------------|---------------------------|-----------------------|------------------|------------------|-----------------------|
+| `inspect-only` | inspect STEP input without conversion | unset | unset | unset | unset | unset | unset | unset | unset |
+| `realtime-desktop` | higher-detail OpenUSD or glTF output | 60 | 1,000,000 | 65,535 | 4,096px | 512 MB | 2,000 ms | 2,000 | 10M-100M triangles, under 10,000 draw calls |
+| `realtime-web` | lower triangle budgets for web delivery | 60 | 250,000 | 65,535 | 2,048px | 128 MB | 3,000 ms | 500 | 100K-1M triangles, under 200 draw calls |
+| `realtime-mobile` | tighter mobile runtime budget for app-store builds | 60 | 150,000 | 65,535 | 2,048px | 128 MB | 2,500 ms | 250 | 100K-500K triangles, under 1,000 draw calls |
+| `virtual-reality` | balanced triangle budgets and LODs for VR runtimes | 90 | 500,000 | 65,535 | 2,048px | 256 MB | 1,500 ms | 250 | 500K-2M triangles, under 1,000 draw calls |
 
-You can pass either a profile name or a `ConversionProfile` returned by `fc.profiles`. Conversion reports include a `profile_budget` step when the selected profile has a budget. That step records target FPS, triangle, vertex, per-mesh vertex, texture-resolution, texture-memory, estimated load-time, and draw-call budgets, plus any amount over budget as report warnings. Load time is a deterministic estimate based on output file size, geometry bytes, baked texture bytes, and draw-call overhead; it is not a measured engine runtime.
+You can pass either a profile name or a `ConversionProfile` returned by `fc.profiles`. Conversion reports include a `profile_budget` step when the selected profile has a budget. That step records target FPS, triangle, vertex, per-mesh vertex, texture-resolution, texture-memory, estimated load-time, draw-call budgets, and Unity reference triangle/draw-call ranges when the profile has them. Fascat's defaults are intentionally stricter than Unity's broad reference ranges for repeatable export checks. Load time is a deterministic estimate based on output file size, geometry bytes, baked texture bytes, and draw-call overhead; it is not a measured engine runtime.
 
 ## Functional wrappers
 

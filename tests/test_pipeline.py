@@ -774,6 +774,9 @@ def test_convert_report_checks_profile_budget(monkeypatch, tmp_path: Path) -> No
             max_texture_memory_mb=1,
             max_load_time_ms=1,
             max_draw_calls=1,
+            unity_reference_profile="test-platform",
+            unity_reference_triangles=(100, 200),
+            unity_reference_draw_calls=3,
         ),
     )
     source = _triangle_asset()
@@ -801,12 +804,19 @@ def test_convert_report_checks_profile_budget(monkeypatch, tmp_path: Path) -> No
         "max_texture_memory_mb": 1,
         "max_load_time_ms": 1,
         "max_draw_calls": 1,
+        "unity_reference_profile": "test-platform",
+        "unity_reference_triangles": [100, 200],
+        "unity_reference_draw_calls": 3,
     }
     assert budget_step.before["triangles"] == 1
     assert budget_step.before["vertices"] == 3
     assert budget_step.before["draw_calls"] == 1
     assert budget_step.after["profile_target_fps"] == 60
     assert budget_step.after["profile_triangles_over_budget"] == 0
+    assert budget_step.after["profile_unity_reference_triangle_min"] == 100
+    assert budget_step.after["profile_unity_reference_triangle_max"] == 200
+    assert budget_step.after["profile_triangle_budget_below_unity_reference_min"] == 99
+    assert budget_step.after["profile_triangle_budget_over_unity_reference_max"] == 0
     assert budget_step.after["profile_vertices_over_budget"] == 1
     assert budget_step.after["profile_max_vertices_per_mesh_budget"] == 2
     assert budget_step.after["profile_largest_mesh_vertices"] == 3
@@ -826,6 +836,8 @@ def test_convert_report_checks_profile_budget(monkeypatch, tmp_path: Path) -> No
     assert budget_step.after["profile_load_time_texture_bytes"] == 33_554_432
     assert budget_step.after["profile_load_time_over_budget_ms"] == 672
     assert budget_step.after["profile_draw_calls_over_budget"] == 0
+    assert budget_step.after["profile_unity_reference_draw_call_budget"] == 3
+    assert budget_step.after["profile_draw_call_budget_over_unity_reference"] == 0
     assert budget_step.after["profile_budget_violations"] == 5
     assert budget_step.warnings == [
         "profile budget exceeded for strict: vertices 3 > 2",

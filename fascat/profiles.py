@@ -46,6 +46,9 @@ def realtime_desktop(
             max_texture_memory_mb=512,
             max_load_time_ms=2_000,
             max_draw_calls=2_000,
+            unity_reference_profile="desktop",
+            unity_reference_triangles=(10_000_000, 100_000_000),
+            unity_reference_draw_calls=10_000,
         ),
     )
 
@@ -73,6 +76,9 @@ def realtime_web(
             max_texture_memory_mb=128,
             max_load_time_ms=3_000,
             max_draw_calls=500,
+            unity_reference_profile="webgl",
+            unity_reference_triangles=(100_000, 1_000_000),
+            unity_reference_draw_calls=200,
         ),
     )
 
@@ -100,6 +106,9 @@ def realtime_mobile(
             max_texture_memory_mb=128,
             max_load_time_ms=2_500,
             max_draw_calls=250,
+            unity_reference_profile="mobile",
+            unity_reference_triangles=(100_000, 500_000),
+            unity_reference_draw_calls=1_000,
         ),
     )
 
@@ -127,6 +136,9 @@ def virtual_reality(
             max_texture_memory_mb=256,
             max_load_time_ms=1_500,
             max_draw_calls=250,
+            unity_reference_profile="vr",
+            unity_reference_triangles=(500_000, 2_000_000),
+            unity_reference_draw_calls=1_000,
         ),
     )
 

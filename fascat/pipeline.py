@@ -720,6 +720,13 @@ def _add_profile_budget_report(asset: Asset, profile: ConversionProfile) -> None
             warnings.append(
                 f"profile budget exceeded for {profile.name}: triangles {asset.triangle_count} > {budget.max_triangles}"
             )
+    if budget.unity_reference_triangles is not None:
+        reference_min, reference_max = budget.unity_reference_triangles
+        after["profile_unity_reference_triangle_min"] = reference_min
+        after["profile_unity_reference_triangle_max"] = reference_max
+        if budget.max_triangles is not None:
+            after["profile_triangle_budget_below_unity_reference_min"] = max(0, reference_min - budget.max_triangles)
+            after["profile_triangle_budget_over_unity_reference_max"] = max(0, budget.max_triangles - reference_max)
     if budget.max_vertices is not None:
         after["profile_vertex_budget"] = budget.max_vertices
         over = max(0, asset.vertex_count - budget.max_vertices)
@@ -793,6 +800,13 @@ def _add_profile_budget_report(asset: Asset, profile: ConversionProfile) -> None
             violations += 1
             warnings.append(
                 f"profile budget exceeded for {profile.name}: draw calls {asset.draw_call_count} > {budget.max_draw_calls}"
+            )
+    if budget.unity_reference_draw_calls is not None:
+        after["profile_unity_reference_draw_call_budget"] = budget.unity_reference_draw_calls
+        if budget.max_draw_calls is not None:
+            after["profile_draw_call_budget_over_unity_reference"] = max(
+                0,
+                budget.max_draw_calls - budget.unity_reference_draw_calls,
             )
 
     after["profile_budget_violations"] = violations

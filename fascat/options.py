@@ -772,8 +772,16 @@ class PlatformBudget:
     max_texture_memory_mb: int | None = None
     max_load_time_ms: int | None = None
     max_draw_calls: int | None = None
+    unity_reference_profile: str | None = None
+    unity_reference_triangles: tuple[int, int] | None = None
+    unity_reference_draw_calls: int | None = None
 
     def __post_init__(self) -> None:
+        if self.unity_reference_triangles is not None:
+            reference_triangles = tuple(int(value) for value in self.unity_reference_triangles)
+            object.__setattr__(self, "unity_reference_triangles", reference_triangles)
+        if self.unity_reference_profile is not None and not self.unity_reference_profile:
+            raise ValueError("unity_reference_profile must not be empty when set")
         if self.target_fps is not None and self.target_fps <= 0:
             raise ValueError("target_fps must be greater than 0 when set")
         if self.max_triangles is not None and self.max_triangles <= 0:
@@ -790,9 +798,22 @@ class PlatformBudget:
             raise ValueError("max_load_time_ms must be greater than 0 when set")
         if self.max_draw_calls is not None and self.max_draw_calls <= 0:
             raise ValueError("max_draw_calls must be greater than 0 when set")
+        if self.unity_reference_triangles is not None:
+            if len(self.unity_reference_triangles) != 2:
+                raise ValueError("unity_reference_triangles must contain min and max values")
+            min_triangles, max_triangles = self.unity_reference_triangles
+            if min_triangles <= 0 or max_triangles <= 0:
+                raise ValueError("unity_reference_triangles values must be greater than 0")
+            if min_triangles > max_triangles:
+                raise ValueError("unity_reference_triangles min must be less than or equal to max")
+        if self.unity_reference_draw_calls is not None and self.unity_reference_draw_calls <= 0:
+            raise ValueError("unity_reference_draw_calls must be greater than 0 when set")
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        data = asdict(self)
+        if self.unity_reference_triangles is not None:
+            data["unity_reference_triangles"] = list(self.unity_reference_triangles)
+        return data
 
 
 @dataclass(frozen=True)

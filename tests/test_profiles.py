@@ -22,9 +22,29 @@ from fascat.options import ConversionProfile
         "max_texture_memory_mb",
         "max_load_time_ms",
         "max_draw_calls",
+        "unity_reference_profile",
+        "unity_reference_triangles",
+        "unity_reference_draw_calls",
     ),
     [
-        (profiles.inspect_only(), "inspect-only", None, None, None, "none", None, None, None, None, None, None, None),
+        (
+            profiles.inspect_only(),
+            "inspect-only",
+            None,
+            None,
+            None,
+            "none",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
         (
             profiles.realtime_desktop(),
             "realtime-desktop",
@@ -39,6 +59,9 @@ from fascat.options import ConversionProfile
             512,
             2_000,
             2_000,
+            "desktop",
+            (10_000_000, 100_000_000),
+            10_000,
         ),
         (
             profiles.realtime_web(),
@@ -54,6 +77,9 @@ from fascat.options import ConversionProfile
             128,
             3_000,
             500,
+            "webgl",
+            (100_000, 1_000_000),
+            200,
         ),
         (
             profiles.realtime_mobile(),
@@ -69,6 +95,9 @@ from fascat.options import ConversionProfile
             128,
             2_500,
             250,
+            "mobile",
+            (100_000, 500_000),
+            1_000,
         ),
         (
             profiles.virtual_reality(),
@@ -84,6 +113,9 @@ from fascat.options import ConversionProfile
             256,
             1_500,
             250,
+            "vr",
+            (500_000, 2_000_000),
+            1_000,
         ),
     ],
 )
@@ -101,6 +133,9 @@ def test_profiles_match_documented_default_table(
     max_texture_memory_mb: int | None,
     max_load_time_ms: int | None,
     max_draw_calls: int | None,
+    unity_reference_profile: str | None,
+    unity_reference_triangles: tuple[int, int] | None,
+    unity_reference_draw_calls: int | None,
 ) -> None:
     assert profile.to_dict()["name"] == name
     assert profiles.by_name(name).to_dict() == profile.to_dict()
@@ -138,6 +173,10 @@ def test_profiles_match_documented_default_table(
         assert profile.budget.max_texture_memory_mb == max_texture_memory_mb
         assert profile.budget.max_load_time_ms == max_load_time_ms
         assert profile.budget.max_draw_calls == max_draw_calls
+        assert profile.budget.unity_reference_profile == unity_reference_profile
+        assert profile.budget.unity_reference_triangles == unity_reference_triangles
+        assert profile.budget.unity_reference_draw_calls == unity_reference_draw_calls
+        assert profile.budget.to_dict()["unity_reference_triangles"] == list(unity_reference_triangles)
 
 
 def test_lod_options_normalize_list_ratios() -> None:
@@ -167,6 +206,11 @@ def test_lod_options_normalize_list_ratios() -> None:
         (lambda: fc.PlatformBudget(max_texture_memory_mb=0), "max_texture_memory_mb"),
         (lambda: fc.PlatformBudget(max_load_time_ms=0), "max_load_time_ms"),
         (lambda: fc.PlatformBudget(max_draw_calls=0), "max_draw_calls"),
+        (lambda: fc.PlatformBudget(unity_reference_profile=""), "unity_reference_profile"),
+        (lambda: fc.PlatformBudget(unity_reference_triangles=(1,)), "unity_reference_triangles"),
+        (lambda: fc.PlatformBudget(unity_reference_triangles=(0, 1)), "unity_reference_triangles"),
+        (lambda: fc.PlatformBudget(unity_reference_triangles=(2, 1)), "unity_reference_triangles"),
+        (lambda: fc.PlatformBudget(unity_reference_draw_calls=0), "unity_reference_draw_calls"),
         (lambda: fc.RepairOptions(tolerance=-1), "tolerance"),
         (lambda: fc.RepairOptions(area_epsilon=-1), "area_epsilon"),
         (lambda: fc.StageOptions(materials="bad"), "materials"),

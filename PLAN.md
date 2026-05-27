@@ -60,6 +60,8 @@ that are currently conservative approximations.
 - Tessellation now warns when retained BREP patches, CAD face groups, or
   material splits are likely to increase submesh, draw-call, or export-size
   pressure.
+- Platform budgets now record Unity reference triangle and draw-call ranges in
+  profile definitions, conversion reports, and documentation tables.
 
 ## Unity Asset Transformer Parity
 
@@ -95,6 +97,24 @@ Comparison snapshot:
 | LODs | LOD ratios, screen-coverage metadata, validation, skipped-part reporting, and glTF `MSFT_lod` metadata. | Occurrence-level LOD group authoring with preserved instance relationships, optimized LOD0 as master asset, far-LOD one-mesh/one-material baking, switching-distance validation, and engine-specific runtime export profiles. |
 | Export | USD/USDZ, glTF/GLB, OBJ, STL, glTF quantization, meshopt, extension reporting, file-size budgets, and rejection of unsupported Draco/KTX2 requests. | Real Draco compression settings, KTX2/Basis texture output, texture resize and PNG/JPEG fallback controls, unused texture cleanup, baseline-versus-optimized size comparisons, Unity/glTFast-oriented profiles, and web/mobile/VR/XR budget presets backed by runtime measurements. |
 
+Second-pass gaps from the Unity references:
+
+- Distinguish UV unwrapping from bake-ready UV packing everywhere. Unity's
+  unwrap function only flattens islands; bake/lightmap UVs still require repack,
+  padding, overlap checks, and normalization. Fascat should warn when UV1 is
+  unwrapped but not packed before AO, lightmap, or material baking.
+- Add orientability diagnostics for face-orientation repair, including
+  non-orientable/Mobius-strip-like polygon strips, so orientation warnings are
+  not limited to non-manifold edge counts.
+- Make decimation memory planning explicit: estimate RAM from polygon count,
+  report when iterative decimation should be used, and explain how a global
+  target is allocated across parts so sparse walls/simple parts stay intact.
+- Use Unity's broad desktop, mobile, VR, and WebGL ranges as report context
+  when tuning future target-device presets and measured runtime profiles.
+- Add export comparison reports that show unoptimized GLB, optimized GLB,
+  geometry-compressed GLB, and geometry-plus-texture-compressed GLB deltas once
+  real Draco and KTX2 outputs exist.
+
 Parity gaps to track:
 
 1. Workflow validation
@@ -119,6 +139,7 @@ Parity gaps to track:
    - Improve BREP healing beyond the current sewing/fix-edge path: sliver-face removal, duplicate face handling, tolerance unification, and visible report warnings for unsupported backend work.
    - Mesh repair now deletes duplicate polygons and records before/after duplicate, degenerate, boundary-edge, and non-manifold metrics.
    - Extend mesh repair with true T-junction sewing, non-manifold edge cracking, and configurable face-orientation strategies for closed solids versus open shells.
+   - Add non-orientable strip detection before face orientation so Mobius-like topology is reported separately from ordinary flipped faces.
    - Add explicit face and normal orientation passes with selectable strategies for exterior solids, single-sided open shells, and preserved two-sided surfaces.
    - Add missing-normal generation controls for sharp-edge angle, area weighting, override behavior, and flipped-component reporting.
    - Add attribute-aware tolerance vertex merging that rebuilds connectivity across hard-edge and non-manifold borders without collapsing intentional material, normal, or UV seams.
@@ -139,6 +160,7 @@ Parity gaps to track:
    - Extend existing box UVs into Unity-style AABB projection controls: local versus shared/global AABB, real-world UV scale or `uv3dSize`, destination channel, override policy, and unit reporting.
    - Add UV segmentation and seam planning, including sharp-edge seams and lines of interest.
    - Add a complete UV workflow model: segment, unwrap, optionally merge islands, align tileable UV0 islands, repack UV1, normalize, validate overlaps, and record which steps ran per channel.
+   - Warn when bake-domain UVs were only unwrapped and not repacked, because unwrap alone does not fit islands into `[0,1]` or add padding for lightmap/AO baking.
    - Add affine UV island merge and alignment controls for tileable UV0 workflows, including allowed transforms, polygon weighting, and rotation-step quantization.
    - Unwrap solver intent is now accepted across Python, CLI, TOML pipelines, metadata, and reports with `default`, `conformal`, and `isometric` values. The current xatlas backend records non-default solver methods as intent and warns that it cannot enforce them directly.
    - Unwrap iteration and tolerance controls are now accepted across Python, CLI, TOML pipelines, metadata, and reports. Remaining work: add a backend that enforces those controls and reports solver failure or excessive distortion.
@@ -170,7 +192,7 @@ Parity gaps to track:
 
 8. Decimation parity
    - Add global target allocation across a selected assembly while decimating at part level, so sparse parts stay intact and dense parts carry most of the reduction.
-   - Add iterative decimation thresholds, memory-budget warnings, and RAM estimates for large meshes before simplification starts.
+   - Add iterative decimation thresholds, memory-budget warnings, and RAM estimates for large meshes before simplification starts, including a documented rule of thumb for memory per million polygons.
    - Add target-device decimation presets, including XR/HoloLens-style triangle caps, so platform targets can drive simplification before export.
    - Replace quality-criterion heuristics with measured geometric error.
    - Explicit decimation now supports UV importance modes: preserve full UV islands, preserve seam topology only, or ignore UVs by stripping UV/tangent attributes before simplification.
@@ -206,6 +228,7 @@ Parity gaps to track:
 11. Platform budgets
    - Desktop, WebGL/web, mobile, and VR profiles now include documented target-FPS, triangle, vertex, per-mesh vertex/index-buffer, texture-resolution, texture-memory, estimated load-time, and draw-call budgets.
    - Conversion reports now include a `profile_budget` step for selected-profile budget status and warnings when output exceeds profile triangle, vertex, per-mesh vertex/index-buffer, texture-resolution, texture-memory, estimated load-time, or draw-call budgets.
+   - Profile budgets now include explicit Unity reference ranges for each broad profile so users can see how Fascat's stricter defaults compare with Unity's desktop, mobile, VR, and WebGL guideline ranges.
    - Add XR/AR device profiles and custom target-device overrides so budgets can model device-specific caps instead of only broad desktop/web/mobile/VR classes.
    - The platform-budget checklist is complete at diagnostic-report level; future work is measured engine/runtime load profiling.
 
