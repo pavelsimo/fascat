@@ -162,7 +162,7 @@ Parity gaps to track:
    - Add a real Draco encoder path with compression level and quantization settings, or keep `draco=True` rejected.
    - Add real KTX2/Basis texture output with quality, compression level, and max-resolution controls.
    - Add export cleanup for unused images/materials and file-size reports broken down by geometry, textures, and metadata.
-   - Add export extension reports that list actual runtime dependencies such as meshopt, Draco, KTX2, `MSFT_lod`, and metadata extras, plus the expected decoder/runtime support.
+   - glTF write reports now list emitted runtime extensions, required extensions, `extras.fascat` metadata, unsupported Draco/KTX2 outputs, and expected runtime support.
    - Add named web, mobile, desktop, and VR export presets that combine geometry compression, texture compression, texture resizing, and cleanup choices.
    - Keep GLB as the preferred web/mobile runtime target while preserving USD/USDZ for OpenUSD workflows.
    - Expose Draco quantization bits for positions, normals, UVs, and vertex colors once a real encoder is available.

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from fascat import profiles
 from fascat.asset import Asset
 from fascat.filter import Filter
-from fascat.io.gltf import GLTF_SUFFIXES, validate_gltf
+from fascat.io.gltf import GLTF_SUFFIXES, runtime_dependency_report, validate_gltf
 from fascat.io.gltf import write_gltf as _write_gltf
 from fascat.io.obj import OBJ_SUFFIXES, validate_obj
 from fascat.io.obj import write_obj as _write_obj
@@ -177,6 +177,8 @@ def convert(
         obj_options=obj_options,
         stl_options=stl_options,
     )
+    if output_format == "gltf":
+        write_options["runtime_dependencies"] = runtime_dependency_report(asset, gltf_options)
     file_size_budget = _file_size_budget(output_format, gltf_options, usd_options, obj_options, stl_options)
     write_timer = timed_step()
     try:

@@ -611,11 +611,15 @@ class Asset:
         self.report.finish(self._report_stats())
 
     def write_gltf(self, path: str | Path, *, options: GltfExportOptions | None = None) -> None:
-        from fascat.io.gltf import write_gltf
+        from fascat.io.gltf import runtime_dependency_report, write_gltf
 
         opts = options or GltfExportOptions()
         before = self._report_stats()
-        step_options: dict[str, object] = {"format": "glTF", **opts.to_dict()}
+        step_options: dict[str, object] = {
+            "format": "glTF",
+            **opts.to_dict(),
+            "runtime_dependencies": runtime_dependency_report(self, opts),
+        }
         timer = timed_step()
         try:
             with timer:

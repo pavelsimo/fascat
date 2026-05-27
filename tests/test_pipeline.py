@@ -551,7 +551,9 @@ def test_convert_dispatches_gltf_writer_and_validator(monkeypatch, tmp_path: Pat
 
     assert written["path"] == str(tmp_path / "output.glb")
     assert written["triangles"] == 1
-    assert steps["write"].options == {
+    write_options = dict(steps["write"].options)
+    runtime_dependencies = write_options.pop("runtime_dependencies")
+    assert write_options == {
         "format": "glTF",
         "quantize": False,
         "meshopt": False,
@@ -560,6 +562,8 @@ def test_convert_dispatches_gltf_writer_and_validator(monkeypatch, tmp_path: Pat
         "file_size_budget_mb": None,
         "metadata": {"mode": "full", "pmi": "metadata"},
     }
+    assert runtime_dependencies["extensions_used"] == []
+    assert runtime_dependencies["extras"] == {"fascat": True, "metadata": "full", "pmi": "metadata"}
     assert steps["validate"].options == {"backend": "fascat-gltf"}
     assert steps["validate"].after["validated_triangles"] == 1
 

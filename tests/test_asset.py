@@ -362,7 +362,9 @@ def test_asset_write_gltf_records_report_step(monkeypatch: pytest.MonkeyPatch, t
     assert calls["asset"] is asset
     assert calls["path"] == output
     assert step.name == "write"
-    assert step.options == {
+    options = dict(step.options)
+    runtime_dependencies = options.pop("runtime_dependencies")
+    assert options == {
         "format": "glTF",
         "quantize": False,
         "meshopt": False,
@@ -371,6 +373,8 @@ def test_asset_write_gltf_records_report_step(monkeypatch: pytest.MonkeyPatch, t
         "file_size_budget_mb": None,
         "metadata": {"mode": "full", "pmi": "metadata"},
     }
+    assert runtime_dependencies["extensions_used"] == []
+    assert runtime_dependencies["extras"] == {"fascat": True, "metadata": "full", "pmi": "metadata"}
     assert step.before == asset.stats()
     assert step.after == asset.stats()
     assert step.duration >= 0.0

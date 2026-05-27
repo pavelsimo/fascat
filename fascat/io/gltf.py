@@ -32,7 +32,11 @@ _FLOAT = 5126
 _UNSIGNED_SHORT = 5123
 _UNSIGNED_INT = 5125
 _KHR_MESH_QUANTIZATION = "KHR_mesh_quantization"
+_EXT_MESHOPT_COMPRESSION = "EXT_meshopt_compression"
+_KHR_DRACO_MESH_COMPRESSION = "KHR_draco_mesh_compression"
+_KHR_TEXTURE_BASISU = "KHR_texture_basisu"
 _MSFT_LOD = "MSFT_lod"
+_FASCAT_EXTRAS = "extras.fascat"
 
 _COMPONENT_SIZES = {
     _BYTE: 1,
@@ -63,6 +67,59 @@ def write_gltf(asset: Asset, path: str | Path, *, options: GltfExportOptions | N
         output_path.write_bytes(_pack_glb(document, binary))
         return
     output_path.write_text(json.dumps(document, indent=2, sort_keys=False) + "\n", encoding="utf-8")
+
+
+def runtime_dependency_report(asset: Asset, options: GltfExportOptions | None = None) -> dict[str, object]:
+    opts = options or GltfExportOptions()
+    extensions_used: list[str] = []
+    extensions_required: list[str] = []
+    expected_support: dict[str, str] = {
+        _FASCAT_EXTRAS: "optional glTF extras; generic loaders may ignore Fascat metadata",
+    }
+    has_meshes = _has_exportable_meshes(asset)
+    if has_meshes and opts.quantize:
+        extensions_used.append(_KHR_MESH_QUANTIZATION)
+        extensions_required.append(_KHR_MESH_QUANTIZATION)
+        expected_support[_KHR_MESH_QUANTIZATION] = "required extension; runtime loader must support quantized accessors"
+    if has_meshes and opts.meshopt:
+        extensions_used.append(_EXT_MESHOPT_COMPRESSION)
+        expected_support[_EXT_MESHOPT_COMPRESSION] = (
+            "optional extension with fallback buffer data; decoder support enables compressed payload use"
+        )
+    if _has_exportable_lods(asset):
+        extensions_used.append(_MSFT_LOD)
+        expected_support[_MSFT_LOD] = "optional extension; runtimes without support can load LOD0 only"
+    return {
+        "extensions_used": extensions_used,
+        "extensions_required": extensions_required,
+        "extras": {
+            "fascat": True,
+            "metadata": opts.metadata.mode,
+            "pmi": opts.metadata.pmi,
+        },
+        "expected_runtime_support": expected_support,
+        "not_written": {
+            _KHR_DRACO_MESH_COMPRESSION: "unsupported; draco=True is rejected before export",
+            _KHR_TEXTURE_BASISU: "unsupported; texture_compression is rejected before export",
+        },
+    }
+
+
+def _has_exportable_meshes(asset: Asset) -> bool:
+    for part in asset.parts.values():
+        meshes = (part.mesh, *part.lod_meshes)
+        if any(mesh is not None and mesh.vertex_count > 0 for mesh in meshes):
+            return True
+    return False
+
+
+def _has_exportable_lods(asset: Asset) -> bool:
+    for part in asset.parts.values():
+        if part.mesh is None:
+            continue
+        if any(mesh.vertex_count > 0 and "lod_omitted" not in mesh.metadata for mesh in part.lod_meshes):
+            return True
+    return False
 
 
 def validate_gltf(path: str | Path) -> dict[str, int]:
@@ -599,7 +656,7 @@ def _apply_meshopt_compression(document: dict[str, Any], binary: bytes) -> bytes
         if not encoded:
             continue
         compressed_offset = _append_aligned(payload, encoded)
-        view.setdefault("extensions", {})["EXT_meshopt_compression"] = {
+        view.setdefault("extensions", {})[_EXT_MESHOPT_COMPRESSION] = {
             "buffer": 0,
             "byteOffset": compressed_offset,
             "byteLength": len(encoded),
@@ -609,7 +666,7 @@ def _apply_meshopt_compression(document: dict[str, Any], binary: bytes) -> bytes
         }
         compressed_views += 1
     if compressed_views:
-        _add_extension_used(document, "EXT_meshopt_compression")
+        _add_extension_used(document, _EXT_MESHOPT_COMPRESSION)
         buffers = _array(document.get("buffers"), "buffers")
         _object(buffers[0], "buffer 0")["byteLength"] = len(payload)
     return bytes(payload)

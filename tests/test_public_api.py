@@ -201,7 +201,9 @@ def test_functional_write_gltf_records_report_step(monkeypatch, tmp_path: Path) 
 
     assert calls == {"asset": asset, "path": output, "options": fc.GltfExportOptions()}
     assert step.name == "write"
-    assert step.options == {
+    options = dict(step.options)
+    runtime_dependencies = options.pop("runtime_dependencies")
+    assert options == {
         "format": "glTF",
         "quantize": False,
         "meshopt": False,
@@ -210,6 +212,8 @@ def test_functional_write_gltf_records_report_step(monkeypatch, tmp_path: Path) 
         "file_size_budget_mb": None,
         "metadata": {"mode": "full", "pmi": "metadata"},
     }
+    assert runtime_dependencies["extensions_used"] == []
+    assert runtime_dependencies["extras"] == {"fascat": True, "metadata": "full", "pmi": "metadata"}
     assert asset.report.finished_at is not None
 
 

@@ -64,9 +64,34 @@ def test_gltf_export_options_write_meshopt_extension_and_file_budget(tmp_path) -
     assert {view["mode"] for view in compressed_views} >= {"ATTRIBUTES", "TRIANGLES"}
     assert validate_gltf(output)["triangles"] == 1
     assert analyze_output(output).parts[0]["bounds"]["max"] == pytest.approx([1.0, 1.0, 0.0])
+    runtime_dependencies = asset.report.steps[-1].options["runtime_dependencies"]
+    assert runtime_dependencies["extensions_used"] == ["KHR_mesh_quantization", "EXT_meshopt_compression"]
+    assert runtime_dependencies["extensions_required"] == ["KHR_mesh_quantization"]
+    assert "EXT_meshopt_compression" in runtime_dependencies["expected_runtime_support"]
     assert asset.report.steps[-1].after["file_size_bytes"] > 0
     assert asset.report.steps[-1].after["file_size_budget_bytes"] == 1
     assert "file size budget exceeded" in asset.report.warnings[-1]
+
+
+def test_gltf_write_reports_lod_and_metadata_runtime_dependencies(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    asset = _asset()
+    part = asset.parts["tri"]
+    assert part.mesh is not None
+    part.lod_meshes = [part.mesh.copy()]
+    output = tmp_path / "triangle_lod.gltf"
+
+    asset.write_gltf(output, options=GltfExportOptions(quantize=True))
+
+    document = json.loads(output.read_text(encoding="utf-8"))
+    runtime_dependencies = asset.report.steps[-1].options["runtime_dependencies"]
+
+    assert "MSFT_lod" in document["extensionsUsed"]
+    assert runtime_dependencies["extensions_used"] == ["KHR_mesh_quantization", "MSFT_lod"]
+    assert runtime_dependencies["extensions_required"] == ["KHR_mesh_quantization"]
+    assert runtime_dependencies["extras"] == {"fascat": True, "metadata": "full", "pmi": "metadata"}
+    assert "extras.fascat" in runtime_dependencies["expected_runtime_support"]
+    assert runtime_dependencies["not_written"]["KHR_draco_mesh_compression"].startswith("unsupported")
+    assert runtime_dependencies["not_written"]["KHR_texture_basisu"].startswith("unsupported")
 
 
 def test_obj_export_writes_mesh_and_mtl_sidecar(tmp_path) -> None:  # type: ignore[no-untyped-def]
