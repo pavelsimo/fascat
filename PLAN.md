@@ -94,6 +94,9 @@ that are currently conservative approximations.
   dry-run output, and conversion report budget checks.
 - Custom target-device triangle budgets now seed the profile optimization target
   and derive a matching vertex budget when one is not provided.
+- Custom target-device budgets now record supported compression methods and
+  runtime glTF extension caps, and profile budget reports warn when emitted
+  runtime dependencies exceed those caps.
 - Conversion reports now include a resolved conversion manifest with the
   effective profile, import options, direct or pipeline operation settings, and
   export settings needed to reproduce a run.
@@ -132,6 +135,17 @@ Comparison snapshot:
 | LODs | LOD ratios, screen-coverage metadata, validation, skipped-part reporting, and glTF `MSFT_lod` metadata. | Occurrence-level LOD group authoring with preserved instance relationships, optimized LOD0 as master asset, far-LOD one-mesh/one-material baking, switching-distance validation, and engine-specific runtime export profiles. |
 | Export | USD/USDZ, glTF/GLB, OBJ, STL, glTF quantization, meshopt, extension reporting, file-size budgets, and rejection of unsupported Draco/KTX2 requests. | Real Draco compression settings, KTX2/Basis texture output, texture resize and PNG/JPEG fallback controls, unused texture cleanup, baseline-versus-optimized size comparisons, Unity/glTFast-oriented profiles, and web/mobile/VR/XR budget presets backed by runtime measurements. |
 
+Function-level parity notes from the linked Unity pages:
+
+| Unity reference | Fascat today | Gap to track |
+| --- | --- | --- |
+| Tessellate models | Sag, sag-ratio, angle, max-polygon-length, per-part overrides, and size-adaptive helpers are represented. | Add CAD-derived UV modes, optional free-edge geometry output, and material/metadata/curvature-driven tessellation profiles. |
+| Repair meshes | Duplicate and degenerate cleanup plus T-junction, boundary-gap, non-manifold, and orientation diagnostics are reported. | Implement true T-junction sewing, boundary stitching, non-manifold edge cracking, and explicit face/normal orientation strategies. |
+| Merge vertices | Vertex merging exists inside mesh repair. | Expose a standalone attribute-aware `merge_vertices` operation across Python, CLI, and TOML with seam/material/normal protection and before/after reports. |
+| Delete degenerate polygons | Degenerate deletion exists inside mesh repair. | Expose a standalone degenerate-polygon cleanup operation with area/tolerance controls, selection support, and reportable no-op behavior. |
+| Decimate to target | Target count, ratio, UV-importance modes, topology intent, RAM estimates, and measured-error reports exist. | Add real global target allocation, configurable iterative thresholds/pass reports, enforced geometric error bounds, and AO/user-weighted decimation. |
+| Unwrap UV | UV0/UV1 unwrap intent, solver method, iteration, tolerance, distortion, and packing diagnostics are represented. | Add destination-channel control, create-seams-from-lines-of-interest, seam graph metadata, island merge/alignment, and real repack/padding/share-map controls. |
+
 Second-pass gaps from the Unity references:
 
 - Distinguish UV unwrapping from bake-ready UV packing everywhere. Unity's
@@ -144,6 +158,9 @@ Second-pass gaps from the Unity references:
 - Make decimation memory planning explicit: estimate RAM from polygon count,
   report when iterative decimation should be used, and explain how a global
   target is allocated across parts so sparse walls/simple parts stay intact.
+- Turn decimation memory planning into runtime controls, not just diagnostics:
+  expose `iterative_threshold` and report actual pass counts for very large
+  assemblies.
 - Use Unity's broad desktop, mobile, VR, and WebGL ranges as report context
   when tuning future target-device presets and measured runtime profiles.
 - Add export comparison reports that show unoptimized GLB, optimized GLB,
@@ -164,6 +181,10 @@ Second-pass gaps from the Unity references:
   optionally creating seams from LoI, unwrapping, merging, aligning, repacking,
   and normalizing should be modeled as distinct UV steps with per-channel
   metadata.
+- Expose Unity-style function-level repair steps where useful. `repair` can stay
+  the high-level default, but `merge_vertices`, `delete_degenerate_polygons`,
+  face orientation, normal orientation, and patch cleanup need standalone
+  operations for reproducible expert pipelines.
 - Add an export-aware merge-versus-instance advisor. Unity's export guidance
   favors preserving instances for file size even when merging can reduce draw
   calls, so Fascat should warn when a merge helps batching but hurts GLB size,
@@ -287,8 +308,8 @@ Parity gaps to track:
    - Desktop, WebGL/web, mobile, and VR profiles now include documented target-FPS, triangle, vertex, per-mesh vertex/index-buffer, texture-resolution, texture-memory, estimated load-time, and draw-call budgets.
    - Conversion reports now include a `profile_budget` step for selected-profile budget status and warnings when output exceeds profile triangle, vertex, per-mesh vertex/index-buffer, texture-resolution, texture-memory, estimated load-time, or draw-call budgets.
    - Profile budgets now include explicit Unity reference ranges for each broad profile so users can see how Fascat's stricter defaults compare with Unity's desktop, mobile, VR, and WebGL guideline ranges.
-   - Augmented-reality and mixed-reality profiles now model stricter AR/XR device caps; remaining work is custom target-device overrides beyond built-in profiles.
-   - Custom target-device profiles can now be loaded from TOML/JSON as budget overlays and surfaced in reports with resolved FPS, triangle, vertex, draw-call, texture, and load-time caps. Remaining work: add compression-support and runtime-extension caps.
+   - Augmented-reality and mixed-reality profiles now model stricter AR/XR device caps, and custom target-device overrides are supported through profile files.
+   - Custom target-device profiles can now be loaded from TOML/JSON as budget overlays and surfaced in reports with resolved FPS, triangle, vertex, draw-call, texture, load-time, compression-support, and runtime-extension caps.
    - Custom target-device triangle budgets now seed profile optimization targets instead of only warning after conversion. Remaining work: use selected platform budgets to seed explicit decimation defaults, LOD choices, texture-resize choices, and export-compression defaults.
    - The platform-budget checklist is complete at diagnostic-report level; future work is measured engine/runtime load profiling.
 

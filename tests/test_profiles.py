@@ -247,6 +247,8 @@ name = "factory-tablet-ar"
 target_fps = 60
 max_triangles = 42000
 max_texture_resolution = 512
+supported_compression = ["meshopt"]
+supported_runtime_extensions = ["KHR_mesh_quantization", "EXT_meshopt_compression"]
 unity_reference_profile = "tablet-ar"
 unity_reference_triangles = [30000, 60000]
 """,
@@ -264,6 +266,8 @@ unity_reference_triangles = [30000, 60000]
     assert profile.budget.max_vertices == 126_000
     assert profile.budget.max_texture_resolution == 512
     assert profile.budget.max_draw_calls == 250
+    assert profile.budget.supported_compression == ("meshopt",)
+    assert profile.budget.supported_runtime_extensions == ("KHR_mesh_quantization", "EXT_meshopt_compression")
     assert profile.budget.unity_reference_profile == "tablet-ar"
     assert profile.budget.unity_reference_triangles == (30_000, 60_000)
 
@@ -271,7 +275,17 @@ unity_reference_triangles = [30000, 60000]
 def test_target_device_profile_from_json_overlays_base_budget(tmp_path: Path) -> None:
     profile_file = tmp_path / "headset.json"
     profile_file.write_text(
-        json.dumps({"name": "warehouse-headset", "budget": {"max_draw_calls": 80, "max_load_time_ms": 900}}),
+        json.dumps(
+            {
+                "name": "warehouse-headset",
+                "budget": {
+                    "max_draw_calls": 80,
+                    "max_load_time_ms": 900,
+                    "supported_compression": ["quantization"],
+                    "supported_runtime_extensions": ["KHR_mesh_quantization"],
+                },
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -285,6 +299,8 @@ def test_target_device_profile_from_json_overlays_base_budget(tmp_path: Path) ->
     assert profile.budget.max_vertices == 225_000
     assert profile.budget.max_draw_calls == 80
     assert profile.budget.max_load_time_ms == 900
+    assert profile.budget.supported_compression == ("quantization",)
+    assert profile.budget.supported_runtime_extensions == ("KHR_mesh_quantization",)
 
 
 @pytest.mark.parametrize(
@@ -378,6 +394,16 @@ def test_size_adaptive_tessellation_requires_bands() -> None:
         (lambda: fc.PlatformBudget(unity_reference_triangles=(0, 1)), "unity_reference_triangles"),
         (lambda: fc.PlatformBudget(unity_reference_triangles=(2, 1)), "unity_reference_triangles"),
         (lambda: fc.PlatformBudget(unity_reference_draw_calls=0), "unity_reference_draw_calls"),
+        (lambda: fc.PlatformBudget(supported_compression="meshopt"), "supported_compression"),
+        (lambda: fc.PlatformBudget(supported_compression=("meshopt", "")), "supported_compression"),
+        (
+            lambda: fc.PlatformBudget(supported_runtime_extensions="KHR_mesh_quantization"),
+            "supported_runtime_extensions",
+        ),
+        (
+            lambda: fc.PlatformBudget(supported_runtime_extensions=("KHR_mesh_quantization", "")),
+            "supported_runtime_extensions",
+        ),
         (lambda: fc.RepairOptions(tolerance=-1), "tolerance"),
         (lambda: fc.RepairOptions(area_epsilon=-1), "area_epsilon"),
         (lambda: fc.StageOptions(materials="bad"), "materials"),

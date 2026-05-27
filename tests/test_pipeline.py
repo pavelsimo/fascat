@@ -967,6 +967,8 @@ def test_convert_report_checks_profile_budget(monkeypatch, tmp_path: Path) -> No
         "max_texture_memory_mb": 1,
         "max_load_time_ms": 1,
         "max_draw_calls": 1,
+        "supported_compression": [],
+        "supported_runtime_extensions": [],
         "unity_reference_profile": "test-platform",
         "unity_reference_triangles": [100, 200],
         "unity_reference_draw_calls": 3,
@@ -1015,6 +1017,49 @@ def test_convert_report_checks_profile_budget(monkeypatch, tmp_path: Path) -> No
         "profile budget exceeded for strict: estimated load time 673ms > 1ms",
     ]
     assert converted.report.warnings[-5:] == budget_step.warnings
+
+
+def test_convert_report_checks_profile_runtime_caps(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.pipeline as pipeline
+
+    profile = ConversionProfile(
+        name="web-cap",
+        tessellation=None,
+        repair=RepairOptions(),
+        stage=StageOptions(uv0="none", uv1=None),
+        optimize=None,
+        lods=None,
+        budget=PlatformBudget(
+            supported_compression=("quantization",),
+            supported_runtime_extensions=("KHR_mesh_quantization",),
+        ),
+    )
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr(pipeline, "_write_gltf", lambda _asset, _path, *, options=None: None)
+
+    converted = convert(
+        "input.step",
+        tmp_path / "output.glb",
+        profile=profile,
+        validate_output=False,
+        gltf_options=GltfExportOptions(quantize=True, meshopt=True),
+    )
+    budget_step = converted.report.steps[-1]
+
+    assert budget_step.name == "profile_budget"
+    assert budget_step.options["supported_compression"] == ["quantization"]
+    assert budget_step.options["supported_runtime_extensions"] == ["KHR_mesh_quantization"]
+    assert budget_step.after["profile_supported_compression_count"] == 1
+    assert budget_step.after["profile_emitted_compression_count"] == 2
+    assert budget_step.after["profile_unsupported_compression_count"] == 1
+    assert budget_step.after["profile_supported_runtime_extension_count"] == 1
+    assert budget_step.after["profile_emitted_runtime_extension_count"] == 2
+    assert budget_step.after["profile_unsupported_runtime_extension_count"] == 1
+    assert budget_step.after["profile_budget_violations"] == 2
+    assert budget_step.warnings == [
+        "profile budget exceeded for web-cap: runtime compression uses unsupported method(s): meshopt",
+        "profile budget exceeded for web-cap: runtime extensions exceed target cap: EXT_meshopt_compression",
+    ]
 
 
 def test_convert_report_finishes_when_validation_is_disabled(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]

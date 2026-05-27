@@ -78,6 +78,17 @@ def _validate_part_settings(part_settings: dict[str, dict[str, object]]) -> None
             raise ValueError(f"unsupported part_settings keys: {names}")
 
 
+def _normalize_string_tuple(value: object, field_name: str) -> tuple[str, ...]:
+    if isinstance(value, str) or not isinstance(value, (list, tuple)):
+        raise ValueError(f"{field_name} must be a sequence of non-empty strings")
+    items: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"{field_name} values must be non-empty strings")
+        items.append(item.strip())
+    return tuple(dict.fromkeys(items))
+
+
 @dataclass(frozen=True)
 class Tessellation:
     sag: float = 0.1
@@ -772,11 +783,23 @@ class PlatformBudget:
     max_texture_memory_mb: int | None = None
     max_load_time_ms: int | None = None
     max_draw_calls: int | None = None
+    supported_compression: tuple[str, ...] = ()
+    supported_runtime_extensions: tuple[str, ...] = ()
     unity_reference_profile: str | None = None
     unity_reference_triangles: tuple[int, int] | None = None
     unity_reference_draw_calls: int | None = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "supported_compression",
+            _normalize_string_tuple(self.supported_compression, "supported_compression"),
+        )
+        object.__setattr__(
+            self,
+            "supported_runtime_extensions",
+            _normalize_string_tuple(self.supported_runtime_extensions, "supported_runtime_extensions"),
+        )
         if self.unity_reference_triangles is not None:
             reference_triangles = tuple(int(value) for value in self.unity_reference_triangles)
             object.__setattr__(self, "unity_reference_triangles", reference_triangles)
@@ -811,6 +834,8 @@ class PlatformBudget:
 
     def to_dict(self) -> dict[str, object]:
         data = asdict(self)
+        data["supported_compression"] = list(self.supported_compression)
+        data["supported_runtime_extensions"] = list(self.supported_runtime_extensions)
         if self.unity_reference_triangles is not None:
             data["unity_reference_triangles"] = list(self.unity_reference_triangles)
         return data

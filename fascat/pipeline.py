@@ -55,6 +55,12 @@ ExportFormat = Literal["usd", "gltf", "obj", "stl"]
 _LOAD_ESTIMATE_BYTES_PER_MS = 50_000
 _LOAD_ESTIMATE_VERTEX_BYTES = 32
 _LOAD_ESTIMATE_TRIANGLE_INDEX_BYTES = 12
+_RUNTIME_COMPRESSION_BY_EXTENSION = {
+    "KHR_mesh_quantization": "quantization",
+    "EXT_meshopt_compression": "meshopt",
+    "KHR_draco_mesh_compression": "draco",
+    "KHR_texture_basisu": "basisu",
+}
 
 
 def convert(
@@ -830,11 +836,69 @@ def _add_profile_budget_report(asset: Asset, profile: ConversionProfile) -> None
                 0,
                 budget.max_draw_calls - budget.unity_reference_draw_calls,
             )
+    runtime_dependencies = _runtime_dependencies_from_report(asset)
+    emitted_extensions = _runtime_dependency_extensions(runtime_dependencies)
+    emitted_compression = _runtime_compression_methods(emitted_extensions)
+    if budget.supported_compression:
+        unsupported_compression = sorted(set(emitted_compression) - set(budget.supported_compression))
+        after["profile_supported_compression_count"] = len(budget.supported_compression)
+        after["profile_emitted_compression_count"] = len(emitted_compression)
+        after["profile_unsupported_compression_count"] = len(unsupported_compression)
+        if unsupported_compression:
+            violations += 1
+            warnings.append(
+                f"profile budget exceeded for {profile.name}: runtime compression uses unsupported method(s): "
+                f"{', '.join(unsupported_compression)}"
+            )
+    if budget.supported_runtime_extensions:
+        unsupported_extensions = sorted(set(emitted_extensions) - set(budget.supported_runtime_extensions))
+        after["profile_supported_runtime_extension_count"] = len(budget.supported_runtime_extensions)
+        after["profile_emitted_runtime_extension_count"] = len(emitted_extensions)
+        after["profile_unsupported_runtime_extension_count"] = len(unsupported_extensions)
+        if unsupported_extensions:
+            violations += 1
+            warnings.append(
+                f"profile budget exceeded for {profile.name}: runtime extensions exceed target cap: "
+                f"{', '.join(unsupported_extensions)}"
+            )
 
     after["profile_budget_violations"] = violations
     for warning in warnings:
         asset.report.add_warning(warning)
     asset.report.add_step("profile_budget", options=options, before=before, after=after, warnings=warnings)
+
+
+def _runtime_dependencies_from_report(asset: Asset) -> Mapping[str, object] | None:
+    for step in reversed(asset.report.steps):
+        if step.name != "write":
+            continue
+        runtime_dependencies = step.options.get("runtime_dependencies")
+        if isinstance(runtime_dependencies, Mapping):
+            return runtime_dependencies
+    return None
+
+
+def _runtime_dependency_extensions(runtime_dependencies: Mapping[str, object] | None) -> tuple[str, ...]:
+    if runtime_dependencies is None:
+        return ()
+    extensions: list[str] = []
+    for key in ("extensions_used", "extensions_required"):
+        values = runtime_dependencies.get(key)
+        if not isinstance(values, (list, tuple)):
+            continue
+        for value in values:
+            if isinstance(value, str) and value not in extensions:
+                extensions.append(value)
+    return tuple(extensions)
+
+
+def _runtime_compression_methods(extensions: tuple[str, ...]) -> tuple[str, ...]:
+    methods: list[str] = []
+    for extension in extensions:
+        method = _RUNTIME_COMPRESSION_BY_EXTENSION.get(extension)
+        if method is not None and method not in methods:
+            methods.append(method)
+    return tuple(methods)
 
 
 def _add_workflow_summary_report(asset: Asset, output_format: ExportFormat, write_options: dict[str, object]) -> None:

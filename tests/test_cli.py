@@ -294,6 +294,8 @@ name = "phone-ar-low"
 [budget]
 max_triangles = 42000
 max_texture_resolution = 512
+supported_compression = ["meshopt"]
+supported_runtime_extensions = ["KHR_mesh_quantization", "EXT_meshopt_compression"]
 """,
         encoding="utf-8",
     )
@@ -322,6 +324,11 @@ max_texture_resolution = 512
     assert payload["profile_options"]["budget"]["max_vertices"] == 126_000
     assert payload["profile_options"]["budget"]["max_texture_resolution"] == 512
     assert payload["profile_options"]["budget"]["max_draw_calls"] == 250
+    assert payload["profile_options"]["budget"]["supported_compression"] == ["meshopt"]
+    assert payload["profile_options"]["budget"]["supported_runtime_extensions"] == [
+        "KHR_mesh_quantization",
+        "EXT_meshopt_compression",
+    ]
     assert payload["profile_options"]["optimize"]["target_triangles"] == 42_000
 
 

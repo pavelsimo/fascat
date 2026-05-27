@@ -30,6 +30,8 @@ _BUDGET_FILE_KEYS = frozenset(
         "max_texture_memory_mb",
         "max_load_time_ms",
         "max_draw_calls",
+        "supported_compression",
+        "supported_runtime_extensions",
         "unity_reference_profile",
         "unity_reference_triangles",
         "unity_reference_draw_calls",
