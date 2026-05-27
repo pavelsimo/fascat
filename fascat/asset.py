@@ -709,12 +709,12 @@ class Asset:
         return _OperationScope(asset=scoped_asset, selected_part_ids=selected_part_ids, selection=selection)
 
     def _isolate_selected_occurrences(self, selected_node_ids: set[str]) -> Asset:
-        asset = self.copy(keep_source=True)
-        occurrences: dict[str, list[Node]] = {}
-        for node in asset.root.walk():
-            if node.part_id is not None and node.part_id in asset.parts:
-                occurrences.setdefault(node.part_id, []).append(node)
+        occurrences = _occurrences_by_part(self)
+        if not _needs_occurrence_isolation(occurrences, selected_node_ids):
+            return self
 
+        asset = self.copy(keep_source=True)
+        occurrences = _occurrences_by_part(asset)
         for part_id, nodes in occurrences.items():
             selected_nodes = [node for node in nodes if node.id in selected_node_ids]
             if not selected_nodes or len(selected_nodes) == len(nodes):
@@ -776,3 +776,19 @@ def _unique_part_id(parts: dict[str, Part], base: str) -> str:
         candidate = f"{base}_selected_{suffix}"
         suffix += 1
     return candidate
+
+
+def _occurrences_by_part(asset: Asset) -> dict[str, list[Node]]:
+    occurrences: dict[str, list[Node]] = {}
+    for node in asset.root.walk():
+        if node.part_id is not None and node.part_id in asset.parts:
+            occurrences.setdefault(node.part_id, []).append(node)
+    return occurrences
+
+
+def _needs_occurrence_isolation(occurrences: dict[str, list[Node]], selected_node_ids: set[str]) -> bool:
+    for nodes in occurrences.values():
+        selected_count = sum(1 for node in nodes if node.id in selected_node_ids)
+        if selected_count and selected_count != len(nodes):
+            return True
+    return False

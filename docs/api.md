@@ -132,7 +132,7 @@ asset = asset.stage(
 )
 ```
 
-Filters support node path, node name, part id, part name, material, metadata, bounding box, size, triangle count, vertex count, and logical `all`, `any`, and `not_` composition. If a selected occurrence shares a part with an unmatched occurrence, Fascat duplicates the selected occurrence's part before applying the operation so the unmatched branch stays intact. Report steps include `where` and `matched` fields when an operation is scoped.
+Filters support node path, node name, part id, part name, material, metadata, bounding box, size, triangle count, vertex count, and logical `all`, `any`, and `not_` composition. If a selected occurrence shares a part with an unmatched occurrence, Fascat duplicates the selected occurrence's part before applying the operation so the unmatched branch stays intact. The scope planner skips that isolation copy when the selection already maps cleanly to whole unique parts. Report steps include `where` and `matched` fields when an operation is scoped.
 
 Filter parameters:
 

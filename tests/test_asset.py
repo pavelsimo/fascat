@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from fascat.asset import Asset, Node, Part
+from fascat.filter import Filter
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.report import Report, ReportStep
@@ -194,6 +195,65 @@ def test_asset_copies_report_on_construction() -> None:
 
     assert asset.report.warnings == ["outside"]
     assert asset.report.input_stats == {"parts": 1}
+
+
+def _scoped_asset() -> Asset:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    return Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="unique_node", name="Unique", part_id="unique"),
+                Node(id="shared_a", name="Shared A", part_id="shared"),
+                Node(id="shared_b", name="Shared B", part_id="shared"),
+            ],
+        ),
+        parts={
+            "unique": Part(id="unique", name="Unique", mesh=mesh),
+            "shared": Part(id="shared", name="Shared", mesh=mesh),
+        },
+    )
+
+
+def test_operation_scope_skips_asset_copy_when_selection_does_not_split_occurrences(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asset = _scoped_asset()
+    calls = 0
+    original_copy = Asset.copy
+
+    def spy_copy(target: Asset, *, keep_source: bool = True) -> Asset:
+        nonlocal calls
+        calls += 1
+        return original_copy(target, keep_source=keep_source)
+
+    monkeypatch.setattr(Asset, "copy", spy_copy)
+
+    scope = asset._operation_scope(Filter.part("unique"))
+
+    assert scope.asset is asset
+    assert scope.selected_part_ids == {"unique"}
+    assert calls == 0
+
+
+def test_operation_scope_copies_only_when_selection_splits_shared_occurrences() -> None:
+    asset = _scoped_asset()
+
+    scope = asset._operation_scope(Filter.name("Shared A"))
+
+    selected_node = next(node for node in scope.asset.root.walk() if node.id == "shared_a")
+    unselected_node = next(node for node in scope.asset.root.walk() if node.id == "shared_b")
+
+    assert scope.asset is not asset
+    assert selected_node.part_id == "shared_selected"
+    assert unselected_node.part_id == "shared"
+    assert scope.selected_part_ids == {"shared_selected"}
+    assert scope.asset.parts["shared_selected"].metadata["source_part_id"] == "shared"
+    assert next(node for node in asset.root.walk() if node.id == "shared_a").part_id == "shared"
 
 
 def test_report_summary_and_json_output(tmp_path: Path) -> None:

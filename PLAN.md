@@ -192,10 +192,10 @@ These need more design and should not be mixed into documentation or diagnostics
    - glTF and USD exporters keep PMI as metadata records for now and resolve links through `source_part_id` / `source_part_ids` after merge, explode, or replace operations.
    - Remaining polish: implement typed AP242 PMI entity extraction and visual annotation geometry for `metadata_and_visuals`.
 
-7. Large assembly scaling
-   - Reduce full-asset copying in operations that only touch selected parts.
-   - Add memory and time benchmarks for large assemblies.
-   - Consider streaming or lazy mesh payloads for heavy STEP imports.
+7. Large assembly scaling - first scoped-copy pass complete
+   - Filtered operations now skip occurrence-isolation asset copies when the selection already maps cleanly to whole unique parts.
+   - Shared repeated parts are still copied only when a selected occurrence must be isolated from unmatched occurrences.
+   - Remaining polish: reduce the operation-level full copy for selected part edits, add memory/time benchmarks, and consider streaming or lazy mesh payloads for heavy STEP imports.
 
 8. Runtime compression
    - Add a real Draco backend only if there is a reliable Python encoder path.
