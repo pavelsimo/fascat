@@ -564,6 +564,7 @@ class DecimateOptions:
     preserve_painted_areas: bool = False
     budget_scope: BudgetScope = "selection"
     uv_importance: DecimateUVImportance = "preserve_islands"
+    iterative_threshold: int = 1_000_000
 
     def __post_init__(self) -> None:
         if self.criterion not in {"target", "quality"}:
@@ -572,6 +573,8 @@ class DecimateOptions:
             raise ValueError("target_triangles must be greater than 0 when set")
         if self.target_ratio is not None and (self.target_ratio <= 0.0 or self.target_ratio >= 1.0):
             raise ValueError("target_ratio must be greater than 0 and less than 1 when set")
+        if self.iterative_threshold <= 0:
+            raise ValueError("iterative_threshold must be greater than 0")
         for name, value in {
             "surface_tolerance": self.surface_tolerance,
             "line_tolerance": self.line_tolerance,

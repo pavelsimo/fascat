@@ -949,6 +949,13 @@ def cmd_convert(
         float | None,
         typer.Option("--uv-tolerance", help="UV deviation tolerance metadata for decimation."),
     ] = None,
+    decimate_iterative_threshold: Annotated[
+        int,
+        typer.Option(
+            "--decimate-iterative-threshold",
+            help="Source triangle threshold above which explicit decimation runs intermediate passes.",
+        ),
+    ] = 1_000_000,
     protect_topology: Annotated[
         bool,
         typer.Option("--protect-topology/--no-protect-topology", help="Preserve topology-sensitive faces."),
@@ -1230,6 +1237,7 @@ def cmd_convert(
         "line_tolerance": line_tolerance,
         "normal_tolerance": normal_tolerance,
         "uv_tolerance": uv_tolerance,
+        "decimate_iterative_threshold": decimate_iterative_threshold,
         "protect_topology": protect_topology,
         "budget_scope": budget_scope.value,
         "uv_importance": uv_importance.value,
@@ -1629,6 +1637,7 @@ def cmd_convert(
                 line_tolerance=line_tolerance,
                 normal_tolerance=normal_tolerance,
                 uv_tolerance=uv_tolerance,
+                iterative_threshold=decimate_iterative_threshold,
                 protect_topology=protect_topology,
                 budget_scope=budget_scope.value,
                 uv_importance=cast(Any, uv_importance.value.replace("-", "_")),

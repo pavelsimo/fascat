@@ -191,30 +191,48 @@ def test_decimate_uses_selection_budget() -> None:
     assert decimated.metadata["decimate_memory_rule_gb_per_million_triangles"] == "5"
     assert decimated.metadata["decimate_iterative_threshold_triangles"] == "1000000"
     assert decimated.metadata["decimate_iterative_recommended"] == "false"
+    assert decimated.metadata["decimate_simplification_passes"] == "1"
+    assert decimated.metadata["decimate_iterative_passes"] == "0"
+    assert decimated.metadata["decimate_max_part_simplification_passes"] == "1"
     assert decimated.report.steps[-1].after["decimate_source_triangles"] == 6
     assert decimated.report.steps[-1].after["decimate_output_triangles"] == 3
     assert decimated.report.steps[-1].after["decimate_estimated_memory_bytes"] == 30_000
     assert decimated.report.steps[-1].after["decimate_iterative_threshold_triangles"] == 1_000_000
     assert decimated.report.steps[-1].after["decimate_iterative_recommended"] == 0
+    assert decimated.report.steps[-1].after["decimate_simplification_passes"] == 1
+    assert decimated.report.steps[-1].after["decimate_iterative_passes"] == 0
     assert decimated.parts["body"].metadata["decimate_error_metric"] == "symmetric_vertex_nearest_distance"
 
 
-def test_decimate_warns_when_iterative_memory_threshold_is_exceeded(monkeypatch: pytest.MonkeyPatch) -> None:
-    import fascat.ops.actions as actions
+def test_decimate_iterative_threshold_controls_runtime_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    targets: list[int] = []
 
-    monkeypatch.setattr(actions, "_DECIMATION_ITERATIVE_THRESHOLD_TRIANGLES", 6)
+    def fake_simplify(self: Mesh, *, target_triangles: int | None = None, **_kwargs: object) -> Mesh:
+        assert target_triangles is not None
+        targets.append(target_triangles)
+        return _triangle_strip(target_triangles)
+
+    monkeypatch.setattr(Mesh, "simplify", fake_simplify)
     asset = Asset(
         root=Node(id="root", name="root", children=[Node(id="body", name="Body", part_id="body")]),
         parts={"body": Part(id="body", name="Body", mesh=_triangle_strip(6))},
     )
 
-    decimated = asset.decimate(DecimateOptions(target_triangles=3, target_ratio=None))
+    decimated = asset.decimate(DecimateOptions(target_triangles=3, target_ratio=None, iterative_threshold=5))
     warnings = decimated.report.steps[-1].warnings
 
+    assert targets == [5, 3]
     assert decimated.metadata["decimate_iterative_recommended"] == "true"
+    assert decimated.metadata["decimate_iterative_threshold_triangles"] == "5"
+    assert decimated.metadata["decimate_simplification_passes"] == "2"
+    assert decimated.metadata["decimate_iterative_passes"] == "1"
+    assert decimated.parts["body"].metadata["decimate_simplification_passes"] == "2"
+    assert decimated.parts["body"].metadata["decimate_iterative_passes"] == "1"
     assert decimated.report.steps[-1].after["decimate_iterative_recommended"] == 1
-    assert decimated.report.steps[-1].after["decimate_iterative_threshold_triangles"] == 6
-    assert any("iterative decimation is recommended above 6 triangles" in warning for warning in warnings)
+    assert decimated.report.steps[-1].after["decimate_iterative_threshold_triangles"] == 5
+    assert decimated.report.steps[-1].after["decimate_simplification_passes"] == 2
+    assert decimated.report.steps[-1].after["decimate_iterative_passes"] == 1
+    assert any("iterative decimation is recommended at or above 5 triangles" in warning for warning in warnings)
 
 
 def test_decimate_warns_when_lod0_ratio_is_aggressive() -> None:
@@ -612,6 +630,8 @@ def test_cli_convert_accepts_optimization_action_options_during_dry_run() -> Non
             "15",
             "--uv-tolerance",
             "0.01",
+            "--decimate-iterative-threshold",
+            "500",
             "--budget-scope",
             "selection",
             "--uv-importance",
@@ -653,6 +673,7 @@ def test_cli_convert_accepts_optimization_action_options_during_dry_run() -> Non
     assert payload["bake"] == ["base_color", "opacity"]
     assert payload["decimate"] is True
     assert payload["uv_importance"] == "ignore"
+    assert payload["decimate_iterative_threshold"] == 500
     assert payload["remove_holes"] is True
     assert payload["remove_occluded"] is True
     assert payload["run_lod_generators"] is True

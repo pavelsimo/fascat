@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import math
 import struct
 import zlib
 from dataclasses import dataclass
@@ -18,7 +19,6 @@ from fascat.options import (
     DecimateOptions,
     LODGeneratorOptions,
     LODOptions,
-    OptimizeOptions,
     RemoveHolesOptions,
     RemoveOccludedOptions,
 )
@@ -27,7 +27,6 @@ FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int64]
 
 _AGGRESSIVE_LOD0_RATIO = 0.2
-_DECIMATION_ITERATIVE_THRESHOLD_TRIANGLES = 1_000_000
 _DECIMATION_MEMORY_BYTES_PER_MILLION_TRIANGLES = 5_000_000_000
 _DECIMATION_MEMORY_GB_PER_MILLION_TRIANGLES = 5.0
 
@@ -100,24 +99,11 @@ def decimate_asset(
 ) -> Asset:
     source_meshes = _source_meshes(asset, selected_part_ids)
     working_asset = _prepare_decimation_asset(asset, options, selected_part_ids)
+    pass_counts: dict[str, _DecimationPassCount] = {}
     if options.budget_scope == "selection":
-        from fascat.ops.optimize import optimize_asset
-
-        result = optimize_asset(
+        result, pass_counts = _decimate_selection_budget(
             working_asset,
-            OptimizeOptions(
-                target_triangles=options.target_triangles,
-                ratio=_decimate_ratio(options),
-                preserve_instances=True,
-                simplify=True,
-                optimize_buffers=True,
-                preserve_hard_edges=True,
-                hard_edge_angle=options.normal_tolerance,
-                preserve_holes=options.protect_topology,
-                preserve_material_boundaries=True,
-                preserve_uv_seams=_preserve_uv_seams(options),
-                preserve_silhouette=options.protect_topology,
-            ),
+            options,
             selected_part_ids=selected_part_ids,
         )
         _warn_aggressive_lod0_decimation(result, source_meshes, options)
@@ -125,7 +111,13 @@ def decimate_asset(
             result.report.add_warning(_quality_decimation_warning())
         _enforce_triangle_budget(result, options, selected_part_ids=selected_part_ids)
         _finalize_decimation_uv_importance(result, options, selected_part_ids=selected_part_ids)
-        _annotate_decimation_result(result, source_meshes, options, selected_part_ids=selected_part_ids)
+        _annotate_decimation_result(
+            result,
+            source_meshes,
+            options,
+            selected_part_ids=selected_part_ids,
+            pass_counts=pass_counts,
+        )
         return result
 
     result = working_asset.copy(keep_source=True)
@@ -141,16 +133,13 @@ def decimate_asset(
         target = options.target_triangles
         if target is not None:
             target = min(target, part.mesh.triangle_count)
-        mesh = part.mesh.simplify(
+        mesh, counts = _simplify_mesh_for_decimation(
+            part.mesh,
+            options,
             target_triangles=target,
             ratio=None if target is not None else ratio,
-            preserve_hard_edges=True,
-            hard_edge_angle=options.normal_tolerance,
-            preserve_holes=options.protect_topology,
-            preserve_material_boundaries=True,
-            preserve_uv_seams=_preserve_uv_seams(options),
-            preserve_silhouette=options.protect_topology,
         )
+        pass_counts[part.id] = counts
         mesh = mesh.optimize_buffers().repair()
         target_budget = target if target is not None else _ratio_target(part.mesh, ratio)
         if target_budget is not None and mesh.triangle_count > target_budget:
@@ -165,7 +154,13 @@ def decimate_asset(
         mesh.validate()
         part.mesh = mesh
         part.fingerprint = mesh.fingerprint()
-    _annotate_decimation_result(result, source_meshes, options, selected_part_ids=selected_part_ids)
+    _annotate_decimation_result(
+        result,
+        source_meshes,
+        options,
+        selected_part_ids=selected_part_ids,
+        pass_counts=pass_counts,
+    )
     return result
 
 
@@ -497,6 +492,108 @@ def _prepare_decimation_asset(
     return result
 
 
+def _decimate_selection_budget(
+    asset: Asset,
+    options: DecimateOptions,
+    *,
+    selected_part_ids: set[str] | None,
+) -> tuple[Asset, dict[str, _DecimationPassCount]]:
+    from fascat.ops.optimize import _selected_triangle_count, _targets_for_parts
+
+    result = asset.copy(keep_source=True)
+    total_triangles = _selected_triangle_count(result.parts, selected_part_ids)
+    targets = _targets_for_parts(
+        result.parts,
+        total_triangles,
+        options.target_triangles,
+        selected_part_ids=selected_part_ids,
+    )
+    if targets is not None and sum(targets.values()) > (options.target_triangles or 0):
+        result.report.add_warning(
+            "target_triangles is lower than the number of non-empty unique meshes; using one triangle per mesh"
+        )
+
+    ratio = _decimate_ratio(options)
+    pass_counts: dict[str, _DecimationPassCount] = {}
+    for part in result.parts.values():
+        if selected_part_ids is not None and part.id not in selected_part_ids:
+            continue
+        if part.mesh is None:
+            continue
+        target = targets.get(part.id) if targets is not None else None
+        mesh, counts = _simplify_mesh_for_decimation(
+            part.mesh,
+            options,
+            target_triangles=target,
+            ratio=None if target is not None else ratio,
+        )
+        pass_counts[part.id] = counts
+        mesh.validate()
+        mesh = mesh.optimize_buffers()
+        mesh.validate()
+        mesh = mesh.repair()
+        part.mesh = mesh
+        part.fingerprint = mesh.fingerprint()
+    return result, pass_counts
+
+
+def _simplify_mesh_for_decimation(
+    mesh: Mesh,
+    options: DecimateOptions,
+    *,
+    target_triangles: int | None,
+    ratio: float | None,
+) -> tuple[Mesh, _DecimationPassCount]:
+    final_target = target_triangles
+    if final_target is None and ratio is not None:
+        final_target = _ratio_target(mesh, ratio)
+    if final_target is None:
+        return mesh.copy(), _DecimationPassCount()
+
+    final_target = max(1, min(int(final_target), mesh.triangle_count))
+    if final_target >= mesh.triangle_count:
+        return mesh.copy(), _DecimationPassCount()
+
+    current = mesh
+    simplification_passes = 0
+    iterative_passes = 0
+    while current.triangle_count > options.iterative_threshold and final_target < options.iterative_threshold:
+        next_target = max(
+            final_target,
+            options.iterative_threshold,
+            int(math.ceil(current.triangle_count * 0.5)),
+        )
+        if next_target >= current.triangle_count:
+            break
+        previous_count = current.triangle_count
+        current = _simplify_decimation_once(current, options, next_target)
+        simplification_passes += 1
+        iterative_passes += 1
+        if current.triangle_count >= previous_count:
+            break
+
+    if current.triangle_count > final_target:
+        current = _simplify_decimation_once(current, options, final_target)
+        simplification_passes += 1
+
+    return current, _DecimationPassCount(
+        simplification_passes=simplification_passes,
+        iterative_passes=iterative_passes,
+    )
+
+
+def _simplify_decimation_once(mesh: Mesh, options: DecimateOptions, target_triangles: int) -> Mesh:
+    return mesh.simplify(
+        target_triangles=target_triangles,
+        preserve_hard_edges=True,
+        hard_edge_angle=options.normal_tolerance,
+        preserve_holes=options.protect_topology,
+        preserve_material_boundaries=True,
+        preserve_uv_seams=_preserve_uv_seams(options),
+        preserve_silhouette=options.protect_topology,
+    )
+
+
 def _finalize_decimation_uv_importance(
     asset: Asset,
     options: DecimateOptions,
@@ -576,12 +673,16 @@ def _annotate_decimation_result(
     options: DecimateOptions,
     *,
     selected_part_ids: set[str] | None,
+    pass_counts: dict[str, _DecimationPassCount],
 ) -> None:
     source_total = 0
     output_total = 0
     max_error = 0.0
     weighted_error = 0.0
     measured_parts = 0
+    simplification_passes = 0
+    iterative_passes = 0
+    max_part_passes = 0
     for part in asset.parts.values():
         if selected_part_ids is not None and part.id not in selected_part_ids:
             continue
@@ -589,16 +690,23 @@ def _annotate_decimation_result(
         if source is None or part.mesh is None:
             continue
         metrics = _decimation_metrics(source, part.mesh)
+        counts = pass_counts.get(part.id, _DecimationPassCount())
         source_total += metrics.source_triangles
         output_total += metrics.output_triangles
         max_error = max(max_error, metrics.max_vertex_error)
         weighted_error += metrics.mean_vertex_error * max(metrics.source_vertices, 1)
         measured_parts += max(metrics.source_vertices, 1)
+        simplification_passes += counts.simplification_passes
+        iterative_passes += counts.iterative_passes
+        max_part_passes = max(max_part_passes, counts.simplification_passes)
         part.metadata = {
             **part.metadata,
             "decimate_criterion": options.criterion,
             "decimate_budget_scope": options.budget_scope,
             "decimate_uv_importance": options.uv_importance,
+            "decimate_iterative_threshold_triangles": str(options.iterative_threshold),
+            "decimate_simplification_passes": str(counts.simplification_passes),
+            "decimate_iterative_passes": str(counts.iterative_passes),
             "decimate_source_triangles": str(metrics.source_triangles),
             "decimate_output_triangles": str(metrics.output_triangles),
             "decimate_triangle_reduction": f"{metrics.triangle_reduction:.9g}",
@@ -611,7 +719,7 @@ def _annotate_decimation_result(
             part.metadata["decimate_removed_uv_channels"] = ",".join(str(channel) for channel in removed_uv_channels)
     if source_total == 0:
         return
-    memory_plan = _decimation_memory_plan(source_total)
+    memory_plan = _decimation_memory_plan(source_total, options.iterative_threshold)
     reduction = (source_total - output_total) / source_total
     requested_ratio = _requested_decimation_keep_ratio(source_meshes, options)
     if requested_ratio is not None:
@@ -631,12 +739,15 @@ def _annotate_decimation_result(
     asset.metadata["decimate_memory_rule_gb_per_million_triangles"] = (
         f"{_DECIMATION_MEMORY_GB_PER_MILLION_TRIANGLES:.9g}"
     )
-    asset.metadata["decimate_iterative_threshold_triangles"] = str(_DECIMATION_ITERATIVE_THRESHOLD_TRIANGLES)
+    asset.metadata["decimate_iterative_threshold_triangles"] = str(options.iterative_threshold)
     asset.metadata["decimate_iterative_recommended"] = str(memory_plan.iterative_recommended).lower()
+    asset.metadata["decimate_simplification_passes"] = str(simplification_passes)
+    asset.metadata["decimate_iterative_passes"] = str(iterative_passes)
+    asset.metadata["decimate_max_part_simplification_passes"] = str(max_part_passes)
     if memory_plan.iterative_recommended:
         asset.report.add_warning(
             f"decimation estimates {memory_plan.estimated_gb:.3g} GB RAM for {source_total} source triangles; "
-            f"iterative decimation is recommended above {_DECIMATION_ITERATIVE_THRESHOLD_TRIANGLES} triangles"
+            f"iterative decimation is recommended at or above {options.iterative_threshold} triangles"
         )
     removed_asset_uv_channels: set[int] = set()
     for part_id, source in source_meshes.items():
@@ -651,18 +762,24 @@ def _annotate_decimation_result(
 
 
 @dataclass(frozen=True)
+class _DecimationPassCount:
+    simplification_passes: int = 0
+    iterative_passes: int = 0
+
+
+@dataclass(frozen=True)
 class _DecimationMemoryPlan:
     estimated_bytes: int
     estimated_gb: float
     iterative_recommended: bool
 
 
-def _decimation_memory_plan(source_triangles: int) -> _DecimationMemoryPlan:
+def _decimation_memory_plan(source_triangles: int, iterative_threshold: int) -> _DecimationMemoryPlan:
     estimated_bytes = int(np.ceil(source_triangles * _DECIMATION_MEMORY_BYTES_PER_MILLION_TRIANGLES / 1_000_000))
     return _DecimationMemoryPlan(
         estimated_bytes=max(estimated_bytes, 0),
         estimated_gb=source_triangles * _DECIMATION_MEMORY_GB_PER_MILLION_TRIANGLES / 1_000_000,
-        iterative_recommended=source_triangles >= _DECIMATION_ITERATIVE_THRESHOLD_TRIANGLES,
+        iterative_recommended=source_triangles >= iterative_threshold,
     )
 
 

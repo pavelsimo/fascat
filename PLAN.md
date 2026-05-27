@@ -65,8 +65,9 @@ that are currently conservative approximations.
   bounding-box bands.
 - Platform budgets now record Unity reference triangle and draw-call ranges in
   profile definitions, conversion reports, and documentation tables.
-- Decimation now records RAM estimates, budget-allocation mode, and
-  iterative-threshold recommendations in metadata and report fields.
+- Decimation now records RAM estimates, budget-allocation mode,
+  configurable iterative-threshold runtime controls, and actual simplification
+  pass counts in metadata and report fields.
 - Staging now warns when bake-domain UVs are only unwrapped without a separate
   repack/padding pass and records that missing repack status in metadata.
 - Staging now records UV island counts, pack efficiency, normalized-space
@@ -153,7 +154,7 @@ Function-level parity notes from the linked Unity pages:
 | Repair meshes | Duplicate and degenerate cleanup plus standalone degenerate-polygon deletion, T-junction, boundary-gap, non-manifold, and orientation diagnostics are reported. | Implement true T-junction sewing, boundary stitching, non-manifold edge cracking, tolerance-based overlap/z-fighting cleanup, non-orientable strip cracking, and explicit face/normal orientation strategies. |
 | Merge vertices | Standalone `merge_vertices` is exposed across Python, CLI, and TOML with normals, tangents, UV, and material-boundary protection plus before/after reports. | Add topology-only connectivity merging that can preserve hard-edge, UV, and material seams as split render attributes; also add stronger cross-bucket tolerance merging and richer reports for skipped merges by protection reason. |
 | Delete degenerate polygons | Standalone `delete_degenerate_polygons` is exposed across Python, CLI, and TOML with area-threshold controls, selection support, no-op reports, unit-aware area reporting, and before/after counts. | Extend cleanup beyond zero-area triangles to tolerance-based overlapping or z-fighting polygons. |
-| Decimate to target | Target count, ratio, UV-importance modes, topology intent, RAM estimates, and measured-error reports exist. | Add real global target allocation, configurable iterative thresholds/pass reports, enforced geometric error bounds, AO/user-weighted decimation, and an explicit cleanup step for texture coordinates or vertex streams that would otherwise make simplification less efficient. |
+| Decimate to target | Target count, ratio, UV-importance modes, topology intent, RAM estimates, configurable iterative threshold/pass reports, and measured-error reports exist. | Add enforced geometric error bounds, AO/user-weighted decimation, and an explicit cleanup step for texture coordinates or vertex streams that would otherwise make simplification less efficient. |
 | Unwrap UV | UV0/UV1 unwrap intent, solver method, iteration, tolerance, sharp-edge seam and forbid-overlap policy intent, distortion, and packing diagnostics are represented. | Add destination-channel control, channel-as-destination behavior when lines of interest define islands, backend-enforced seam policies, create-seams-from-lines-of-interest, seam graph metadata, island merge/alignment, and real repack/padding/share-map controls. |
 
 Second-pass gaps from the Unity references:
@@ -168,9 +169,9 @@ Second-pass gaps from the Unity references:
 - Make decimation memory planning explicit: estimate RAM from polygon count,
   report when iterative decimation should be used, and explain how a global
   target is allocated across parts so sparse walls/simple parts stay intact.
-- Turn decimation memory planning into runtime controls, not just diagnostics:
-  expose `iterative_threshold` and report actual pass counts for very large
-  assemblies.
+- Decimation memory planning now has runtime controls, not just diagnostics:
+  `iterative_threshold` triggers intermediate simplification passes and reports
+  actual simplification and iterative pass counts.
 - Use Unity's broad desktop, mobile, VR, and WebGL ranges as report context
   when tuning future target-device presets and measured runtime profiles.
 - Add export comparison reports that show unoptimized GLB, optimized GLB,
@@ -317,7 +318,7 @@ Parity gaps to track:
 
 8. Decimation parity
    - Add Unity-style global target allocation across a selected assembly while decimating at part level, so sparse/simple parts stay intact and dense parts carry most of the reduction, with before/after allocation reports.
-   - Decimation now records RAM estimates using the Unity 5 GB per million polygons rule of thumb, reports global versus per-part budget allocation, and warns when the selected source triangle count reaches the iterative threshold.
+   - Decimation now records RAM estimates using the Unity 5 GB per million polygons rule of thumb, reports global versus per-part budget allocation, exposes a configurable iterative threshold, and records actual simplification and iterative pass counts.
    - Add target-device decimation presets, including XR/HoloLens-style triangle caps, so platform targets can drive simplification before export.
    - Replace quality-criterion heuristics with measured geometric error.
    - Explicit decimation now supports UV importance modes: preserve full UV islands, preserve seam topology only, or ignore UVs by stripping UV/tangent attributes before simplification.
@@ -392,9 +393,9 @@ These need more design and should not be mixed into documentation or diagnostics
    - Decimation now records achieved triangle reduction and measured symmetric nearest-vertex error on parts and asset metadata.
    - Explicit decimation now records `decimate_requested_keep_ratio` when derivable and warns when the requested keep ratio is below 20% for close-view LOD0 assets.
    - Explicit decimation now supports UV importance modes for preserving islands, preserving seams only, or ignoring UV/tangent attributes before simplification.
-   - Explicit decimation now records estimated RAM, budget-allocation mode, and iterative-threshold recommendations.
+   - Explicit decimation now records estimated RAM, budget-allocation mode, configurable iterative-threshold controls, and actual simplification pass counts.
    - `criterion="quality"` now reports measured error, but still maps tolerances to a target ratio.
-   - Remaining polish: enforce geometric error bounds, preserve selected CAD features, add richer topology protection metrics, configurable iterative processing, and AO/user-weight constraints for very large meshes.
+   - Remaining polish: enforce geometric error bounds, preserve selected CAD features, add richer topology protection metrics, and add AO/user-weight constraints for very large meshes.
 
 5. BREP healing depth - first topology-risk reporting pass complete
    - BREP status now records wire, edge, free/unstitched-edge, small-edge, open-shell, and sliver-face counts.

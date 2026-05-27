@@ -446,6 +446,7 @@ def test_asset_operation_reports_include_options_and_before_after_counts() -> No
             "line_tolerance",
             "normal_tolerance",
             "uv_tolerance",
+            "iterative_threshold",
             "protect_topology",
             "preserve_painted_areas",
             "budget_scope",

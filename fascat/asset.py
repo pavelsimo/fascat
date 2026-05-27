@@ -1199,6 +1199,9 @@ def _decimation_report_stats(asset: Asset) -> dict[str, int]:
         "decimate_output_triangles",
         "decimate_estimated_memory_bytes",
         "decimate_iterative_threshold_triangles",
+        "decimate_simplification_passes",
+        "decimate_iterative_passes",
+        "decimate_max_part_simplification_passes",
     ):
         if key in asset.metadata:
             stats[key] = _metadata_int(asset.metadata[key], 0)
