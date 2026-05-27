@@ -34,6 +34,18 @@ def _vector_angles(left: FloatArray, right: FloatArray) -> FloatArray:
     return angles
 
 
+def _triangle_corner_angles(triangles: FloatArray) -> FloatArray:
+    if triangles.shape[0] == 0:
+        return np.empty((0, 3), dtype=np.float64)
+    angles = np.empty((triangles.shape[0], 3), dtype=np.float64)
+    for corner in range(3):
+        origin = triangles[:, corner]
+        left = triangles[:, (corner + 1) % 3] - origin
+        right = triangles[:, (corner + 2) % 3] - origin
+        angles[:, corner] = _vector_angles(left, right)
+    return angles
+
+
 def _polygon_area_2d(points: list[Point2D]) -> float:
     if len(points) < 3:
         return 0.0
@@ -975,6 +987,76 @@ class Mesh:
             "overlapping_face_pairs": overlapping_pairs,
         }
 
+    def uv_distortion_metrics(self, channel: int = 0, *, tolerance: float = 1e-9) -> dict[str, int | float]:
+        if tolerance < 0.0:
+            raise ValueError("tolerance must be greater than or equal to 0")
+        if channel not in self.uvs:
+            raise ValueError(f"uv channel {channel} is not present")
+
+        uv = self.uvs[channel]
+        if self.triangle_count == 0:
+            return {
+                "island_count": 0,
+                "uv_area": 0.0,
+                "uv_bounds_area": 0.0,
+                "pack_efficiency": 0.0,
+                "normalized_pack_efficiency": 0.0,
+                "max_angle_distortion_degrees": 0.0,
+                "mean_angle_distortion_degrees": 0.0,
+                "max_edge_length_distortion": 0.0,
+                "mean_edge_length_distortion": 0.0,
+            }
+
+        uv_triangles = uv[self.faces]
+        uv_edge_a = uv_triangles[:, 1] - uv_triangles[:, 0]
+        uv_edge_b = uv_triangles[:, 2] - uv_triangles[:, 0]
+        uv_signed_areas = 0.5 * (uv_edge_a[:, 0] * uv_edge_b[:, 1] - uv_edge_a[:, 1] * uv_edge_b[:, 0])
+        uv_abs_areas = np.abs(uv_signed_areas)
+        uv_area = float(uv_abs_areas.sum())
+        uv_bounds_area = self._uv_bounds_area(channel)
+        pack_efficiency = min(1.0, uv_area / uv_bounds_area) if uv_bounds_area > tolerance else 0.0
+        normalized_pack_efficiency = min(1.0, uv_area)
+
+        geometry_areas = self._triangle_areas()
+        valid_faces = (geometry_areas > tolerance) & (uv_abs_areas > tolerance)
+        max_angle_distortion = 0.0
+        mean_angle_distortion = 0.0
+        max_edge_distortion = 0.0
+        mean_edge_distortion = 0.0
+        if np.any(valid_faces):
+            geometry_angles = _triangle_corner_angles(self.points[self.faces][valid_faces])
+            uv_angles = _triangle_corner_angles(uv_triangles[valid_faces])
+            angle_distortion = np.degrees(np.abs(geometry_angles - uv_angles))
+            max_angle_distortion = float(angle_distortion.max()) if angle_distortion.size else 0.0
+            mean_angle_distortion = float(angle_distortion.mean()) if angle_distortion.size else 0.0
+
+            geometry_edges = self._triangle_edge_lengths()[valid_faces]
+            uv_edges = self._uv_triangle_edge_lengths(channel)[valid_faces]
+            geometry_perimeters = geometry_edges.sum(axis=1)
+            uv_perimeters = uv_edges.sum(axis=1)
+            valid_edges = (geometry_perimeters > tolerance) & (uv_perimeters > tolerance)
+            if np.any(valid_edges):
+                scale = uv_perimeters[valid_edges] / geometry_perimeters[valid_edges]
+                expected_uv_edges = geometry_edges[valid_edges] * scale[:, None]
+                edge_distortion = np.abs(uv_edges[valid_edges] - expected_uv_edges) / np.maximum(
+                    expected_uv_edges,
+                    tolerance,
+                )
+                max_edge_distortion = float(edge_distortion.max()) if edge_distortion.size else 0.0
+                mean_edge_distortion = float(edge_distortion.mean()) if edge_distortion.size else 0.0
+
+        return {
+            "island_count": self._uv_island_count(channel, tolerance=tolerance),
+            "uv_area": uv_area,
+            "uv_bounds_area": uv_bounds_area,
+            "pack_efficiency": pack_efficiency,
+            "normalized_pack_efficiency": normalized_pack_efficiency,
+            "max_angle_distortion_degrees": max_angle_distortion,
+            "mean_angle_distortion_degrees": mean_angle_distortion,
+            "max_edge_length_distortion": max_edge_distortion,
+            "mean_edge_length_distortion": mean_edge_distortion,
+        }
+
     def unwrap_uv(self, channel: int = 0) -> Mesh:
         try:
             import xatlas
@@ -1352,6 +1434,83 @@ class Mesh:
         p1 = self.points[faces[:, 1]]
         p2 = self.points[faces[:, 2]]
         return float(np.einsum("ij,ij->i", p0, np.cross(p1, p2)).sum() / 6.0)
+
+    def _uv_bounds_area(self, channel: int) -> float:
+        uv = self.uvs[channel]
+        if uv.shape[0] == 0:
+            return 0.0
+        span = uv.max(axis=0) - uv.min(axis=0)
+        return float(max(span[0], 0.0) * max(span[1], 0.0))
+
+    def _uv_triangle_edge_lengths(self, channel: int) -> FloatArray:
+        if self.triangle_count == 0:
+            return np.empty((0, 3), dtype=np.float64)
+        triangles = self.uvs[channel][self.faces]
+        return cast(
+            FloatArray,
+            np.linalg.norm(
+                np.stack(
+                    [
+                        triangles[:, 1] - triangles[:, 0],
+                        triangles[:, 2] - triangles[:, 1],
+                        triangles[:, 0] - triangles[:, 2],
+                    ],
+                    axis=1,
+                ),
+                axis=2,
+            ),
+        )
+
+    def _uv_island_count(self, channel: int, *, tolerance: float) -> int:
+        if self.triangle_count == 0:
+            return 0
+        uv = self.uvs[channel]
+        uv_triangles = uv[self.faces]
+        edge_a = uv_triangles[:, 1] - uv_triangles[:, 0]
+        edge_b = uv_triangles[:, 2] - uv_triangles[:, 0]
+        uv_areas = np.abs(0.5 * (edge_a[:, 0] * edge_b[:, 1] - edge_a[:, 1] * edge_b[:, 0]))
+        valid_faces = set(np.flatnonzero(uv_areas > tolerance).astype(int).tolist())
+        if not valid_faces:
+            return 0
+
+        parent = np.arange(self.triangle_count, dtype=np.int64)
+
+        def find(index: int) -> int:
+            while int(parent[index]) != index:
+                parent[index] = parent[int(parent[index])]
+                index = int(parent[index])
+            return index
+
+        def union(left: int, right: int) -> None:
+            left_root = find(left)
+            right_root = find(right)
+            if left_root != right_root:
+                parent[right_root] = left_root
+
+        edge_incidents: dict[tuple[int, int], list[tuple[int, int, int]]] = defaultdict(list)
+        for face_index, face in enumerate(self.faces.astype(int).tolist()):
+            if face_index not in valid_faces:
+                continue
+            for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
+                edge_incidents[(min(start, end), max(start, end))].append((face_index, start, end))
+
+        for incidents in edge_incidents.values():
+            if len(incidents) != 2:
+                continue
+            left_face, left_start, left_end = incidents[0]
+            right_face, right_start, right_end = incidents[1]
+            same_direction = bool(
+                np.linalg.norm(uv[left_start] - uv[right_start]) <= tolerance
+                and np.linalg.norm(uv[left_end] - uv[right_end]) <= tolerance
+            )
+            opposite_direction = bool(
+                np.linalg.norm(uv[left_start] - uv[right_end]) <= tolerance
+                and np.linalg.norm(uv[left_end] - uv[right_start]) <= tolerance
+            )
+            if same_direction or opposite_direction:
+                union(left_face, right_face)
+
+        return len({find(face_index) for face_index in valid_faces})
 
     def _flip_inward_closed_components(self) -> Mesh:
         flipped_components = self._flipped_closed_orientation_component_faces()

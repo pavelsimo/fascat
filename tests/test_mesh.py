@@ -425,6 +425,32 @@ def test_uv_layout_stats_detects_overlap_bounds_and_degenerate_faces() -> None:
     assert stats["overlapping_face_pairs"] == 1
 
 
+def test_uv_distortion_metrics_record_islands_pack_and_stretch() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [2, 1, 3]], dtype=int),
+        uvs={0: np.array([[0, 0], [1, 0], [0, 1], [1, 1]], dtype=float)},
+    )
+    distorted = Mesh(
+        points=mesh.points,
+        faces=mesh.faces,
+        uvs={0: np.array([[0, 0], [1, 0], [0, 1], [1, 0.25]], dtype=float)},
+    )
+
+    metrics = mesh.uv_distortion_metrics(0)
+    distorted_metrics = distorted.uv_distortion_metrics(0)
+
+    assert metrics["island_count"] == 1
+    assert metrics["pack_efficiency"] == pytest.approx(1.0)
+    assert metrics["normalized_pack_efficiency"] == pytest.approx(1.0)
+    assert metrics["max_angle_distortion_degrees"] == pytest.approx(0.0)
+    assert metrics["max_edge_length_distortion"] == pytest.approx(0.0)
+    assert distorted_metrics["island_count"] == 1
+    assert distorted_metrics["pack_efficiency"] == pytest.approx(0.625)
+    assert distorted_metrics["max_angle_distortion_degrees"] > 0.0
+    assert distorted_metrics["max_edge_length_distortion"] > 0.0
+
+
 def test_subdivide_long_edges_enforces_limit_and_preserves_materials() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [4, 0, 0], [0, 3, 0]], dtype=float),

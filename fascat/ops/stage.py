@@ -359,6 +359,7 @@ def _tag_uv_layout_quality(asset: Asset, part_id: str, mesh: Mesh, uv_modes: dic
         prefix = f"uv{channel}"
         mode = uv_modes.get(channel, str(mesh.metadata.get(f"{prefix}_mode", mesh.metadata.get(prefix, "existing"))))
         stats = mesh.uv_layout_stats(channel)
+        distortion = mesh.uv_distortion_metrics(channel)
         domain = _uv_domain(channel, mode)
         validation_problems = _uv_validation_problems(stats, domain=domain)
         mesh.metadata[f"{prefix}_domain"] = domain
@@ -370,6 +371,23 @@ def _tag_uv_layout_quality(asset: Asset, part_id: str, mesh: Mesh, uv_modes: dic
         mesh.metadata[f"{prefix}_out_of_unit_vertices"] = str(stats["out_of_unit_vertices"])
         mesh.metadata[f"{prefix}_degenerate_faces"] = str(stats["degenerate_faces"])
         mesh.metadata[f"{prefix}_overlap_pairs"] = str(stats["overlapping_face_pairs"])
+        mesh.metadata[f"{prefix}_island_count"] = str(distortion["island_count"])
+        mesh.metadata[f"{prefix}_pack_efficiency"] = _format_uv_metric(distortion["pack_efficiency"])
+        mesh.metadata[f"{prefix}_normalized_pack_efficiency"] = _format_uv_metric(
+            distortion["normalized_pack_efficiency"]
+        )
+        mesh.metadata[f"{prefix}_max_angle_distortion_degrees"] = _format_uv_metric(
+            distortion["max_angle_distortion_degrees"]
+        )
+        mesh.metadata[f"{prefix}_mean_angle_distortion_degrees"] = _format_uv_metric(
+            distortion["mean_angle_distortion_degrees"]
+        )
+        mesh.metadata[f"{prefix}_max_edge_length_distortion"] = _format_uv_metric(
+            distortion["max_edge_length_distortion"]
+        )
+        mesh.metadata[f"{prefix}_mean_edge_length_distortion"] = _format_uv_metric(
+            distortion["mean_edge_length_distortion"]
+        )
         mesh.metadata[f"{prefix}_workflow_steps"] = _uv_workflow_steps(mesh, prefix, mode)
         if domain != "bake":
             continue
@@ -422,6 +440,10 @@ def _uv_bounds(uv: np.ndarray) -> str:
     mins = uv.min(axis=0)
     maxs = uv.max(axis=0)
     return ",".join(f"{value:.9g}" for value in (mins[0], mins[1], maxs[0], maxs[1]))
+
+
+def _format_uv_metric(value: int | float) -> str:
+    return f"{float(value):.9g}"
 
 
 def _uv_unit_domain_status(out_of_unit_vertices: int) -> str:
