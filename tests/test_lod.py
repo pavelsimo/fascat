@@ -73,13 +73,54 @@ def test_lods_are_monotonic() -> None:
     assert part.metadata["lod_level_triangles"] == ",".join(str(count) for count in counts[1:])
     assert float(part.metadata["lod_triangle_multiplier"]) > 1.0
     assert int(part.metadata["lod_added_mesh_bytes"]) > 0
+    assert part.metadata["lod_level_instance_reuse"] == "not_applicable,not_applicable,not_applicable"
+    assert part.metadata["lod_level_material_merge"] == "not_run,not_run,not_run"
+    assert part.metadata["lod_level_texture_bake"] == "not_run,not_run,not_run"
+    assert part.metadata["lod_level_culling_granularity"] == "part,part,part"
     assert with_lods.metadata["lod_source_triangles"] == str(mesh.triangle_count)
     assert with_lods.metadata["lod_added_triangles"] == str(sum(counts[1:]))
     assert with_lods.metadata["lod_chain_triangles"] == str(sum(counts))
+    assert with_lods.metadata["lod_reused_instance_levels"] == "0"
+    assert with_lods.metadata["lod_material_merged_levels"] == "0"
+    assert with_lods.metadata["lod_texture_baked_levels"] == "0"
+    assert with_lods.metadata["lod_culling_changed_levels"] == "0"
     assert step.after["lod_source_triangles"] == mesh.triangle_count
     assert step.after["lod_added_triangles"] == sum(counts[1:])
     assert step.after["lod_chain_triangles"] == sum(counts)
     assert step.after["lod_added_mesh_bytes"] == int(with_lods.metadata["lod_added_mesh_bytes"])
+    assert step.after["lod_reused_instance_levels"] == 0
+
+
+def test_lods_report_level_policy_for_reused_instances() -> None:
+    mesh = _triangle_mesh()
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="node_a", name="Node A", part_id="shared"),
+                Node(id="node_b", name="Node B", part_id="shared"),
+            ],
+        ),
+        parts={"shared": Part(id="shared", name="Shared", mesh=mesh)},
+    )
+
+    with_lods = asset.lods(LODOptions((0.5, 0.25)))
+    part = with_lods.parts["shared"]
+    step = with_lods.report.steps[-1]
+
+    assert len(part.lod_meshes) == 2
+    assert part.metadata["lod_occurrences"] == "2"
+    assert part.metadata["lod_level_instance_reuse"] == "preserved,preserved"
+    assert part.metadata["lod_level_material_merge"] == "not_run,not_run"
+    assert part.metadata["lod_level_texture_bake"] == "not_run,not_run"
+    assert part.metadata["lod_level_culling_granularity"] == "part,part"
+    assert part.lod_meshes[0].metadata["lod_instance_reuse"] == "preserved"
+    assert with_lods.metadata["lod_reused_instance_levels"] == "2"
+    assert with_lods.metadata["lod_material_merged_levels"] == "0"
+    assert with_lods.metadata["lod_texture_baked_levels"] == "0"
+    assert with_lods.metadata["lod_culling_changed_levels"] == "0"
+    assert step.after["lod_reused_instance_levels"] == 2
 
 
 def test_lods_can_omit_tiny_parts_at_lower_screen_coverage() -> None:
@@ -132,8 +173,14 @@ def test_lods_can_omit_tiny_parts_at_lower_screen_coverage() -> None:
     assert with_lods.parts["cube"].lod_meshes[0].triangle_count > 0
     assert with_lods.parts["cube"].lod_meshes[1].triangle_count == 0
     assert with_lods.parts["cube"].lod_meshes[1].metadata["lod_omitted"] == "tiny_part"
+    assert with_lods.parts["cube"].lod_meshes[1].metadata["lod_instance_reuse"] == "omitted"
+    assert with_lods.parts["cube"].lod_meshes[1].metadata["lod_culling_granularity"] == "omitted_tiny_part"
+    assert with_lods.parts["cube"].metadata["lod_level_instance_reuse"] == "not_applicable,omitted"
+    assert with_lods.parts["cube"].metadata["lod_level_culling_granularity"] == "part,omitted_tiny_part"
     assert with_lods.parts["cube"].metadata["lod_omitted_tiny_part_meshes"] == "1"
+    assert with_lods.parts["cube"].metadata["lod_culling_changed_levels"] == "1"
     assert with_lods.metadata["lod_omitted_tiny_part_meshes"] == "1"
+    assert with_lods.metadata["lod_culling_changed_levels"] == "1"
 
 
 def test_lods_warn_when_selected_parts_have_no_mesh() -> None:
@@ -184,3 +231,10 @@ def test_lods_warn_when_no_tessellated_parts_match() -> None:
     assert len(warnings) == 2
     assert "LOD generation skipped part without tessellated mesh: Untessellated" in warnings[0]
     assert warnings[1] == "LOD generation matched no tessellated mesh-bearing parts"
+
+
+def _triangle_mesh() -> Mesh:
+    return Mesh(
+        points=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )

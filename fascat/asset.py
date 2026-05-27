@@ -1108,6 +1108,10 @@ def _lod_report_stats(asset: Asset) -> dict[str, int]:
         "lod_chain_triangles",
         "lod_chain_mesh_bytes",
         "lod_omitted_tiny_part_meshes",
+        "lod_reused_instance_levels",
+        "lod_material_merged_levels",
+        "lod_texture_baked_levels",
+        "lod_culling_changed_levels",
     ):
         if key in asset.metadata:
             stats[key] = _metadata_int(asset.metadata[key], 0)

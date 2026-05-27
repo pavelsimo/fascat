@@ -10,6 +10,7 @@ from fascat.options import LODOptions
 def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str] | None = None) -> Asset:
     result = asset.copy(keep_source=True)
     screen_coverage = _screen_coverage(options)
+    occurrence_counts = _occurrence_counts_by_part(result)
     generated_parts = 0
     skipped_parts = 0
     source_vertices = 0
@@ -19,6 +20,10 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
     added_triangles = 0
     added_mesh_bytes = 0
     omitted_tiny_parts = 0
+    reused_instance_levels = 0
+    material_merged_levels = 0
+    texture_baked_levels = 0
+    culling_changed_levels = 0
     for part in result.parts.values():
         if selected_part_ids is not None and part.id not in selected_part_ids:
             continue
@@ -29,6 +34,7 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
             result.report.add_warning(f"LOD generation skipped part without tessellated mesh: {part.name}")
             continue
         generated_parts += 1
+        part_occurrences = occurrence_counts.get(part.id, 0)
         previous_count = part.mesh.triangle_count
         diagonal = _mesh_diagonal(part.mesh)
         part_source_vertices = part.mesh.vertex_count
@@ -38,8 +44,34 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
         part_lod_triangles = 0
         part_lod_bytes = 0
         part_omitted_tiny = 0
+        part_reused_instance_levels = 0
+        part_material_merged_levels = 0
+        part_texture_baked_levels = 0
+        part_culling_changed_levels = 0
+        level_instance_reuse: list[str] = []
+        level_material_merge: list[str] = []
+        level_texture_bake: list[str] = []
+        level_culling_granularity: list[str] = []
         for index, ratio in enumerate(options.ratios):
             coverage = screen_coverage[index]
+            policy_metadata = _level_policy_metadata(
+                part_occurrences=part_occurrences,
+                culling_granularity="omitted_tiny_part"
+                if options.drop_tiny_parts and diagonal * coverage < options.tiny_part_screen_size
+                else "part",
+            )
+            level_instance_reuse.append(policy_metadata["lod_instance_reuse"])
+            level_material_merge.append(policy_metadata["lod_material_merge"])
+            level_texture_bake.append(policy_metadata["lod_texture_bake"])
+            level_culling_granularity.append(policy_metadata["lod_culling_granularity"])
+            if policy_metadata["lod_instance_reuse"] == "preserved":
+                part_reused_instance_levels += 1
+            if policy_metadata["lod_material_merge"] == "merged":
+                part_material_merged_levels += 1
+            if policy_metadata["lod_texture_bake"] == "baked":
+                part_texture_baked_levels += 1
+            if policy_metadata["lod_culling_granularity"] != "part":
+                part_culling_changed_levels += 1
             if options.drop_tiny_parts and diagonal * coverage < options.tiny_part_screen_size:
                 lod = _empty_lod(part.mesh)
                 lod.metadata = {
@@ -47,6 +79,7 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
                     "lod_ratio": f"{ratio:.9g}",
                     "lod_screen_coverage": f"{coverage:.9g}",
                     "lod_omitted": "tiny_part",
+                    **policy_metadata,
                 }
                 part.lod_meshes.append(lod)
                 previous_count = 0
@@ -62,6 +95,7 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
                 "lod_screen_coverage": f"{coverage:.9g}",
                 "lod_mode": options.mode,
                 "lod_per_part_budget": str(options.per_part_budget).lower(),
+                **policy_metadata,
             }
             lod.validate()
             previous_count = lod.triangle_count
@@ -76,6 +110,10 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
         added_triangles += part_lod_triangles
         added_mesh_bytes += part_lod_bytes
         omitted_tiny_parts += part_omitted_tiny
+        reused_instance_levels += part_reused_instance_levels
+        material_merged_levels += part_material_merged_levels
+        texture_baked_levels += part_texture_baked_levels
+        culling_changed_levels += part_culling_changed_levels
         level_vertices = ",".join(str(mesh.vertex_count) for mesh in part.lod_meshes)
         level_triangles = ",".join(str(mesh.triangle_count) for mesh in part.lod_meshes)
         part.metadata = {
@@ -85,6 +123,7 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
             "lod_mode": options.mode,
             "lod_per_part_budget": str(options.per_part_budget).lower(),
             "lod_drop_tiny_parts": str(options.drop_tiny_parts).lower(),
+            "lod_occurrences": str(part_occurrences),
             "lod_source_vertices": str(part_source_vertices),
             "lod_source_triangles": str(part_source_triangles),
             "lod_source_mesh_bytes": str(part_source_bytes),
@@ -99,6 +138,14 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
             "lod_omitted_tiny_part_meshes": str(part_omitted_tiny),
             "lod_triangle_multiplier": _ratio_text(part_source_triangles + part_lod_triangles, part_source_triangles),
             "lod_mesh_byte_multiplier": _ratio_text(part_source_bytes + part_lod_bytes, part_source_bytes),
+            "lod_level_instance_reuse": ",".join(level_instance_reuse),
+            "lod_level_material_merge": ",".join(level_material_merge),
+            "lod_level_texture_bake": ",".join(level_texture_bake),
+            "lod_level_culling_granularity": ",".join(level_culling_granularity),
+            "lod_reused_instance_levels": str(part_reused_instance_levels),
+            "lod_material_merged_levels": str(part_material_merged_levels),
+            "lod_texture_baked_levels": str(part_texture_baked_levels),
+            "lod_culling_changed_levels": str(part_culling_changed_levels),
         }
     result.metadata["lod_mode"] = options.mode
     result.metadata["lod_screen_coverage"] = ",".join(f"{value:.9g}" for value in screen_coverage)
@@ -116,11 +163,37 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
     result.metadata["lod_omitted_tiny_part_meshes"] = str(omitted_tiny_parts)
     result.metadata["lod_triangle_multiplier"] = _ratio_text(source_triangles + added_triangles, source_triangles)
     result.metadata["lod_mesh_byte_multiplier"] = _ratio_text(source_mesh_bytes + added_mesh_bytes, source_mesh_bytes)
+    result.metadata["lod_reused_instance_levels"] = str(reused_instance_levels)
+    result.metadata["lod_material_merged_levels"] = str(material_merged_levels)
+    result.metadata["lod_texture_baked_levels"] = str(texture_baked_levels)
+    result.metadata["lod_culling_changed_levels"] = str(culling_changed_levels)
     if generated_parts == 0 and skipped_parts:
         result.report.add_warning("LOD generation matched no tessellated mesh-bearing parts")
     if options.validate:
         _validate_lods(result, selected_part_ids=selected_part_ids)
     return result
+
+
+def _occurrence_counts_by_part(asset: Asset) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for node in asset.root.walk():
+        if node.part_id is None:
+            continue
+        counts[node.part_id] = counts.get(node.part_id, 0) + 1
+    return counts
+
+
+def _level_policy_metadata(*, part_occurrences: int, culling_granularity: str) -> dict[str, str]:
+    if culling_granularity == "omitted_tiny_part":
+        instance_reuse = "omitted"
+    else:
+        instance_reuse = "preserved" if part_occurrences > 1 else "not_applicable"
+    return {
+        "lod_instance_reuse": instance_reuse,
+        "lod_material_merge": "not_run",
+        "lod_texture_bake": "not_run",
+        "lod_culling_granularity": culling_granularity,
+    }
 
 
 def _screen_coverage(options: LODOptions) -> tuple[float, ...]:
