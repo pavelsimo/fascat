@@ -104,7 +104,7 @@ Parity gaps to track:
    - Add image cleanup: merge duplicate images, remove unused images, resize textures to platform budgets.
 
 6. Optimization and draw-call reduction
-   - Replace AABB containment with real occlusion/visibility removal.
+   - Add acceleration structures, confidence metrics, and optional raster/GPU backends to the new sampled occlusion removal.
    - Add loose and precise instance reconstruction for similar, separately modeled parts.
    - Improve merge planning so reports show draw-call savings, instance loss, memory growth, and culling impact.
    - Add retopology or proxy-mesh paths for cases where decimation and occlusion are not enough.
@@ -141,10 +141,11 @@ verify CI/docs before moving on.
 
 These need more design and should not be mixed into documentation or diagnostics commits.
 
-1. True occlusion removal
-   - Replace AABB containment with visibility testing.
-   - Support part, submesh, and triangle granularity.
-   - Make strategy and hemispherical evaluation change the algorithm, not just metadata.
+1. True occlusion removal - complete in the first larger-work pass
+   - Replaced AABB containment with deterministic sampled visibility rays.
+   - Supports part, submesh/material-group, and triangle granularity.
+   - Strategy changes the direction set, and hemispherical evaluation restricts rays to top/side views.
+   - Remaining polish: add acceleration structures, measured confidence, and optional raster/GPU backends for very large production meshes.
 
 2. Better hole removal
    - Add a real BREP path for cylindrical or feature-level holes when source shape data is available.

@@ -694,11 +694,11 @@ def cmd_convert(
     ] = 2048,
     hemi_evaluation: Annotated[
         bool,
-        typer.Option("--hemi-evaluation", help="Use hemispherical top/side occlusion evaluation metadata."),
+        typer.Option("--hemi-evaluation", help="Restrict occlusion visibility rays to top and side views."),
     ] = False,
     neighbors_preservation: Annotated[
         int,
-        typer.Option("--neighbors-preservation", help="Visible-neighbor preservation rings for occlusion fallback."),
+        typer.Option("--neighbors-preservation", help="Visible-neighbor preservation rings for triangle occlusion."),
     ] = 1,
     consider_transparency_opaque: Annotated[
         bool,
@@ -1602,7 +1602,7 @@ def _convert_operation_diagnostics(payload: dict[str, Any]) -> list[dict[str, st
         add(
             "remove_occluded",
             "approximate",
-            "occlusion removal uses part-level AABB containment, not visibility sampling",
+            "occlusion removal uses deterministic sampled visibility; precision controls the sample budget",
         )
     if payload["decimate"]:
         if payload["decimate_criterion"] == "quality":

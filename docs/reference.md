@@ -116,12 +116,12 @@ Dry-run JSON for `convert` includes `operation_diagnostics`, a list of planned o
 | `--hole-types` | `through,blind,surface` | Hole types to remove |
 | `--max-hole-diameter` | `3.0` | Maximum hole diameter to remove |
 | `--prefer-brep / --no-prefer-brep` | `true` | Prefer BREP feature removal when available |
-| `--remove-occluded` | `false` | Remove selected nodes hidden inside larger opaque bounds |
+| `--remove-occluded` | `false` | Remove geometry hidden from sampled exterior visibility rays |
 | `--occlusion-strategy` | `advanced` | Occlusion strategy: `conservative`, `exterior`, or `advanced` |
-| `--occlusion-level` | `triangles` | Requested occlusion level: `parts`, `submeshes`, or `triangles` |
+| `--occlusion-level` | `triangles` | Occlusion removal level: `parts`, `submeshes`, or `triangles` |
 | `--occlusion-precision` | `2048` | Occlusion precision preset or sample resolution |
-| `--hemi-evaluation` | `false` | Record hemispherical top/side occlusion evaluation intent |
-| `--neighbors-preservation` | `1` | Visible-neighbor preservation rings for occlusion fallback |
+| `--hemi-evaluation` | `false` | Restrict occlusion visibility rays to upper-hemisphere and side views |
+| `--neighbors-preservation` | `1` | Visible-neighbor preservation rings for triangle occlusion removal |
 | `--consider-transparency-opaque` | `false` | Treat transparent materials as occluders |
 | `--preserve-cavities / --no-preserve-cavities` | `true` | Preserve large interior cavities |
 | `--minimum-cavity-volume-m3` | `0.5` | Minimum cavity volume to preserve |
@@ -159,7 +159,7 @@ Units and behavior notes:
 - Screen coverage values are fractions between `0` and `1`; file-size budgets are megabytes; atlas and bake sizes are pixels.
 - `--decimate-criterion quality` currently maps tolerances to a target ratio and reports a warning because error-bounded simplification is not implemented.
 - `--remove-holes` uses mesh boundary filling when BREP hole removal is unavailable; `--hole-types` are recorded as intent by the mesh fallback.
-- `--remove-occluded` currently uses part-level AABB containment even when submesh, triangle, advanced, or hemispherical modes are requested, and records warnings for those fallbacks.
+- `--remove-occluded` uses deterministic sampled visibility. Strategy changes the direction set, `--hemi-evaluation` restricts rays to upper-hemisphere and side views, and `--occlusion-level` controls whether fully hidden parts, material groups, or triangles are removed.
 - `--draco` is rejected until a Draco encoder backend is integrated.
 
 ## Inspect flags
@@ -259,7 +259,7 @@ warnings to distinguish exact work from fallbacks.
 | Staging, normals, tangents, UV metadata | Partial | `stage` report step; tangents require UV0 | Add seam planning, unwrap method selection, UV overlap checks, repack, normalize, and per-channel validation |
 | Material baking | Metadata-only | `bake_materials` warns texture image baking is not implemented | Generate real base-color, opacity, roughness, metallic, normal, AO, and emissive textures |
 | Hole removal | Approximate | `remove_holes` warns about the mesh boundary-fill fallback and hole-type metadata limits | Add BREP feature-level hole classification and removal |
-| Occlusion removal | Approximate | `remove_occluded` warns about part-level AABB containment fallback | Replace with visibility sampling at part, submesh, and triangle levels |
+| Occlusion removal | Approximate | `remove_occluded` warns that sampled visibility may require higher precision for thin occluders | Add acceleration structures, measured confidence, and raster/GPU backends for high-poly production scenes |
 | Decimation | Partial | `decimate`; quality criterion is reported as heuristic in dry-run diagnostics | Add measured geometric error, topology protection metrics, iterative limits, and UV/AO importance modes |
 | LOD generation | Partial | `run_lod_generators` / `lods` report steps | Preserve occurrence-level LOD chains and add far-LOD merge plus validation |
 | Runtime compression | Partial | glTF quantization and meshopt are implemented; texture compression is metadata-only; Draco is rejected | Add real KTX2/Basis output and a Draco path only if a reliable encoder is integrated |

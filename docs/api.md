@@ -566,7 +566,7 @@ asset = asset.run_lod_generators(
 )
 ```
 
-Material baking currently creates a shared flat material and metadata for baked maps; it does not write texture images. Hole removal and occlusion removal use deterministic mesh-level fallbacks when BREP feature editing or visibility rendering is unavailable, and the report records warnings when requested options require unavailable backends.
+Material baking currently creates a shared flat material and metadata for baked maps; it does not write texture images. Hole removal uses a deterministic mesh-level fallback when BREP feature editing is unavailable. Occlusion removal uses deterministic visibility sampling, so the report records that thin occluders can require higher precision.
 
 Optimization action parameters:
 
@@ -591,10 +591,10 @@ Optimization action parameters:
 | `RemoveHolesOptions` | `through`, `blind`, `surface` | Requested hole-type filters. Mesh fallback cannot classify these types and records them as intent. |
 | `RemoveHolesOptions` | `max_diameter` | Only fill detected open boundary loops at or below this measured boundary diameter. |
 | `RemoveHolesOptions` | `prefer_brep` | Request BREP-level feature removal. Current implementation warns and uses mesh boundary filling. |
-| `RemoveOccludedOptions` | `strategy` | Requested occlusion strategy. Current implementation warns when non-conservative options are requested and uses AABB containment. |
-| `RemoveOccludedOptions` | `level` | Requested removal granularity. Current implementation supports part-level removal only. |
-| `RemoveOccludedOptions` | `precision` | Reserved for raster or sampling backends; not used by the AABB fallback. |
-| `RemoveOccludedOptions` | `hemi_evaluation` | Reserved for view-dependent visibility backends; not used by the AABB fallback. |
+| `RemoveOccludedOptions` | `strategy` | Visibility direction set: `conservative` checks cardinal views, `exterior` adds exterior diagonals, and `advanced` uses the densest deterministic direction set. |
+| `RemoveOccludedOptions` | `level` | Removal granularity: `parts` removes fully hidden occurrences, `submeshes` removes fully hidden material groups, and `triangles` removes hidden faces. |
+| `RemoveOccludedOptions` | `precision` | Maximum part-level face sample count before deterministic downsampling. Higher values can help thin occluders and large parts. |
+| `RemoveOccludedOptions` | `hemi_evaluation` | Restrict visibility rays to the upper hemisphere and side views for top/side-oriented evaluation. |
 | `RemoveOccludedOptions` | `neighbors_preservation` | Keep this many rings around visible triangles to reduce cracks. |
 | `RemoveOccludedOptions` | `consider_transparency_opaque` | Treat transparent materials as opaque for conservative visibility. |
 | `RemoveOccludedOptions` | `preserve_cavities` | Preserve interior cavities above the configured volume threshold. |
@@ -646,7 +646,7 @@ Report examples for destructive and approximate operations:
   "before": {"parts": 120, "triangles": 300000},
   "after": {"parts": 118, "triangles": 296000},
   "warnings": [
-    "occlusion level triangles uses part-level AABB containment fallback; submesh and triangle removal are not implemented"
+    "remove_occluded uses deterministic sampled visibility; thin occluders may require higher precision"
   ]
 }
 ```

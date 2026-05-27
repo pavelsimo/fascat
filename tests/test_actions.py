@@ -66,6 +66,29 @@ def _cube_mesh(scale: float = 1.0) -> Mesh:
     return Mesh(points=points, faces=faces)
 
 
+def _translated_mesh(mesh: Mesh, x: float, y: float = 0.0, z: float = 0.0) -> Mesh:
+    translated = mesh.copy()
+    translated.points = translated.points + np.asarray([x, y, z], dtype=float)
+    return translated
+
+
+def _merge_meshes(meshes: list[tuple[Mesh, int]]) -> Mesh:
+    points: list[np.ndarray] = []
+    faces: list[np.ndarray] = []
+    material_indices: list[int] = []
+    offset = 0
+    for mesh, material_index in meshes:
+        points.append(mesh.points)
+        faces.append(mesh.faces + offset)
+        material_indices.extend([material_index] * mesh.triangle_count)
+        offset += mesh.vertex_count
+    return Mesh(
+        points=np.vstack(points),
+        faces=np.vstack(faces),
+        material_indices=np.asarray(material_indices, dtype=int),
+    )
+
+
 def test_bake_materials_merges_selected_material_slots() -> None:
     mesh = Mesh(
         points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
@@ -168,10 +191,11 @@ def test_remove_occluded_removes_contained_part_nodes() -> None:
     assert visible.occurrence_count == 1
     assert "inner" not in visible.parts
     assert visible.metadata["removed_occluded_nodes"] == "1"
-    assert any("AABB containment fallback" in item for item in visible.report.steps[-1].warnings)
+    assert visible.metadata["removed_occluded_triangles"] == "12"
+    assert any("sampled visibility" in item for item in visible.report.steps[-1].warnings)
 
 
-def test_remove_occluded_warns_when_using_part_level_aabb_fallback() -> None:
+def test_remove_occluded_records_visibility_sampling_metadata() -> None:
     asset = Asset(
         root=Node(id="root", name="root", children=[Node(id="part", name="Part", part_id="part")]),
         parts={"part": Part(id="part", name="Part", mesh=_cube_mesh(1.0))},
@@ -180,8 +204,126 @@ def test_remove_occluded_warns_when_using_part_level_aabb_fallback() -> None:
     result = asset.remove_occluded(RemoveOccludedOptions(level="triangles", hemi_evaluation=True))
 
     warnings = result.report.steps[-1].warnings
-    assert any("part-level AABB containment fallback" in item for item in warnings)
-    assert any("hemi_evaluation" in item for item in warnings)
+    assert any("sampled visibility" in item for item in warnings)
+    assert result.metadata["occlusion_level"] == "triangles"
+    assert result.metadata["occlusion_hemi_evaluation"] == "true"
+    assert int(result.metadata["occlusion_direction_count"]) < 26
+
+
+def test_remove_occluded_respects_transparent_occluders() -> None:
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="outer", name="Outer", part_id="outer"),
+                Node(id="inner", name="Inner", part_id="inner"),
+            ],
+        ),
+        parts={
+            "outer": Part(id="outer", name="Outer", mesh=_cube_mesh(2.0), material_ids=["glass"]),
+            "inner": Part(id="inner", name="Inner", mesh=_cube_mesh(0.5)),
+        },
+        materials={"glass": Material(id="glass", name="Glass", base_color=(0.8, 0.9, 1.0, 0.35), opacity=0.35)},
+    )
+
+    visible = asset.remove_occluded(
+        RemoveOccludedOptions(level="parts", preserve_cavities=False, consider_transparency_opaque=False)
+    )
+    hidden = asset.remove_occluded(
+        RemoveOccludedOptions(level="parts", preserve_cavities=False, consider_transparency_opaque=True)
+    )
+
+    assert visible.occurrence_count == 2
+    assert hidden.occurrence_count == 1
+    assert "inner" not in hidden.parts
+
+
+def test_remove_occluded_keeps_side_by_side_parts() -> None:
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="left", name="Left", part_id="left"),
+                Node(id="right", name="Right", part_id="right"),
+            ],
+        ),
+        parts={
+            "left": Part(id="left", name="Left", mesh=_translated_mesh(_cube_mesh(0.5), -1.0)),
+            "right": Part(id="right", name="Right", mesh=_translated_mesh(_cube_mesh(0.5), 1.0)),
+        },
+    )
+
+    visible = asset.remove_occluded(RemoveOccludedOptions(level="parts", preserve_cavities=False))
+
+    assert visible.occurrence_count == 2
+    assert visible.metadata["removed_occluded_nodes"] == "0"
+
+
+def test_remove_occluded_triangle_level_removes_hidden_occurrence() -> None:
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="outer", name="Outer", part_id="outer"),
+                Node(id="inner", name="Inner", part_id="inner"),
+            ],
+        ),
+        parts={
+            "outer": Part(id="outer", name="Outer", mesh=_cube_mesh(2.0)),
+            "inner": Part(id="inner", name="Inner", mesh=_cube_mesh(0.5)),
+        },
+    )
+
+    visible = asset.remove_occluded(
+        RemoveOccludedOptions(level="triangles", preserve_cavities=False, neighbors_preservation=0)
+    )
+
+    assert visible.occurrence_count == 1
+    assert "inner" not in visible.parts
+    assert visible.metadata["removed_occluded_triangles"] == "12"
+
+
+def test_remove_occluded_submesh_level_removes_hidden_material_group() -> None:
+    candidate_mesh = _merge_meshes(
+        [
+            (_cube_mesh(0.5), 0),
+            (_translated_mesh(_cube_mesh(0.5), 4.0), 1),
+        ]
+    )
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="outer", name="Outer", part_id="outer"),
+                Node(id="candidate", name="Candidate", part_id="candidate"),
+            ],
+        ),
+        parts={
+            "outer": Part(id="outer", name="Outer", mesh=_cube_mesh(2.0)),
+            "candidate": Part(
+                id="candidate",
+                name="Candidate",
+                mesh=candidate_mesh,
+                material_ids=["hidden", "visible"],
+            ),
+        },
+        materials={
+            "hidden": Material(id="hidden", name="Hidden", base_color=(1.0, 0.0, 0.0, 1.0)),
+            "visible": Material(id="visible", name="Visible", base_color=(0.0, 1.0, 0.0, 1.0)),
+        },
+    )
+
+    result = asset.remove_occluded(RemoveOccludedOptions(level="submeshes", preserve_cavities=False))
+    part = result.parts["candidate"]
+
+    assert part.mesh is not None
+    assert part.mesh.triangle_count == 12
+    assert part.material_ids == ["visible"]
+    assert result.metadata["removed_occluded_triangles"] == "12"
 
 
 def test_run_lod_generators_records_screen_coverage_metadata() -> None:

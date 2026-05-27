@@ -6,7 +6,7 @@ from typing import cast
 import numpy as np
 from numpy.typing import NDArray
 
-from fascat.asset import Asset, Node
+from fascat.asset import Asset, Node, Part
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.options import (
@@ -210,42 +210,62 @@ def remove_occluded_asset(
     selected_node_ids: set[str],
 ) -> Asset:
     result = asset.copy(keep_source=True)
-    result.report.add_warning(
-        "remove_occluded uses part-level AABB containment fallback; true visibility sampling is not implemented"
-    )
     if options.level != "parts":
-        result.report.add_warning(
-            f"occlusion level {options.level} uses part-level AABB containment fallback; "
-            "submesh and triangle removal are not implemented"
-        )
-    if options.strategy != "conservative" or options.hemi_evaluation:
-        result.report.add_warning(
-            "remove_occluded uses conservative AABB containment; strategy and hemi_evaluation "
-            "do not change visibility sampling"
-        )
+        _isolate_selected_occurrence_parts(result, selected_node_ids)
+    result.report.add_warning(
+        "remove_occluded uses deterministic sampled visibility; thin occluders may require higher precision"
+    )
     occurrences = _world_occurrences(result)
     selected_occurrences = [item for item in occurrences if item.node.id in selected_node_ids]
+    directions = _occlusion_directions(options)
+    ray_distance = _occlusion_ray_distance(occurrences)
     removed_node_ids: set[str] = set()
+    trims: list[_OcclusionTrim] = []
     for candidate in selected_occurrences:
         if _preserve_candidate_cavity(result, candidate, options):
             continue
-        for occluder in occurrences:
-            if occluder.node.id == candidate.node.id:
-                continue
-            if not options.consider_transparency_opaque and _part_is_transparent(result, occluder.part_id):
-                continue
-            if occluder.volume <= candidate.volume * 1.001:
-                continue
-            if _bbox_contains(occluder.bounds_min, occluder.bounds_max, candidate.bounds_min, candidate.bounds_max):
+        occluders = _candidate_occluders(result, candidate, occurrences, options)
+        if options.level == "parts":
+            if not _occurrence_has_visible_sample(candidate, occluders, directions, ray_distance, options):
                 removed_node_ids.add(candidate.node.id)
-                break
+            continue
+        visible_faces = _visible_face_mask(candidate, occluders, directions, ray_distance)
+        part = result.parts.get(candidate.part_id)
+        mesh = None if part is None else part.mesh
+        if mesh is None or mesh.triangle_count == 0 or bool(np.all(visible_faces)):
+            continue
+        if options.level == "submeshes":
+            keep_mask = _submesh_keep_mask(mesh, visible_faces)
+        else:
+            keep_mask = _expand_face_mask(mesh, visible_faces, options.neighbors_preservation)
+        if bool(np.all(keep_mask)):
+            continue
+        keep_faces = np.flatnonzero(keep_mask)
+        removed_faces = int(mesh.triangle_count - keep_faces.shape[0])
+        if keep_faces.size == 0:
+            removed_node_ids.add(candidate.node.id)
+        else:
+            trims.append(
+                _OcclusionTrim(
+                    node_id=candidate.node.id,
+                    part_id=candidate.part_id,
+                    keep_faces=keep_faces.astype(np.int64),
+                    removed_faces=removed_faces,
+                )
+            )
 
     if removed_node_ids:
         _remove_part_nodes(result.root, removed_node_ids)
+    removed_faces_total = _removed_node_triangle_count(result, selected_occurrences, removed_node_ids)
+    removed_faces_total += _apply_occlusion_trims(result, trims, removed_node_ids, options)
+    if removed_node_ids or removed_faces_total:
         _drop_unreferenced_parts(result)
     result.metadata["removed_occluded_nodes"] = str(len(removed_node_ids))
+    result.metadata["removed_occluded_triangles"] = str(removed_faces_total)
     result.metadata["occlusion_strategy"] = options.strategy
     result.metadata["occlusion_level"] = options.level
+    result.metadata["occlusion_direction_count"] = str(len(directions))
+    result.metadata["occlusion_hemi_evaluation"] = str(options.hemi_evaluation).lower()
     return result
 
 
@@ -287,9 +307,19 @@ class _HoleFillStats:
 class _WorldOccurrence:
     node: Node
     part_id: str
+    world_points: FloatArray
+    faces: IntArray
     bounds_min: FloatArray
     bounds_max: FloatArray
     volume: float
+
+
+@dataclass(frozen=True)
+class _OcclusionTrim:
+    node_id: str
+    part_id: str
+    keep_faces: IntArray
+    removed_faces: int
 
 
 def _selected_mesh_part_ids(asset: Asset, selected_part_ids: set[str] | None) -> set[str]:
@@ -531,6 +561,333 @@ def _loop_diameter(points: FloatArray, loop: list[int]) -> float:
     return float(distances.max())
 
 
+def _isolate_selected_occurrence_parts(asset: Asset, selected_node_ids: set[str]) -> None:
+    references: dict[str, list[Node]] = {}
+    for node in asset.root.walk():
+        if node.part_id is not None and node.part_id in asset.parts:
+            references.setdefault(node.part_id, []).append(node)
+
+    for part_id, nodes in list(references.items()):
+        selected_nodes = [node for node in nodes if node.id in selected_node_ids]
+        if not selected_nodes:
+            continue
+        for node in selected_nodes[:-1] if len(selected_nodes) == len(nodes) else selected_nodes:
+            new_part_id = _unique_part_id(asset.parts, f"{part_id}_{node.id}")
+            part = asset.parts[part_id].copy(keep_source=True)
+            part.id = new_part_id
+            part.metadata = {**part.metadata, "source_part_id": part_id}
+            asset.parts[new_part_id] = part
+            node.part_id = new_part_id
+
+
+def _candidate_occluders(
+    asset: Asset,
+    candidate: _WorldOccurrence,
+    occurrences: list[_WorldOccurrence],
+    options: RemoveOccludedOptions,
+) -> list[_WorldOccurrence]:
+    return [
+        occluder
+        for occluder in occurrences
+        if occluder.node.id != candidate.node.id
+        and (options.consider_transparency_opaque or not _part_is_transparent(asset, occluder.part_id))
+    ]
+
+
+def _occlusion_directions(options: RemoveOccludedOptions) -> list[FloatArray]:
+    if options.strategy == "conservative":
+        vectors = [
+            (1.0, 0.0, 0.0),
+            (-1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0),
+            (0.0, -1.0, 0.0),
+            (0.0, 0.0, 1.0),
+            (0.0, 0.0, -1.0),
+        ]
+    elif options.strategy == "exterior":
+        vectors = [(x, y, z) for x in (-1.0, 1.0) for y in (-1.0, 1.0) for z in (-1.0, 1.0)] + [
+            (1.0, 0.0, 0.0),
+            (-1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0),
+            (0.0, -1.0, 0.0),
+            (0.0, 0.0, 1.0),
+            (0.0, 0.0, -1.0),
+        ]
+    else:
+        vectors = [
+            (x, y, z)
+            for x in (-1.0, 0.0, 1.0)
+            for y in (-1.0, 0.0, 1.0)
+            for z in (-1.0, 0.0, 1.0)
+            if (x, y, z) != (0.0, 0.0, 0.0)
+        ]
+    if options.hemi_evaluation:
+        vectors = [vector for vector in vectors if vector[2] >= 0.0]
+    directions: list[FloatArray] = []
+    for vector in vectors:
+        direction = np.asarray(vector, dtype=np.float64)
+        length = float(np.linalg.norm(direction))
+        if length > 0.0:
+            directions.append(direction / length)
+    return directions
+
+
+def _occlusion_ray_distance(occurrences: list[_WorldOccurrence]) -> float:
+    if not occurrences:
+        return 1.0
+    bounds_min = np.vstack([occurrence.bounds_min for occurrence in occurrences]).min(axis=0)
+    bounds_max = np.vstack([occurrence.bounds_max for occurrence in occurrences]).max(axis=0)
+    diagonal = float(np.linalg.norm(bounds_max - bounds_min))
+    return max(diagonal * 2.0, 1.0)
+
+
+def _occurrence_has_visible_sample(
+    candidate: _WorldOccurrence,
+    occluders: list[_WorldOccurrence],
+    directions: list[FloatArray],
+    ray_distance: float,
+    options: RemoveOccludedOptions,
+) -> bool:
+    samples = _occurrence_visibility_samples(candidate, options.precision)
+    if samples.size == 0 or not occluders:
+        return True
+    return any(_sample_is_visible(sample, occluders, directions, ray_distance) for sample in samples)
+
+
+def _occurrence_visibility_samples(candidate: _WorldOccurrence, precision: int) -> FloatArray:
+    face_samples = _face_centers(candidate)
+    if face_samples.shape[0] > precision:
+        indices = np.unique(np.linspace(0, face_samples.shape[0] - 1, precision, dtype=np.int64))
+        face_samples = face_samples[indices]
+    mins = candidate.bounds_min
+    maxs = candidate.bounds_max
+    box_samples = np.asarray(
+        [
+            [mins[0], mins[1], mins[2]],
+            [mins[0], mins[1], maxs[2]],
+            [mins[0], maxs[1], mins[2]],
+            [mins[0], maxs[1], maxs[2]],
+            [maxs[0], mins[1], mins[2]],
+            [maxs[0], mins[1], maxs[2]],
+            [maxs[0], maxs[1], mins[2]],
+            [maxs[0], maxs[1], maxs[2]],
+            [(mins[0] + maxs[0]) * 0.5, mins[1], (mins[2] + maxs[2]) * 0.5],
+            [(mins[0] + maxs[0]) * 0.5, maxs[1], (mins[2] + maxs[2]) * 0.5],
+            [mins[0], (mins[1] + maxs[1]) * 0.5, (mins[2] + maxs[2]) * 0.5],
+            [maxs[0], (mins[1] + maxs[1]) * 0.5, (mins[2] + maxs[2]) * 0.5],
+            [(mins[0] + maxs[0]) * 0.5, (mins[1] + maxs[1]) * 0.5, mins[2]],
+            [(mins[0] + maxs[0]) * 0.5, (mins[1] + maxs[1]) * 0.5, maxs[2]],
+        ],
+        dtype=np.float64,
+    )
+    if face_samples.size == 0:
+        return box_samples
+    return cast(FloatArray, np.vstack([face_samples, box_samples]))
+
+
+def _visible_face_mask(
+    candidate: _WorldOccurrence,
+    occluders: list[_WorldOccurrence],
+    directions: list[FloatArray],
+    ray_distance: float,
+) -> NDArray[np.bool_]:
+    centers = _face_centers(candidate)
+    if centers.size == 0 or not occluders:
+        return np.ones(candidate.faces.shape[0], dtype=np.bool_)
+    return np.asarray(
+        [_sample_is_visible(center, occluders, directions, ray_distance) for center in centers],
+        dtype=np.bool_,
+    )
+
+
+def _face_centers(occurrence: _WorldOccurrence) -> FloatArray:
+    if occurrence.faces.size == 0:
+        return np.empty((0, 3), dtype=np.float64)
+    triangles = occurrence.world_points[occurrence.faces]
+    return cast(FloatArray, triangles.mean(axis=1))
+
+
+def _sample_is_visible(
+    sample: FloatArray,
+    occluders: list[_WorldOccurrence],
+    directions: list[FloatArray],
+    ray_distance: float,
+) -> bool:
+    for direction in directions:
+        origin = sample + direction * ray_distance
+        if not _segment_blocked(origin, sample, occluders):
+            return True
+    return False
+
+
+def _segment_blocked(start: FloatArray, end: FloatArray, occluders: list[_WorldOccurrence]) -> bool:
+    for occluder in occluders:
+        if not _segment_intersects_bounds(start, end, occluder.bounds_min, occluder.bounds_max):
+            continue
+        if _segment_intersects_mesh(start, end, occluder.world_points, occluder.faces):
+            return True
+    return False
+
+
+def _segment_intersects_mesh(start: FloatArray, end: FloatArray, points: FloatArray, faces: IntArray) -> bool:
+    for face in faces.astype(int).tolist():
+        triangle = points[np.asarray(face, dtype=np.int64)]
+        hit = _segment_triangle_t(start, end, triangle)
+        if hit is not None and 1e-8 < hit < 1.0 - 1e-8:
+            return True
+    return False
+
+
+def _segment_triangle_t(start: FloatArray, end: FloatArray, triangle: FloatArray) -> float | None:
+    epsilon = 1e-12
+    direction = end - start
+    edge1 = triangle[1] - triangle[0]
+    edge2 = triangle[2] - triangle[0]
+    pvec = np.cross(direction, edge2)
+    determinant = float(np.dot(edge1, pvec))
+    if abs(determinant) <= epsilon:
+        return None
+    inverse = 1.0 / determinant
+    tvec = start - triangle[0]
+    u = float(np.dot(tvec, pvec)) * inverse
+    if u < -epsilon or u > 1.0 + epsilon:
+        return None
+    qvec = np.cross(tvec, edge1)
+    v = float(np.dot(direction, qvec)) * inverse
+    if v < -epsilon or u + v > 1.0 + epsilon:
+        return None
+    t = float(np.dot(edge2, qvec)) * inverse
+    if t < -epsilon or t > 1.0 + epsilon:
+        return None
+    return t
+
+
+def _segment_intersects_bounds(
+    start: FloatArray,
+    end: FloatArray,
+    bounds_min: FloatArray,
+    bounds_max: FloatArray,
+) -> bool:
+    epsilon = 1e-12
+    direction = end - start
+    tmin = 0.0
+    tmax = 1.0
+    for axis in range(3):
+        if abs(float(direction[axis])) <= epsilon:
+            if start[axis] < bounds_min[axis] - epsilon or start[axis] > bounds_max[axis] + epsilon:
+                return False
+            continue
+        inverse = 1.0 / float(direction[axis])
+        near = (float(bounds_min[axis]) - float(start[axis])) * inverse
+        far = (float(bounds_max[axis]) - float(start[axis])) * inverse
+        if near > far:
+            near, far = far, near
+        tmin = max(tmin, near)
+        tmax = min(tmax, far)
+        if tmin > tmax:
+            return False
+    return True
+
+
+def _submesh_keep_mask(mesh: Mesh, visible_faces: NDArray[np.bool_]) -> NDArray[np.bool_]:
+    if mesh.material_indices is None:
+        return cast(NDArray[np.bool_], visible_faces.copy())
+    keep = np.zeros(mesh.triangle_count, dtype=np.bool_)
+    for material_index in np.unique(mesh.material_indices):
+        group = mesh.material_indices == material_index
+        if bool(np.any(visible_faces[group])):
+            keep[group] = True
+    return keep
+
+
+def _expand_face_mask(mesh: Mesh, visible_faces: NDArray[np.bool_], rings: int) -> NDArray[np.bool_]:
+    keep = visible_faces.copy()
+    if rings <= 0 or not bool(np.any(keep)):
+        return cast(NDArray[np.bool_], keep)
+    edge_faces: dict[tuple[int, int], list[int]] = {}
+    for face_index, face in enumerate(mesh.faces.astype(int).tolist()):
+        for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
+            edge_faces.setdefault(_edge_key(start, end), []).append(face_index)
+    neighbors: list[set[int]] = [set() for _ in range(mesh.triangle_count)]
+    for face_indices in edge_faces.values():
+        if len(face_indices) < 2:
+            continue
+        for face_index in face_indices:
+            neighbors[face_index].update(index for index in face_indices if index != face_index)
+    frontier = set(np.flatnonzero(keep).astype(int).tolist())
+    for _ in range(rings):
+        next_frontier: set[int] = set()
+        for face_index in frontier:
+            next_frontier.update(neighbors[face_index])
+        next_frontier.difference_update(np.flatnonzero(keep).astype(int).tolist())
+        if not next_frontier:
+            break
+        keep[np.asarray(sorted(next_frontier), dtype=np.int64)] = True
+        frontier = next_frontier
+    return cast(NDArray[np.bool_], keep)
+
+
+def _apply_occlusion_trims(
+    asset: Asset,
+    trims: list[_OcclusionTrim],
+    removed_node_ids: set[str],
+    options: RemoveOccludedOptions,
+) -> int:
+    removed_faces_total = 0
+    for trim in trims:
+        if trim.node_id in removed_node_ids:
+            continue
+        part = asset.parts.get(trim.part_id)
+        if part is None or part.mesh is None:
+            continue
+        mesh = _slice_faces(part.mesh, trim.keep_faces).remove_unreferenced_vertices()
+        if mesh.triangle_count:
+            mesh = mesh.compute_normals()
+        _compact_material_slots(part, mesh)
+        mesh.metadata = {
+            **mesh.metadata,
+            "occlusion_level": options.level,
+            "occlusion_removed_faces": str(trim.removed_faces),
+        }
+        mesh.validate()
+        part.mesh = mesh
+        part.metadata = {
+            **part.metadata,
+            "occlusion_level": options.level,
+            "occlusion_removed_faces": str(trim.removed_faces),
+        }
+        part.fingerprint = mesh.fingerprint()
+        removed_faces_total += trim.removed_faces
+    return removed_faces_total
+
+
+def _removed_node_triangle_count(
+    asset: Asset,
+    selected_occurrences: list[_WorldOccurrence],
+    removed_node_ids: set[str],
+) -> int:
+    total = 0
+    for occurrence in selected_occurrences:
+        if occurrence.node.id not in removed_node_ids:
+            continue
+        part = asset.parts.get(occurrence.part_id)
+        if part is not None and part.mesh is not None:
+            total += part.mesh.triangle_count
+    return total
+
+
+def _compact_material_slots(part: Part, mesh: Mesh) -> None:
+    if mesh.material_indices is None:
+        return
+    material_ids = part.material_ids
+    used = sorted({int(index) for index in mesh.material_indices.astype(int).tolist()})
+    if not used or any(index < 0 or index >= len(material_ids) for index in used):
+        return
+    remap = {old: new for new, old in enumerate(used)}
+    mesh.material_indices = np.asarray([remap[int(index)] for index in mesh.material_indices], dtype=np.int64)
+    part.material_ids = [material_ids[index] for index in used]
+
+
 def _world_occurrences(asset: Asset) -> list[_WorldOccurrence]:
     occurrences: list[_WorldOccurrence] = []
 
@@ -539,13 +896,20 @@ def _world_occurrences(asset: Asset) -> list[_WorldOccurrence]:
         if node.part_id is not None and node.part_id in asset.parts:
             part = asset.parts[node.part_id]
             if part.mesh is not None:
-                mins, maxs = part.mesh.bounds()
-                world_min, world_max = _transform_bounds(mins, maxs, current)
+                world_points = _transform_points(part.mesh.points, current)
+                if world_points.shape[0] == 0:
+                    mins, maxs = part.mesh.bounds()
+                    world_min, world_max = _transform_bounds(mins, maxs, current)
+                else:
+                    world_min = cast(FloatArray, world_points.min(axis=0))
+                    world_max = cast(FloatArray, world_points.max(axis=0))
                 volume = float(np.prod(np.maximum(world_max - world_min, 0.0)))
                 occurrences.append(
                     _WorldOccurrence(
                         node=node,
                         part_id=node.part_id,
+                        world_points=world_points,
+                        faces=part.mesh.faces.copy(),
                         bounds_min=world_min,
                         bounds_max=world_max,
                         volume=volume,
@@ -556,6 +920,13 @@ def _world_occurrences(asset: Asset) -> list[_WorldOccurrence]:
 
     walk(asset.root, np.eye(4, dtype=np.float64))
     return occurrences
+
+
+def _transform_points(points: FloatArray, transform: FloatArray) -> FloatArray:
+    if points.shape[0] == 0:
+        return cast(FloatArray, points.copy())
+    homogeneous = np.column_stack([points, np.ones(points.shape[0], dtype=np.float64)])
+    return cast(FloatArray, (transform @ homogeneous.T).T[:, :3])
 
 
 def _transform_bounds(mins: FloatArray, maxs: FloatArray, transform: FloatArray) -> tuple[FloatArray, FloatArray]:
@@ -651,6 +1022,15 @@ def _unique_material_id(materials: dict[str, Material], base: str) -> str:
     candidate = base
     suffix = 2
     while candidate in materials:
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    return candidate
+
+
+def _unique_part_id(parts: dict[str, Part], base: str) -> str:
+    candidate = base
+    suffix = 2
+    while candidate in parts:
         candidate = f"{base}_{suffix}"
         suffix += 1
     return candidate
