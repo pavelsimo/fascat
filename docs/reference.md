@@ -40,6 +40,7 @@ fascat inspect input.step --json
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--profile` | `realtime-desktop` | Conversion profile: `inspect-only`, `realtime-desktop`, `realtime-web`, or `virtual-reality` |
+| `--pipeline` | unset | TOML pipeline file with named filters and ordered conversion steps |
 | `--sag` | profile value | CAD tessellation sag tolerance |
 | `--angle` | profile value | CAD tessellation angle tolerance in degrees |
 | `--target-triangles` | profile value | Target triangle count for optimized LOD0 |
@@ -177,6 +178,44 @@ Supported filter expressions:
 | `size>=50` | Match bounding-box diagonal |
 
 Repeated `--filter` flags are combined with logical AND. Use `--exclude-filter` for negative selectors.
+
+## Pipeline files
+
+Use `--pipeline` when different assembly branches need different ordered steps.
+
+```toml
+[[filters]]
+name = "fasteners"
+path = "*/Fasteners/*"
+names = ["Bolt*", "Nut*", "Washer*"]
+
+[[filters]]
+name = "large_castings"
+path = "*/Housing/*"
+min_diagonal = 50.0
+
+[[steps]]
+op = "tessellate"
+where = "large_castings"
+sag = 0.03
+angle = 10.0
+
+[[steps]]
+op = "tessellate"
+where_not = "large_castings"
+sag = 0.2
+angle = 20.0
+
+[[steps]]
+op = "merge"
+where = "fasteners"
+mode = "by_material"
+metadata = "combine"
+```
+
+```bash
+fascat convert motor.step motor.glb --pipeline realtime.toml
+```
 
 ## Validate flags
 

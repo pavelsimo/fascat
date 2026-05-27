@@ -65,6 +65,24 @@ fascat convert motor.step motor.glb \
   --report report.json
 ```
 
+For branch-specific conversion settings, put named filters and ordered steps in a pipeline file:
+
+```toml
+[[filters]]
+name = "fasteners"
+path = "*/Fasteners/*"
+names = ["Bolt*"]
+
+[[steps]]
+op = "merge"
+where = "fasteners"
+mode = "by_material"
+```
+
+```bash
+fascat convert motor.step motor.glb --pipeline realtime.toml
+```
+
 ## Tune tessellation and LODs
 
 ```bash

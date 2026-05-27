@@ -50,6 +50,15 @@ def test_public_api_exposes_quality_analysis() -> None:
     assert report.summary["open_boundaries"] == 1
 
 
+def test_public_api_exposes_pipeline_spec(tmp_path: Path) -> None:
+    pipeline_file = tmp_path / "pipeline.toml"
+    pipeline_file.write_text('[[steps]]\nop = "repair"\n', encoding="utf-8")
+
+    spec = fc.PipelineSpec.from_file(pipeline_file)
+
+    assert spec.steps[0].op == "repair"
+
+
 def test_functional_api_wraps_tessellation_options() -> None:
     asset = fc.Asset(
         root=fc.Node(id="root", name="root", children=[fc.Node(id="node", name="node", part_id="part")]),

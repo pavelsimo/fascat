@@ -32,6 +32,7 @@ dependencies = [
     "typer>=0.15",
     "typing-extensions>=4.8",
     "rich>=13.0",
+    "tomli>=2.0",
     "usd-core>=24.8",
 ]
 

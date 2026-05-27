@@ -408,6 +408,13 @@ fc.convert("motor.step", "motor.gltf", profile="realtime-web")
 `fc.convert()` validates generated output by default. Pass `validate_output=False` only when another step in your pipeline validates the asset.
 When `where` is provided to `fc.convert()`, tessellation, repair, and staging still run for the full asset, while merge, scene optimization, optimization actions, optimization, and LOD generation are scoped to the matched assembly subset.
 
+For multiple branch-specific steps, load the same TOML pipeline format used by `fascat convert --pipeline`:
+
+```python
+pipeline = fc.PipelineSpec.from_file("realtime.toml")
+asset = fc.convert("motor.step", "motor.glb", pipeline=pipeline)
+```
+
 ## Runtime Export Options
 
 glTF and USD exports accept runtime delivery options, and OBJ/STL are available for mesh-only handoff workflows.

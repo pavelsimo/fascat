@@ -110,6 +110,7 @@ def test_convert_help() -> None:
     result = runner.invoke(app, ["convert", "--help"])
     assert result.exit_code == 0
     assert "--target-triangles" in plain(result.output)
+    assert "--pipeline" in plain(result.output)
     assert "--min-edge-length" in plain(result.output)
     assert "--max-edge-length" in plain(result.output)
     assert "--quality-report" in plain(result.output)
@@ -178,6 +179,50 @@ def test_convert_dry_run_accepts_gltf_output_and_virtual_reality_profile() -> No
     assert result.exit_code == 0
     assert '"output": "output.glb"' in result.output
     assert '"profile": "virtual-reality"' in result.output
+
+
+def test_convert_dry_run_accepts_pipeline_file(tmp_path: Path) -> None:
+    pipeline_file = tmp_path / "realtime.toml"
+    pipeline_file.write_text(
+        """
+[[filters]]
+name = "fasteners"
+path = "*/Fasteners/*"
+names = ["Bolt*"]
+
+[[steps]]
+op = "tessellate"
+where = "fasteners"
+sag = 0.2
+
+[[steps]]
+op = "optimize"
+where_not = "fasteners"
+target_triangles = 80000
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        ["--json", "--dry-run", "convert", "input.step", "output.glb", "--pipeline", str(pipeline_file)],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["pipeline"] == str(pipeline_file)
+    assert payload["pipeline_filters"] == ["fasteners"]
+    assert [step["op"] for step in payload["pipeline_steps"]] == ["tessellate", "optimize"]
+
+
+def test_convert_rejects_invalid_pipeline_file(tmp_path: Path) -> None:
+    pipeline_file = tmp_path / "bad.toml"
+    pipeline_file.write_text('[[steps]]\nwhere = "missing"\n', encoding="utf-8")
+
+    result = runner.invoke(app, ["--dry-run", "convert", "input.step", "output.glb", "--pipeline", str(pipeline_file)])
+
+    assert result.exit_code == 2
+    assert "Invalid pipeline file" in result.output
 
 
 def test_inspect_dry_run() -> None:

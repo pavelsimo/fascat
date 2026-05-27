@@ -60,6 +60,7 @@ from fascat.pipeline import (
     write_stl,
     write_usd,
 )
+from fascat.pipeline_file import PipelineSpec, PipelineStep
 
 __version__ = "0.1.0"
 
@@ -88,6 +89,8 @@ __all__ = [
     "OptimizeOptions",
     "Part",
     "PmiAnnotation",
+    "PipelineSpec",
+    "PipelineStep",
     "RepairOptions",
     "RemoveHolesOptions",
     "RemoveOccludedOptions",

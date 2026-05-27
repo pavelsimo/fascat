@@ -42,6 +42,7 @@ from fascat.options import (
     UsdExportOptions,
     UVMode,
 )
+from fascat.pipeline_file import PipelineSpec
 from fascat.report import timed_step
 
 if TYPE_CHECKING:
@@ -78,6 +79,7 @@ def convert(
     usd_options: UsdExportOptions | None = None,
     obj_options: ObjExportOptions | None = None,
     stl_options: StlExportOptions | None = None,
+    pipeline: PipelineSpec | None = None,
     where: Filter | None = None,
 ) -> Asset:
     output_format = _export_format(output_path)
@@ -88,67 +90,70 @@ def convert(
     asset = read_step(input_path, options=import_options) if import_options is not None else read_step(input_path)
     if progress is not None:
         progress("source", asset.stats())
-    tessellation_options = tessellation or selected.tessellation
-    if heal_brep is not None:
-        asset = asset.heal_brep(heal_brep, where=where)
+    if pipeline is not None:
+        asset = pipeline.apply(asset, progress=progress)
+    else:
+        tessellation_options = tessellation or selected.tessellation
+        if heal_brep is not None:
+            asset = asset.heal_brep(heal_brep, where=where)
+            if progress is not None:
+                progress("heal_brep", asset.stats())
+        if tessellation_options is not None:
+            asset = asset.tessellate(tessellation_options)
+            if progress is not None:
+                progress("tessellate", asset.stats())
+        asset = asset.repair(selected.repair)
         if progress is not None:
-            progress("heal_brep", asset.stats())
-    if tessellation_options is not None:
-        asset = asset.tessellate(tessellation_options)
+            progress("repair", asset.stats())
+        asset = asset.stage(stage or selected.stage)
         if progress is not None:
-            progress("tessellate", asset.stats())
-    asset = asset.repair(selected.repair)
-    if progress is not None:
-        progress("repair", asset.stats())
-    asset = asset.stage(stage or selected.stage)
-    if progress is not None:
-        progress("stage", asset.stats())
-    if merge is not None:
-        asset = asset.merge(merge, where=where)
-        if progress is not None:
-            progress("merge", asset.stats())
-    if explode is not None:
-        asset = asset.explode(explode, where=where)
-        if progress is not None:
-            progress("explode", asset.stats())
-    if replace is not None:
-        asset = asset.replace(replace, where=where)
-        if progress is not None:
-            progress("replace", asset.stats())
-    if scene is not None:
-        asset = asset.optimize_scene(scene, where=where)
-        if progress is not None:
-            progress("optimize_scene", asset.stats())
-    if bake_materials is not None:
-        asset = asset.bake_materials(bake_materials, where=where)
-        if progress is not None:
-            progress("bake_materials", asset.stats())
-    if remove_holes is not None:
-        asset = asset.remove_holes(remove_holes, where=where)
-        if progress is not None:
-            progress("remove_holes", asset.stats())
-    if remove_occluded is not None:
-        asset = asset.remove_occluded(remove_occluded, where=where)
-        if progress is not None:
-            progress("remove_occluded", asset.stats())
-    if decimate is not None:
-        asset = asset.decimate(decimate, where=where)
-        if progress is not None:
-            progress("decimate", asset.stats())
-    optimize_options = optimize if optimize is not None else selected.optimize
-    if optimize_options is not None:
-        asset = asset.optimize(optimize_options, where=where)
-        if progress is not None:
-            progress("optimize", asset.stats())
-    lod_options = lods if lods is not None else selected.lods
-    if lod_generator is not None:
-        asset = asset.run_lod_generators(lod_generator, where=where)
-        if progress is not None:
-            progress("run_lod_generators", asset.stats())
-    elif lod_options is not None:
-        asset = asset.lods(lod_options, where=where)
-        if progress is not None:
-            progress("lods", asset.stats())
+            progress("stage", asset.stats())
+        if merge is not None:
+            asset = asset.merge(merge, where=where)
+            if progress is not None:
+                progress("merge", asset.stats())
+        if explode is not None:
+            asset = asset.explode(explode, where=where)
+            if progress is not None:
+                progress("explode", asset.stats())
+        if replace is not None:
+            asset = asset.replace(replace, where=where)
+            if progress is not None:
+                progress("replace", asset.stats())
+        if scene is not None:
+            asset = asset.optimize_scene(scene, where=where)
+            if progress is not None:
+                progress("optimize_scene", asset.stats())
+        if bake_materials is not None:
+            asset = asset.bake_materials(bake_materials, where=where)
+            if progress is not None:
+                progress("bake_materials", asset.stats())
+        if remove_holes is not None:
+            asset = asset.remove_holes(remove_holes, where=where)
+            if progress is not None:
+                progress("remove_holes", asset.stats())
+        if remove_occluded is not None:
+            asset = asset.remove_occluded(remove_occluded, where=where)
+            if progress is not None:
+                progress("remove_occluded", asset.stats())
+        if decimate is not None:
+            asset = asset.decimate(decimate, where=where)
+            if progress is not None:
+                progress("decimate", asset.stats())
+        optimize_options = optimize if optimize is not None else selected.optimize
+        if optimize_options is not None:
+            asset = asset.optimize(optimize_options, where=where)
+            if progress is not None:
+                progress("optimize", asset.stats())
+        lod_options = lods if lods is not None else selected.lods
+        if lod_generator is not None:
+            asset = asset.run_lod_generators(lod_generator, where=where)
+            if progress is not None:
+                progress("run_lod_generators", asset.stats())
+        elif lod_options is not None:
+            asset = asset.lods(lod_options, where=where)
+            if progress is not None:
+                progress("lods", asset.stats())
     write_before = _report_stats(asset)
     write_options: dict[str, object] = _write_options(
         output_format,

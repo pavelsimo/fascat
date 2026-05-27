@@ -49,6 +49,7 @@ from fascat.options import (
 )
 from fascat.pipeline import convert
 from fascat.pipeline import validate_output as validate_export
+from fascat.pipeline_file import PipelineSpec
 from fascat.profiles import by_name
 from fascat.report import Report
 
@@ -400,6 +401,7 @@ def cmd_inspect(
     epilog=f"""Examples:
   fascat convert motor.step motor.usdc
   fascat convert motor.step motor.glb --profile virtual-reality
+  fascat convert motor.step motor.glb --pipeline realtime.toml
   fascat convert motor.step
   fascat convert motor.step motor.usda --debug --report report.json
   fascat --dry-run --json convert motor.step motor.usdc
@@ -418,6 +420,10 @@ def cmd_convert(
         ),
     ] = None,
     profile: Annotated[Profile, typer.Option("--profile", help="Conversion profile.")] = Profile.REALTIME_DESKTOP,
+    pipeline: Annotated[
+        Path | None,
+        typer.Option("--pipeline", help="TOML pipeline file with named filters and ordered steps."),
+    ] = None,
     sag: Annotated[float | None, typer.Option("--sag", help="CAD tessellation sag tolerance.")] = None,
     angle: Annotated[
         float | None,
@@ -823,6 +829,7 @@ def cmd_convert(
         "input": str(input_path),
         "output": str(output_path) if output_path is not None else None,
         "profile": profile.value,
+        "pipeline": str(pipeline) if pipeline else None,
         "sag": sag,
         "angle": angle,
         "target_triangles": target_triangles,
@@ -933,6 +940,10 @@ def cmd_convert(
         "dry_run": state.dry_run,
     }
     where = _parse_filter_options(filters, exclude_filters, ctx, payload)
+    pipeline_spec = _read_pipeline_for_cli(pipeline, ctx, payload) if pipeline is not None else None
+    if pipeline_spec is not None:
+        payload["pipeline_steps"] = [step.to_dict() for step in pipeline_spec.steps]
+        payload["pipeline_filters"] = sorted(pipeline_spec.filters)
     lod_values = _parse_lods(lods, ctx, payload)
     bake_maps = _parse_bake_maps(bake, ctx, payload)
     enabled_hole_types = _parse_hole_types(hole_types, ctx, payload)
@@ -1243,6 +1254,7 @@ def cmd_convert(
             input_path,
             output_path,
             profile=profile.value,
+            pipeline=pipeline_spec,
             tessellation=tessellation,
             stage=stage_options,
             import_options=import_options,
@@ -1621,6 +1633,15 @@ def _step_read_options(metadata: MetadataMode, pmi: PmiMode) -> StepReadOptions:
     )
 
 
+def _read_pipeline_for_cli(path: Path, ctx: typer.Context, payload: dict[str, Any]) -> PipelineSpec:
+    _require_existing_file(path, "pipeline", ctx, payload)
+    try:
+        return PipelineSpec.from_file(path)
+    except Exception as exc:
+        _fail(ctx, payload, f"Invalid pipeline file: {exc}", code=2)
+    raise AssertionError("unreachable")
+
+
 def _brep_heal_options(
     *,
     heal_tolerance: float,
@@ -1746,6 +1767,7 @@ def _convert_for_cli(
     output_path: Path,
     *,
     profile: str,
+    pipeline: PipelineSpec | None,
     tessellation: Tessellation,
     stage: StageOptions,
     import_options: StepReadOptions,
@@ -1778,6 +1800,7 @@ def _convert_for_cli(
                 temp_input,
                 output_path,
                 profile,
+                pipeline,
                 tessellation,
                 stage,
                 import_options,
@@ -1805,6 +1828,7 @@ def _convert_for_cli(
         input_path,
         output_path,
         profile,
+        pipeline,
         tessellation,
         stage,
         import_options,
@@ -1834,6 +1858,7 @@ def _convert_output(
     input_path: Path,
     output_path: Path,
     profile: str,
+    pipeline: PipelineSpec | None,
     tessellation: Tessellation,
     stage: StageOptions,
     import_options: StepReadOptions,
@@ -1867,6 +1892,7 @@ def _convert_output(
                 input_path,
                 handle.name,
                 profile=profile,
+                pipeline=pipeline,
                 import_options=import_options,
                 tessellation=tessellation,
                 heal_brep=heal_brep,
@@ -1898,6 +1924,7 @@ def _convert_output(
         input_path,
         output_path,
         profile=profile,
+        pipeline=pipeline,
         import_options=import_options,
         tessellation=tessellation,
         heal_brep=heal_brep,

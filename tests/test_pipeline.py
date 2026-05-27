@@ -23,6 +23,7 @@ from fascat.options import (
     StageOptions,
 )
 from fascat.pipeline import convert
+from fascat.pipeline_file import PipelineSpec
 from fascat.report import Report
 
 
@@ -275,6 +276,50 @@ def test_convert_report_includes_timed_write_and_validate_steps(monkeypatch, tmp
     assert steps["validate"].duration >= 0.0
     assert converted.report.finished_at is not None
     assert converted.report.output_stats == converted.stats()
+
+
+def test_convert_can_run_toml_pipeline_steps(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.pipeline as pipeline
+
+    asset = _triangle_asset()
+    pipeline_file = tmp_path / "pipeline.toml"
+    pipeline_file.write_text(
+        """
+[[filters]]
+name = "simple"
+part = "part"
+max_triangles = 12
+
+[[steps]]
+op = "repair"
+
+[[steps]]
+op = "replace"
+where = "simple"
+mode = "bounding_box"
+""",
+        encoding="utf-8",
+    )
+    captured: dict[str, Asset] = {}
+
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: asset)
+    monkeypatch.setattr(
+        pipeline,
+        "_write_usd",
+        lambda written_asset, _path, *, debug=False, options=None: captured.setdefault("asset", written_asset),
+    )
+    monkeypatch.setattr(pipeline, "validate_usd", lambda _path: {"meshes": 1, "points": 8, "triangles": 12})
+
+    converted = convert("input.step", tmp_path / "output.usdc", pipeline=PipelineSpec.from_file(pipeline_file))
+
+    written = captured["asset"]
+    part = next(iter(written.parts.values()))
+    assert part.mesh is not None
+    assert part.mesh.triangle_count == 12
+    steps = {step.name: step for step in converted.report.steps}
+    assert [step.name for step in converted.report.steps[1:]] == ["repair", "replace", "write", "validate"]
+    assert steps["replace"].options["where"]["criteria"] == {"part_id": ["part"], "max_triangles": 12}
+    assert steps["replace"].options["matched"]["parts"] == 1
 
 
 def test_convert_dispatches_gltf_writer_and_validator(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
