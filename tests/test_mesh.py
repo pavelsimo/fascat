@@ -120,6 +120,28 @@ def test_quality_metrics_counts_duplicate_polygons() -> None:
     assert metrics["duplicate_polygons"] == 1
 
 
+def test_repair_records_t_junction_counts() -> None:
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [2, 0, 0],
+                [0, 1, 0],
+                [1, 0, 0],
+                [1, -1, 0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [0, 3, 4]], dtype=int),
+    )
+
+    repaired = mesh.repair(RepairOptions())
+
+    assert mesh.t_junction_count() == 1
+    assert repaired.metadata["repair_t_junctions_before"] == "1"
+    assert repaired.metadata["repair_t_junctions_after"] == "1"
+
+
 def test_orientability_metrics_detect_mobius_like_strip() -> None:
     mesh = mobius_strip_mesh()
 

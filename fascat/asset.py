@@ -324,6 +324,12 @@ class Asset:
                             f"part {part.id} has {non_orientable_edges} non-orientable shared edge(s) "
                             "before face orientation; Mobius-like topology cannot be fixed by winding normalization"
                         )
+                    remaining_t_junctions = _metadata_int(part.mesh.metadata.get("repair_t_junctions_after"), 0)
+                    if remaining_t_junctions:
+                        asset.report.add_warning(
+                            f"part {part.id} has {remaining_t_junctions} T-junction(s) after mesh repair; "
+                            "T-junction sewing is not implemented"
+                        )
                     part.fingerprint = part.mesh.fingerprint()
         step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
@@ -956,6 +962,8 @@ def _hierarchy_report_stats(asset: Asset) -> dict[str, int]:
 def _repair_report_stats(asset: Asset) -> dict[str, int]:
     stats = asset.stats()
     non_orientable_edges = 0
+    t_junctions_before = 0
+    t_junctions_after = 0
     for part in asset.parts.values():
         if part.mesh is None:
             continue
@@ -963,8 +971,13 @@ def _repair_report_stats(asset: Asset) -> dict[str, int]:
             part.mesh.metadata.get("repair_non_orientable_edges_before_orientation"),
             0,
         )
+        t_junctions_before += _metadata_int(part.mesh.metadata.get("repair_t_junctions_before"), 0)
+        t_junctions_after += _metadata_int(part.mesh.metadata.get("repair_t_junctions_after"), 0)
     if non_orientable_edges:
         stats["repair_non_orientable_edges_before_orientation"] = non_orientable_edges
+    if t_junctions_before or t_junctions_after:
+        stats["repair_t_junctions_before"] = t_junctions_before
+        stats["repair_t_junctions_after"] = t_junctions_after
     return stats
 
 

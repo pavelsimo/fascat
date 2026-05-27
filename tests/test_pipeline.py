@@ -68,6 +68,22 @@ def _mobius_strip_mesh(segments: int = 6) -> Mesh:
     return Mesh(points=np.asarray(points, dtype=float), faces=np.asarray(faces, dtype=int))
 
 
+def _t_junction_mesh() -> Mesh:
+    return Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [2, 0, 0],
+                [0, 1, 0],
+                [1, 0, 0],
+                [1, -1, 0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [0, 3, 4]], dtype=int),
+    )
+
+
 def _test_profile() -> ConversionProfile:
     return ConversionProfile(
         name="test",
@@ -186,6 +202,24 @@ def test_repair_reports_non_orientable_topology_before_winding_fix() -> None:
     assert mesh.metadata["repair_non_orientable_edges_before_orientation"] == "1"
     assert step.after["repair_non_orientable_edges_before_orientation"] == 1
     assert any("non-orientable shared edge" in warning for warning in step.warnings)
+
+
+def test_repair_report_includes_t_junction_metrics() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="panel")]),
+        parts={"panel": Part(id="panel", name="Panel", mesh=_t_junction_mesh())},
+    )
+
+    repaired = asset.repair(RepairOptions())
+
+    mesh = repaired.parts["panel"].mesh
+    step = repaired.report.steps[-1]
+    assert mesh is not None
+    assert mesh.metadata["repair_t_junctions_before"] == "1"
+    assert mesh.metadata["repair_t_junctions_after"] == "1"
+    assert step.after["repair_t_junctions_before"] == 1
+    assert step.after["repair_t_junctions_after"] == 1
+    assert any("T-junction sewing is not implemented" in warning for warning in step.warnings)
 
 
 def test_asset_operation_reports_include_options_and_before_after_counts() -> None:

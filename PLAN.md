@@ -70,6 +70,8 @@ that are currently conservative approximations.
   orientation and warns when Mobius-like topology cannot be fixed by winding.
 - Draw-call reports now separate mesh count, referenced material count,
   submesh/material slots, instances, reused instances, and merged batches.
+- Mesh repair now records before/after T-junction counts and warns that
+  remaining T-junctions still need a sewing backend.
 
 ## Unity Asset Transformer Parity
 
@@ -99,7 +101,7 @@ Comparison snapshot:
 | Area | Fascat today | Missing for closer Unity parity |
 | --- | --- | --- |
 | Import | STEP-centric import with hierarchy, transforms, metadata, colors, repeated-part handling, PMI presence reporting, existing-mesh reuse intent, construction-only point/line cleanup controls, source-space normalization reporting, and BREP patch cleanup reporting after tessellation. | True multi-file/multi-root import semantics, design-variant import, typed/visual PMI, mixed BREP construction-curve cleanup, native CAD/JT/IFC/Parasolid/IGES coverage, and richer per-part loaded-representation reports. |
-| Repair and tessellation | BREP sewing/fix-edge path, mesh duplicate/degenerate cleanup, unit-aware repair tolerance reporting, sag/sag-ratio/angle/max-length controls, free-edge diagnostics, reusable existing mesh control, and retained patch / submesh risk warnings. | Open-shell grouping, unstitched-face handling, T-junction sewing, non-manifold edge cracking, selectable face/normal orientation strategies, CAD-derived UV modes, targeted tessellation by part/material/metadata/curvature, and optional free-edge geometry output. |
+| Repair and tessellation | BREP sewing/fix-edge path, mesh duplicate/degenerate/T-junction diagnostics, unit-aware repair tolerance reporting, sag/sag-ratio/angle/max-length controls, free-edge diagnostics, reusable existing mesh control, and retained patch / submesh risk warnings. | Open-shell grouping, unstitched-face handling, T-junction sewing, non-manifold edge cracking, boundary-gap and flipped-component metrics, selectable face/normal orientation strategies, CAD-derived UV modes, targeted tessellation by part/material/metadata/curvature, and optional free-edge geometry output. |
 | Staging | Normal/tangent generation, box/unwrap/lightmap UV modes, UV copy/normalization, UV validation, material normalization, duplicate-material merge, and metadata-only atlas intent. | Unity-style UV0 tileable versus UV1 bake workflows with segmentation, lines of interest, island merge/alignment, repack/padding/share-map controls, distortion and pack-efficiency metrics, material-library mapping, real atlas textures, AO/lightmap baking, and texture cleanup. |
 | Optimization | Mesh simplification, measured error reporting, sampled occlusion removal, exact instance reconstruction, scene merge/split utilities, draw-call breakdown reports, and UV-importance modes. | Global assembly target allocation with iterative memory thresholds, real geometric-error bounded simplification, AO/user-weighted decimation, standard/advanced occlusion backends, retopology/proxy mesh generation, duplicate image/material cleanup, and merge reports that quantify culling, memory, and file-size tradeoffs. |
 | LODs | LOD ratios, screen-coverage metadata, validation, skipped-part reporting, and glTF `MSFT_lod` metadata. | Occurrence-level LOD group authoring with preserved instance relationships, optimized LOD0 as master asset, far-LOD one-mesh/one-material baking, switching-distance validation, and engine-specific runtime export profiles. |
@@ -151,7 +153,7 @@ Parity gaps to track:
    - Add explicit face and normal orientation passes with selectable strategies for exterior solids, single-sided open shells, and preserved two-sided surfaces.
    - Add missing-normal generation controls for sharp-edge angle, area weighting, override behavior, and flipped-component reporting.
    - Add attribute-aware tolerance vertex merging that rebuilds connectivity across hard-edge and non-manifold borders without collapsing intentional material, normal, or UV seams.
-   - Add before/after repair metrics for T-junctions, boundary gaps, and flipped components.
+   - Mesh repair now records before/after T-junction counts and warns that sewing remains unavailable. Remaining work: boundary-gap and flipped-component metrics.
    - BREP healing and mesh repair now report unit-aware tolerance policy: effective source/local units, declared target units, meters-per-unit conversions, vertex-merge and degenerate-polygon cleanup status, and missing T-junction/non-manifold backend operations.
 
 4. Tessellation controls
@@ -281,6 +283,7 @@ These need more design and should not be mixed into documentation or diagnostics
    - Unsupported sliver-face removal still reports a visible warning instead of claiming geometry was changed.
    - Mesh repair now handles duplicate polygon cleanup after tessellation.
    - Mesh repair now reports non-orientable shared-edge cycles before winding normalization.
+   - Mesh repair now reports before/after T-junction counts and warns when T-junctions remain.
    - Remaining polish: implement or delegate sliver-face removal, BREP duplicate-face cleanup, and deeper face/wire repair before tessellation.
 
 6. PMI and metadata output - first stability pass complete

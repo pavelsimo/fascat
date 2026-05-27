@@ -203,7 +203,9 @@ class Mesh:
         mesh = mesh._drop_invalid_faces()
         mesh = mesh._drop_non_finite()
         mesh = mesh.remove_unreferenced_vertices()
+        t_junction_tolerance = max(opts.tolerance, 1e-9)
         before_metrics = mesh.quality_metrics(area_epsilon=opts.area_epsilon)
+        before_t_junctions = mesh.t_junction_count(tolerance=t_junction_tolerance)
         if opts.merge_vertices and opts.tolerance > 0.0:
             mesh = mesh.merge_close_vertices(opts.tolerance)
         mesh = mesh.remove_duplicate_faces()
@@ -219,6 +221,7 @@ class Mesh:
             if mesh.triangle_count != previous_triangle_count:
                 mesh = mesh.compute_normals()
         after_metrics = mesh.quality_metrics(area_epsilon=opts.area_epsilon)
+        after_t_junctions = mesh.t_junction_count(tolerance=t_junction_tolerance)
         mesh.metadata = {
             **mesh.metadata,
             "repair_duplicate_polygons_before": str(int(before_metrics["duplicate_polygons"])),
@@ -229,6 +232,8 @@ class Mesh:
             "repair_boundary_edges_after": str(int(after_metrics["boundary_edges"])),
             "repair_non_manifold_edges_before": str(int(before_metrics["non_manifold_edges"])),
             "repair_non_manifold_edges_after": str(int(after_metrics["non_manifold_edges"])),
+            "repair_t_junctions_before": str(before_t_junctions),
+            "repair_t_junctions_after": str(after_t_junctions),
             "repair_orientation_components_before_orientation": str(int(orientation_metrics["orientation_components"])),
             "repair_non_orientable_edges_before_orientation": str(int(orientation_metrics["non_orientable_edges"])),
         }
@@ -353,6 +358,40 @@ class Mesh:
             "boundary_edges": int(np.count_nonzero(counts == 1)),
             "non_manifold_edges": int(np.count_nonzero(counts > 2)),
         }
+
+    def t_junction_count(self, *, tolerance: float = 1e-9) -> int:
+        if self.triangle_count == 0 or self.vertex_count < 3:
+            return 0
+        distance_tolerance = max(float(tolerance), 1e-12)
+        edges, _counts = self._undirected_edges_and_counts()
+        conflicts: set[tuple[int, int, int]] = set()
+        for start_index, end_index in edges.astype(int).tolist():
+            start = self.points[start_index]
+            end = self.points[end_index]
+            vector = end - start
+            length_squared = float(np.dot(vector, vector))
+            if length_squared <= distance_tolerance * distance_tolerance:
+                continue
+            minimum = np.minimum(start, end) - distance_tolerance
+            maximum = np.maximum(start, end) + distance_tolerance
+            candidates = np.flatnonzero(np.all((self.points >= minimum) & (self.points <= maximum), axis=1))
+            if candidates.size == 0:
+                continue
+            candidate_points = self.points[candidates]
+            projection = np.asarray(((candidate_points - start) @ vector) / length_squared, dtype=np.float64)
+            length = math.sqrt(length_squared)
+            endpoint_margin = distance_tolerance / length
+            interior = (projection > endpoint_margin) & (projection < 1.0 - endpoint_margin)
+            if not np.any(interior):
+                continue
+            projected = start + (projection[:, None] * vector)
+            distances = np.linalg.norm(candidate_points - projected, axis=1)
+            on_edge = interior & (distances <= distance_tolerance)
+            for candidate in candidates[on_edge].astype(int).tolist():
+                if candidate in {start_index, end_index}:
+                    continue
+                conflicts.add((min(start_index, end_index), max(start_index, end_index), candidate))
+        return len(conflicts)
 
     def orientability_metrics(self) -> dict[str, int]:
         if self.triangle_count == 0:
