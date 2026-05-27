@@ -64,6 +64,8 @@ that are currently conservative approximations.
   profile definitions, conversion reports, and documentation tables.
 - Decimation now records RAM estimates, budget-allocation mode, and
   iterative-threshold recommendations in metadata and report fields.
+- Staging now warns when bake-domain UVs are only unwrapped without a separate
+  repack/padding pass and records that missing repack status in metadata.
 
 ## Unity Asset Transformer Parity
 
@@ -162,7 +164,7 @@ Parity gaps to track:
    - Extend existing box UVs into Unity-style AABB projection controls: local versus shared/global AABB, real-world UV scale or `uv3dSize`, destination channel, override policy, and unit reporting.
    - Add UV segmentation and seam planning, including sharp-edge seams and lines of interest.
    - Add a complete UV workflow model: segment, unwrap, optionally merge islands, align tileable UV0 islands, repack UV1, normalize, validate overlaps, and record which steps ran per channel.
-   - Warn when bake-domain UVs were only unwrapped and not repacked, because unwrap alone does not fit islands into `[0,1]` or add padding for lightmap/AO baking.
+   - Staging now warns when bake-domain UVs were only unwrapped and not repacked, because unwrap alone does not prove islands were packed into `[0,1]` with padding for lightmap, AO, or material baking.
    - Add affine UV island merge and alignment controls for tileable UV0 workflows, including allowed transforms, polygon weighting, and rotation-step quantization.
    - Unwrap solver intent is now accepted across Python, CLI, TOML pipelines, metadata, and reports with `default`, `conformal`, and `isometric` values. The current xatlas backend records non-default solver methods as intent and warns that it cannot enforce them directly.
    - Unwrap iteration and tolerance controls are now accepted across Python, CLI, TOML pipelines, metadata, and reports. Remaining work: add a backend that enforces those controls and reports solver failure or excessive distortion.
@@ -294,6 +296,7 @@ These need more design and should not be mixed into documentation or diagnostics
 9. UV pipeline depth - validation status pass complete
    - Stage now records per-channel UV domain, bounds, unit-domain status, validation status, degenerate UV face counts, and overlap-pair counts on mesh metadata.
    - UV1 or `lightmap` channels warn on bake-domain violations, while UV0 overlaps remain metadata-only for tileable texture workflows.
+   - Bake-domain `unwrap` and `lightmap` channels now record `missing_repack` status and warn that no separate repack/padding backend ran.
    - Unwrap method, iteration, and tolerance controls are now represented as solver intent; non-default values warn when xatlas cannot enforce them directly.
    - Tangent lifecycle validation now reports generated, regenerated, preserved, invalidated, missing-UV0, and dropped tangent states, with explicit override support for forced regeneration.
    - UV0-to-UV1 copy now records source-channel and missing-source metadata, and emits a warning when the source channel is unavailable.

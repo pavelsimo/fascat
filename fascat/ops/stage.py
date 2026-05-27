@@ -10,6 +10,9 @@ from fascat.options import StageOptions
 
 def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[str] | None = None) -> Asset:
     result = asset.copy(keep_source=True)
+    uv_summary = {
+        "bake_missing_repack": 0,
+    }
     tangent_summary = {
         "generated": 0,
         "regenerated": 0,
@@ -96,9 +99,10 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
         )
         if options.validate_normals:
             mesh.validate_normals(require_tangents=options.tangents)
-        _tag_uv_layout_quality(result, part.id, mesh, uv_modes)
+        uv_summary["bake_missing_repack"] += _tag_uv_layout_quality(result, part.id, mesh, uv_modes)
         part.mesh = mesh
         part.fingerprint = mesh.fingerprint()
+    _tag_uv_summary(result, uv_summary)
     _tag_tangent_summary(result, tangent_summary)
     return result
 
@@ -349,7 +353,8 @@ def _warn_unwrap_solver_limits(asset: Asset, options: StageOptions) -> None:
     )
 
 
-def _tag_uv_layout_quality(asset: Asset, part_id: str, mesh: Mesh, uv_modes: dict[int, str]) -> None:
+def _tag_uv_layout_quality(asset: Asset, part_id: str, mesh: Mesh, uv_modes: dict[int, str]) -> int:
+    bake_missing_repack = 0
     for channel in sorted(mesh.uvs):
         prefix = f"uv{channel}"
         mode = uv_modes.get(channel, str(mesh.metadata.get(f"{prefix}_mode", mesh.metadata.get(prefix, "existing"))))
@@ -365,13 +370,44 @@ def _tag_uv_layout_quality(asset: Asset, part_id: str, mesh: Mesh, uv_modes: dic
         mesh.metadata[f"{prefix}_out_of_unit_vertices"] = str(stats["out_of_unit_vertices"])
         mesh.metadata[f"{prefix}_degenerate_faces"] = str(stats["degenerate_faces"])
         mesh.metadata[f"{prefix}_overlap_pairs"] = str(stats["overlapping_face_pairs"])
+        mesh.metadata[f"{prefix}_workflow_steps"] = _uv_workflow_steps(mesh, prefix, mode)
         if domain != "bake":
             continue
+        if mode in {"unwrap", "lightmap"}:
+            bake_missing_repack += 1
+            mesh.metadata[f"{prefix}_pack_status"] = "missing_repack"
+            mesh.metadata[f"{prefix}_padding_status"] = "metadata_only"
+            asset.report.add_warning(
+                f"part {part_id} {prefix} was unwrapped for baking, but no UV repack/padding backend ran; "
+                "repack into 0..1 with padding before AO, lightmap, or material baking"
+            )
         problems = _uv_bake_warning_problems(stats)
         if problems:
             asset.report.add_warning(
                 f"part {part_id} {prefix} violates lightmap/baking constraints: {', '.join(problems)}"
             )
+    return bake_missing_repack
+
+
+def _tag_uv_summary(asset: Asset, uv_summary: dict[str, int]) -> None:
+    missing = uv_summary["bake_missing_repack"]
+    if missing:
+        asset.metadata["stage_bake_uv_channels_missing_repack"] = str(missing)
+
+
+def _uv_workflow_steps(mesh: Mesh, prefix: str, mode: str) -> str:
+    if mode == "box":
+        steps = ["project"]
+    elif mode in {"unwrap", "lightmap"}:
+        steps = ["unwrap"]
+    elif mode == "copy_uv0":
+        steps = ["copy"]
+    else:
+        steps = ["preserve"]
+    if mesh.metadata.get(f"{prefix}_normalize_status") == "normalized":
+        steps.append("normalize")
+    steps.append("validate")
+    return ",".join(steps)
 
 
 def _uv_domain(channel: int, mode: str) -> str:

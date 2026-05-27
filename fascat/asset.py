@@ -310,7 +310,7 @@ class Asset:
             "stage",
             options=_options_with_scope(opts.to_dict(), scope),
             before=before,
-            after=asset.stats(),
+            after=_stage_report_stats(asset),
             duration=timer.duration,
             warnings=step_warnings,
         )
@@ -879,6 +879,16 @@ def _format_metadata_float(value: object) -> str:
 
 def _hierarchy_report_stats(asset: Asset) -> dict[str, int]:
     return {**asset.stats(include_lods=True), "draw_calls": asset.draw_call_count}
+
+
+def _stage_report_stats(asset: Asset) -> dict[str, int]:
+    stats = asset.stats()
+    if "stage_bake_uv_channels_missing_repack" in asset.metadata:
+        stats["stage_bake_uv_channels_missing_repack"] = _metadata_int(
+            asset.metadata["stage_bake_uv_channels_missing_repack"],
+            0,
+        )
+    return stats
 
 
 def _decimation_report_stats(asset: Asset) -> dict[str, int]:
