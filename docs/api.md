@@ -195,6 +195,22 @@ asset.pmi.append(
 
 glTF export writes metadata and PMI into `extras.fascat`. USD export writes Fascat metadata into `customData` on the scene, nodes, prototypes, materials, meshes, and `/PMI/*` annotation prims.
 
+```python
+asset.write_gltf(
+    "motor.glb",
+    options=fc.GltfExportOptions(
+        metadata=fc.MetadataExportOptions(mode="full", pmi="metadata"),
+    ),
+)
+
+asset.write_usd(
+    "motor.usdc",
+    options=fc.UsdExportOptions(
+        metadata=fc.MetadataExportOptions(mode="full", pmi="metadata_and_visuals"),
+    ),
+)
+```
+
 ## BREP Healing
 
 Run BREP healing before tessellation when STEP topology needs sewing, edge fixing, tolerance unification, or open-shell reporting.
@@ -415,6 +431,18 @@ pipeline = fc.PipelineSpec.from_file("realtime.toml")
 asset = fc.convert("motor.step", "motor.glb", pipeline=pipeline)
 ```
 
+Pipeline files can also define import and export metadata policy:
+
+```toml
+[import]
+metadata = "full"
+pmi = true
+
+[export]
+metadata = "summary"
+pmi = "metadata"
+```
+
 ## Runtime Export Options
 
 glTF and USD exports accept runtime delivery options, and OBJ/STL are available for mesh-only handoff workflows.
@@ -428,6 +456,7 @@ asset.write_gltf(
         draco=False,
         texture_compression=None,
         file_size_budget_mb=50,
+        metadata=fc.MetadataExportOptions(mode="summary", pmi="metadata"),
     ),
 )
 

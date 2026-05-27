@@ -68,6 +68,14 @@ fascat convert motor.step motor.glb \
 For branch-specific conversion settings, put named filters and ordered steps in a pipeline file:
 
 ```toml
+[import]
+metadata = "full"
+pmi = true
+
+[export]
+metadata = "summary"
+pmi = "metadata"
+
 [[filters]]
 name = "fasteners"
 path = "*/Fasteners/*"

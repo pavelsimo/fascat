@@ -188,6 +188,14 @@ def test_convert_dry_run_accepts_pipeline_file(tmp_path: Path) -> None:
     pipeline_file = tmp_path / "realtime.toml"
     pipeline_file.write_text(
         """
+[import]
+metadata = "none"
+pmi = false
+
+[export]
+metadata = "summary"
+pmi = "none"
+
 [[filters]]
 name = "fasteners"
 path = "*/Fasteners/*"
@@ -214,6 +222,9 @@ target_triangles = 80000
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["pipeline"] == str(pipeline_file)
+    assert payload["pipeline_import"]["metadata"] is False
+    assert payload["pipeline_import"]["pmi"] is False
+    assert payload["pipeline_export"] == {"mode": "summary", "pmi": "none"}
     assert payload["pipeline_filters"] == ["fasteners"]
     assert [step["op"] for step in payload["pipeline_steps"]] == ["tessellate", "optimize"]
 

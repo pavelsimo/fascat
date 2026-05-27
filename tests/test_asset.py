@@ -246,7 +246,13 @@ def test_asset_write_usd_records_report_step(monkeypatch: pytest.MonkeyPatch, tm
     assert calls["path"] == output
     assert calls["debug"] is True
     assert step.name == "write"
-    assert step.options == {"format": "OpenUSD", "debug": True, "package": "default", "file_size_budget_mb": None}
+    assert step.options == {
+        "format": "OpenUSD",
+        "debug": True,
+        "package": "default",
+        "file_size_budget_mb": None,
+        "metadata": {"mode": "full", "pmi": "metadata"},
+    }
     assert step.before == asset.stats()
     assert step.after == asset.stats()
     assert step.duration >= 0.0
@@ -303,6 +309,7 @@ def test_asset_write_gltf_records_report_step(monkeypatch: pytest.MonkeyPatch, t
         "draco": False,
         "texture_compression": None,
         "file_size_budget_mb": None,
+        "metadata": {"mode": "full", "pmi": "metadata"},
     }
     assert step.before == asset.stats()
     assert step.after == asset.stats()

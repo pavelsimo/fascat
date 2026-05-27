@@ -28,6 +28,7 @@ from fascat.options import (
     LODGeneratorOptions,
     LODOptions,
     MergeOptions,
+    MetadataExportOptions,
     ObjExportOptions,
     OptimizeOptions,
     RemoveHolesOptions,
@@ -87,11 +88,21 @@ def convert(
     if debug and (output_format != "usd" or (str(output_path) != "-" and output_suffix not in {".usd", ".usda"})):
         raise ValueError("--debug is only supported for .usd or .usda exports")
     selected = profiles.by_name(profile) if isinstance(profile, str) else profile
-    asset = read_step(input_path, options=import_options) if import_options is not None else read_step(input_path)
+    effective_import_options = import_options
+    if effective_import_options is None and pipeline is not None:
+        effective_import_options = pipeline.import_options
+    asset = (
+        read_step(input_path, options=effective_import_options)
+        if effective_import_options is not None
+        else read_step(input_path)
+    )
     if progress is not None:
         progress("source", asset.stats())
     if pipeline is not None:
         asset = pipeline.apply(asset, progress=progress)
+        if pipeline.export_metadata is not None:
+            gltf_options = _with_gltf_metadata(gltf_options, pipeline.export_metadata)
+            usd_options = _with_usd_metadata(usd_options, pipeline.export_metadata)
     else:
         tessellation_options = tessellation or selected.tessellation
         if heal_brep is not None:
@@ -274,6 +285,35 @@ def _file_size_budget(
     return None if stl_options is None else stl_options.file_size_budget_mb
 
 
+def _with_gltf_metadata(
+    options: GltfExportOptions | None,
+    metadata: MetadataExportOptions,
+) -> GltfExportOptions:
+    if options is None:
+        return GltfExportOptions(metadata=metadata)
+    return GltfExportOptions(
+        quantize=options.quantize,
+        meshopt=options.meshopt,
+        draco=options.draco,
+        texture_compression=options.texture_compression,
+        file_size_budget_mb=options.file_size_budget_mb,
+        metadata=metadata,
+    )
+
+
+def _with_usd_metadata(
+    options: UsdExportOptions | None,
+    metadata: MetadataExportOptions,
+) -> UsdExportOptions:
+    if options is None:
+        return UsdExportOptions(metadata=metadata)
+    return UsdExportOptions(
+        package=options.package,
+        file_size_budget_mb=options.file_size_budget_mb,
+        metadata=metadata,
+    )
+
+
 def _stats_with_file_size(
     stats: dict[str, int],
     path: str | Path,
@@ -377,7 +417,11 @@ def _usd_options_for_path(path: str | Path, options: UsdExportOptions | None) ->
         return UsdExportOptions(package="usdz")
     if options.package == "usdz":
         return options
-    return UsdExportOptions(package="usdz", file_size_budget_mb=options.file_size_budget_mb)
+    return UsdExportOptions(
+        package="usdz",
+        file_size_budget_mb=options.file_size_budget_mb,
+        metadata=options.metadata,
+    )
 
 
 def _write_options(

@@ -579,6 +579,7 @@ class Asset:
             opts = UsdExportOptions(
                 package="usdz",
                 file_size_budget_mb=None if options is None else options.file_size_budget_mb,
+                metadata=UsdExportOptions().metadata if options is None else options.metadata,
             )
         else:
             opts = options or UsdExportOptions()

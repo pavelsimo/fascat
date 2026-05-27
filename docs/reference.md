@@ -184,6 +184,14 @@ Repeated `--filter` flags are combined with logical AND. Use `--exclude-filter` 
 Use `--pipeline` when different assembly branches need different ordered steps.
 
 ```toml
+[import]
+metadata = "full"
+pmi = true
+
+[export]
+metadata = "summary"
+pmi = "metadata"
+
 [[filters]]
 name = "fasteners"
 path = "*/Fasteners/*"

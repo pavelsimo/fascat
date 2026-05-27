@@ -59,6 +59,12 @@ def test_public_api_exposes_pipeline_spec(tmp_path: Path) -> None:
     assert spec.steps[0].op == "repair"
 
 
+def test_public_api_exposes_metadata_export_options() -> None:
+    options = fc.MetadataExportOptions(mode="summary", pmi="metadata-and-visuals")
+
+    assert options.to_dict() == {"mode": "summary", "pmi": "metadata_and_visuals"}
+
+
 def test_functional_api_wraps_tessellation_options() -> None:
     asset = fc.Asset(
         root=fc.Node(id="root", name="root", children=[fc.Node(id="node", name="node", part_id="part")]),
@@ -126,7 +132,13 @@ def test_functional_write_usd_records_report_step(monkeypatch, tmp_path: Path) -
 
     assert calls == {"asset": asset, "path": output, "debug": True, "options": fc.UsdExportOptions()}
     assert step.name == "write"
-    assert step.options == {"format": "OpenUSD", "debug": True, "package": "default", "file_size_budget_mb": None}
+    assert step.options == {
+        "format": "OpenUSD",
+        "debug": True,
+        "package": "default",
+        "file_size_budget_mb": None,
+        "metadata": {"mode": "full", "pmi": "metadata"},
+    }
     assert asset.report.finished_at is not None
 
 
@@ -188,6 +200,7 @@ def test_functional_write_gltf_records_report_step(monkeypatch, tmp_path: Path) 
         "draco": False,
         "texture_compression": None,
         "file_size_budget_mb": None,
+        "metadata": {"mode": "full", "pmi": "metadata"},
     }
     assert asset.report.finished_at is not None
 

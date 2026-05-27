@@ -13,7 +13,7 @@ from numpy.typing import NDArray
 from fascat.asset import Asset, Node, Part
 from fascat.material import Material
 from fascat.mesh import Mesh
-from fascat.options import GltfExportOptions
+from fascat.options import GltfExportOptions, MetadataExportOptions
 
 GLTF_SUFFIXES = {".gltf", ".glb"}
 
@@ -47,7 +47,7 @@ def write_gltf(asset: Asset, path: str | Path, *, options: GltfExportOptions | N
         raise ValueError(f"unsupported glTF extension: {output_path.suffix or '<none>'}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    document, binary = _build_document(asset, binary_uri=suffix == ".gltf")
+    document, binary = _build_document(asset, binary_uri=suffix == ".gltf", metadata_options=opts.metadata)
     _apply_export_options(document, opts)
     if suffix == ".glb":
         output_path.write_bytes(_pack_glb(document, binary))
@@ -124,10 +124,15 @@ class _ExportSpace:
     inverse_matrix: NDArray[np.float64]
 
 
-def _build_document(asset: Asset, *, binary_uri: bool) -> tuple[dict[str, Any], bytes]:
+def _build_document(
+    asset: Asset,
+    *,
+    binary_uri: bool,
+    metadata_options: MetadataExportOptions,
+) -> tuple[dict[str, Any], bytes]:
     export_space = _export_space(asset)
     builder = _BufferBuilder()
-    material_indices = _write_materials(asset.materials)
+    material_indices = _write_materials(asset.materials, metadata_options)
     meshes: list[dict[str, Any]] = []
     part_meshes: dict[str, int] = {}
     part_lods: dict[str, list[dict[str, object]]] = {}
@@ -143,6 +148,7 @@ def _build_document(asset: Asset, *, binary_uri: bool) -> tuple[dict[str, Any], 
             part.mesh,
             material_indices,
             export_space,
+            metadata_options,
             lod=0,
             pmi_ids=pmi_by_part.get(part.id, []),
         )
@@ -155,6 +161,7 @@ def _build_document(asset: Asset, *, binary_uri: bool) -> tuple[dict[str, Any], 
                 lod_mesh,
                 material_indices,
                 export_space,
+                metadata_options,
                 lod=lod,
                 pmi_ids=pmi_by_part.get(part.id, []),
             )
@@ -163,7 +170,7 @@ def _build_document(asset: Asset, *, binary_uri: bool) -> tuple[dict[str, Any], 
             part_lods[part.id] = lod_entries
 
     nodes: list[dict[str, Any]] = []
-    root_node = _append_node(nodes, asset.root, part_meshes, part_lods, export_space)
+    root_node = _append_node(nodes, asset.root, part_meshes, part_lods, export_space, metadata_options)
     binary = bytes(builder.data)
     buffers: list[dict[str, object]] = [{"byteLength": len(binary)}]
     if binary_uri:
@@ -185,8 +192,7 @@ def _build_document(asset: Asset, *, binary_uri: bool) -> tuple[dict[str, Any], 
                 "sourceUpAxis": asset.up_axis,
                 "exportUnits": "metre",
                 "exportUpAxis": "Y",
-                "metadata": dict(asset.metadata),
-                "pmi": [annotation.to_dict() for annotation in asset.pmi],
+                **_asset_metadata_extras(asset, metadata_options),
             }
         },
     }
@@ -198,9 +204,14 @@ def _build_document(asset: Asset, *, binary_uri: bool) -> tuple[dict[str, Any], 
     return document, binary
 
 
-def _write_materials(materials: dict[str, Material]) -> dict[str, dict[str, Any]]:
+def _write_materials(
+    materials: dict[str, Material],
+    metadata_options: MetadataExportOptions,
+) -> dict[str, dict[str, Any]]:
     written: dict[str, dict[str, Any]] = {}
     for index, material in enumerate(materials.values()):
+        fascat_extras: dict[str, object] = {"materialId": material.id}
+        _add_metadata_extras(fascat_extras, material.metadata, metadata_options)
         gltf_material: dict[str, Any] = {
             "name": material.name or material.id,
             "pbrMetallicRoughness": {
@@ -208,13 +219,37 @@ def _write_materials(materials: dict[str, Material]) -> dict[str, dict[str, Any]
                 "metallicFactor": material.metallic,
                 "roughnessFactor": material.roughness,
             },
-            "extras": {"fascat": {"materialId": material.id, "metadata": dict(material.metadata)}},
+            "extras": {"fascat": fascat_extras},
         }
         if material.opacity < 1.0 or material.base_color[3] < 1.0:
             gltf_material["alphaMode"] = "BLEND"
         gltf_material["_fascat_index"] = index
         written[material.id] = gltf_material
     return written
+
+
+def _asset_metadata_extras(asset: Asset, options: MetadataExportOptions) -> dict[str, object]:
+    extras: dict[str, object] = {}
+    if options.mode != "none":
+        extras["metadataSummary"] = _metadata_summary(asset)
+    if options.mode == "full":
+        extras["metadata"] = dict(asset.metadata)
+    elif options.mode == "summary":
+        extras["metadata"] = dict(cast(dict[str, object], extras["metadataSummary"]))
+    if options.pmi != "none":
+        pmi = [annotation.to_dict() for annotation in asset.pmi]
+        extras["pmi"] = pmi if options.pmi not in {"summary"} else {"count": len(pmi)}
+    return extras
+
+
+def _metadata_summary(asset: Asset) -> dict[str, object]:
+    return {
+        "asset": len(asset.metadata),
+        "nodes": sum(len(node.metadata) for node in asset.root.walk()),
+        "parts": sum(len(part.metadata) for part in asset.parts.values()),
+        "materials": sum(len(material.metadata) for material in asset.materials.values()),
+        "pmi": len(asset.pmi),
+    }
 
 
 def _append_mesh(
@@ -224,6 +259,7 @@ def _append_mesh(
     mesh: Mesh,
     material_indices: dict[str, dict[str, Any]],
     export_space: _ExportSpace,
+    metadata_options: MetadataExportOptions,
     *,
     lod: int,
     pmi_ids: list[str],
@@ -296,18 +332,17 @@ def _append_mesh(
             primitive["material"] = int(material_indices[material_id]["_fascat_index"])
         primitives.append(primitive)
 
+    fascat_extras: dict[str, object] = {
+        "partId": part.id,
+        "originalName": part.name,
+        "lod": lod,
+    }
+    _add_metadata_extras(fascat_extras, part.metadata, metadata_options)
+    _add_pmi_link_extras(fascat_extras, pmi_ids, metadata_options)
     gltf_mesh: dict[str, Any] = {
         "name": f"{part.name or part.id}_lod{lod}",
         "primitives": primitives,
-        "extras": {
-            "fascat": {
-                "partId": part.id,
-                "originalName": part.name,
-                "lod": lod,
-                "metadata": dict(part.metadata),
-                "pmiIds": list(pmi_ids),
-            }
-        },
+        "extras": {"fascat": fascat_extras},
     }
     meshes.append(gltf_mesh)
     return len(meshes) - 1
@@ -365,10 +400,15 @@ def _append_node(
     part_meshes: dict[str, int],
     part_lods: dict[str, list[dict[str, object]]],
     export_space: _ExportSpace,
+    metadata_options: MetadataExportOptions,
 ) -> int:
+    fascat_extras: dict[str, object] = {"nodeId": node.id}
+    if metadata_options.mode == "full":
+        fascat_extras.update(node.metadata)
+    _add_metadata_extras(fascat_extras, node.metadata, metadata_options)
     gltf_node: dict[str, Any] = {
         "name": node.name or node.id,
-        "extras": {"fascat": {"nodeId": node.id, **node.metadata, "metadata": dict(node.metadata)}},
+        "extras": {"fascat": fascat_extras},
     }
     transform = _matrix_to_export_space(node.transform, export_space)
     if not np.allclose(transform, np.eye(4)):
@@ -381,7 +421,9 @@ def _append_node(
             gltf_node["extras"]["fascat"]["lods"] = lods
     index = len(nodes)
     nodes.append(gltf_node)
-    children = [_append_node(nodes, child, part_meshes, part_lods, export_space) for child in node.children]
+    children = [
+        _append_node(nodes, child, part_meshes, part_lods, export_space, metadata_options) for child in node.children
+    ]
     if children:
         gltf_node["children"] = children
     return index
@@ -393,6 +435,30 @@ def _pmi_by_part(asset: Asset) -> dict[str, list[str]]:
         for target in annotation.applies_to:
             result.setdefault(target, []).append(annotation.id)
     return result
+
+
+def _add_metadata_extras(
+    payload: dict[str, object],
+    metadata: dict[str, object],
+    options: MetadataExportOptions,
+) -> None:
+    if options.mode == "full":
+        payload["metadata"] = dict(metadata)
+    elif options.mode == "summary" and metadata:
+        payload["metadataSummary"] = {"count": len(metadata)}
+
+
+def _add_pmi_link_extras(
+    payload: dict[str, object],
+    pmi_ids: list[str],
+    options: MetadataExportOptions,
+) -> None:
+    if not pmi_ids or options.pmi == "none":
+        return
+    if options.pmi == "summary":
+        payload["pmiCount"] = len(pmi_ids)
+    else:
+        payload["pmiIds"] = list(pmi_ids)
 
 
 def _export_space(asset: Asset) -> _ExportSpace:

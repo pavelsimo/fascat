@@ -19,6 +19,7 @@ from fascat.options import (
     LODLevel,
     LODOptions,
     MergeOptions,
+    MetadataExportOptions,
     OptimizeOptions,
     RemoveHolesOptions,
     RemoveOccludedOptions,
@@ -26,6 +27,7 @@ from fascat.options import (
     ReplaceOptions,
     SceneOptimizeOptions,
     StageOptions,
+    StepReadOptions,
     Tessellation,
     UnwrapOptions,
 )
@@ -50,6 +52,8 @@ class PipelineStep:
 class PipelineSpec:
     filters: dict[str, Filter]
     steps: tuple[PipelineStep, ...]
+    import_options: StepReadOptions | None = None
+    export_metadata: MetadataExportOptions | None = None
 
     def __post_init__(self) -> None:
         if not self.steps:
@@ -63,12 +67,19 @@ class PipelineSpec:
     def from_dict(cls, values: dict[str, object]) -> PipelineSpec:
         filters = _filters(values.get("filters", []))
         steps = _steps(values.get("steps", []))
-        return cls(filters=filters, steps=tuple(steps))
+        return cls(
+            filters=filters,
+            steps=tuple(steps),
+            import_options=_import_options(values.get("import")),
+            export_metadata=_export_metadata_options(values.get("export")),
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
             "filters": sorted(self.filters),
             "steps": [step.to_dict() for step in self.steps],
+            "import": None if self.import_options is None else self.import_options.to_dict(),
+            "export": None if self.export_metadata is None else self.export_metadata.to_dict(),
         }
 
     def apply(
@@ -180,6 +191,49 @@ def _steps(value: object) -> list[PipelineStep]:
             raise ValueError("pipeline step entries require an op")
         steps.append(PipelineStep(op=op, values={str(key): value for key, value in item.items() if key != "op"}))
     return steps
+
+
+def _import_options(value: object) -> StepReadOptions | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("pipeline import settings must be a table")
+    metadata_enabled = _metadata_import_enabled(value.get("metadata", True))
+    return StepReadOptions(
+        metadata=metadata_enabled,
+        product_metadata=bool(value.get("product_metadata", metadata_enabled)),
+        properties=bool(value.get("properties", metadata_enabled)),
+        layers=bool(value.get("layers", metadata_enabled)),
+        validation_properties=bool(value.get("validation_properties", metadata_enabled)),
+        pmi=_pmi_import_enabled(value.get("pmi", True)),
+    )
+
+
+def _export_metadata_options(value: object) -> MetadataExportOptions | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("pipeline export settings must be a table")
+    return MetadataExportOptions(
+        mode=cast(Any, _literal(value.get("metadata", "full"))),
+        pmi=cast(Any, _literal(value.get("pmi", "metadata"))),
+    )
+
+
+def _metadata_import_enabled(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.replace("-", "_").lower() != "none"
+    raise ValueError("pipeline import metadata must be a bool or one of: none, summary, full")
+
+
+def _pmi_import_enabled(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.replace("-", "_").lower() != "none"
+    raise ValueError("pipeline import pmi must be a bool or string mode")
 
 
 def _apply_step(asset: Asset, step: PipelineStep, where: Filter | None) -> Asset:

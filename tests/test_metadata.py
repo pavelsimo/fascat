@@ -12,6 +12,7 @@ from fascat.io.gltf import write_gltf
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.metadata import PmiAnnotation, Tolerance
+from fascat.options import GltfExportOptions, MetadataExportOptions
 
 runner = CliRunner()
 
@@ -79,6 +80,29 @@ def test_gltf_export_writes_metadata_and_pmi_extras(tmp_path: Path) -> None:
     assert mesh_extras["pmiIds"] == ["pmi_001"]
     assert node_extras["metadata"]["step_label"] == "0:1"
     assert document["materials"][0]["extras"]["fascat"]["metadata"]["finish"] == "matte"
+
+
+def test_gltf_export_can_suppress_metadata_and_pmi(tmp_path: Path) -> None:
+    output = tmp_path / "metadata-none.gltf"
+
+    write_gltf(
+        _asset_with_metadata(),
+        output,
+        options=GltfExportOptions(metadata=MetadataExportOptions(mode="none", pmi="none")),
+    )
+
+    document = json.loads(output.read_text(encoding="utf-8"))
+    fascat = document["extras"]["fascat"]
+    mesh_extras = document["meshes"][0]["extras"]["fascat"]
+    node_extras = next(node["extras"]["fascat"] for node in document["nodes"] if node["name"] == "Panel Node")
+
+    assert "metadata" not in fascat
+    assert "metadataSummary" not in fascat
+    assert "pmi" not in fascat
+    assert "metadata" not in mesh_extras
+    assert "pmiIds" not in mesh_extras
+    assert "metadata" not in node_extras
+    assert "metadata" not in document["materials"][0]["extras"]["fascat"]
 
 
 def test_asset_copy_preserves_top_level_metadata_and_pmi() -> None:

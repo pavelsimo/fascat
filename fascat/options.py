@@ -35,6 +35,8 @@ LODPreset = Literal["desktop", "web", "mobile", "vr"]
 LODOutput = Literal["variants", "extras", "separate"]
 TextureCompression = Literal["ktx2", "basisu"]
 UsdPackageMode = Literal["default", "usdz"]
+MetadataExportMode = Literal["none", "summary", "full"]
+PmiExportMode = Literal["none", "summary", "metadata", "metadata_and_visuals", "full"]
 
 _BAKE_MAPS = {"base_color", "opacity", "normal", "roughness", "metallic", "ao", "emissive"}
 _HOLE_TYPES = {"through", "blind", "surface"}
@@ -608,12 +610,30 @@ class AnalyzeOptions:
 
 
 @dataclass(frozen=True)
+class MetadataExportOptions:
+    mode: MetadataExportMode = "full"
+    pmi: PmiExportMode = "metadata"
+
+    def __post_init__(self) -> None:
+        pmi = self.pmi.replace("-", "_") if isinstance(self.pmi, str) else self.pmi
+        object.__setattr__(self, "pmi", pmi)
+        if self.mode not in {"none", "summary", "full"}:
+            raise ValueError("metadata export mode must be one of: none, summary, full")
+        if self.pmi not in {"none", "summary", "metadata", "metadata_and_visuals", "full"}:
+            raise ValueError("PMI export mode must be one of: none, summary, metadata, metadata_and_visuals, full")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class GltfExportOptions:
     quantize: bool = False
     meshopt: bool = False
     draco: bool = False
     texture_compression: TextureCompression | None = None
     file_size_budget_mb: float | None = None
+    metadata: MetadataExportOptions = field(default_factory=MetadataExportOptions)
 
     def __post_init__(self) -> None:
         if self.texture_compression not in {None, "ktx2", "basisu"}:
@@ -622,13 +642,14 @@ class GltfExportOptions:
             raise ValueError("file_size_budget_mb must be greater than 0 when set")
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        return {**asdict(self), "metadata": self.metadata.to_dict()}
 
 
 @dataclass(frozen=True)
 class UsdExportOptions:
     package: UsdPackageMode = "default"
     file_size_budget_mb: float | None = None
+    metadata: MetadataExportOptions = field(default_factory=MetadataExportOptions)
 
     def __post_init__(self) -> None:
         if self.package not in {"default", "usdz"}:
@@ -637,7 +658,7 @@ class UsdExportOptions:
             raise ValueError("file_size_budget_mb must be greater than 0 when set")
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        return {**asdict(self), "metadata": self.metadata.to_dict()}
 
 
 @dataclass(frozen=True)

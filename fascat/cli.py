@@ -34,6 +34,7 @@ from fascat.options import (
     LODLevel,
     LODOptions,
     MergeOptions,
+    MetadataExportOptions,
     ObjExportOptions,
     OptimizeOptions,
     RemoveHolesOptions,
@@ -944,6 +945,12 @@ def cmd_convert(
     if pipeline_spec is not None:
         payload["pipeline_steps"] = [step.to_dict() for step in pipeline_spec.steps]
         payload["pipeline_filters"] = sorted(pipeline_spec.filters)
+        payload["pipeline_import"] = (
+            None if pipeline_spec.import_options is None else pipeline_spec.import_options.to_dict()
+        )
+        payload["pipeline_export"] = (
+            None if pipeline_spec.export_metadata is None else pipeline_spec.export_metadata.to_dict()
+        )
     lod_values = _parse_lods(lods, ctx, payload)
     bake_maps = _parse_bake_maps(bake, ctx, payload)
     enabled_hole_types = _parse_hole_types(hole_types, ctx, payload)
@@ -1108,7 +1115,16 @@ def cmd_convert(
             uv0=uv0.value,
             uv1=uv1.value,
         )
-        import_options = _step_read_options(metadata, pmi)
+        import_options = (
+            pipeline_spec.import_options
+            if pipeline_spec and pipeline_spec.import_options
+            else _step_read_options(metadata, pmi)
+        )
+        export_metadata = (
+            pipeline_spec.export_metadata
+            if pipeline_spec is not None and pipeline_spec.export_metadata is not None
+            else _metadata_export_options(metadata, pmi)
+        )
         heal_options = (
             _brep_heal_options(
                 heal_tolerance=heal_tolerance,
@@ -1241,8 +1257,13 @@ def cmd_convert(
             draco=draco,
             texture_compression=cast(Any, texture_compression),
             file_size_budget_mb=file_size_budget_mb,
+            metadata=export_metadata,
         )
-        usd_options = UsdExportOptions(package=cast(Any, usd_package), file_size_budget_mb=file_size_budget_mb)
+        usd_options = UsdExportOptions(
+            package=cast(Any, usd_package),
+            file_size_budget_mb=file_size_budget_mb,
+            metadata=export_metadata,
+        )
         obj_options = ObjExportOptions(
             materials=obj_materials,
             write_mtl=write_mtl,
@@ -1648,6 +1669,13 @@ def _step_read_options(metadata: MetadataMode, pmi: PmiMode) -> StepReadOptions:
         layers=metadata_enabled,
         validation_properties=metadata_enabled,
         pmi=pmi_enabled,
+    )
+
+
+def _metadata_export_options(metadata: MetadataMode, pmi: PmiMode) -> MetadataExportOptions:
+    return MetadataExportOptions(
+        mode=cast(Any, metadata.value),
+        pmi=cast(Any, pmi.value.replace("-", "_")),
     )
 
 

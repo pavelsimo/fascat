@@ -12,6 +12,7 @@ from fascat.options import (
     ConversionProfile,
     DecimateOptions,
     ExplodeOptions,
+    GltfExportOptions,
     LODGeneratorOptions,
     LODLevel,
     LODOptions,
@@ -21,6 +22,7 @@ from fascat.options import (
     RepairOptions,
     ReplaceOptions,
     StageOptions,
+    StepReadOptions,
 )
 from fascat.pipeline import convert
 from fascat.pipeline_file import PipelineSpec
@@ -322,6 +324,54 @@ mode = "bounding_box"
     assert steps["replace"].options["matched"]["parts"] == 1
 
 
+def test_convert_pipeline_file_can_set_import_and_export_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import fascat.pipeline as pipeline
+
+    pipeline_file = tmp_path / "metadata-pipeline.toml"
+    pipeline_file.write_text(
+        """
+[import]
+metadata = "none"
+pmi = false
+
+[export]
+metadata = "summary"
+pmi = "none"
+
+[[steps]]
+op = "repair"
+""",
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_read_step(_path: str, *, options: object = None) -> Asset:
+        captured["import_options"] = options
+        return _triangle_asset()
+
+    def fake_write_gltf(_asset: Asset, _path: str | Path, *, options: object = None) -> None:
+        captured["export_options"] = options
+
+    monkeypatch.setattr(pipeline, "read_step", fake_read_step)
+    monkeypatch.setattr(pipeline, "_write_gltf", fake_write_gltf)
+    monkeypatch.setattr(pipeline, "validate_gltf", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
+
+    converted = convert("input.step", tmp_path / "output.glb", pipeline=PipelineSpec.from_file(pipeline_file))
+
+    import_options = captured["import_options"]
+    export_options = captured["export_options"]
+    assert isinstance(import_options, StepReadOptions)
+    assert isinstance(export_options, GltfExportOptions)
+    assert import_options.metadata is False
+    assert import_options.pmi is False
+    assert export_options.metadata.mode == "summary"
+    assert export_options.metadata.pmi == "none"
+    assert converted.report.steps[-2].options["metadata"] == {"mode": "summary", "pmi": "none"}
+
+
 def test_convert_dispatches_gltf_writer_and_validator(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     import fascat.pipeline as pipeline
 
@@ -353,6 +403,7 @@ def test_convert_dispatches_gltf_writer_and_validator(monkeypatch, tmp_path: Pat
         "draco": False,
         "texture_compression": None,
         "file_size_budget_mb": None,
+        "metadata": {"mode": "full", "pmi": "metadata"},
     }
     assert steps["validate"].options == {"backend": "fascat-gltf"}
     assert steps["validate"].after["validated_triangles"] == 1
