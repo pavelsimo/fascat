@@ -101,6 +101,29 @@ def _boundary_gap_mesh() -> Mesh:
     )
 
 
+def _flipped_tetrahedron_mesh() -> Mesh:
+    return Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [0, 0, 1],
+            ],
+            dtype=float,
+        ),
+        faces=np.array(
+            [
+                [0, 1, 2],
+                [0, 3, 1],
+                [0, 2, 3],
+                [1, 3, 2],
+            ],
+            dtype=int,
+        ),
+    )
+
+
 def _test_profile() -> ConversionProfile:
     return ConversionProfile(
         name="test",
@@ -257,6 +280,24 @@ def test_repair_report_includes_boundary_gap_metrics() -> None:
     assert step.after["repair_boundary_gaps_before"] == 1
     assert step.after["repair_boundary_gaps_after"] == 1
     assert any("boundary gap stitching is not implemented" in warning for warning in step.warnings)
+
+
+def test_repair_report_includes_flipped_component_metrics() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="solid")]),
+        parts={"solid": Part(id="solid", name="Solid", mesh=_flipped_tetrahedron_mesh())},
+    )
+
+    repaired = asset.repair(RepairOptions(fix_winding=False))
+
+    mesh = repaired.parts["solid"].mesh
+    step = repaired.report.steps[-1]
+    assert mesh is not None
+    assert mesh.metadata["repair_flipped_components_before_orientation"] == "1"
+    assert mesh.metadata["repair_flipped_components_after_orientation"] == "1"
+    assert step.after["repair_flipped_components_before_orientation"] == 1
+    assert step.after["repair_flipped_components_after_orientation"] == 1
+    assert any("flipped closed orientation component" in warning for warning in step.warnings)
 
 
 def test_asset_operation_reports_include_options_and_before_after_counts() -> None:

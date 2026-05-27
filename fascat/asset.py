@@ -337,6 +337,15 @@ class Asset:
                             f"part {part.id} has {remaining_boundary_gaps} boundary gap(s) after mesh repair; "
                             "boundary gap stitching is not implemented"
                         )
+                    remaining_flipped_components = _metadata_int(
+                        part.mesh.metadata.get("repair_flipped_components_after_orientation"),
+                        0,
+                    )
+                    if remaining_flipped_components:
+                        asset.report.add_warning(
+                            f"part {part.id} has {remaining_flipped_components} flipped closed orientation "
+                            "component(s) after mesh repair; outward face orientation was not produced"
+                        )
                     part.fingerprint = part.mesh.fingerprint()
         step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
@@ -973,6 +982,8 @@ def _repair_report_stats(asset: Asset) -> dict[str, int]:
     t_junctions_after = 0
     boundary_gaps_before = 0
     boundary_gaps_after = 0
+    flipped_components_before = 0
+    flipped_components_after = 0
     for part in asset.parts.values():
         if part.mesh is None:
             continue
@@ -984,6 +995,14 @@ def _repair_report_stats(asset: Asset) -> dict[str, int]:
         t_junctions_after += _metadata_int(part.mesh.metadata.get("repair_t_junctions_after"), 0)
         boundary_gaps_before += _metadata_int(part.mesh.metadata.get("repair_boundary_gaps_before"), 0)
         boundary_gaps_after += _metadata_int(part.mesh.metadata.get("repair_boundary_gaps_after"), 0)
+        flipped_components_before += _metadata_int(
+            part.mesh.metadata.get("repair_flipped_components_before_orientation"),
+            0,
+        )
+        flipped_components_after += _metadata_int(
+            part.mesh.metadata.get("repair_flipped_components_after_orientation"),
+            0,
+        )
     if non_orientable_edges:
         stats["repair_non_orientable_edges_before_orientation"] = non_orientable_edges
     if t_junctions_before or t_junctions_after:
@@ -992,6 +1011,9 @@ def _repair_report_stats(asset: Asset) -> dict[str, int]:
     if boundary_gaps_before or boundary_gaps_after:
         stats["repair_boundary_gaps_before"] = boundary_gaps_before
         stats["repair_boundary_gaps_after"] = boundary_gaps_after
+    if flipped_components_before or flipped_components_after:
+        stats["repair_flipped_components_before_orientation"] = flipped_components_before
+        stats["repair_flipped_components_after_orientation"] = flipped_components_after
     return stats
 
 

@@ -44,6 +44,29 @@ def mobius_strip_mesh(segments: int = 6) -> Mesh:
     return Mesh(points=np.asarray(points, dtype=float), faces=np.asarray(faces, dtype=int))
 
 
+def flipped_tetrahedron_mesh() -> Mesh:
+    return Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [0, 0, 1],
+            ],
+            dtype=float,
+        ),
+        faces=np.array(
+            [
+                [0, 1, 2],
+                [0, 3, 1],
+                [0, 2, 3],
+                [1, 3, 2],
+            ],
+            dtype=int,
+        ),
+    )
+
+
 def test_mesh_copies_mutable_inputs_on_construction() -> None:
     points = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float)
     faces = np.array([[0, 1, 2]], dtype=int)
@@ -175,6 +198,22 @@ def test_orientability_metrics_detect_mobius_like_strip() -> None:
     assert metrics["non_orientable_edges"] == 1
     assert repaired.metadata["repair_orientation_components_before_orientation"] == "1"
     assert repaired.metadata["repair_non_orientable_edges_before_orientation"] == "1"
+
+
+def test_repair_records_flipped_closed_orientation_components() -> None:
+    mesh = flipped_tetrahedron_mesh()
+
+    metrics = mesh.orientability_metrics()
+    repaired = mesh.repair(RepairOptions())
+    not_fixed = mesh.repair(RepairOptions(fix_winding=False))
+
+    assert metrics["closed_orientation_components"] == 1
+    assert metrics["flipped_orientation_components"] == 1
+    assert repaired.metadata["repair_closed_orientation_components_before_orientation"] == "1"
+    assert repaired.metadata["repair_closed_orientation_components_after_orientation"] == "1"
+    assert repaired.metadata["repair_flipped_components_before_orientation"] == "1"
+    assert repaired.metadata["repair_flipped_components_after_orientation"] == "0"
+    assert not_fixed.metadata["repair_flipped_components_after_orientation"] == "1"
 
 
 def test_mesh_merges_close_vertices_with_tolerance() -> None:

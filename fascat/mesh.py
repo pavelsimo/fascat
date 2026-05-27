@@ -222,6 +222,7 @@ class Mesh:
             mesh = mesh.fill_holes()
             if mesh.triangle_count != previous_triangle_count:
                 mesh = mesh.compute_normals()
+        after_orientation_metrics = mesh.orientability_metrics()
         after_metrics = mesh.quality_metrics(area_epsilon=opts.area_epsilon)
         after_t_junctions = mesh.t_junction_count(tolerance=t_junction_tolerance)
         after_boundary_gaps = mesh.boundary_gap_count(tolerance=boundary_gap_tolerance)
@@ -241,6 +242,18 @@ class Mesh:
             "repair_boundary_gaps_after": str(after_boundary_gaps),
             "repair_orientation_components_before_orientation": str(int(orientation_metrics["orientation_components"])),
             "repair_non_orientable_edges_before_orientation": str(int(orientation_metrics["non_orientable_edges"])),
+            "repair_closed_orientation_components_before_orientation": str(
+                int(orientation_metrics["closed_orientation_components"])
+            ),
+            "repair_closed_orientation_components_after_orientation": str(
+                int(after_orientation_metrics["closed_orientation_components"])
+            ),
+            "repair_flipped_components_before_orientation": str(
+                int(orientation_metrics["flipped_orientation_components"])
+            ),
+            "repair_flipped_components_after_orientation": str(
+                int(after_orientation_metrics["flipped_orientation_components"])
+            ),
         }
         mesh.validate()
         return mesh
@@ -433,14 +446,23 @@ class Mesh:
 
     def orientability_metrics(self) -> dict[str, int]:
         if self.triangle_count == 0:
-            return {"orientation_components": 0, "non_orientable_edges": 0}
+            return {
+                "orientation_components": 0,
+                "non_orientable_edges": 0,
+                "closed_orientation_components": 0,
+                "flipped_orientation_components": 0,
+            }
 
         edge_incidents: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
+        face_edges: list[list[tuple[int, int]]] = []
         for face_index, face in enumerate(self.faces.astype(int).tolist()):
+            edges: list[tuple[int, int]] = []
             for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
                 key = (min(start, end), max(start, end))
                 direction = 1 if (start, end) == key else -1
                 edge_incidents[key].append((face_index, direction))
+                edges.append(key)
+            face_edges.append(edges)
 
         adjacency: dict[int, list[tuple[int, int, tuple[int, int]]]] = defaultdict(list)
         for edge, incidents in edge_incidents.items():
@@ -453,11 +475,13 @@ class Mesh:
 
         face_signs: dict[int, int] = {}
         conflict_edges: set[tuple[int, int]] = set()
+        component_faces: list[set[int]] = []
         components = 0
         for face_index in range(self.triangle_count):
             if face_index in face_signs:
                 continue
             components += 1
+            faces = {face_index}
             face_signs[face_index] = 1
             queue: deque[int] = deque([face_index])
             while queue:
@@ -466,11 +490,31 @@ class Mesh:
                     expected_sign = face_signs[current] * required_relation
                     if neighbor not in face_signs:
                         face_signs[neighbor] = expected_sign
+                        faces.add(neighbor)
                         queue.append(neighbor)
                     elif face_signs[neighbor] != expected_sign:
                         conflict_edges.add(edge)
+            component_faces.append(faces)
 
-        return {"orientation_components": components, "non_orientable_edges": len(conflict_edges)}
+        closed_components = 0
+        flipped_components = 0
+        volume_epsilon = self._orientation_volume_epsilon()
+        for faces in component_faces:
+            component_edges = {edge for face_index in faces for edge in face_edges[face_index]}
+            if any(edge in conflict_edges or len(edge_incidents[edge]) != 2 for edge in component_edges):
+                continue
+            closed_components += 1
+            if any(face_signs[face_index] != 1 for face_index in faces):
+                continue
+            if self._signed_volume_for_faces(faces) < -volume_epsilon:
+                flipped_components += 1
+
+        return {
+            "orientation_components": components,
+            "non_orientable_edges": len(conflict_edges),
+            "closed_orientation_components": closed_components,
+            "flipped_orientation_components": flipped_components,
+        }
 
     def compute_normals(self, *, angle_weighted: bool = True) -> Mesh:
         normals = np.zeros_like(self.points, dtype=np.float64)
@@ -1295,6 +1339,85 @@ class Mesh:
         unit[valid] = normals[valid] / lengths[valid, None]
         return unit
 
+    def _orientation_volume_epsilon(self) -> float:
+        mins, maxs = self.bounds()
+        scale = max(float(np.linalg.norm(maxs - mins)), 1e-9)
+        return scale**3 * 1e-12
+
+    def _signed_volume_for_faces(self, face_indices: set[int]) -> float:
+        if not face_indices:
+            return 0.0
+        faces = self.faces[np.asarray(sorted(face_indices), dtype=np.int64)]
+        p0 = self.points[faces[:, 0]]
+        p1 = self.points[faces[:, 1]]
+        p2 = self.points[faces[:, 2]]
+        return float(np.einsum("ij,ij->i", p0, np.cross(p1, p2)).sum() / 6.0)
+
+    def _flip_inward_closed_components(self) -> Mesh:
+        flipped_components = self._flipped_closed_orientation_component_faces()
+        if not flipped_components:
+            return self.copy()
+
+        mesh = self.copy()
+        for face_indices in flipped_components:
+            indices = np.asarray(sorted(face_indices), dtype=np.int64)
+            mesh.faces[indices] = mesh.faces[indices][:, [0, 2, 1]]
+        mesh.normals = None
+        mesh.tangents = None
+        return mesh
+
+    def _flipped_closed_orientation_component_faces(self) -> list[set[int]]:
+        if self.triangle_count == 0:
+            return []
+
+        edge_incidents: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
+        face_edges: list[list[tuple[int, int]]] = []
+        for face_index, face in enumerate(self.faces.astype(int).tolist()):
+            edges: list[tuple[int, int]] = []
+            for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
+                key = (min(start, end), max(start, end))
+                direction = 1 if (start, end) == key else -1
+                edge_incidents[key].append((face_index, direction))
+                edges.append(key)
+            face_edges.append(edges)
+
+        adjacency: dict[int, list[int]] = defaultdict(list)
+        for incidents in edge_incidents.values():
+            if len(incidents) != 2:
+                continue
+            left_face = incidents[0][0]
+            right_face = incidents[1][0]
+            adjacency[left_face].append(right_face)
+            adjacency[right_face].append(left_face)
+
+        visited: set[int] = set()
+        flipped_components: list[set[int]] = []
+        volume_epsilon = self._orientation_volume_epsilon()
+        for face_index in range(self.triangle_count):
+            if face_index in visited:
+                continue
+            faces = {face_index}
+            visited.add(face_index)
+            queue: deque[int] = deque([face_index])
+            while queue:
+                current = queue.popleft()
+                for neighbor in adjacency[current]:
+                    if neighbor in visited:
+                        continue
+                    visited.add(neighbor)
+                    faces.add(neighbor)
+                    queue.append(neighbor)
+
+            component_edges = {edge for component_face in faces for edge in face_edges[component_face]}
+            if any(len(edge_incidents[edge]) != 2 for edge in component_edges):
+                continue
+            if any(edge_incidents[edge][0][1] == edge_incidents[edge][1][1] for edge in component_edges):
+                continue
+            if self._signed_volume_for_faces(faces) < -volume_epsilon:
+                flipped_components.append(faces)
+
+        return flipped_components
+
     def _uv_seam_vertices(self) -> set[int]:
         if not self.uvs or self.vertex_count == 0:
             return set()
@@ -1380,9 +1503,9 @@ class Mesh:
             mesh.points = np.asarray(tri.vertices, dtype=np.float64)
             mesh.faces = np.asarray(tri.faces, dtype=np.int64)
             mesh._remap_face_attributes_from(self)
-            return mesh
+            return mesh._flip_inward_closed_components()
         except Exception:
-            return self.copy()
+            return self._flip_inward_closed_components()
 
     def _boundary_loops(self) -> list[list[int]]:
         if self.triangle_count == 0:
