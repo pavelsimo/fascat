@@ -696,6 +696,7 @@ if(tocLinks.length){
 
 const sections = [
   ["Get Started", ["index.md", "install.md", "quickstart.md", "api.md"]],
+  ["Guides",      ["format-guidelines.md"]],
   ["Reference",   ["reference.md"]],
 ];
 

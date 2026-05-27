@@ -17,4 +17,5 @@ Fascat converts CAD STEP assemblies into realtime-ready OpenUSD and glTF assets 
 - [Install](install.html) — Homebrew, pip, pipx, or PyPI
 - [Quick Start](quickstart.html) — common patterns in 60 seconds
 - [Python API](api.html) — fluent assets, profiles, reports, validation, and export
+- [Format Guidelines](format-guidelines.html) — what to ask for and what to export
 - [Reference](reference.html) — global flags, env vars, exit codes, completions
