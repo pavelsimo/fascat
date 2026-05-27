@@ -10,7 +10,7 @@ from fascat.asset import Asset, Node, Part
 from fascat.cli import app
 from fascat.filter import Filter
 from fascat.mesh import Mesh
-from fascat.ops.heal import BrepStatus
+from fascat.ops.heal import BrepStatus, brep_status
 from fascat.options import BrepHealOptions, ConversionProfile, RepairOptions, StageOptions
 from fascat.pipeline import convert
 
@@ -53,9 +53,90 @@ def test_heal_brep_scopes_to_selected_parts_and_records_status(monkeypatch) -> N
     assert healed.parts["other"].source_shape == {"shape": "other"}
     assert healed.parts["selected"].metadata["brep_kind"] == "solid"
     assert healed.parts["selected"].metadata["brep_open_shells"] == "0"
+    assert healed.parts["selected"].metadata["brep_free_edges"] == "0"
+    assert healed.parts["selected"].metadata["brep_small_edges"] == "0"
+    assert healed.parts["selected"].metadata["brep_heal_operations"] == "fix_edges,unify_tolerances,sew_faces"
     assert healed.report.warnings == ["Selected: fixed trims"]
     assert healed.report.steps[-1].name == "heal_brep"
     assert healed.report.steps[-1].options["matched"]["parts"] == 1
+
+
+def test_brep_status_dict_includes_topology_risk_counts() -> None:
+    status = BrepStatus(
+        kind="open_surface",
+        shells=1,
+        wires=2,
+        edges=7,
+        faces=3,
+        open_shells=1,
+        free_edges=4,
+        small_edges=2,
+        sliver_faces=1,
+    )
+
+    assert status.to_dict() == {
+        "kind": "open_surface",
+        "solids": 0,
+        "shells": 1,
+        "wires": 2,
+        "edges": 7,
+        "faces": 3,
+        "open_shells": 1,
+        "free_edges": 4,
+        "small_edges": 2,
+        "sliver_faces": 1,
+    }
+
+
+def test_brep_status_reports_closed_box_topology() -> None:
+    pytest.importorskip("OCP.BRepPrimAPI")
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+
+    status = brep_status(BRepPrimAPI_MakeBox(1.0, 1.0, 1.0).Shape(), small_edge_length=0.5)
+
+    assert status.kind == "solid"
+    assert status.solids == 1
+    assert status.faces == 6
+    assert status.edges >= 12
+    assert status.free_edges == 0
+    assert status.small_edges == 0
+
+
+def test_heal_brep_reports_remaining_topology_risks(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import fascat.ops.heal as heal
+
+    def fake_heal_shape(shape: object, _options: BrepHealOptions) -> tuple[object, BrepStatus, BrepStatus, list[str]]:
+        return (
+            shape,
+            BrepStatus(kind="open_surface", shells=1, wires=1, edges=5, faces=2, open_shells=1, free_edges=4),
+            BrepStatus(
+                kind="open_surface",
+                shells=1,
+                wires=1,
+                edges=5,
+                faces=2,
+                open_shells=1,
+                free_edges=2,
+                small_edges=1,
+            ),
+            [],
+        )
+
+    monkeypatch.setattr(heal, "heal_shape", fake_heal_shape)
+
+    healed = _asset_with_brep().heal_brep(BrepHealOptions(tolerance=0.25), where=Filter.part("selected"))
+
+    selected = healed.parts["selected"]
+    assert selected.metadata["brep_edges"] == "5"
+    assert selected.metadata["brep_free_edges"] == "2"
+    assert selected.metadata["brep_unstitched_edges"] == "2"
+    assert selected.metadata["brep_small_edges"] == "1"
+    assert "free_edges': 2" in selected.metadata["brep_after"]
+    assert healed.report.warnings == [
+        "Selected: BREP healing left 1 open shell(s)",
+        "Selected: BREP healing left 2 free/unstitched edge(s)",
+        "Selected: BREP healing left 1 edge(s) at or below tolerance 0.25",
+    ]
 
 
 def test_heal_brep_can_fail_on_remaining_open_shells(monkeypatch) -> None:  # type: ignore[no-untyped-def]

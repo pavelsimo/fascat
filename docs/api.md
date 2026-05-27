@@ -288,7 +288,7 @@ asset.write_usd(
 
 ## BREP Healing
 
-Run BREP healing before tessellation when STEP topology needs sewing, edge fixing, tolerance unification, or open-shell reporting.
+Run BREP healing before tessellation when STEP topology needs sewing, edge fixing, tolerance unification, or open-shell and unstitched-edge reporting.
 
 ```python
 asset = fc.read_step("motor.step").heal_brep(
@@ -305,7 +305,7 @@ asset = fc.read_step("motor.step").heal_brep(
 )
 ```
 
-The operation stores per-part `brep_*` metadata and records a `heal_brep` report step. `fc.convert(..., heal_brep=fc.BrepHealOptions())` runs healing before tessellation. Sliver-face removal is requested through the BREP backend, but the current backend reports a warning when that removal path is unavailable instead of silently claiming that the source shape changed.
+The operation stores per-part `brep_*` metadata and records a `heal_brep` report step. Metadata includes BREP kind, solid/shell/wire/edge/face counts, open shells, free or unstitched edges, small edges at or below the healing tolerance, and sliver-face counts. `fc.convert(..., heal_brep=fc.BrepHealOptions())` runs healing before tessellation. Sliver-face removal is requested through the BREP backend, but the current backend reports a warning when that removal path is unavailable instead of silently claiming that the source shape changed. Remaining open shells, free edges, and small edges are also surfaced as report warnings.
 
 Brep healing parameters:
 

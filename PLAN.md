@@ -181,11 +181,11 @@ These need more design and should not be mixed into documentation or diagnostics
    - `criterion="quality"` now reports measured error, but still maps tolerances to a target ratio.
    - Remaining polish: enforce geometric error bounds, preserve selected CAD features, add richer topology protection metrics, iterative processing, and vertex-weight constraints for very large meshes.
 
-5. BREP healing depth
-   - Implement or delegate sliver-face removal.
-   - Improve sewing, small edge handling, and face/wire repair before tessellation.
-   - Add open-shell detection and unstitched-face handling before repair.
-   - Keep warnings visible when a backend cannot perform a requested operation.
+5. BREP healing depth - first topology-risk reporting pass complete
+   - BREP status now records wire, edge, free/unstitched-edge, small-edge, open-shell, and sliver-face counts.
+   - `heal_brep` now stores those counts in per-part metadata and warns when open shells, free edges, or small edges remain after healing.
+   - Unsupported sliver-face removal still reports a visible warning instead of claiming geometry was changed.
+   - Remaining polish: implement or delegate sliver-face removal, duplicate-face cleanup, and deeper face/wire repair before tessellation.
 
 6. PMI and metadata output
    - Add STEP AP242 PMI import tests.

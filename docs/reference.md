@@ -253,7 +253,7 @@ warnings to distinguish exact work from fallbacks.
 | Capability | Fascat status | Report or diagnostic | Next step |
 |------------|---------------|----------------------|-----------|
 | STEP import, hierarchy, names, transforms, colors, metadata | Implemented for STEP | `import` report stats and pipeline import options | Add design variants, richer PMI/product toggles, existing mesh preference, and multi-file import |
-| BREP healing | Partial | `heal_brep`; sliver removal warns that the backend leaves shapes unchanged | Implement sliver-face removal, duplicate-face cleanup, tolerance unification, and open-shell handling |
+| BREP healing | Partial | `heal_brep`; records open shells, free/unstitched edges, small edges, and sliver counts; sliver removal warns that the backend leaves shapes unchanged | Implement sliver-face removal, duplicate-face cleanup, and deeper face/wire repair |
 | Tessellation | Implemented | `tessellate` report options and quality metadata | Add separate sag-ratio option, existing tessellation reuse, CAD UV/tangent extraction, and free-edge diagnostics |
 | Mesh repair | Implemented for core cleanup | `repair` report step | Add T-junction sewing, non-manifold cracking, and configurable orientation strategies |
 | Staging, normals, tangents, UV metadata | Partial | `stage` report step; tangents require UV0 | Add seam planning, unwrap method selection, UV overlap checks, repack, normalize, and per-channel validation |
