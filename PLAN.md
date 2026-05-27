@@ -104,8 +104,8 @@ Parity gaps to track:
 
 5. UV staging
    - Add UV segmentation and seam planning, including sharp-edge seams and lines of interest.
-   - Expose unwrap solver intent where the backend supports it: conformal versus isometric.
-   - Add unwrap iteration and tolerance controls, plus diagnostics for solver failure or excessive distortion.
+   - Unwrap solver intent is now accepted across Python, CLI, TOML pipelines, metadata, and reports with `default`, `conformal`, and `isometric` values. The current xatlas backend records non-default solver methods as intent and warns that it cannot enforce them directly.
+   - Unwrap iteration and tolerance controls are now accepted across Python, CLI, TOML pipelines, metadata, and reports. Remaining work: add a backend that enforces those controls and reports solver failure or excessive distortion.
    - Add UV copy between channels, UV island merge, alignment, overlap checks, repack, normalize, and per-channel validation.
    - Make UV0 tileable and UV1 baking requirements explicit: UV0 may overlap; UV1 must fit in `[0,1]` with padding and no overlaps.
    - Add a cleanup step to remove unused UV channels before decimation when texture coordinates should not constrain simplification.
@@ -208,7 +208,8 @@ These need more design and should not be mixed into documentation or diagnostics
 9. UV pipeline depth - first layout quality pass complete
    - Stage now records per-channel UV bounds, degenerate UV face counts, and overlap-pair counts on mesh metadata.
    - UV1 or `lightmap` channels warn on bake-domain violations, while UV0 overlaps remain metadata-only for tileable texture workflows.
-   - Remaining polish: add seam segmentation, unwrap method selection, island merging, packing, normalization, and deeper per-channel validation.
+   - Unwrap method, iteration, and tolerance controls are now represented as solver intent; non-default values warn when xatlas cannot enforce them directly.
+   - Remaining polish: add seam segmentation, backend-enforced solver controls, island merging, packing, normalization, and deeper per-channel validation.
 
 10. Instance reconstruction - exact mesh pass complete
    - `optimize_scene(instance_policy="auto"|"preserve")` now reconstructs shared instances for separately modeled parts with matching mesh fingerprints, vertex attributes, material assignments, and metadata.

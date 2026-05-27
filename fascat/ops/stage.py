@@ -12,6 +12,8 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
         _require_xatlas()
     if options.uv0 in {"unwrap", "lightmap"}:
         _require_xatlas()
+    if options.uv0 in {"unwrap", "lightmap"} or options.uv1 in {"unwrap", "lightmap"}:
+        _warn_unwrap_solver_limits(result, options)
     if options.merge_equivalent_materials:
         _merge_equivalent_materials(result, selected_part_ids=selected_part_ids)
     if options.material_mode == "pbr":
@@ -160,9 +162,29 @@ def _tag_uv_metadata(mesh: Mesh, channel: int, mode: str, options: StageOptions)
         mesh.metadata[f"{prefix}_texel_density"] = str(options.unwrap.texel_density)
     if options.unwrap.max_stretch is not None:
         mesh.metadata[f"{prefix}_max_stretch"] = str(options.unwrap.max_stretch)
+    if mode in {"unwrap", "lightmap"}:
+        mesh.metadata[f"{prefix}_unwrap_backend"] = "xatlas"
+        mesh.metadata[f"{prefix}_unwrap_method"] = options.unwrap.method
+        if options.unwrap.method != "default":
+            mesh.metadata[f"{prefix}_unwrap_method_status"] = "intent"
+        if options.unwrap.iterations is not None:
+            mesh.metadata[f"{prefix}_unwrap_iterations"] = str(options.unwrap.iterations)
+            mesh.metadata[f"{prefix}_unwrap_iterations_status"] = "intent"
+        if options.unwrap.tolerance is not None:
+            mesh.metadata[f"{prefix}_unwrap_tolerance"] = str(options.unwrap.tolerance)
+            mesh.metadata[f"{prefix}_unwrap_tolerance_status"] = "intent"
     if options.atlas.enabled:
         mesh.metadata[f"{prefix}_atlas"] = "atlas_0"
         mesh.metadata[f"{prefix}_atlas_size"] = str(options.atlas.max_size)
+
+
+def _warn_unwrap_solver_limits(asset: Asset, options: StageOptions) -> None:
+    if options.unwrap.method == "default" and options.unwrap.iterations is None and options.unwrap.tolerance is None:
+        return
+    asset.report.add_warning(
+        "xatlas unwrap backend records method, iteration, and tolerance controls as intent; "
+        "the current backend does not expose those solver controls"
+    )
 
 
 def _tag_uv_layout_quality(asset: Asset, part_id: str, mesh: Mesh, uv_modes: dict[int, str]) -> None:

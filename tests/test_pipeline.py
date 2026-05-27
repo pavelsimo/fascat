@@ -373,6 +373,35 @@ def test_pipeline_advises_unity_style_ordering() -> None:
     assert all(item["level"] == "warning" for item in advisories)
 
 
+def test_pipeline_stage_unwrap_solver_controls_are_parsed() -> None:
+    spec = PipelineSpec.from_dict(
+        {
+            "steps": [
+                {
+                    "op": "stage",
+                    "uv0": "box",
+                    "unwrap_method": "isometric",
+                    "unwrap_iterations": 16,
+                    "unwrap_tolerance": 0.001,
+                }
+            ]
+        }
+    )
+
+    staged = spec.apply(_triangle_asset())
+    step = staged.report.steps[-1]
+
+    assert step.name == "stage"
+    assert step.options["unwrap"] == {
+        "texel_density": None,
+        "padding": 2,
+        "max_stretch": None,
+        "method": "isometric",
+        "iterations": 16,
+        "tolerance": 0.001,
+    }
+
+
 def test_pipeline_advisories_are_added_to_convert_report(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     import fascat.pipeline as pipeline
 

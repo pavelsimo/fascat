@@ -111,6 +111,12 @@ class UVMode(str, Enum):
     LIGHTMAP = "lightmap"
 
 
+class UnwrapMethod(str, Enum):
+    DEFAULT = "default"
+    CONFORMAL = "conformal"
+    ISOMETRIC = "isometric"
+
+
 class MaterialMode(str, Enum):
     CAD = "cad"
     DISPLAY = "display"
@@ -557,6 +563,18 @@ def cmd_convert(
         float | None,
         typer.Option("--max-stretch", help="Maximum UV stretch metadata for unwrap workflows."),
     ] = None,
+    unwrap_method: Annotated[
+        UnwrapMethod,
+        typer.Option("--unwrap-method", help="Unwrap solver intent: default, conformal, or isometric."),
+    ] = UnwrapMethod.DEFAULT,
+    unwrap_iterations: Annotated[
+        int | None,
+        typer.Option("--unwrap-iterations", help="Requested unwrap solver iteration budget metadata."),
+    ] = None,
+    unwrap_tolerance: Annotated[
+        float | None,
+        typer.Option("--unwrap-tolerance", help="Requested unwrap solver tolerance metadata."),
+    ] = None,
     atlas: Annotated[bool, typer.Option("--atlas", help="Tag materials and UVs for a generated atlas.")] = False,
     atlas_size: Annotated[int, typer.Option("--atlas-size", help="Maximum atlas texture size.")] = 4096,
     metadata: Annotated[
@@ -886,6 +904,9 @@ def cmd_convert(
         "texel_density": texel_density,
         "uv_padding": uv_padding,
         "max_stretch": max_stretch,
+        "unwrap_method": unwrap_method.value,
+        "unwrap_iterations": unwrap_iterations,
+        "unwrap_tolerance": unwrap_tolerance,
         "atlas": atlas,
         "atlas_size": atlas_size,
         "metadata": metadata.value,
@@ -1031,6 +1052,10 @@ def cmd_convert(
         _fail(ctx, payload, "--uv-padding must be greater than or equal to 0.", code=2)
     if max_stretch is not None and max_stretch < 0.0:
         _fail(ctx, payload, "--max-stretch must be greater than or equal to 0.", code=2)
+    if unwrap_iterations is not None and unwrap_iterations <= 0:
+        _fail(ctx, payload, "--unwrap-iterations must be greater than 0.", code=2)
+    if unwrap_tolerance is not None and unwrap_tolerance < 0.0:
+        _fail(ctx, payload, "--unwrap-tolerance must be greater than or equal to 0.", code=2)
     if atlas_size <= 0:
         _fail(ctx, payload, "--atlas-size must be greater than 0.", code=2)
     if maps_resolution <= 0:
@@ -1154,7 +1179,14 @@ def cmd_convert(
             preserve_face_boundaries=preserve_face_boundaries,
             tangents=tangents,
             validate_normals=validate_normals,
-            unwrap=UnwrapOptions(texel_density=texel_density, padding=uv_padding, max_stretch=max_stretch),
+            unwrap=UnwrapOptions(
+                texel_density=texel_density,
+                padding=uv_padding,
+                max_stretch=max_stretch,
+                method=unwrap_method.value,
+                iterations=unwrap_iterations,
+                tolerance=unwrap_tolerance,
+            ),
             atlas=AtlasOptions(enabled=atlas, max_size=atlas_size),
             uv0=uv0.value,
             uv1=uv1.value,

@@ -255,10 +255,26 @@ def test_stage_unwrap_uv_uses_xatlas_backend() -> None:
         parts={"part": Part(id="part", name="Part", mesh=mesh)},
     )
 
-    staged = asset.stage(StageOptions(uv0="unwrap", uv1="unwrap"))
+    staged = asset.stage(
+        StageOptions(
+            uv0="unwrap",
+            uv1="unwrap",
+            unwrap=UnwrapOptions(method="conformal", iterations=8, tolerance=0.01),
+        )
+    )
     staged_mesh = staged.parts["part"].mesh
 
     assert staged_mesh is not None
     assert staged_mesh.metadata["uv0"] == "xatlas"
     assert staged_mesh.metadata["uv1"] == "xatlas"
+    assert staged_mesh.metadata["uv0_unwrap_backend"] == "xatlas"
+    assert staged_mesh.metadata["uv0_unwrap_method"] == "conformal"
+    assert staged_mesh.metadata["uv0_unwrap_method_status"] == "intent"
+    assert staged_mesh.metadata["uv0_unwrap_iterations"] == "8"
+    assert staged_mesh.metadata["uv0_unwrap_iterations_status"] == "intent"
+    assert staged_mesh.metadata["uv0_unwrap_tolerance"] == "0.01"
+    assert staged_mesh.metadata["uv0_unwrap_tolerance_status"] == "intent"
     assert sorted(staged_mesh.uvs) == [0, 1]
+    assert any(
+        "records method, iteration, and tolerance controls as intent" in warning for warning in staged.report.warnings
+    )

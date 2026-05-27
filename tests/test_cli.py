@@ -134,6 +134,9 @@ def test_convert_help() -> None:
     assert "--sag-ratio" in plain(result.output)
     assert "--reuse-existing-meshes" in plain(result.output)
     assert "--free-edge-report" in plain(result.output)
+    assert "--unwrap-method" in plain(result.output)
+    assert "--unwrap-iterations" in plain(result.output)
+    assert "--unwrap-tolerance" in plain(result.output)
     assert "--remove-holes" in plain(result.output)
     assert "--remove-occluded" in plain(result.output)
     assert "--explode" in plain(result.output)
@@ -172,6 +175,9 @@ def test_convert_dry_run_json() -> None:
     assert payload["max_polygon_length"] is None
     assert payload["free_edge_report"] is False
     assert payload["reuse_existing_meshes"] is True
+    assert payload["unwrap_method"] == "default"
+    assert payload["unwrap_iterations"] is None
+    assert payload["unwrap_tolerance"] is None
     diagnostics = {item["operation"]: item for item in payload["operation_diagnostics"]}
     assert diagnostics["import"]["level"] == "exact"
     assert diagnostics["tessellate"]["level"] == "exact"
@@ -816,7 +822,9 @@ def test_convert_writes_tessellation_quality_report(monkeypatch, tmp_path: Path)
 
     def fake_convert(*_args: object, **kwargs: object) -> fc.Asset:
         tessellation = kwargs["tessellation"]
+        stage = kwargs["stage"]
         assert isinstance(tessellation, fc.Tessellation)
+        assert isinstance(stage, fc.StageOptions)
         assert tessellation.sag_ratio == 0.02
         assert tessellation.min_edge_length == 0.01
         assert tessellation.max_polygon_length == 3.0
@@ -824,6 +832,9 @@ def test_convert_writes_tessellation_quality_report(monkeypatch, tmp_path: Path)
         assert tessellation.quality_report is True
         assert tessellation.free_edge_report is True
         assert tessellation.reuse_existing_meshes is False
+        assert stage.unwrap.method == "isometric"
+        assert stage.unwrap.iterations == 32
+        assert stage.unwrap.tolerance == 0.001
         return asset
 
     monkeypatch.setattr(cli, "_convert_for_cli", fake_convert)
@@ -843,6 +854,12 @@ def test_convert_writes_tessellation_quality_report(monkeypatch, tmp_path: Path)
             "--retessellate-existing-meshes",
             "--free-edge-report",
             "--avoid-skinny-triangles",
+            "--unwrap-method",
+            "isometric",
+            "--unwrap-iterations",
+            "32",
+            "--unwrap-tolerance",
+            "0.001",
             "--quality-report",
             str(quality_file),
         ],
@@ -1105,6 +1122,14 @@ def test_convert_rejects_invalid_uv_pipeline_values(capsys) -> None:  # type: ig
     result = invoke_run(["--dry-run", "convert", "input.step", "output.usdc", "--atlas-size", "0"], capsys)
     assert result.exit_code == 2
     assert "--atlas-size must be greater than 0" in result.stderr
+
+    result = invoke_run(["--dry-run", "convert", "input.step", "output.usdc", "--unwrap-iterations", "0"], capsys)
+    assert result.exit_code == 2
+    assert "--unwrap-iterations must be greater than 0" in result.stderr
+
+    result = invoke_run(["--dry-run", "convert", "input.step", "output.usdc", "--unwrap-tolerance", "-1"], capsys)
+    assert result.exit_code == 2
+    assert "--unwrap-tolerance must be greater than or equal to 0" in result.stderr
 
 
 def test_convert_rejects_invalid_lods_as_json(capsys) -> None:  # type: ignore[no-untyped-def]

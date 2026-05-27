@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Literal
 
 UVMode = Literal["none", "box", "unwrap", "lightmap"]
+UnwrapMethod = Literal["default", "conformal", "isometric"]
 NormalMode = Literal["none", "smooth", "hard_edges", "flat"]
 MaterialMode = Literal["cad", "display", "none"]
 MaterialPipelineMode = Literal["cad", "pbr"]
@@ -173,6 +174,9 @@ class UnwrapOptions:
     texel_density: float | None = None
     padding: int = 2
     max_stretch: float | None = None
+    method: UnwrapMethod = "default"
+    iterations: int | None = None
+    tolerance: float | None = None
 
     def __post_init__(self) -> None:
         if self.texel_density is not None and self.texel_density <= 0.0:
@@ -181,6 +185,12 @@ class UnwrapOptions:
             raise ValueError("padding must be greater than or equal to 0")
         if self.max_stretch is not None and self.max_stretch < 0.0:
             raise ValueError("max_stretch must be greater than or equal to 0 when set")
+        if self.method not in {"default", "conformal", "isometric"}:
+            raise ValueError("unwrap method must be one of: default, conformal, isometric")
+        if self.iterations is not None and self.iterations <= 0:
+            raise ValueError("unwrap iterations must be greater than 0 when set")
+        if self.tolerance is not None and self.tolerance < 0.0:
+            raise ValueError("unwrap tolerance must be greater than or equal to 0 when set")
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

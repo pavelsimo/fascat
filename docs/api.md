@@ -481,6 +481,9 @@ asset = asset.stage(
             texel_density=256.0,
             padding=4,
             max_stretch=0.15,
+            method="conformal",
+            iterations=32,
+            tolerance=0.001,
         ),
         atlas=fc.AtlasOptions(
             enabled=True,
@@ -493,6 +496,8 @@ asset = asset.stage(
 Atlas support currently records atlas and texture-bake metadata on materials and meshes. It does not write atlas images. Dedicated material baking is a separate optimization step; it emits constant embedded texture maps from material factors and glTF can export those maps as material textures.
 
 Staged meshes also record UV layout quality metadata for each channel: `uvN_out_of_unit_vertices`, `uvN_degenerate_faces`, and `uvN_overlap_pairs`. UV0 overlaps are allowed for tileable material workflows and are recorded as metadata only. UV1 or `lightmap` channels add stage warnings when they contain overlaps, degenerate UV faces, or coordinates outside the 0..1 bake domain.
+
+When `uv0` or `uv1` uses `unwrap` or `lightmap`, fascat currently uses the optional xatlas backend. `method`, `iterations`, and `tolerance` record Unity-style solver intent for conformal or isometric unwrapping and solver stopping criteria. The current xatlas integration does not expose those controls directly, so non-default values are marked with `*_status="intent"` metadata and add a report warning instead of pretending the backend enforced them.
 
 Staging, UV, and material parameters:
 
@@ -508,6 +513,9 @@ Staging, UV, and material parameters:
 | `UnwrapOptions` | `texel_density` | Desired texture density for generated UVs. |
 | `UnwrapOptions` | `padding` | Padding between UV islands in pixels. |
 | `UnwrapOptions` | `max_stretch` | Maximum tolerated UV stretch before reporting unwrap risk. |
+| `UnwrapOptions` | `method` | Requested unwrap solver intent: `default`, `conformal`, or `isometric`. Non-default values are recorded as intent with the xatlas backend. |
+| `UnwrapOptions` | `iterations` | Requested unwrap solver iteration budget. Recorded as intent until a backend exposes this control. |
+| `UnwrapOptions` | `tolerance` | Requested unwrap solver error threshold. Recorded as intent until a backend exposes this control. |
 | `AtlasOptions` | `enabled` | Record atlas metadata and prepare materials for later baking. |
 | `AtlasOptions` | `max_size` | Maximum atlas texture size in pixels. |
 

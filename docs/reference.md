@@ -81,6 +81,9 @@ Dry-run JSON for `convert` includes `operation_diagnostics`, a list of planned o
 | `--texel-density` | unset | UV texel density metadata for unwrap and atlas workflows |
 | `--uv-padding` | `2` | UV island padding metadata in pixels |
 | `--max-stretch` | unset | Maximum UV stretch metadata for unwrap workflows |
+| `--unwrap-method` | `default` | Unwrap solver intent: `default`, `conformal`, or `isometric` |
+| `--unwrap-iterations` | unset | Requested unwrap solver iteration budget metadata |
+| `--unwrap-tolerance` | unset | Requested unwrap solver tolerance metadata |
 | `--atlas` | `false` | Tag materials and UVs for a generated atlas |
 | `--atlas-size` | `4096` | Maximum atlas texture size |
 | `--metadata` | `full` | Metadata import/export mode: `none`, `summary`, or `full` |
@@ -264,7 +267,7 @@ warnings to distinguish exact work from fallbacks.
 | BREP healing | Partial | `heal_brep`; records open shells, free/unstitched edges, small edges, and sliver counts; sliver removal warns that the backend leaves shapes unchanged | Implement sliver-face removal, duplicate-face cleanup, and deeper face/wire repair |
 | Tessellation | Implemented | `tessellate` report options, explicit sag-ratio, existing mesh reuse/retessellation controls, max-polygon-length diagnostics, free-edge diagnostics, and quality metadata | Add CAD UV/tangent extraction |
 | Mesh repair | Implemented for core cleanup | `repair` report step; mesh metadata records before/after duplicate polygon, degenerate triangle, boundary edge, and non-manifold edge counts | Add T-junction sewing, non-manifold cracking, and configurable orientation strategies |
-| Staging, normals, tangents, UV metadata | Partial | `stage` report step; tangents require UV0; mesh metadata records UV bounds, degenerates, and overlap counts, with warnings for UV1/lightmap bake violations | Add seam planning, unwrap method selection, repack, normalize, and deeper per-channel validation |
+| Staging, normals, tangents, UV metadata | Partial | `stage` report step; tangents require UV0; mesh metadata records UV bounds, degenerates, overlap counts, and unwrap solver intent, with warnings for UV1/lightmap bake violations and unsupported solver controls | Add seam planning, backend-enforced unwrap solver controls, island merge, repack, normalize, and deeper per-channel validation |
 | Material baking | Approximate | `bake_materials` emits constant embedded texture maps from material factors and warns that raster baking is not implemented | Generate real atlas textures from source texture/material inputs |
 | Hole removal | Approximate | `remove_holes` warns when it falls back to mesh boundary classification and filling | Add BREP feature-level removal for closed cylindrical and pocket holes |
 | Occlusion removal | Approximate | `remove_occluded` warns that sampled visibility may require higher precision and records candidate counts, sampled face coverage, direction coverage, and confidence metadata | Add acceleration structures and optional raster/GPU backends for high-poly production scenes |
