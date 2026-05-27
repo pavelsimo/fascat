@@ -77,8 +77,8 @@ decimation controls, and final export compression.
 Parity gaps to track:
 
 1. Workflow validation
-   - Add a pipeline advisor that checks Unity-style ordering: import cleanup, BREP/mesh repair, tessellation, face orientation, attributes, staging, optimization, LOD generation, then export cleanup/compression.
-   - Warn when a pipeline decimates before repair, computes tangents before UV0, bakes AO without UV1, generates LODs before LOD0 optimization, or requests compression without real texture/geometry compression backends.
+   - Pipeline files now expose Unity-style ordering advisories through `PipelineSpec.advisories()`, dry-run `pipeline_advisories`, and conversion report warnings.
+   - The advisor warns when a pipeline decimates before repair, computes tangents before UV0, bakes AO without UV1, or generates LODs before LOD0 optimization. Compression backend requests are still rejected by the CLI/options layer until real encoders exist.
    - Add report summaries that show which Unity-inspired preparation stages were run, skipped, approximated, or blocked by missing optional backends.
 
 2. Import controls

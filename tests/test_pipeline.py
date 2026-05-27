@@ -349,6 +349,50 @@ def test_pipeline_validates_step_options_during_parse() -> None:
         PipelineSpec.from_dict({"steps": [{"op": "tessellate", "sag": 0.0}]})
 
 
+def test_pipeline_advises_unity_style_ordering() -> None:
+    spec = PipelineSpec.from_dict(
+        {
+            "steps": [
+                {"op": "decimate"},
+                {"op": "stage", "tangents": True, "uv0": "none"},
+                {"op": "bake_materials", "bake": ["ao"]},
+                {"op": "run_lod_generators"},
+            ],
+        }
+    )
+
+    advisories = spec.advisories()
+
+    assert [item["code"] for item in advisories] == [
+        "decimate_before_repair",
+        "tangents_without_uv0",
+        "ao_bake_without_uv1",
+        "lods_before_optimize",
+    ]
+    assert [item["step"] for item in advisories] == [1, 2, 3, 4]
+    assert all(item["level"] == "warning" for item in advisories)
+
+
+def test_pipeline_advisories_are_added_to_convert_report(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.pipeline as pipeline
+
+    captured: dict[str, Asset] = {}
+    spec = PipelineSpec.from_dict({"steps": [{"op": "decimate", "target_ratio": 0.9}, {"op": "repair"}]})
+
+    monkeypatch.setattr(pipeline, "read_step", lambda _path, *, options=None: _triangle_asset())
+    monkeypatch.setattr(
+        pipeline,
+        "_write_usd",
+        lambda written_asset, _path, *, debug=False, options=None: captured.setdefault("asset", written_asset),
+    )
+    monkeypatch.setattr(pipeline, "validate_usd", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
+
+    converted = convert("input.step", tmp_path / "output.usdc", pipeline=spec)
+
+    assert "decimation runs before mesh repair" in converted.report.warnings[0]
+    assert captured["asset"].report.warnings == converted.report.warnings
+
+
 def test_pipeline_rejects_incompatible_step_options_with_line(tmp_path: Path) -> None:
     pipeline_file = tmp_path / "bad-merge.toml"
     pipeline_file.write_text('[[steps]]\nop = "merge"\nmode = "regions"\n', encoding="utf-8")

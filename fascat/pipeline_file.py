@@ -326,6 +326,9 @@ class PipelineSpec:
             "export": None if self.export_metadata is None else self.export_metadata.to_dict(),
         }
 
+    def advisories(self) -> list[dict[str, object]]:
+        return _pipeline_advisories(self.steps)
+
     def apply(
         self,
         asset: Asset,
@@ -357,6 +360,70 @@ class PipelineSpec:
         if value not in self.filters:
             raise ValueError(f"unknown pipeline filter: {value}")
         return self.filters[value]
+
+
+def _pipeline_advisories(steps: tuple[PipelineStep, ...]) -> list[dict[str, object]]:
+    advisories: list[dict[str, object]] = []
+    saw_repair = False
+    saw_uv0 = False
+    saw_uv1 = False
+    saw_optimize = False
+
+    def add(index: int, step: PipelineStep, code: str, message: str) -> None:
+        advisories.append(
+            {
+                "level": "warning",
+                "code": code,
+                "step": index,
+                "operation": step.op,
+                "message": message,
+            }
+        )
+
+    for index, step in enumerate(steps, start=1):
+        if step.op == "decimate" and not saw_repair:
+            add(
+                index,
+                step,
+                "decimate_before_repair",
+                "decimation runs before mesh repair; repair should run before simplification",
+            )
+        if step.op == "stage":
+            uv0 = _literal(step.values.get("uv0", "box"))
+            uv1 = _literal(step.values.get("uv1", "none"))
+            if bool(step.values.get("tangents", False)) and uv0 == "none" and not saw_uv0:
+                add(
+                    index,
+                    step,
+                    "tangents_without_uv0",
+                    "tangents are requested before UV0 is available",
+                )
+            saw_uv0 = saw_uv0 or uv0 != "none"
+            saw_uv1 = saw_uv1 or uv1 not in {None, "none"}
+        if step.op == "bake_materials":
+            bake_maps = {_literal(item) for item in _string_list(step.values.get("bake", ["base_color"]))}
+            bake_uv_channel = _as_int(step.values.get("uv_channel", 0))
+            generates_uv1 = bool(step.values.get("force_uv_generation", False)) and bake_uv_channel == 1
+            if "ao" in bake_maps and not (saw_uv1 or generates_uv1):
+                add(
+                    index,
+                    step,
+                    "ao_bake_without_uv1",
+                    "ambient occlusion baking is requested before UV1 is available",
+                )
+        if step.op in {"run_lod_generators", "lods"} and not saw_optimize:
+            add(
+                index,
+                step,
+                "lods_before_optimize",
+                "LOD generation runs before LOD0 optimization",
+            )
+        if step.op == "repair":
+            saw_repair = True
+        if step.op == "optimize":
+            saw_optimize = True
+
+    return advisories
 
 
 def _load_toml(path: str | Path) -> tuple[dict[str, object], _TomlLocation]:

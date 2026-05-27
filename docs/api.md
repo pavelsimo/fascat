@@ -729,6 +729,8 @@ For multiple branch-specific steps, load the same TOML pipeline format used by `
 
 ```python
 pipeline = fc.PipelineSpec.from_file("realtime.toml")
+for advisory in pipeline.advisories():
+    print(advisory["message"])
 asset = fc.convert("motor.step", "motor.glb", pipeline=pipeline)
 ```
 

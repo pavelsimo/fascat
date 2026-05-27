@@ -99,6 +99,8 @@ def convert(
     if progress is not None:
         progress("source", asset.stats())
     if pipeline is not None:
+        for advisory in pipeline.advisories():
+            asset.report.add_warning(str(advisory["message"]))
         asset = pipeline.apply(asset, progress=progress)
         if pipeline.export_metadata is not None:
             gltf_options = _with_gltf_metadata(gltf_options, pipeline.export_metadata)

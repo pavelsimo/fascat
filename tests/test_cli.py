@@ -277,12 +277,50 @@ target_triangles = 80000
     assert payload["pipeline_import"]["metadata"] is False
     assert payload["pipeline_import"]["pmi"] is False
     assert payload["pipeline_export"] == {"mode": "summary", "pmi": "none"}
+    assert payload["pipeline_advisories"] == []
     assert payload["pipeline_filters"] == ["fasteners"]
     assert [step["op"] for step in payload["pipeline_steps"]] == ["tessellate", "optimize"]
     assert payload["pipeline_steps"][0]["sag_ratio"] == 0.01
     assert payload["pipeline_steps"][0]["max_polygon_length"] == 3.0
     assert payload["pipeline_steps"][0]["free_edge_report"] is True
     assert payload["pipeline_steps"][0]["reuse_existing_meshes"] is False
+
+
+def test_convert_dry_run_reports_pipeline_advisories(tmp_path: Path) -> None:
+    pipeline_file = tmp_path / "bad-order.toml"
+    pipeline_file.write_text(
+        """
+[[steps]]
+op = "decimate"
+
+[[steps]]
+op = "stage"
+tangents = true
+uv0 = "none"
+
+[[steps]]
+op = "bake_materials"
+bake = ["ao"]
+
+[[steps]]
+op = "lods"
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        ["--json", "--dry-run", "convert", "input.step", "output.glb", "--pipeline", str(pipeline_file)],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert [item["code"] for item in payload["pipeline_advisories"]] == [
+        "decimate_before_repair",
+        "tangents_without_uv0",
+        "ao_bake_without_uv1",
+        "lods_before_optimize",
+    ]
 
 
 def test_convert_rejects_invalid_pipeline_file(tmp_path: Path) -> None:

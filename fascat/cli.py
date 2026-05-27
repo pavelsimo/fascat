@@ -968,6 +968,7 @@ def cmd_convert(
     if pipeline_spec is not None:
         payload["pipeline_steps"] = [step.to_dict() for step in pipeline_spec.steps]
         payload["pipeline_filters"] = sorted(pipeline_spec.filters)
+        payload["pipeline_advisories"] = pipeline_spec.advisories()
         payload["pipeline_import"] = (
             None if pipeline_spec.import_options is None else pipeline_spec.import_options.to_dict()
         )
