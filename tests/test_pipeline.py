@@ -47,6 +47,27 @@ def _triangle_asset() -> Asset:
     )
 
 
+def _mobius_strip_mesh(segments: int = 6) -> Mesh:
+    points: list[np.ndarray] = []
+    for index in range(segments):
+        theta = 2.0 * np.pi * index / segments
+        radial = np.array([np.cos(theta), np.sin(theta), 0.0], dtype=float)
+        twist = (np.cos(theta * 0.5) * radial) + (np.sin(theta * 0.5) * np.array([0.0, 0.0, 1.0], dtype=float))
+        center = 2.0 * radial
+        points.append(center - (0.25 * twist))
+        points.append(center + (0.25 * twist))
+
+    faces: list[list[int]] = []
+    for index in range(segments):
+        left = index * 2
+        right = left + 1
+        next_left = 1 if index == segments - 1 else (index + 1) * 2
+        next_right = 0 if index == segments - 1 else next_left + 1
+        faces.append([left, next_left, right])
+        faces.append([right, next_left, next_right])
+    return Mesh(points=np.asarray(points, dtype=float), faces=np.asarray(faces, dtype=int))
+
+
 def _test_profile() -> ConversionProfile:
     return ConversionProfile(
         name="test",
@@ -149,6 +170,22 @@ def test_repair_report_includes_unit_aware_tolerance_policy() -> None:
     assert mesh.metadata["repair_vertex_merge_tolerance_meters"] == "0.002"
     assert mesh.metadata["repair_degenerate_area_epsilon_square_meters"] == "3e-06"
     assert mesh.metadata["repair_t_junction_sewing"] == "not_implemented"
+
+
+def test_repair_reports_non_orientable_topology_before_winding_fix() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="strip")]),
+        parts={"strip": Part(id="strip", name="Strip", mesh=_mobius_strip_mesh())},
+    )
+
+    repaired = asset.repair(RepairOptions())
+
+    mesh = repaired.parts["strip"].mesh
+    step = repaired.report.steps[-1]
+    assert mesh is not None
+    assert mesh.metadata["repair_non_orientable_edges_before_orientation"] == "1"
+    assert step.after["repair_non_orientable_edges_before_orientation"] == 1
+    assert any("non-orientable shared edge" in warning for warning in step.warnings)
 
 
 def test_asset_operation_reports_include_options_and_before_after_counts() -> None:

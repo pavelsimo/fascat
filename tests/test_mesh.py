@@ -16,6 +16,34 @@ def valid_triangle(**overrides: object) -> Mesh:
     return Mesh(**values)
 
 
+def mobius_strip_mesh(segments: int = 6) -> Mesh:
+    points: list[np.ndarray] = []
+    radius = 2.0
+    half_width = 0.25
+    for index in range(segments):
+        theta = 2.0 * np.pi * index / segments
+        radial = np.array([np.cos(theta), np.sin(theta), 0.0], dtype=float)
+        vertical = np.array([0.0, 0.0, 1.0], dtype=float)
+        twist = (np.cos(theta * 0.5) * radial) + (np.sin(theta * 0.5) * vertical)
+        center = radius * radial
+        points.append(center - (half_width * twist))
+        points.append(center + (half_width * twist))
+
+    faces: list[list[int]] = []
+    for index in range(segments):
+        left = index * 2
+        right = left + 1
+        if index == segments - 1:
+            next_left = 1
+            next_right = 0
+        else:
+            next_left = (index + 1) * 2
+            next_right = next_left + 1
+        faces.append([left, next_left, right])
+        faces.append([right, next_left, next_right])
+    return Mesh(points=np.asarray(points, dtype=float), faces=np.asarray(faces, dtype=int))
+
+
 def test_mesh_copies_mutable_inputs_on_construction() -> None:
     points = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float)
     faces = np.array([[0, 1, 2]], dtype=int)
@@ -90,6 +118,18 @@ def test_quality_metrics_counts_duplicate_polygons() -> None:
     metrics = mesh.quality_metrics()
 
     assert metrics["duplicate_polygons"] == 1
+
+
+def test_orientability_metrics_detect_mobius_like_strip() -> None:
+    mesh = mobius_strip_mesh()
+
+    metrics = mesh.orientability_metrics()
+    repaired = mesh.repair(RepairOptions())
+
+    assert metrics["orientation_components"] == 1
+    assert metrics["non_orientable_edges"] == 1
+    assert repaired.metadata["repair_orientation_components_before_orientation"] == "1"
+    assert repaired.metadata["repair_non_orientable_edges_before_orientation"] == "1"
 
 
 def test_mesh_merges_close_vertices_with_tolerance() -> None:

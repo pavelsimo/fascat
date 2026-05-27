@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, cast
@@ -208,6 +209,7 @@ class Mesh:
         mesh = mesh.remove_duplicate_faces()
         if opts.delete_degenerate:
             mesh = mesh.remove_degenerate_faces(opts.area_epsilon)
+        orientation_metrics = mesh.orientability_metrics()
         if opts.fix_winding:
             mesh = mesh.fix_winding()
         mesh = mesh.compute_normals()
@@ -227,6 +229,8 @@ class Mesh:
             "repair_boundary_edges_after": str(int(after_metrics["boundary_edges"])),
             "repair_non_manifold_edges_before": str(int(before_metrics["non_manifold_edges"])),
             "repair_non_manifold_edges_after": str(int(after_metrics["non_manifold_edges"])),
+            "repair_orientation_components_before_orientation": str(int(orientation_metrics["orientation_components"])),
+            "repair_non_orientable_edges_before_orientation": str(int(orientation_metrics["non_orientable_edges"])),
         }
         mesh.validate()
         return mesh
@@ -349,6 +353,47 @@ class Mesh:
             "boundary_edges": int(np.count_nonzero(counts == 1)),
             "non_manifold_edges": int(np.count_nonzero(counts > 2)),
         }
+
+    def orientability_metrics(self) -> dict[str, int]:
+        if self.triangle_count == 0:
+            return {"orientation_components": 0, "non_orientable_edges": 0}
+
+        edge_incidents: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
+        for face_index, face in enumerate(self.faces.astype(int).tolist()):
+            for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
+                key = (min(start, end), max(start, end))
+                direction = 1 if (start, end) == key else -1
+                edge_incidents[key].append((face_index, direction))
+
+        adjacency: dict[int, list[tuple[int, int, tuple[int, int]]]] = defaultdict(list)
+        for edge, incidents in edge_incidents.items():
+            if len(incidents) != 2:
+                continue
+            (left_face, left_direction), (right_face, right_direction) = incidents
+            required_relation = -left_direction * right_direction
+            adjacency[left_face].append((right_face, required_relation, edge))
+            adjacency[right_face].append((left_face, required_relation, edge))
+
+        face_signs: dict[int, int] = {}
+        conflict_edges: set[tuple[int, int]] = set()
+        components = 0
+        for face_index in range(self.triangle_count):
+            if face_index in face_signs:
+                continue
+            components += 1
+            face_signs[face_index] = 1
+            queue: deque[int] = deque([face_index])
+            while queue:
+                current = queue.popleft()
+                for neighbor, required_relation, edge in adjacency[current]:
+                    expected_sign = face_signs[current] * required_relation
+                    if neighbor not in face_signs:
+                        face_signs[neighbor] = expected_sign
+                        queue.append(neighbor)
+                    elif face_signs[neighbor] != expected_sign:
+                        conflict_edges.add(edge)
+
+        return {"orientation_components": components, "non_orientable_edges": len(conflict_edges)}
 
     def compute_normals(self, *, angle_weighted: bool = True) -> Mesh:
         normals = np.zeros_like(self.points, dtype=np.float64)

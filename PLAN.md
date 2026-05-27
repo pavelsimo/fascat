@@ -66,6 +66,8 @@ that are currently conservative approximations.
   iterative-threshold recommendations in metadata and report fields.
 - Staging now warns when bake-domain UVs are only unwrapped without a separate
   repack/padding pass and records that missing repack status in metadata.
+- Mesh repair now detects non-orientable shared-edge cycles before face
+  orientation and warns when Mobius-like topology cannot be fixed by winding.
 
 ## Unity Asset Transformer Parity
 
@@ -107,9 +109,9 @@ Second-pass gaps from the Unity references:
   unwrap function only flattens islands; bake/lightmap UVs still require repack,
   padding, overlap checks, and normalization. Fascat should warn when UV1 is
   unwrapped but not packed before AO, lightmap, or material baking.
-- Add orientability diagnostics for face-orientation repair, including
-  non-orientable/Mobius-strip-like polygon strips, so orientation warnings are
-  not limited to non-manifold edge counts.
+- Mesh repair now includes orientability diagnostics for face-orientation
+  repair, including non-orientable/Mobius-strip-like polygon strips, so
+  orientation warnings are not limited to non-manifold edge counts.
 - Make decimation memory planning explicit: estimate RAM from polygon count,
   report when iterative decimation should be used, and explain how a global
   target is allocated across parts so sparse walls/simple parts stay intact.
@@ -143,7 +145,7 @@ Parity gaps to track:
    - Improve BREP healing beyond the current sewing/fix-edge path: sliver-face removal, duplicate face handling, tolerance unification, and visible report warnings for unsupported backend work.
    - Mesh repair now deletes duplicate polygons and records before/after duplicate, degenerate, boundary-edge, and non-manifold metrics.
    - Extend mesh repair with true T-junction sewing, non-manifold edge cracking, and configurable face-orientation strategies for closed solids versus open shells.
-   - Add non-orientable strip detection before face orientation so Mobius-like topology is reported separately from ordinary flipped faces.
+   - Mesh repair now detects non-orientable strips before face orientation so Mobius-like topology is reported separately from ordinary flipped faces.
    - Add explicit face and normal orientation passes with selectable strategies for exterior solids, single-sided open shells, and preserved two-sided surfaces.
    - Add missing-normal generation controls for sharp-edge angle, area weighting, override behavior, and flipped-component reporting.
    - Add attribute-aware tolerance vertex merging that rebuilds connectivity across hard-edge and non-manifold borders without collapsing intentional material, normal, or UV seams.
@@ -276,6 +278,7 @@ These need more design and should not be mixed into documentation or diagnostics
    - `heal_brep` now stores those counts in per-part metadata and warns when open shells, free edges, or small edges remain after healing.
    - Unsupported sliver-face removal still reports a visible warning instead of claiming geometry was changed.
    - Mesh repair now handles duplicate polygon cleanup after tessellation.
+   - Mesh repair now reports non-orientable shared-edge cycles before winding normalization.
    - Remaining polish: implement or delegate sliver-face removal, BREP duplicate-face cleanup, and deeper face/wire repair before tessellation.
 
 6. PMI and metadata output - first stability pass complete

@@ -284,13 +284,22 @@ class Asset:
                 if part.mesh is not None:
                     part.mesh = part.mesh.repair(opts)
                     part.mesh.metadata = {**part.mesh.metadata, **repair_unit_metadata}
+                    non_orientable_edges = _metadata_int(
+                        part.mesh.metadata.get("repair_non_orientable_edges_before_orientation"),
+                        0,
+                    )
+                    if non_orientable_edges:
+                        asset.report.add_warning(
+                            f"part {part.id} has {non_orientable_edges} non-orientable shared edge(s) "
+                            "before face orientation; Mobius-like topology cannot be fixed by winding normalization"
+                        )
                     part.fingerprint = part.mesh.fingerprint()
         step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
             "repair",
             options=_options_with_scope({**opts.to_dict(), "tolerance_policy": tolerance_policy}, scope),
             before=before,
-            after=asset.stats(),
+            after=_repair_report_stats(asset),
             duration=timer.duration,
             warnings=step_warnings,
         )
@@ -879,6 +888,21 @@ def _format_metadata_float(value: object) -> str:
 
 def _hierarchy_report_stats(asset: Asset) -> dict[str, int]:
     return {**asset.stats(include_lods=True), "draw_calls": asset.draw_call_count}
+
+
+def _repair_report_stats(asset: Asset) -> dict[str, int]:
+    stats = asset.stats()
+    non_orientable_edges = 0
+    for part in asset.parts.values():
+        if part.mesh is None:
+            continue
+        non_orientable_edges += _metadata_int(
+            part.mesh.metadata.get("repair_non_orientable_edges_before_orientation"),
+            0,
+        )
+    if non_orientable_edges:
+        stats["repair_non_orientable_edges_before_orientation"] = non_orientable_edges
+    return stats
 
 
 def _stage_report_stats(asset: Asset) -> dict[str, int]:
