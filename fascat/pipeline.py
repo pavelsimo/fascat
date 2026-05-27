@@ -102,15 +102,35 @@ def convert(
     )
     if progress is not None:
         progress("source", asset.stats())
+    planned_tessellation: Tessellation | None = None
+    planned_stage: StageOptions | None = None
+    planned_optimize: OptimizeOptions | None = None
+    planned_lods: LODOptions | None = None
+    if pipeline is None:
+        planned_tessellation = tessellation or selected.tessellation
+        planned_stage = stage or selected.stage
+        planned_optimize = optimize if optimize is not None else selected.optimize
+        planned_lods = lods if lods is not None else selected.lods
+    _add_preflight_report(
+        asset,
+        output_format,
+        pipeline=pipeline,
+        tessellation=planned_tessellation,
+        stage=planned_stage,
+        bake_materials=bake_materials,
+        decimate=decimate,
+        optimize=planned_optimize,
+        lod_generator=lod_generator,
+        lods=planned_lods,
+        gltf_options=gltf_options,
+    )
     if pipeline is not None:
-        for advisory in pipeline.advisories():
-            asset.report.add_warning(str(advisory["message"]))
         asset = pipeline.apply(asset, progress=progress)
         if pipeline.export_metadata is not None:
             gltf_options = _with_gltf_metadata(gltf_options, pipeline.export_metadata)
             usd_options = _with_usd_metadata(usd_options, pipeline.export_metadata)
     else:
-        tessellation_options = tessellation or selected.tessellation
+        tessellation_options = planned_tessellation
         if heal_brep is not None:
             asset = asset.heal_brep(heal_brep, where=where)
             if progress is not None:
@@ -157,12 +177,12 @@ def convert(
             asset = asset.decimate(decimate, where=where)
             if progress is not None:
                 progress("decimate", asset.stats())
-        optimize_options = optimize if optimize is not None else selected.optimize
+        optimize_options = planned_optimize
         if optimize_options is not None:
             asset = asset.optimize(optimize_options, where=where)
             if progress is not None:
                 progress("optimize", asset.stats())
-        lod_options = lods if lods is not None else selected.lods
+        lod_options = planned_lods
         if lod_generator is not None:
             asset = asset.run_lod_generators(lod_generator, where=where)
             if progress is not None:
@@ -251,6 +271,406 @@ def convert(
     _add_profile_budget_report(asset, selected)
     asset.report.finish(_report_stats(asset))
     return asset
+
+
+def _add_preflight_report(
+    asset: Asset,
+    output_format: ExportFormat,
+    *,
+    pipeline: PipelineSpec | None,
+    tessellation: Tessellation | None,
+    stage: StageOptions | None,
+    bake_materials: BakeMaterialOptions | None,
+    decimate: DecimateOptions | None,
+    optimize: OptimizeOptions | None,
+    lod_generator: LODGeneratorOptions | None,
+    lods: LODOptions | None,
+    gltf_options: GltfExportOptions | None,
+) -> None:
+    checks = _preflight_checks(
+        output_format,
+        pipeline=pipeline,
+        tessellation=tessellation,
+        stage=stage,
+        bake_materials=bake_materials,
+        decimate=decimate,
+        optimize=optimize,
+        lod_generator=lod_generator,
+        lods=lods,
+        gltf_options=gltf_options,
+    )
+    warnings = [str(item["message"]) for item in checks if item["status"] == "warning"]
+    before = _report_stats(asset)
+    after = dict(before)
+    after["preflight_checks_total"] = len(checks)
+    for status in ("ok", "warning", "skipped", "info"):
+        after[f"preflight_checks_{status}"] = sum(1 for item in checks if item["status"] == status)
+    for warning in warnings:
+        asset.report.add_warning(warning)
+    asset.report.add_step(
+        "preflight",
+        options={"style": "unity_asset_transformer", "checks": checks},
+        before=before,
+        after=after,
+        warnings=warnings,
+    )
+
+
+def _preflight_checks(
+    output_format: ExportFormat,
+    *,
+    pipeline: PipelineSpec | None,
+    tessellation: Tessellation | None,
+    stage: StageOptions | None,
+    bake_materials: BakeMaterialOptions | None,
+    decimate: DecimateOptions | None,
+    optimize: OptimizeOptions | None,
+    lod_generator: LODGeneratorOptions | None,
+    lods: LODOptions | None,
+    gltf_options: GltfExportOptions | None,
+) -> list[dict[str, object]]:
+    if pipeline is not None:
+        checks = _pipeline_preflight_checks(pipeline)
+        bake_planned = any(step.op == "bake_materials" for step in pipeline.steps)
+    else:
+        checks = _direct_preflight_checks(
+            tessellation=tessellation,
+            stage=stage,
+            bake_materials=bake_materials,
+            decimate=decimate,
+            optimize=optimize,
+            lod_generator=lod_generator,
+            lods=lods,
+        )
+        bake_planned = bake_materials is not None
+    checks.extend(_export_preflight_checks(output_format, gltf_options, bake_planned=bake_planned))
+    return checks
+
+
+def _pipeline_preflight_checks(pipeline: PipelineSpec) -> list[dict[str, object]]:
+    checks = [
+        _preflight_item(
+            code=str(advisory["code"]),
+            status="warning",
+            stage="workflow",
+            operation=str(advisory["operation"]),
+            message=str(advisory["message"]),
+            step=cast(int, advisory["step"]),
+        )
+        for advisory in pipeline.advisories()
+    ]
+    tessellate_steps = [step for step in pipeline.steps if step.op == "tessellate"]
+    if not tessellate_steps:
+        checks.append(
+            _preflight_item(
+                code="brep_patch_cleanup_not_planned",
+                status="skipped",
+                stage="import_cleanup",
+                operation="tessellate",
+                message="no tessellation step is planned, so BREP patch cleanup does not apply",
+            )
+        )
+    elif any(bool(step.values.get("keep_brep", False)) for step in tessellate_steps):
+        checks.append(
+            _preflight_item(
+                code="brep_patches_retained",
+                status="warning",
+                stage="import_cleanup",
+                operation="tessellate",
+                message="BREP patch data is retained after tessellation; disable keep_brep before runtime export unless CAD surfaces are still needed",
+            )
+        )
+    else:
+        checks.append(
+            _preflight_item(
+                code="brep_patch_cleanup_planned",
+                status="ok",
+                stage="import_cleanup",
+                operation="tessellate",
+                message="tessellation is planned with BREP patch cleanup enabled",
+            )
+        )
+
+    stage_steps = [step for step in pipeline.steps if step.op == "stage"]
+    if not stage_steps:
+        checks.append(
+            _preflight_item(
+                code="orientation_not_planned",
+                status="warning",
+                stage="orientation",
+                operation="stage",
+                message="no stage step is planned; normal generation and orientation-sensitive attributes will not be prepared",
+            )
+        )
+    elif any(_stage_values_prepare_normals(step.values) for step in stage_steps):
+        checks.append(
+            _preflight_item(
+                code="orientation_preparation_planned",
+                status="ok",
+                stage="orientation",
+                operation="stage",
+                message="stage is planned with normal preparation enabled",
+            )
+        )
+    else:
+        checks.append(
+            _preflight_item(
+                code="orientation_not_planned",
+                status="warning",
+                stage="orientation",
+                operation="stage",
+                message="stage disables normals; face and normal orientation should be verified before export",
+            )
+        )
+    return checks
+
+
+def _direct_preflight_checks(
+    *,
+    tessellation: Tessellation | None,
+    stage: StageOptions | None,
+    bake_materials: BakeMaterialOptions | None,
+    decimate: DecimateOptions | None,
+    optimize: OptimizeOptions | None,
+    lod_generator: LODGeneratorOptions | None,
+    lods: LODOptions | None,
+) -> list[dict[str, object]]:
+    checks: list[dict[str, object]] = []
+    if tessellation is None:
+        checks.append(
+            _preflight_item(
+                code="brep_patch_cleanup_not_planned",
+                status="skipped",
+                stage="import_cleanup",
+                operation="tessellate",
+                message="no tessellation step is planned, so BREP patch cleanup does not apply",
+            )
+        )
+    elif tessellation.keep_brep:
+        checks.append(
+            _preflight_item(
+                code="brep_patches_retained",
+                status="warning",
+                stage="import_cleanup",
+                operation="tessellate",
+                message="BREP patch data is retained after tessellation; disable keep_brep before runtime export unless CAD surfaces are still needed",
+            )
+        )
+    else:
+        checks.append(
+            _preflight_item(
+                code="brep_patch_cleanup_planned",
+                status="ok",
+                stage="import_cleanup",
+                operation="tessellate",
+                message="tessellation is planned with BREP patch cleanup enabled",
+            )
+        )
+
+    checks.append(_stage_orientation_preflight(stage))
+    checks.append(_stage_tangent_preflight(stage))
+    checks.append(_ao_bake_preflight(stage, bake_materials))
+
+    lod_planned = lod_generator is not None or lods is not None
+    if lod_planned and optimize is None and decimate is None:
+        checks.append(
+            _preflight_item(
+                code="lods_without_lod0_optimization",
+                status="warning",
+                stage="lod_generation",
+                operation="lods",
+                message="LOD generation is planned without LOD0 optimization",
+            )
+        )
+    elif lod_planned:
+        checks.append(
+            _preflight_item(
+                code="lod0_optimization_before_lods",
+                status="ok",
+                stage="lod_generation",
+                operation="optimize,lods",
+                message="LOD0 optimization is planned before LOD generation",
+            )
+        )
+    else:
+        checks.append(
+            _preflight_item(
+                code="lod_generation_not_requested",
+                status="skipped",
+                stage="lod_generation",
+                operation="lods",
+                message="LOD generation was not requested",
+            )
+        )
+    return checks
+
+
+def _export_preflight_checks(
+    output_format: ExportFormat,
+    gltf_options: GltfExportOptions | None,
+    *,
+    bake_planned: bool,
+) -> list[dict[str, object]]:
+    if output_format != "gltf":
+        return [
+            _preflight_item(
+                code="gltf_geometry_compression_not_applicable",
+                status="skipped",
+                stage="export",
+                operation="export",
+                message="glTF geometry compression checks do not apply to this export format",
+            ),
+            _preflight_item(
+                code="texture_compression_not_applicable",
+                status="skipped",
+                stage="export",
+                operation="export",
+                message="KTX2/Basis texture export checks do not apply to this export format",
+            ),
+        ]
+
+    geometry_compression = gltf_options is not None and (gltf_options.quantize or gltf_options.meshopt)
+    texture_message = (
+        "baked textures are planned for glTF export, but KTX2/Basis output is unavailable and requests are rejected"
+        if bake_planned
+        else "KTX2/Basis texture output is unavailable; no texture-producing bake step is planned"
+    )
+    return [
+        _preflight_item(
+            code="gltf_geometry_compression_planned"
+            if geometry_compression
+            else "gltf_geometry_compression_not_requested",
+            status="ok" if geometry_compression else "info",
+            stage="export",
+            operation="write",
+            message="glTF geometry compression or quantization is planned"
+            if geometry_compression
+            else "glTF export has no runtime geometry compression requested",
+        ),
+        _preflight_item(
+            code="texture_compression_backend_missing",
+            status="warning" if bake_planned else "info",
+            stage="export",
+            operation="write",
+            message=texture_message,
+        ),
+    ]
+
+
+def _stage_orientation_preflight(stage: StageOptions | None) -> dict[str, object]:
+    if stage is None:
+        return _preflight_item(
+            code="orientation_not_planned",
+            status="warning",
+            stage="orientation",
+            operation="stage",
+            message="no stage step is planned; normal generation and orientation-sensitive attributes will not be prepared",
+        )
+    if not stage.normals or stage.normal_mode == "none":
+        return _preflight_item(
+            code="orientation_not_planned",
+            status="warning",
+            stage="orientation",
+            operation="stage",
+            message="stage disables normals; face and normal orientation should be verified before export",
+        )
+    return _preflight_item(
+        code="orientation_preparation_planned",
+        status="ok",
+        stage="orientation",
+        operation="stage",
+        message="stage is planned with normal preparation enabled",
+    )
+
+
+def _stage_tangent_preflight(stage: StageOptions | None) -> dict[str, object]:
+    if stage is None or not stage.tangents:
+        return _preflight_item(
+            code="tangent_generation_not_requested",
+            status="skipped",
+            stage="uv_preparation",
+            operation="stage",
+            message="tangent generation was not requested",
+        )
+    uv_channel = stage.tangent_uv_channel
+    if _stage_has_uv_channel(stage, uv_channel):
+        return _preflight_item(
+            code="tangent_uv_available",
+            status="ok",
+            stage="uv_preparation",
+            operation="stage",
+            message=f"tangent generation has UV{uv_channel} available",
+        )
+    return _preflight_item(
+        code=f"tangents_without_uv{uv_channel}",
+        status="warning",
+        stage="uv_preparation",
+        operation="stage",
+        message=f"tangents are requested before UV{uv_channel} is available",
+    )
+
+
+def _ao_bake_preflight(stage: StageOptions | None, bake_materials: BakeMaterialOptions | None) -> dict[str, object]:
+    if bake_materials is None or "ao" not in bake_materials.bake:
+        return _preflight_item(
+            code="ao_bake_not_requested",
+            status="skipped",
+            stage="material_baking",
+            operation="bake_materials",
+            message="ambient occlusion baking was not requested",
+        )
+    generates_bake_uv = bake_materials.force_uv_generation and bake_materials.uv_channel == 1
+    if _stage_has_uv_channel(stage, 1) or generates_bake_uv:
+        return _preflight_item(
+            code="ao_bake_uv1_available",
+            status="ok",
+            stage="material_baking",
+            operation="bake_materials",
+            message="ambient occlusion baking has UV1 available or explicitly generated",
+        )
+    return _preflight_item(
+        code="ao_bake_without_uv1",
+        status="warning",
+        stage="material_baking",
+        operation="bake_materials",
+        message="ambient occlusion baking is requested before UV1 is available",
+    )
+
+
+def _stage_has_uv_channel(stage: StageOptions | None, channel: int) -> bool:
+    if stage is None:
+        return False
+    if channel == 0:
+        return stage.uv0 not in {None, "none"}
+    if channel == 1:
+        return stage.uv1 not in {None, "none"} and (stage.uv1 != "copy_uv0" or stage.uv0 not in {None, "none"})
+    return False
+
+
+def _stage_values_prepare_normals(values: dict[str, object]) -> bool:
+    normal_mode = str(values.get("normal_mode", "smooth")).replace("-", "_")
+    return bool(values.get("normals", True)) and normal_mode != "none"
+
+
+def _preflight_item(
+    *,
+    code: str,
+    status: str,
+    stage: str,
+    operation: str,
+    message: str,
+    step: int | None = None,
+) -> dict[str, object]:
+    item: dict[str, object] = {
+        "code": code,
+        "status": status,
+        "stage": stage,
+        "operation": operation,
+        "message": message,
+    }
+    if step is not None:
+        item["step"] = step
+    return item
 
 
 def _record_failed_step(

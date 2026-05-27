@@ -25,6 +25,7 @@ from fascat.options import (
     ReplaceOptions,
     StageOptions,
     StepReadOptions,
+    Tessellation,
 )
 from fascat.pipeline import convert
 from fascat.pipeline_file import PipelineSpec
@@ -330,6 +331,7 @@ mode = "bounding_box"
     assert part.mesh.triangle_count == 12
     steps = {step.name: step for step in converted.report.steps}
     assert [step.name for step in converted.report.steps[1:]] == [
+        "preflight",
         "repair",
         "replace",
         "write",
@@ -491,6 +493,35 @@ def test_pipeline_advisories_are_added_to_convert_report(monkeypatch, tmp_path: 
 
     assert "decimation runs before mesh repair" in converted.report.warnings[0]
     assert captured["asset"].report.warnings == converted.report.warnings
+
+
+def test_convert_report_includes_preflight_checklist(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.pipeline as pipeline
+
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr(pipeline, "_write_gltf", lambda _asset, _path, *, options=None: None)
+
+    converted = convert(
+        "input.step",
+        tmp_path / "output.glb",
+        profile=_test_profile(),
+        tessellation=Tessellation(keep_brep=True),
+        stage=StageOptions(normal_mode="none", tangents=True, uv0="none", uv1=None),
+        bake_materials=BakeMaterialOptions(bake=("ao",)),
+        gltf_options=GltfExportOptions(),
+        validate_output=False,
+    )
+    preflight = converted.report.steps[1]
+    checks = {item["code"]: item for item in preflight.options["checks"]}  # type: ignore[index]
+
+    assert preflight.name == "preflight"
+    assert preflight.after["preflight_checks_warning"] == 5
+    assert checks["brep_patches_retained"]["status"] == "warning"
+    assert checks["orientation_not_planned"]["status"] == "warning"
+    assert checks["tangents_without_uv0"]["status"] == "warning"
+    assert checks["ao_bake_without_uv1"]["status"] == "warning"
+    assert checks["texture_compression_backend_missing"]["status"] == "warning"
+    assert preflight.warnings == converted.report.warnings[:5]
 
 
 def test_convert_report_includes_workflow_summary(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]

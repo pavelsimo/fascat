@@ -51,6 +51,9 @@ that are currently conservative approximations.
 - glTF LODs now include node-level `MSFT_lod` references in addition to Fascat extras.
 - OBJ export writes normals, `f v//vn` faces, and smoothing directives.
 - Self-intersection analysis now performs bounded triangle-triangle checks instead of counting AABB candidates.
+- Conversion reports now include a Unity-style `preflight` checklist before
+  expensive operations run, covering patch cleanup, orientation, UV/tangent
+  ordering, AO bake prerequisites, LOD0 optimization, and export backend gaps.
 
 ## Unity Asset Transformer Parity
 
@@ -92,7 +95,7 @@ Parity gaps to track:
    - Pipeline files now expose Unity-style ordering advisories through `PipelineSpec.advisories()`, dry-run `pipeline_advisories`, and conversion report warnings.
    - The advisor warns when a pipeline decimates before repair, computes tangents before UV0, bakes AO without UV1, or generates LODs before LOD0 optimization. Compression backend requests are still rejected by the CLI/options layer until real encoders exist.
    - Conversion reports now include a `workflow_summary` step that maps Unity-inspired preparation stages to run/skipped status and exact, approximate, or metadata-only levels, including import cleanup, orientation, UV preparation, material baking, LOD generation, export compression, and export.
-   - Remaining work: add a preflight parity checklist before expensive operations run, with missing prerequisites and missing optional backends called out before conversion starts. It should also flag missing patch cleanup, face/normal orientation, UV-before-tangent ordering, and export texture/compression prerequisites.
+   - Conversion reports now include a `preflight` step before pipeline or profile operations run, with checklist warnings for missing patch cleanup, face/normal orientation, UV-before-tangent ordering, AO bake UV1 prerequisites, LOD generation without LOD0 optimization, and glTF texture/compression backend gaps.
 
 2. Import controls
    - Reference docs now include a supported-format parity matrix. Unity's baseline covers many CAD and mesh formats; Fascat currently centers on STEP input and USD/glTF/OBJ/STL output, with IGES, Parasolid, JT, native CAD, IFC, 3MF, and QIF explicitly deferred.
