@@ -244,6 +244,27 @@ such as invalid numeric ranges, missing `external_path`, conflicting `where` /
 `where_not`, or unsupported operation names fail during parse. CLI errors include
 `line N` when the source file location can be identified.
 
+## Unity-inspired capability matrix
+
+This matrix maps Unity Asset Transformer-style CAD-to-runtime capabilities to the
+current Fascat behavior. Use dry-run `operation_diagnostics` and report step
+warnings to distinguish exact work from fallbacks.
+
+| Capability | Fascat status | Report or diagnostic | Next step |
+|------------|---------------|----------------------|-----------|
+| STEP import, hierarchy, names, transforms, colors, metadata | Implemented for STEP | `import` report stats and pipeline import options | Add design variants, richer PMI/product toggles, existing mesh preference, and multi-file import |
+| BREP healing | Partial | `heal_brep`; sliver removal warns that the backend leaves shapes unchanged | Implement sliver-face removal, duplicate-face cleanup, tolerance unification, and open-shell handling |
+| Tessellation | Implemented | `tessellate` report options and quality metadata | Add separate sag-ratio option, existing tessellation reuse, CAD UV/tangent extraction, and free-edge diagnostics |
+| Mesh repair | Implemented for core cleanup | `repair` report step | Add T-junction sewing, non-manifold cracking, and configurable orientation strategies |
+| Staging, normals, tangents, UV metadata | Partial | `stage` report step; tangents require UV0 | Add seam planning, unwrap method selection, UV overlap checks, repack, normalize, and per-channel validation |
+| Material baking | Metadata-only | `bake_materials` warns texture image baking is not implemented | Generate real base-color, opacity, roughness, metallic, normal, AO, and emissive textures |
+| Hole removal | Approximate | `remove_holes` warns about the mesh boundary-fill fallback and hole-type metadata limits | Add BREP feature-level hole classification and removal |
+| Occlusion removal | Approximate | `remove_occluded` warns about part-level AABB containment fallback | Replace with visibility sampling at part, submesh, and triangle levels |
+| Decimation | Partial | `decimate`; quality criterion is reported as heuristic in dry-run diagnostics | Add measured geometric error, topology protection metrics, iterative limits, and UV/AO importance modes |
+| LOD generation | Partial | `run_lod_generators` / `lods` report steps | Preserve occurrence-level LOD chains and add far-LOD merge plus validation |
+| Runtime compression | Partial | glTF quantization and meshopt are implemented; texture compression is metadata-only; Draco is rejected | Add real KTX2/Basis output and a Draco path only if a reliable encoder is integrated |
+| Export and budgets | Implemented for USD, USDZ, glTF/GLB, OBJ, STL | `write` report includes file size and optional budget warnings | Add geometry/texture/metadata size breakdowns and export cleanup for unused resources |
+
 ## Validate flags
 
 | Flag | Default | Description |
