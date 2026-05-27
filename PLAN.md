@@ -128,6 +128,9 @@ that are currently conservative approximations.
 - Explicit decimation now uses the selected profile or target-device triangle
   budget as its target when `--decimate` is enabled without a manual
   `--target-triangles` or `--ratio`.
+- LOD generation now reports source, added-LOD, and full-chain vertex/triangle
+  counts plus estimated mesh payload bytes, making extra-level memory and
+  export-size tradeoffs visible.
 
 ## Unity Asset Transformer Parity
 
@@ -160,7 +163,7 @@ Comparison snapshot:
 | Repair and tessellation | BREP sewing/fix-edge path, mesh duplicate/degenerate/T-junction/boundary-gap/flipped-component diagnostics, unit-aware repair tolerance reporting, sag/sag-ratio/angle/max-length controls, bounding-box-derived tessellation helpers, free-edge diagnostics, reusable existing mesh control, retained patch / submesh risk warnings, and tessellation attribute-provenance metadata. | Open-shell grouping, unstitched-face handling, T-junction sewing, boundary-gap stitching, non-manifold edge cracking, tolerance-based overlapping-surface/z-fighting cleanup, non-orientable strip cracking, topology-only vertex connectivity with split render attributes, selectable face/normal orientation strategies, real tessellation-time tangent/UV/free-edge geometry generation controls, CAD-derived UV modes, targeted tessellation by material/metadata/curvature, and optional free-edge geometry output. |
 | Staging | Normal/tangent generation, box/unwrap/lightmap UV modes, UV copy/normalization, UV validation, UV island/distortion/packing diagnostics, material normalization, duplicate-material merge, and metadata-only atlas intent. | Unity-style UV0 tileable versus UV1 bake workflows with segmentation, sharp-edge seam and forbid-overlap UV policies, lines of interest, island merge/alignment, real repack/padding/share-map controls, material-library mapping, real atlas textures, AO/lightmap baking, and texture cleanup. |
 | Optimization | Mesh simplification, measured error reporting, sampled occlusion removal, exact instance reconstruction, scene merge/split utilities, draw-call breakdown reports, UV-importance modes, and pre-decimation cleanup for unused UVs/tangents. | Global assembly target allocation with iterative memory thresholds, real geometric-error bounded simplification, AO/user-weighted decimation, cleanup for vertex colors/weights, standard/advanced occlusion backends, retopology/proxy mesh generation with normal-map transfer, symmetry-aware loose/precise instance reconstruction, duplicate image/material cleanup, and merge reports that quantify culling, memory, and file-size tradeoffs. |
-| LODs | LOD ratios, screen-coverage metadata, validation, skipped-part reporting, and glTF `MSFT_lod` metadata. | Occurrence-level LOD group authoring with preserved instance relationships, optimized LOD0 as master asset, explicit conservative LOD0 versus destructive distant-LOD policy, far-LOD one-mesh/one-material baking, LOD-count memory/file-size tradeoff reports, switching-distance validation, and engine-specific runtime export profiles. |
+| LODs | LOD ratios, screen-coverage metadata, validation, skipped-part reporting, per-level mesh-payload tradeoff reports, and glTF `MSFT_lod` metadata. | Occurrence-level LOD group authoring with preserved instance relationships, optimized LOD0 as master asset, explicit conservative LOD0 versus destructive distant-LOD policy, far-LOD one-mesh/one-material baking, switching-distance validation, and engine-specific runtime export profiles. |
 | Export | USD/USDZ, glTF/GLB, OBJ, STL, glTF quantization, meshopt, extension reporting, file-size budgets, and rejection of unsupported Draco/KTX2 requests. | Real Draco compression settings, KTX2/Basis texture output, texture resize and PNG/JPEG fallback controls, unused texture cleanup, baseline-versus-optimized size comparisons, expected-versus-measured export size ladders, Unity/glTFast-oriented profiles, and web/mobile/VR/XR budget presets backed by runtime measurements. |
 
 Function-level parity notes from the linked Unity pages:
@@ -354,7 +357,7 @@ Parity gaps to track:
    - Preserve occurrence-level LOD chains and instance relationships across all LOD levels.
    - Add far-LOD generation that can merge to one mesh and one baked material for one-draw-call distant rendering.
    - Add LOD validation for screen coverage, monotonic triangle reduction, material simplification, switching distances, and export runtime behavior.
-   - Report the memory and export-size tradeoff of adding extra LOD levels so users can choose three to four useful levels instead of generating wasteful chains.
+   - LOD generation now reports source, added-LOD, and full-chain vertex/triangle counts plus estimated mesh payload bytes so users can choose useful levels instead of generating wasteful chains.
    - Add LOD generation reports that show whether each level reused instances, merged materials, baked textures, or changed culling granularity.
    - Non-mesh or untessellated selections are now skipped with part metadata, generated/skipped counts, and report warnings instead of quietly producing partial chains.
    - Add engine-specific LOD export metadata or profiles for Unity, Unreal, and standards-based glTF runtimes, including switching-distance validation.

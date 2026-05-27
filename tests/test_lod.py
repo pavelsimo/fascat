@@ -65,6 +65,21 @@ def test_lods_are_monotonic() -> None:
     assert step.after["lod_meshes"] == 3
     assert step.after["lod_vertices"] == sum(lod.vertex_count for lod in part.lod_meshes)
     assert step.after["lod_triangles"] == sum(counts[1:])
+    assert part.metadata["lod_source_vertices"] == str(mesh.vertex_count)
+    assert part.metadata["lod_source_triangles"] == str(mesh.triangle_count)
+    assert part.metadata["lod_added_vertices"] == str(sum(lod.vertex_count for lod in part.lod_meshes))
+    assert part.metadata["lod_added_triangles"] == str(sum(counts[1:]))
+    assert part.metadata["lod_chain_triangles"] == str(sum(counts))
+    assert part.metadata["lod_level_triangles"] == ",".join(str(count) for count in counts[1:])
+    assert float(part.metadata["lod_triangle_multiplier"]) > 1.0
+    assert int(part.metadata["lod_added_mesh_bytes"]) > 0
+    assert with_lods.metadata["lod_source_triangles"] == str(mesh.triangle_count)
+    assert with_lods.metadata["lod_added_triangles"] == str(sum(counts[1:]))
+    assert with_lods.metadata["lod_chain_triangles"] == str(sum(counts))
+    assert step.after["lod_source_triangles"] == mesh.triangle_count
+    assert step.after["lod_added_triangles"] == sum(counts[1:])
+    assert step.after["lod_chain_triangles"] == sum(counts)
+    assert step.after["lod_added_mesh_bytes"] == int(with_lods.metadata["lod_added_mesh_bytes"])
 
 
 def test_lods_can_omit_tiny_parts_at_lower_screen_coverage() -> None:
@@ -117,6 +132,8 @@ def test_lods_can_omit_tiny_parts_at_lower_screen_coverage() -> None:
     assert with_lods.parts["cube"].lod_meshes[0].triangle_count > 0
     assert with_lods.parts["cube"].lod_meshes[1].triangle_count == 0
     assert with_lods.parts["cube"].lod_meshes[1].metadata["lod_omitted"] == "tiny_part"
+    assert with_lods.parts["cube"].metadata["lod_omitted_tiny_part_meshes"] == "1"
+    assert with_lods.metadata["lod_omitted_tiny_part_meshes"] == "1"
 
 
 def test_lods_warn_when_selected_parts_have_no_mesh() -> None:

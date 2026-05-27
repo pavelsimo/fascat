@@ -647,6 +647,8 @@ def test_run_lod_generators_records_screen_coverage_metadata() -> None:
 
     assert len(with_lods.parts["cube"].lod_meshes) == 2
     assert with_lods.parts["cube"].metadata["lod_screen_coverage"] == "0.5,0.2"
+    assert with_lods.parts["cube"].lod_meshes[0].metadata["lod_screen_coverage"] == "0.5"
+    assert with_lods.parts["cube"].lod_meshes[1].metadata["lod_screen_coverage"] == "0.2"
     assert with_lods.report.steps[-1].name == "run_lod_generators"
 
 

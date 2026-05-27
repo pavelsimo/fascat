@@ -296,7 +296,12 @@ def run_lod_generators_asset(
     from fascat.ops.lod import build_lods
 
     ratios = tuple(level.target_ratio for level in options.levels)
-    result = build_lods(asset, LODOptions(ratios=ratios), selected_part_ids=selected_part_ids)
+    screen_coverage = tuple(level.screen_coverage for level in options.levels)
+    result = build_lods(
+        asset,
+        LODOptions(ratios=ratios, screen_coverage=screen_coverage),
+        selected_part_ids=selected_part_ids,
+    )
     coverage = ",".join(f"{level.screen_coverage:.9g}" for level in options.levels)
     for part in result.parts.values():
         if selected_part_ids is not None and part.id not in selected_part_ids:

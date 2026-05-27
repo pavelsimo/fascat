@@ -489,7 +489,7 @@ class Asset:
             "lods",
             options=_options_with_scope(opts.to_dict(), scope),
             before=before,
-            after=asset.stats(include_lods=True),
+            after=_lod_report_stats(asset),
             duration=timer.duration,
             warnings=step_warnings,
         )
@@ -701,7 +701,7 @@ class Asset:
             "run_lod_generators",
             options=_options_with_scope(opts.to_dict(), scope),
             before=before,
-            after=_hierarchy_report_stats(asset),
+            after=_lod_report_stats(asset),
             duration=timer.duration,
             warnings=step_warnings,
         )
@@ -1091,6 +1091,27 @@ def _part_is_merged_batch(part: Part) -> bool:
 
 def _hierarchy_report_stats(asset: Asset) -> dict[str, int]:
     return {**asset.stats(include_lods=True), **asset.draw_call_breakdown()}
+
+
+def _lod_report_stats(asset: Asset) -> dict[str, int]:
+    stats = _hierarchy_report_stats(asset)
+    for key in (
+        "lod_generated_parts",
+        "lod_skipped_no_mesh_parts",
+        "lod_source_vertices",
+        "lod_source_triangles",
+        "lod_source_mesh_bytes",
+        "lod_added_vertices",
+        "lod_added_triangles",
+        "lod_added_mesh_bytes",
+        "lod_chain_vertices",
+        "lod_chain_triangles",
+        "lod_chain_mesh_bytes",
+        "lod_omitted_tiny_part_meshes",
+    ):
+        if key in asset.metadata:
+            stats[key] = _metadata_int(asset.metadata[key], 0)
+    return stats
 
 
 def _repair_report_stats(asset: Asset) -> dict[str, int]:
