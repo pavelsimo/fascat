@@ -100,6 +100,7 @@ asset = asset.tessellate(
         angle=15.0,
         relative=True,
         max_edge_length=None,
+        reuse_existing_meshes=True,
     )
 )
 

@@ -54,6 +54,7 @@ _TESSELLATION_PART_SETTING_KEYS = {
     "quality_report",
     "create_normals",
     "keep_brep",
+    "reuse_existing_meshes",
 }
 
 
@@ -83,6 +84,7 @@ class Tessellation:
     quality_report: bool = False
     create_normals: bool = True
     keep_brep: bool = False
+    reuse_existing_meshes: bool = True
     part_settings: dict[str, dict[str, object]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

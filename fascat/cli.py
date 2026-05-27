@@ -466,6 +466,13 @@ def cmd_convert(
         Path | None,
         typer.Option("--quality-report", help="Write per-part tessellation quality metrics as JSON."),
     ] = None,
+    reuse_existing_meshes: Annotated[
+        bool,
+        typer.Option(
+            "--reuse-existing-meshes/--retessellate-existing-meshes",
+            help="Reuse imported meshes instead of retessellating source BREP geometry.",
+        ),
+    ] = True,
     heal_brep: Annotated[bool, typer.Option("--heal-brep", help="Run BREP healing before tessellation.")] = False,
     heal_tolerance: Annotated[float, typer.Option("--heal-tolerance", help="BREP healing tolerance.")] = 0.05,
     remove_sliver_faces: Annotated[
@@ -846,6 +853,7 @@ def cmd_convert(
         "curvature_adaptive": curvature_adaptive,
         "avoid_skinny_triangles": avoid_skinny_triangles,
         "quality_report": str(quality_report) if quality_report else None,
+        "reuse_existing_meshes": reuse_existing_meshes,
         "heal_brep": heal_brep,
         "heal_tolerance": heal_tolerance,
         "remove_sliver_faces": remove_sliver_faces,
@@ -1098,6 +1106,7 @@ def cmd_convert(
             curvature_adaptive=curvature_adaptive,
             avoid_skinny_triangles=avoid_skinny_triangles,
             quality_report=quality_report is not None or base_tessellation.quality_report,
+            reuse_existing_meshes=reuse_existing_meshes,
         )
         optimize_options = profile_options.optimize
         if optimize_options is not None:

@@ -209,6 +209,74 @@ def test_tessellation_keep_brep_controls_source_shape_retention(monkeypatch) -> 
     assert kept.parts["part"].source_shape is source_shape
 
 
+def test_tessellate_reuses_existing_meshes_by_default(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import fascat.ops.tessellate as tessellate_module
+
+    source_shape = object()
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Part", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=triangle_mesh(), source_shape=source_shape)},
+    )
+    calls: list[object] = []
+
+    def fake_tessellate_shape(shape: object, _options: Tessellation, **_kwargs: object) -> Mesh:
+        calls.append(shape)
+        return Mesh(
+            points=np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], dtype=float),
+            faces=np.array([[0, 1, 2], [0, 2, 3]], dtype=int),
+        )
+
+    monkeypatch.setattr(tessellate_module, "tessellate_shape", fake_tessellate_shape)
+
+    tessellated = asset.tessellate(Tessellation())
+
+    assert calls == []
+    assert tessellated.parts["part"].mesh is not None
+    assert tessellated.parts["part"].mesh.triangle_count == 1
+    assert tessellated.parts["part"].source_shape is source_shape
+
+
+def test_tessellate_replaces_existing_meshes_when_requested(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import fascat.ops.tessellate as tessellate_module
+
+    source_shape = object()
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Part", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=triangle_mesh(), source_shape=source_shape)},
+    )
+    calls: list[object] = []
+
+    def fake_tessellate_shape(shape: object, _options: Tessellation, **_kwargs: object) -> Mesh:
+        calls.append(shape)
+        return Mesh(
+            points=np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], dtype=float),
+            faces=np.array([[0, 1, 2], [0, 2, 3]], dtype=int),
+        )
+
+    monkeypatch.setattr(tessellate_module, "tessellate_shape", fake_tessellate_shape)
+
+    tessellated = asset.tessellate(Tessellation(reuse_existing_meshes=False))
+
+    assert calls == [source_shape]
+    assert tessellated.parts["part"].mesh is not None
+    assert tessellated.parts["part"].mesh.triangle_count == 2
+    assert tessellated.parts["part"].source_shape is None
+
+
+def test_tessellate_warns_when_existing_mesh_cannot_be_retessellated() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Part", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=triangle_mesh())},
+    )
+
+    tessellated = asset.tessellate(Tessellation(reuse_existing_meshes=False))
+
+    assert tessellated.parts["part"].mesh is not None
+    assert tessellated.report.steps[-1].warnings == [
+        "part has existing mesh but no source shape and cannot be retessellated: Part"
+    ]
+
+
 def test_occt_mesh_parameters_use_sag_ratio_as_relative_deflection() -> None:
     import fascat.ops.tessellate as tessellate_module
 

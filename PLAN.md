@@ -97,7 +97,7 @@ Parity gaps to track:
 
 4. Tessellation controls
    - Sag-ratio is now a first-class tessellation option across Python, CLI, TOML pipelines, per-part overrides, reports, and OCCT backend parameter mapping. `relative=True` remains for compatibility when `sag_ratio` is unset.
-   - Support explicit override/reuse of existing tessellation when imported data already contains meshes.
+   - Existing imported meshes now have an explicit `reuse_existing_meshes` control across Python, CLI, TOML pipelines, per-part overrides, and reports. The default preserves imported meshes; disabling it retessellates from source BREP where available.
    - Investigate CAD-parametric UV and tangent generation during tessellation, plus free-edge extraction for diagnostics.
    - Add targeted tessellation profiles by part size, material, metadata, curvature, or filter so shiny/high-detail parts can use finer criteria than bulk structural parts.
    - Expose max polygon length separately from cleanup subdivision and report when long triangles may cause lighting artifacts.

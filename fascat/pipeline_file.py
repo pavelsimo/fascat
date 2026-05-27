@@ -94,6 +94,7 @@ _TESSELLATION_KEYS = frozenset(
         "quality_report",
         "create_normals",
         "keep_brep",
+        "reuse_existing_meshes",
         "part_settings",
     }
 )
@@ -661,6 +662,7 @@ def _tessellation(values: dict[str, object]) -> Tessellation:
         quality_report=bool(values.get("quality_report", False)),
         create_normals=bool(values.get("create_normals", True)),
         keep_brep=bool(values.get("keep_brep", False)),
+        reuse_existing_meshes=bool(values.get("reuse_existing_meshes", True)),
         part_settings=cast(dict[str, dict[str, object]], values.get("part_settings", {})),
     )
 

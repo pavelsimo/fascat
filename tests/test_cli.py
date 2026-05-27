@@ -131,6 +131,7 @@ def test_convert_help() -> None:
     assert "--bake-materials" in plain(result.output)
     assert "--decimate" in plain(result.output)
     assert "--sag-ratio" in plain(result.output)
+    assert "--reuse-existing-meshes" in plain(result.output)
     assert "--remove-holes" in plain(result.output)
     assert "--remove-occluded" in plain(result.output)
     assert "--explode" in plain(result.output)
@@ -166,6 +167,7 @@ def test_convert_dry_run_json() -> None:
     assert payload["command"] == "convert"
     assert payload["dry_run"] is True
     assert payload["sag_ratio"] == 0.01
+    assert payload["reuse_existing_meshes"] is True
     diagnostics = {item["operation"]: item for item in payload["operation_diagnostics"]}
     assert diagnostics["import"]["level"] == "exact"
     assert diagnostics["tessellate"]["level"] == "exact"
@@ -248,6 +250,7 @@ op = "tessellate"
 where = "fasteners"
 sag = 0.2
 sag-ratio = 0.01
+reuse-existing-meshes = false
 
 [[steps]]
 op = "optimize"
@@ -271,6 +274,7 @@ target_triangles = 80000
     assert payload["pipeline_filters"] == ["fasteners"]
     assert [step["op"] for step in payload["pipeline_steps"]] == ["tessellate", "optimize"]
     assert payload["pipeline_steps"][0]["sag_ratio"] == 0.01
+    assert payload["pipeline_steps"][0]["reuse_existing_meshes"] is False
 
 
 def test_convert_rejects_invalid_pipeline_file(tmp_path: Path) -> None:
@@ -771,6 +775,7 @@ def test_convert_writes_tessellation_quality_report(monkeypatch, tmp_path: Path)
         assert tessellation.min_edge_length == 0.01
         assert tessellation.avoid_skinny_triangles is True
         assert tessellation.quality_report is True
+        assert tessellation.reuse_existing_meshes is False
         return asset
 
     monkeypatch.setattr(cli, "_convert_for_cli", fake_convert)
@@ -785,6 +790,7 @@ def test_convert_writes_tessellation_quality_report(monkeypatch, tmp_path: Path)
             "0.01",
             "--sag-ratio",
             "0.02",
+            "--retessellate-existing-meshes",
             "--avoid-skinny-triangles",
             "--quality-report",
             str(quality_file),

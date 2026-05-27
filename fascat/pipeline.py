@@ -465,6 +465,7 @@ def tessellate(
     quality_report: bool = False,
     create_normals: bool = True,
     keep_brep: bool = False,
+    reuse_existing_meshes: bool = True,
     part_settings: dict[str, dict[str, object]] | None = None,
     where: Filter | None = None,
 ) -> Asset:
@@ -482,6 +483,7 @@ def tessellate(
             quality_report=quality_report,
             create_normals=create_normals,
             keep_brep=keep_brep,
+            reuse_existing_meshes=reuse_existing_meshes,
             part_settings=part_settings or {},
         ),
         where=where,

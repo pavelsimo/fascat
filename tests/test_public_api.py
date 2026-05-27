@@ -85,6 +85,7 @@ def test_functional_api_wraps_tessellation_options() -> None:
         quality_report=True,
         create_normals=False,
         keep_brep=True,
+        reuse_existing_meshes=False,
         part_settings={"Part": {"sag": 0.3}},
     )
     step = tessellated.report.steps[-1]
@@ -103,6 +104,7 @@ def test_functional_api_wraps_tessellation_options() -> None:
         "quality_report": True,
         "create_normals": False,
         "keep_brep": True,
+        "reuse_existing_meshes": False,
         "part_settings": {"Part": {"sag": 0.3}},
     }
     assert step.warnings == ["part has no source shape and cannot be tessellated: Part"]

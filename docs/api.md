@@ -20,6 +20,7 @@ asset = asset.tessellate(
         relative=True,
         min_edge_length=None,
         max_edge_length=None,
+        reuse_existing_meshes=True,
         preserve_boundaries=True,
         curvature_adaptive=False,
         avoid_skinny_triangles=False,
@@ -339,6 +340,7 @@ asset = fc.read_step("motor.step").tessellate(
         curvature_adaptive=True,
         avoid_skinny_triangles=True,
         quality_report=True,
+        reuse_existing_meshes=True,
         part_settings={
             "housing": {"sag": 0.03, "sag_ratio": 0.005, "max_edge_length": 1.0},
             "Fastener": {"sag": 0.15},
@@ -367,6 +369,7 @@ Tessellation parameters:
 | `quality_report` | Record per-part tessellation quality metrics for later reporting. |
 | `create_normals` | Generate normals during tessellation when the backend can provide them. |
 | `keep_brep` | Keep source BREP handles on parts after tessellation for later BREP-aware operations. |
+| `reuse_existing_meshes` | Reuse meshes already present on imported parts. Set to `False` to retessellate from source BREP where available. |
 | `part_settings` | Per-part overrides keyed by part id or part name. Supports the same tessellation option names. |
 
 Repair parameters:

@@ -19,12 +19,17 @@ def tessellate_asset(asset: Asset, options: Tessellation, *, selected_part_ids: 
     for part in result.parts.values():
         if selected_part_ids is not None and part.id not in selected_part_ids:
             continue
-        if part.mesh is not None:
+        part_options = _options_for_part(options, part)
+        if part.mesh is not None and part_options.reuse_existing_meshes:
             continue
         if part.source_shape is None:
-            result.report.add_warning(f"part has no source shape and cannot be tessellated: {part.name}")
+            if part.mesh is None:
+                result.report.add_warning(f"part has no source shape and cannot be tessellated: {part.name}")
+            else:
+                result.report.add_warning(
+                    f"part has existing mesh but no source shape and cannot be retessellated: {part.name}"
+                )
             continue
-        part_options = _options_for_part(options, part)
         face_material_indices = _face_material_indices_from_metadata(part.metadata)
         cache_key = _tessellation_cache_key(
             part.source_shape,
@@ -248,6 +253,7 @@ def _tessellation_settings_key(options: Tessellation) -> tuple[object, ...]:
         options.curvature_adaptive,
         options.avoid_skinny_triangles,
         options.create_normals,
+        options.reuse_existing_meshes,
     )
 
 

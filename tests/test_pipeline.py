@@ -133,6 +133,7 @@ def test_asset_operation_reports_include_options_and_before_after_counts() -> No
             "quality_report",
             "create_normals",
             "keep_brep",
+            "reuse_existing_meshes",
             "part_settings",
         },
         "repair": {
