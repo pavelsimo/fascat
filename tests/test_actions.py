@@ -323,6 +323,29 @@ def test_remove_occluded_records_visibility_sampling_metadata() -> None:
     assert result.metadata["occlusion_level"] == "triangles"
     assert result.metadata["occlusion_hemi_evaluation"] == "true"
     assert int(result.metadata["occlusion_direction_count"]) < 26
+    assert result.metadata["occlusion_candidate_count"] == "1"
+    assert result.metadata["occlusion_face_count"] == "12"
+    assert result.metadata["occlusion_sample_count"] == "12"
+    assert result.metadata["occlusion_visible_sample_count"] == "12"
+    assert result.metadata["occlusion_hidden_sample_count"] == "0"
+    assert result.metadata["occlusion_sample_coverage"] == "1"
+    assert result.metadata["occlusion_direction_coverage"] == "1"
+    assert result.metadata["occlusion_confidence"] == "1"
+
+
+def test_remove_occluded_records_lower_confidence_for_sparse_sampling() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="strip", name="Strip", part_id="strip")]),
+        parts={"strip": Part(id="strip", name="Strip", mesh=_triangle_strip(100))},
+    )
+
+    result = asset.remove_occluded(RemoveOccludedOptions(level="parts", precision=1, strategy="conservative"))
+
+    assert result.metadata["occlusion_face_count"] == "100"
+    assert result.metadata["occlusion_sample_count"] == "15"
+    assert result.metadata["occlusion_sample_coverage"] == "0.15"
+    assert result.metadata["occlusion_direction_coverage"] == "0.230769"
+    assert result.metadata["occlusion_confidence"] == "0.15"
 
 
 def test_remove_occluded_respects_transparent_occluders() -> None:

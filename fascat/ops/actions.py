@@ -228,15 +228,19 @@ def remove_occluded_asset(
     ray_distance = _occlusion_ray_distance(occurrences)
     removed_node_ids: set[str] = set()
     trims: list[_OcclusionTrim] = []
+    measurements: list[_OcclusionMeasurement] = []
     for candidate in selected_occurrences:
         if _preserve_candidate_cavity(result, candidate, options):
             continue
         occluders = _candidate_occluders(result, candidate, occurrences, options)
         if options.level == "parts":
-            if not _occurrence_has_visible_sample(candidate, occluders, directions, ray_distance, options):
+            measurement = _occurrence_visibility_measurement(candidate, occluders, directions, ray_distance, options)
+            measurements.append(measurement)
+            if measurement.visible_sample_count == 0:
                 removed_node_ids.add(candidate.node.id)
             continue
-        visible_faces = _visible_face_mask(candidate, occluders, directions, ray_distance)
+        visible_faces, measurement = _visible_face_measurement(candidate, occluders, directions, ray_distance)
+        measurements.append(measurement)
         part = result.parts.get(candidate.part_id)
         mesh = None if part is None else part.mesh
         if mesh is None or mesh.triangle_count == 0 or bool(np.all(visible_faces)):
@@ -273,6 +277,7 @@ def remove_occluded_asset(
     result.metadata["occlusion_level"] = options.level
     result.metadata["occlusion_direction_count"] = str(len(directions))
     result.metadata["occlusion_hemi_evaluation"] = str(options.hemi_evaluation).lower()
+    _record_occlusion_confidence(result, measurements, len(selected_occurrences), len(directions), options)
     return result
 
 
@@ -348,6 +353,14 @@ class _OcclusionTrim:
     part_id: str
     keep_faces: IntArray
     removed_faces: int
+
+
+@dataclass(frozen=True)
+class _OcclusionMeasurement:
+    face_count: int
+    sample_count: int
+    visible_sample_count: int
+    hidden_sample_count: int
 
 
 def _selected_mesh_part_ids(asset: Asset, selected_part_ids: set[str] | None) -> set[str]:
@@ -971,17 +984,66 @@ def _occlusion_ray_distance(occurrences: list[_WorldOccurrence]) -> float:
     return max(diagonal * 2.0, 1.0)
 
 
-def _occurrence_has_visible_sample(
+def _record_occlusion_confidence(
+    asset: Asset,
+    measurements: list[_OcclusionMeasurement],
+    candidate_count: int,
+    direction_count: int,
+    options: RemoveOccludedOptions,
+) -> None:
+    face_count = sum(measurement.face_count for measurement in measurements)
+    sample_count = sum(measurement.sample_count for measurement in measurements)
+    visible_samples = sum(measurement.visible_sample_count for measurement in measurements)
+    hidden_samples = sum(measurement.hidden_sample_count for measurement in measurements)
+    sample_coverage = 1.0 if face_count == 0 else min(1.0, sample_count / face_count)
+    max_directions = _max_occlusion_direction_count(options)
+    direction_coverage = 1.0 if max_directions == 0 else min(1.0, direction_count / max_directions)
+    confidence = min(sample_coverage, direction_coverage)
+
+    asset.metadata["occlusion_candidate_count"] = str(candidate_count)
+    asset.metadata["occlusion_face_count"] = str(face_count)
+    asset.metadata["occlusion_sample_count"] = str(sample_count)
+    asset.metadata["occlusion_visible_sample_count"] = str(visible_samples)
+    asset.metadata["occlusion_hidden_sample_count"] = str(hidden_samples)
+    asset.metadata["occlusion_sample_coverage"] = f"{sample_coverage:.6g}"
+    asset.metadata["occlusion_direction_coverage"] = f"{direction_coverage:.6g}"
+    asset.metadata["occlusion_confidence"] = f"{confidence:.6g}"
+
+
+def _max_occlusion_direction_count(options: RemoveOccludedOptions) -> int:
+    return len(
+        _occlusion_directions(RemoveOccludedOptions(strategy="advanced", hemi_evaluation=options.hemi_evaluation))
+    )
+
+
+def _occurrence_visibility_measurement(
     candidate: _WorldOccurrence,
     occluders: list[_WorldOccurrence],
     directions: list[FloatArray],
     ray_distance: float,
     options: RemoveOccludedOptions,
-) -> bool:
+) -> _OcclusionMeasurement:
     samples = _occurrence_visibility_samples(candidate, options.precision)
+    face_count = int(candidate.faces.shape[0])
     if samples.size == 0 or not occluders:
-        return True
-    return any(_sample_is_visible(sample, occluders, directions, ray_distance) for sample in samples)
+        return _OcclusionMeasurement(
+            face_count=face_count,
+            sample_count=int(samples.shape[0]),
+            visible_sample_count=int(samples.shape[0]),
+            hidden_sample_count=0,
+        )
+    visible = np.asarray(
+        [_sample_is_visible(sample, occluders, directions, ray_distance) for sample in samples],
+        dtype=np.bool_,
+    )
+    visible_count = int(np.count_nonzero(visible))
+    sample_count = int(visible.shape[0])
+    return _OcclusionMeasurement(
+        face_count=face_count,
+        sample_count=sample_count,
+        visible_sample_count=visible_count,
+        hidden_sample_count=sample_count - visible_count,
+    )
 
 
 def _occurrence_visibility_samples(candidate: _WorldOccurrence, precision: int) -> FloatArray:
@@ -1015,18 +1077,33 @@ def _occurrence_visibility_samples(candidate: _WorldOccurrence, precision: int) 
     return cast(FloatArray, np.vstack([face_samples, box_samples]))
 
 
-def _visible_face_mask(
+def _visible_face_measurement(
     candidate: _WorldOccurrence,
     occluders: list[_WorldOccurrence],
     directions: list[FloatArray],
     ray_distance: float,
-) -> NDArray[np.bool_]:
+) -> tuple[NDArray[np.bool_], _OcclusionMeasurement]:
     centers = _face_centers(candidate)
     if centers.size == 0 or not occluders:
-        return np.ones(candidate.faces.shape[0], dtype=np.bool_)
-    return np.asarray(
+        visible_faces = np.ones(candidate.faces.shape[0], dtype=np.bool_)
+        sample_count = int(visible_faces.shape[0])
+        return visible_faces, _OcclusionMeasurement(
+            face_count=int(candidate.faces.shape[0]),
+            sample_count=sample_count,
+            visible_sample_count=sample_count,
+            hidden_sample_count=0,
+        )
+    visible_faces = np.asarray(
         [_sample_is_visible(center, occluders, directions, ray_distance) for center in centers],
         dtype=np.bool_,
+    )
+    visible_count = int(np.count_nonzero(visible_faces))
+    sample_count = int(visible_faces.shape[0])
+    return visible_faces, _OcclusionMeasurement(
+        face_count=int(candidate.faces.shape[0]),
+        sample_count=sample_count,
+        visible_sample_count=visible_count,
+        hidden_sample_count=sample_count - visible_count,
     )
 
 

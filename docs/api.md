@@ -570,7 +570,7 @@ asset = asset.run_lod_generators(
 )
 ```
 
-Material baking currently creates a shared flat material and constant embedded texture maps from material factors; it does not rasterize source textures into atlases. Hole removal uses deterministic mesh boundary classification and filling when BREP feature editing is unavailable. Occlusion removal uses deterministic visibility sampling, so the report records that thin occluders can require higher precision.
+Material baking currently creates a shared flat material and constant embedded texture maps from material factors; it does not rasterize source textures into atlases. Hole removal uses deterministic mesh boundary classification and filling when BREP feature editing is unavailable. Occlusion removal uses deterministic visibility sampling, so the report records that thin occluders can require higher precision and asset metadata records the measured sample coverage, direction coverage, and confidence score.
 
 Optimization action parameters:
 
@@ -610,6 +610,8 @@ Optimization action parameters:
 | `LODGeneratorOptions` | `allow_non_monotonic` | Permit non-monotonic LODs without failing validation. |
 | `LODLevel` | `screen_coverage` | Screen fraction at which this LOD becomes appropriate. |
 | `LODLevel` | `target_ratio` | Fraction of source triangles to keep for this LOD. |
+
+Occlusion metadata includes `occlusion_candidate_count`, `occlusion_face_count`, `occlusion_sample_count`, `occlusion_visible_sample_count`, `occlusion_hidden_sample_count`, `occlusion_sample_coverage`, `occlusion_direction_coverage`, and `occlusion_confidence`. The confidence score is the lower of sample coverage and direction coverage; lower values mean the result depends on sparse sampling or a reduced direction set.
 
 Report examples for destructive and approximate operations:
 

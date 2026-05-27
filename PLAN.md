@@ -160,11 +160,12 @@ verify CI/docs before moving on.
 
 These need more design and should not be mixed into documentation or diagnostics commits.
 
-1. True occlusion removal - complete in the first larger-work pass
+1. True occlusion removal - measured confidence pass complete
    - Replaced AABB containment with deterministic sampled visibility rays.
    - Supports part, submesh/material-group, and triangle granularity.
    - Strategy changes the direction set, and hemispherical evaluation restricts rays to top/side views.
-   - Remaining polish: add acceleration structures, measured confidence, and optional raster/GPU backends for very large production meshes.
+   - Output metadata now records candidate counts, face counts, sample counts, visible/hidden samples, sample coverage, direction coverage, and an occlusion confidence score.
+   - Remaining polish: add acceleration structures and optional raster/GPU backends for very large production meshes.
 
 2. Better hole removal - first mesh-classification pass complete
    - Mesh fallback now classifies boundary loops as through, blind, or surface and respects the enabled hole types.

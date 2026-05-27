@@ -159,7 +159,7 @@ Units and behavior notes:
 - Screen coverage values are fractions between `0` and `1`; file-size budgets are megabytes; atlas and bake sizes are pixels.
 - `--decimate-criterion quality` maps tolerances to a target ratio, records measured nearest-vertex error and achieved triangle reduction, and reports a warning because tolerance bounds are not enforced.
 - `--remove-holes` uses mesh boundary classification and filling when BREP hole removal is unavailable. `--hole-types` filters inferred through, blind, and surface boundary loops; closed BREP feature holes still require a BREP feature backend.
-- `--remove-occluded` uses deterministic sampled visibility. Strategy changes the direction set, `--hemi-evaluation` restricts rays to upper-hemisphere and side views, and `--occlusion-level` controls whether fully hidden parts, material groups, or triangles are removed.
+- `--remove-occluded` uses deterministic sampled visibility. Strategy changes the direction set, `--hemi-evaluation` restricts rays to upper-hemisphere and side views, and `--occlusion-level` controls whether fully hidden parts, material groups, or triangles are removed. Output metadata records sample coverage, direction coverage, and an occlusion confidence score.
 - `--draco` is rejected until a Draco encoder backend is integrated.
 
 ## Inspect flags
@@ -259,7 +259,7 @@ warnings to distinguish exact work from fallbacks.
 | Staging, normals, tangents, UV metadata | Partial | `stage` report step; tangents require UV0; mesh metadata records UV bounds, degenerates, and overlap counts, with warnings for UV1/lightmap bake violations | Add seam planning, unwrap method selection, repack, normalize, and deeper per-channel validation |
 | Material baking | Approximate | `bake_materials` emits constant embedded texture maps from material factors and warns that raster baking is not implemented | Generate real atlas textures from source texture/material inputs |
 | Hole removal | Approximate | `remove_holes` warns when it falls back to mesh boundary classification and filling | Add BREP feature-level removal for closed cylindrical and pocket holes |
-| Occlusion removal | Approximate | `remove_occluded` warns that sampled visibility may require higher precision for thin occluders | Add acceleration structures, measured confidence, and raster/GPU backends for high-poly production scenes |
+| Occlusion removal | Approximate | `remove_occluded` warns that sampled visibility may require higher precision and records candidate counts, sampled face coverage, direction coverage, and confidence metadata | Add acceleration structures and optional raster/GPU backends for high-poly production scenes |
 | Decimation | Partial | `decimate`; quality criterion records measured vertex error but still uses a ratio heuristic | Enforce geometric error bounds and add topology protection metrics, iterative limits, and UV/AO importance modes |
 | LOD generation | Partial | `run_lod_generators` / `lods` report steps | Preserve occurrence-level LOD chains and add far-LOD merge plus validation |
 | Instance reconstruction | Partial | `optimize_scene` reconstructs exact matching mesh fingerprints when vertex attributes, material assignments, and metadata match; metadata records reconstructed part/occurrence counts and vertex/triangle savings | Add tolerance-based similarity detection and richer file-size savings estimates |
