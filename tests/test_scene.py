@@ -51,18 +51,40 @@ def _asset() -> Asset:
 
 
 def test_optimize_scene_batches_by_material_and_annotates_index_buffers() -> None:
+    source_breakdown = _asset().draw_call_breakdown()
+
     optimized = _asset().optimize_scene(
         SceneOptimizeOptions(batch_by_material=True, merge_compatible_meshes=True, index_buffer="auto")
     )
+    step = optimized.report.steps[-1]
 
+    assert source_breakdown == {
+        "draw_calls": 3,
+        "draw_call_meshes": 2,
+        "draw_call_materials": 2,
+        "draw_call_submesh_slots": 2,
+        "draw_call_material_slots": 2,
+        "draw_call_mesh_instances": 3,
+        "draw_call_reused_instances": 1,
+        "draw_call_instanced_meshes": 1,
+        "draw_call_merged_batches": 0,
+    }
     assert optimized.draw_call_count == 2
     assert optimized.part_count == 2
     assert all(
         part.mesh is not None and part.mesh.metadata["index_buffer"] == "uint16" for part in optimized.parts.values()
     )
-    assert optimized.report.steps[-1].name == "optimize_scene"
-    assert optimized.report.steps[-1].before["draw_calls"] == 3
-    assert optimized.report.steps[-1].after["draw_calls"] == 2
+    assert step.name == "optimize_scene"
+    assert step.before["draw_calls"] == 3
+    assert step.before["draw_call_mesh_instances"] == 3
+    assert step.before["draw_call_reused_instances"] == 1
+    assert step.after["draw_calls"] == 2
+    assert step.after["draw_call_meshes"] == 2
+    assert step.after["draw_call_materials"] == 2
+    assert step.after["draw_call_submesh_slots"] == 2
+    assert step.after["draw_call_mesh_instances"] == 2
+    assert step.after["draw_call_reused_instances"] == 0
+    assert step.after["draw_call_merged_batches"] == 2
 
 
 def test_optimize_scene_splits_large_merged_meshes() -> None:

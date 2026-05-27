@@ -703,7 +703,7 @@ def _add_profile_budget_report(asset: Asset, profile: ConversionProfile) -> None
     budget = profile.budget
     if budget is None:
         return
-    before = {**_report_stats(asset), "draw_calls": asset.draw_call_count}
+    before = {**_report_stats(asset), **asset.draw_call_breakdown()}
     after = dict(before)
     options = {"profile": profile.name, **budget.to_dict()}
     warnings: list[str] = []

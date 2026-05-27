@@ -173,18 +173,49 @@ class Asset:
 
     @property
     def draw_call_count(self) -> int:
-        total = 0
+        return self.draw_call_breakdown()["draw_calls"]
+
+    def draw_call_breakdown(self) -> dict[str, int]:
+        occurrence_counts: dict[str, int] = {}
         for node in self.root.walk():
             if node.part_id is None:
                 continue
             part = self.parts.get(node.part_id)
             if part is None or part.mesh is None:
                 continue
-            if part.mesh.material_indices is None:
-                total += 1
-            else:
-                total += max(1, len(set(part.mesh.material_indices.astype(int).tolist())))
-        return total
+            occurrence_counts[node.part_id] = occurrence_counts.get(node.part_id, 0) + 1
+
+        draw_calls = 0
+        submesh_slots = 0
+        material_slots = 0
+        used_material_ids: set[str] = set()
+        instanced_meshes = 0
+        merged_batches = 0
+        for part_id, occurrence_count in occurrence_counts.items():
+            part = self.parts[part_id]
+            slots = _part_draw_call_slots(part)
+            draw_calls += slots * occurrence_count
+            submesh_slots += slots
+            material_slots += _part_material_slot_count(part, slots)
+            used_material_ids.update(_part_used_material_ids(part))
+            if occurrence_count > 1:
+                instanced_meshes += 1
+            if _part_is_merged_batch(part):
+                merged_batches += 1
+
+        mesh_instances = sum(occurrence_counts.values())
+        mesh_count = len(occurrence_counts)
+        return {
+            "draw_calls": draw_calls,
+            "draw_call_meshes": mesh_count,
+            "draw_call_materials": len(used_material_ids),
+            "draw_call_submesh_slots": submesh_slots,
+            "draw_call_material_slots": material_slots,
+            "draw_call_mesh_instances": mesh_instances,
+            "draw_call_reused_instances": max(0, mesh_instances - mesh_count),
+            "draw_call_instanced_meshes": instanced_meshes,
+            "draw_call_merged_batches": merged_batches,
+        }
 
     def copy(self, *, keep_source: bool = True) -> Asset:
         return Asset(
@@ -886,8 +917,40 @@ def _format_metadata_float(value: object) -> str:
     return f"{numeric:.9g}"
 
 
+def _part_draw_call_slots(part: Part) -> int:
+    mesh = part.mesh
+    if mesh is None:
+        return 0
+    if mesh.material_indices is None or mesh.material_indices.size == 0:
+        return 1
+    return max(1, len(set(mesh.material_indices.astype(int).tolist())))
+
+
+def _part_material_slot_count(part: Part, draw_call_slots: int) -> int:
+    if part.mesh is None:
+        return 0
+    return max(draw_call_slots, len(part.material_ids), 1)
+
+
+def _part_used_material_ids(part: Part) -> set[str]:
+    if part.mesh is None:
+        return set()
+    if part.mesh.material_indices is None or part.mesh.material_indices.size == 0:
+        return set(part.material_ids)
+    used: set[str] = set()
+    for index in set(part.mesh.material_indices.astype(int).tolist()):
+        if 0 <= index < len(part.material_ids):
+            used.add(part.material_ids[index])
+    return used
+
+
+def _part_is_merged_batch(part: Part) -> bool:
+    mesh_metadata = {} if part.mesh is None else part.mesh.metadata
+    return _metadata_int(mesh_metadata.get("merged_occurrences"), 0) > 0
+
+
 def _hierarchy_report_stats(asset: Asset) -> dict[str, int]:
-    return {**asset.stats(include_lods=True), "draw_calls": asset.draw_call_count}
+    return {**asset.stats(include_lods=True), **asset.draw_call_breakdown()}
 
 
 def _repair_report_stats(asset: Asset) -> dict[str, int]:

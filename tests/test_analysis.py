@@ -96,6 +96,14 @@ def test_asset_analyze_reports_geometry_quality_and_visual_risks(tmp_path: Path)
     assert payload["summary"]["tiny_part_triangles"] == 1
     assert payload["summary"]["material_count"] == 2
     assert payload["summary"]["draw_call_estimate"] == 3
+    assert payload["summary"]["draw_calls"] == 3
+    assert payload["summary"]["draw_call_meshes"] == 2
+    assert payload["summary"]["draw_call_materials"] == 2
+    assert payload["summary"]["draw_call_submesh_slots"] == 3
+    assert payload["summary"]["draw_call_material_slots"] == 3
+    assert payload["summary"]["draw_call_mesh_instances"] == 2
+    assert payload["summary"]["draw_call_reused_instances"] == 0
+    assert payload["summary"]["draw_call_merged_batches"] == 0
     assert payload["summary"]["visual_risk_warnings"] > 0
     assert any("non-manifold edges" in warning for warning in payload["warnings"])
     assert payload["parts"][0]["part_id"] == "main"

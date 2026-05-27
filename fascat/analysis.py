@@ -77,7 +77,9 @@ def analyze_asset(
         "material_count": asset.material_count,
     }
     if opts.draw_call_estimate or opts.visual_risk:
-        summary["draw_call_estimate"] = asset.draw_call_count
+        draw_call_breakdown = asset.draw_call_breakdown()
+        summary["draw_call_estimate"] = draw_call_breakdown["draw_calls"]
+        summary.update(draw_call_breakdown)
 
     parts: list[dict[str, object]] = []
     totals = _QualityTotals()
@@ -1023,6 +1025,19 @@ def _validation_only_report(
     }
     if options.draw_call_estimate or options.visual_risk:
         summary["draw_call_estimate"] = None
+        summary.update(
+            {
+                "draw_calls": None,
+                "draw_call_meshes": None,
+                "draw_call_materials": None,
+                "draw_call_submesh_slots": None,
+                "draw_call_material_slots": None,
+                "draw_call_mesh_instances": None,
+                "draw_call_reused_instances": None,
+                "draw_call_instanced_meshes": None,
+                "draw_call_merged_batches": None,
+            }
+        )
     return AnalysisReport(
         source_path=str(source_path or path),
         options=options.to_dict(),

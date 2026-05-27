@@ -848,6 +848,11 @@ def test_convert_report_checks_profile_budget(monkeypatch, tmp_path: Path) -> No
     assert budget_step.before["triangles"] == 1
     assert budget_step.before["vertices"] == 3
     assert budget_step.before["draw_calls"] == 1
+    assert budget_step.before["draw_call_meshes"] == 1
+    assert budget_step.before["draw_call_materials"] == 1
+    assert budget_step.before["draw_call_submesh_slots"] == 1
+    assert budget_step.before["draw_call_mesh_instances"] == 1
+    assert budget_step.before["draw_call_merged_batches"] == 0
     assert budget_step.after["profile_target_fps"] == 60
     assert budget_step.after["profile_triangles_over_budget"] == 0
     assert budget_step.after["profile_unity_reference_triangle_min"] == 100

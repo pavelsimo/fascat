@@ -182,7 +182,7 @@ asset = asset.merge(
 )
 ```
 
-Merge modes include `all`, `by_material`, `by_node_name`, `by_part_name`, `hierarchy_level`, `parent_children`, `final_level`, and `regions`. Merging bakes node transforms into merged vertex positions, keeps material slots when requested, removes replaced empty nodes, and records before/after `draw_calls` in the merge report step.
+Merge modes include `all`, `by_material`, `by_node_name`, `by_part_name`, `hierarchy_level`, `parent_children`, `final_level`, and `regions`. Merging bakes node transforms into merged vertex positions, keeps material slots when requested, removes replaced empty nodes, and records before/after draw-call breakdown fields in the merge report step: `draw_calls`, `draw_call_meshes`, `draw_call_materials`, `draw_call_submesh_slots`, `draw_call_material_slots`, `draw_call_mesh_instances`, `draw_call_reused_instances`, `draw_call_instanced_meshes`, and `draw_call_merged_batches`.
 
 Use `explode()` when runtime tools need separate meshes by material or connected component, and `replace()` when a selected part should become a proxy.
 
@@ -549,7 +549,7 @@ Staging, UV, and material parameters:
 
 ## Scene Optimization
 
-Use scene optimization to reduce draw calls after staging and optional hierarchy merging. It batches compatible meshes, can batch by material, reconstructs exact repeated mesh instances when vertex attributes, materials, and metadata match, reports duplicate mesh payload savings, splits large merged meshes, simplifies empty hierarchy, and annotates the intended index-buffer width.
+Use scene optimization to reduce draw calls after staging and optional hierarchy merging. It batches compatible meshes, can batch by material, reconstructs exact repeated mesh instances when vertex attributes, materials, and metadata match, reports duplicate mesh payload savings, splits large merged meshes, simplifies empty hierarchy, annotates the intended index-buffer width, and records how mesh count, material count, submesh/material slots, instances, and merged batches contributed to the draw-call estimate.
 
 ```python
 asset = asset.optimize_scene(
@@ -871,7 +871,7 @@ Available profiles:
 | `realtime-mobile` | tighter mobile runtime budget for app-store builds | 60 | 150,000 | 65,535 | 2,048px | 128 MB | 2,500 ms | 250 | 100K-500K triangles, under 1,000 draw calls |
 | `virtual-reality` | balanced triangle budgets and LODs for VR runtimes | 90 | 500,000 | 65,535 | 2,048px | 256 MB | 1,500 ms | 250 | 500K-2M triangles, under 1,000 draw calls |
 
-You can pass either a profile name or a `ConversionProfile` returned by `fc.profiles`. Conversion reports include a `profile_budget` step when the selected profile has a budget. That step records target FPS, triangle, vertex, per-mesh vertex, texture-resolution, texture-memory, estimated load-time, draw-call budgets, and Unity reference triangle/draw-call ranges when the profile has them. Fascat's defaults are intentionally stricter than Unity's broad reference ranges for repeatable export checks. Load time is a deterministic estimate based on output file size, geometry bytes, baked texture bytes, and draw-call overhead; it is not a measured engine runtime.
+You can pass either a profile name or a `ConversionProfile` returned by `fc.profiles`. Conversion reports include a `profile_budget` step when the selected profile has a budget. That step records target FPS, triangle, vertex, per-mesh vertex, texture-resolution, texture-memory, estimated load-time, draw-call budgets, draw-call breakdown fields, and Unity reference triangle/draw-call ranges when the profile has them. Fascat's defaults are intentionally stricter than Unity's broad reference ranges for repeatable export checks. Load time is a deterministic estimate based on output file size, geometry bytes, baked texture bytes, and draw-call overhead; it is not a measured engine runtime.
 
 ## Functional wrappers
 
@@ -930,8 +930,8 @@ report.write_json("quality-report.json")
 
 The analysis report includes per-part topology counts, actual triangle
 self-intersection counts, degenerate and sliver triangle stats, tiny-part stats,
-material count, draw-call estimate, and visual-risk warnings derived from mesh
-quality and before/after pipeline report steps. Self-intersection checks ignore
+material count, draw-call estimate, draw-call breakdown fields, and visual-risk
+warnings derived from mesh quality and before/after pipeline report steps. Self-intersection checks ignore
 adjacent triangles that share vertices. Coplanar overlaps count as intersections,
 while point-only endpoint contact does not. If `max_self_intersection_pairs` is
 reached, `self_intersections_lower_bound` is `true` and the report includes
@@ -948,7 +948,7 @@ Analysis parameters:
 | `self_intersections` | Run bounded triangle-triangle intersection checks and report detected self-intersections. |
 | `sliver_triangles` | Report degenerate and high-aspect-ratio triangles. |
 | `tiny_parts` | Report parts below the configured diagonal threshold. |
-| `draw_call_estimate` | Include material count and estimated draw calls. |
+| `draw_call_estimate` | Include estimated draw calls, mesh count, referenced material count, submesh/material slots, instances, and merged batch counts. |
 | `visual_risk` | Enable risk-oriented warnings from geometry quality and report steps. |
 | `sliver_aspect_ratio` | Aspect-ratio threshold used to classify sliver triangles. |
 | `degenerate_area_epsilon` | Triangle area threshold used to classify degenerates. |
