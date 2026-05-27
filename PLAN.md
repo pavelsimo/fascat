@@ -207,9 +207,11 @@ These need more design and should not be mixed into documentation or diagnostics
    - UV1 or `lightmap` channels warn on bake-domain violations, while UV0 overlaps remain metadata-only for tileable texture workflows.
    - Remaining polish: add seam segmentation, unwrap method selection, island merging, packing, normalization, and deeper per-channel validation.
 
-10. Instance reconstruction
-   - Detect similar separately modeled parts and rebuild shared mesh instances where safe.
-   - Report memory/file-size savings and any metadata or material differences that prevent instancing.
+10. Instance reconstruction - exact mesh pass complete
+   - `optimize_scene(instance_policy="auto"|"preserve")` now reconstructs shared instances for separately modeled parts with matching mesh fingerprints, vertex attributes, material assignments, and metadata.
+   - Scene metadata records reconstructed part/occurrence counts plus duplicate vertex/triangle payload savings.
+   - Vertex attribute, material, or metadata differences now emit warnings when they prevent full reconstruction.
+   - Remaining polish: add tolerance-based similarity detection, transform-aware matching, and richer file-size savings estimates.
 
 ## Correct Deferrals
 

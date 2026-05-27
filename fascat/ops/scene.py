@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 import numpy as np
 
 from fascat.asset import Asset, Node, Part, identity_transform
@@ -46,6 +49,9 @@ def optimize_scene_asset(
 
 
 def _apply_instance_policy(asset: Asset, options: SceneOptimizeOptions, selected_node_ids: set[str]) -> None:
+    if options.instance_policy in {"auto", "preserve"}:
+        _reconstruct_instances(asset, selected_node_ids)
+        return
     if options.instance_policy != "expand":
         return
     occurrence_counts = _part_occurrence_counts(asset)
@@ -68,6 +74,129 @@ def _apply_instance_policy(asset: Asset, options: SceneOptimizeOptions, selected
         asset.parts[part.id] = part
         existing_part_ids.add(part.id)
         node.part_id = part.id
+
+
+def _reconstruct_instances(asset: Asset, selected_node_ids: set[str]) -> None:
+    selected_part_ids = _selected_part_ids(asset, selected_node_ids)
+    part_ids_by_fingerprint: dict[str, list[str]] = {}
+    for part_id in sorted(selected_part_ids):
+        part = asset.parts.get(part_id)
+        if part is None or part.mesh is None:
+            continue
+        fingerprint = part.fingerprint or part.mesh.fingerprint()
+        part.fingerprint = fingerprint
+        part_ids_by_fingerprint.setdefault(fingerprint, []).append(part_id)
+
+    replacements: dict[str, str] = {}
+    material_blocked_groups = 0
+    attribute_blocked_groups = 0
+    metadata_blocked_groups = 0
+    for part_ids in part_ids_by_fingerprint.values():
+        if len(part_ids) <= 1:
+            continue
+        material_keys = {_part_material_key(asset.parts[part_id]) for part_id in part_ids}
+        attribute_keys = {_part_mesh_attribute_key(asset.parts[part_id].mesh) for part_id in part_ids}
+        metadata_keys = {_part_metadata_key(asset.parts[part_id]) for part_id in part_ids}
+        if len(material_keys) > 1:
+            material_blocked_groups += 1
+        if len(attribute_keys) > 1:
+            attribute_blocked_groups += 1
+        if len(metadata_keys) > 1:
+            metadata_blocked_groups += 1
+
+        canonical_by_key: dict[tuple[object, ...], str] = {}
+        for part_id in part_ids:
+            part = asset.parts[part_id]
+            material_key = _part_material_key(part)
+            attribute_key = _part_mesh_attribute_key(part.mesh)
+            metadata_key = _part_metadata_key(part)
+            key = (material_key, attribute_key, metadata_key)
+            canonical_id = canonical_by_key.get(key)
+            if canonical_id is None:
+                canonical_by_key[key] = part_id
+                continue
+            replacements[part_id] = canonical_id
+
+    vertex_savings = 0
+    triangle_savings = 0
+    for part_id in replacements:
+        mesh = asset.parts[part_id].mesh
+        if mesh is None:
+            continue
+        vertex_savings += mesh.vertex_count
+        triangle_savings += mesh.triangle_count
+
+    remapped_occurrences = 0
+    for node in asset.root.walk():
+        if node.part_id in replacements:
+            node.part_id = replacements[node.part_id]
+            remapped_occurrences += 1
+    if replacements:
+        asset.parts = {part_id: part for part_id, part in asset.parts.items() if part_id not in replacements}
+
+    asset.metadata["scene_reconstructed_part_count"] = str(len(replacements))
+    asset.metadata["scene_reconstructed_occurrence_count"] = str(remapped_occurrences)
+    asset.metadata["scene_reconstructed_vertex_savings"] = str(vertex_savings)
+    asset.metadata["scene_reconstructed_triangle_savings"] = str(triangle_savings)
+    if material_blocked_groups:
+        asset.report.add_warning(
+            "instance reconstruction found "
+            f"{material_blocked_groups} matching mesh group(s) with material differences that prevented full instancing"
+        )
+    if attribute_blocked_groups:
+        asset.report.add_warning(
+            "instance reconstruction found "
+            f"{attribute_blocked_groups} matching mesh group(s) with vertex attribute differences that prevented full "
+            "instancing"
+        )
+    if metadata_blocked_groups:
+        asset.report.add_warning(
+            "instance reconstruction found "
+            f"{metadata_blocked_groups} matching mesh group(s) with metadata differences that prevented full instancing"
+        )
+
+
+def _part_material_key(part: Part) -> tuple[tuple[str, ...], tuple[int, ...] | None]:
+    material_indices = None
+    if part.mesh is not None and part.mesh.material_indices is not None:
+        material_indices = tuple(int(value) for value in part.mesh.material_indices.tolist())
+    return (tuple(part.material_ids), material_indices)
+
+
+def _part_metadata_key(part: Part) -> tuple[str, str]:
+    mesh_metadata = {} if part.mesh is None else part.mesh.metadata
+    return (_metadata_key(part.metadata), _metadata_key(mesh_metadata))
+
+
+def _part_mesh_attribute_key(
+    mesh: Mesh | None,
+) -> tuple[str | None, str | None, tuple[tuple[int, str], ...], tuple[tuple[str, str], ...]]:
+    if mesh is None:
+        return (None, None, (), ())
+    uv_keys = tuple((channel, _array_digest_required(values)) for channel, values in sorted(mesh.uvs.items()))
+    face_group_keys = tuple((name, _array_digest_required(values)) for name, values in sorted(mesh.face_groups.items()))
+    return (_array_digest(mesh.normals), _array_digest(mesh.tangents), uv_keys, face_group_keys)
+
+
+def _array_digest_required(values: np.ndarray) -> str:
+    digest = _array_digest(values)
+    assert digest is not None
+    return digest
+
+
+def _array_digest(values: np.ndarray | None) -> str | None:
+    if values is None:
+        return None
+    array = np.ascontiguousarray(values)
+    digest = hashlib.sha1()
+    digest.update(str(array.dtype).encode("utf-8"))
+    digest.update(str(array.shape).encode("utf-8"))
+    digest.update(array.tobytes())
+    return digest.hexdigest()
+
+
+def _metadata_key(metadata: dict[str, object]) -> str:
+    return json.dumps(metadata, sort_keys=True, default=str)
 
 
 def _flatten_safe(node: Node) -> None:

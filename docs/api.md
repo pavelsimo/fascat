@@ -499,7 +499,7 @@ Staging, UV, and material parameters:
 
 ## Scene Optimization
 
-Use scene optimization to reduce draw calls after staging and optional hierarchy merging. It batches compatible meshes, can batch by material, splits large merged meshes, simplifies empty hierarchy, and annotates the intended index-buffer width.
+Use scene optimization to reduce draw calls after staging and optional hierarchy merging. It batches compatible meshes, can batch by material, reconstructs exact repeated mesh instances when vertex attributes, materials, and metadata match, reports duplicate mesh payload savings, splits large merged meshes, simplifies empty hierarchy, and annotates the intended index-buffer width.
 
 ```python
 asset = asset.optimize_scene(
@@ -527,7 +527,7 @@ Scene optimization parameters:
 | `index_buffer` | `auto` chooses 16-bit or 32-bit indices. `uint16` and `uint32` force a width. |
 | `flatten` | `none` preserves hierarchy, `safe` removes only safe empty structure, and `all` aggressively flattens. |
 | `remove_empty_nodes` | Remove hierarchy nodes with no part and no children. |
-| `instance_policy` | `auto` preserves useful instances, `preserve` keeps all repeated part instances, and `expand` duplicates instances. |
+| `instance_policy` | `auto` and `preserve` reconstruct exact repeated mesh instances when vertex attributes, material assignments, and metadata match. `expand` duplicates instances per occurrence. |
 
 ## Optimization Actions
 

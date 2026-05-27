@@ -99,7 +99,7 @@ Dry-run JSON for `convert` includes `operation_diagnostics`, a list of planned o
 | `--split-large-meshes` | `false` | Split scene-optimized meshes above the vertex limit |
 | `--index-buffer` | `auto` | Index buffer mode: `auto`, `uint16`, or `uint32` |
 | `--flatten` | `safe` | Hierarchy flattening mode: `none`, `safe`, or `all` |
-| `--instance-policy` | `auto` | Instance policy: `auto`, `preserve`, or `expand` |
+| `--instance-policy` | `auto` | Instance policy: `auto` and `preserve` reconstruct exact matching mesh instances; `expand` duplicates per occurrence |
 | `--bake-materials` | `false` | Create a shared baked material with constant embedded texture maps |
 | `--maps-resolution` | `2048` | Requested bake texture resolution in pixels, recorded for downstream atlas generation |
 | `--force-uv-generation` | `false` | Generate UVs before material bake metadata and textures are recorded |
@@ -262,6 +262,7 @@ warnings to distinguish exact work from fallbacks.
 | Occlusion removal | Approximate | `remove_occluded` warns that sampled visibility may require higher precision for thin occluders | Add acceleration structures, measured confidence, and raster/GPU backends for high-poly production scenes |
 | Decimation | Partial | `decimate`; quality criterion records measured vertex error but still uses a ratio heuristic | Enforce geometric error bounds and add topology protection metrics, iterative limits, and UV/AO importance modes |
 | LOD generation | Partial | `run_lod_generators` / `lods` report steps | Preserve occurrence-level LOD chains and add far-LOD merge plus validation |
+| Instance reconstruction | Partial | `optimize_scene` reconstructs exact matching mesh fingerprints when vertex attributes, material assignments, and metadata match; metadata records reconstructed part/occurrence counts and vertex/triangle savings | Add tolerance-based similarity detection and richer file-size savings estimates |
 | Runtime compression | Partial | glTF quantization and meshopt are implemented; Draco and texture compression are rejected until real encoders are integrated | Add real KTX2/Basis output and a Draco path only if reliable encoders are integrated |
 | Export and budgets | Implemented for USD, USDZ, glTF/GLB, OBJ, STL | `write` report includes file size and optional budget warnings | Add geometry/texture/metadata size breakdowns and export cleanup for unused resources |
 | PMI metadata export | Partial | glTF `extras.fascat` and USD `customData` include PMI records and resolve links through `source_part_ids` after merge/replace | Add visual annotation geometry for `metadata_and_visuals` |
