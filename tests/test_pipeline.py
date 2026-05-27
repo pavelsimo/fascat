@@ -120,6 +120,37 @@ def test_asset_operations_return_new_assets_without_mutating_originals() -> None
     assert repaired.parts["part"].mesh.triangle_count == 1
 
 
+def test_repair_report_includes_unit_aware_tolerance_policy() -> None:
+    asset = _triangle_asset()
+    asset.units = "metre"
+    asset.meters_per_unit = 1.0
+    asset.metadata = {"source_units": "millimetre", "source_meters_per_unit": 0.001}
+
+    repaired = asset.repair(RepairOptions(tolerance=2.0, area_epsilon=3.0))
+
+    step = repaired.report.steps[-1]
+    policy = step.options["tolerance_policy"]
+    mesh = repaired.parts["part"].mesh
+    assert isinstance(policy, dict)
+    assert mesh is not None
+    assert policy["coordinate_space"] == "source_local"
+    assert policy["effective_units"] == "millimetre"
+    assert policy["target_units"] == "metre"
+    assert policy["vertex_merge_tolerance_meters"] == pytest.approx(0.002)
+    assert policy["degenerate_area_epsilon_square_meters"] == pytest.approx(0.000003)
+    assert policy["operations"] == {
+        "vertex_merge": "enabled",
+        "degenerate_polygon_cleanup": "enabled",
+        "t_junction_sewing": "not_implemented",
+        "non_manifold_edge_cracking": "not_implemented",
+    }
+    assert mesh.metadata["repair_effective_units"] == "millimetre"
+    assert mesh.metadata["repair_target_units"] == "metre"
+    assert mesh.metadata["repair_vertex_merge_tolerance_meters"] == "0.002"
+    assert mesh.metadata["repair_degenerate_area_epsilon_square_meters"] == "3e-06"
+    assert mesh.metadata["repair_t_junction_sewing"] == "not_implemented"
+
+
 def test_asset_operation_reports_include_options_and_before_after_counts() -> None:
     required_counts = {"nodes", "parts", "occurrences", "materials", "vertices", "triangles"}
     required_options = {

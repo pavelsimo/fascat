@@ -333,7 +333,7 @@ asset = fc.read_step("motor.step").heal_brep(
 )
 ```
 
-The operation stores per-part `brep_*` metadata and records a `heal_brep` report step. Metadata includes BREP kind, solid/shell/wire/edge/face counts, open shells, free or unstitched edges, small edges at or below the healing tolerance, and sliver-face counts. `fc.convert(..., heal_brep=fc.BrepHealOptions())` runs healing before tessellation. Sliver-face removal is requested through the BREP backend, but the current backend reports a warning when that removal path is unavailable instead of silently claiming that the source shape changed. Remaining open shells, free edges, and small edges are also surfaced as report warnings.
+The operation stores per-part `brep_*` metadata and records a `heal_brep` report step. Metadata includes BREP kind, solid/shell/wire/edge/face counts, open shells, free or unstitched edges, small edges at or below the healing tolerance, and sliver-face counts. The report step also includes `tolerance_policy`, which records the effective source/local units used by the BREP backend, declared target units, meters-per-unit conversions, tolerance values in meters, sliver area in square meters, and whether sewing, edge fixing, tolerance unification, sliver removal, T-junction sewing, and non-manifold cracking are enabled, disabled, requested, or not implemented. `fc.convert(..., heal_brep=fc.BrepHealOptions())` runs healing before tessellation. Sliver-face removal is requested through the BREP backend, but the current backend reports a warning when that removal path is unavailable instead of silently claiming that the source shape changed. Remaining open shells, free edges, and small edges are also surfaced as report warnings.
 
 Brep healing parameters:
 
@@ -411,7 +411,7 @@ Repair parameters:
 | `fill_small_holes` | Fill small mesh boundary loops as a fallback mesh repair step. |
 | `area_epsilon` | Area threshold used to classify degenerate triangles. |
 
-Repair metadata records before/after counts for `repair_duplicate_polygons`, `repair_degenerate_triangles`, `repair_boundary_edges`, and `repair_non_manifold_edges`. Duplicate polygons are triangles that reference the same three vertices, regardless of winding.
+Repair metadata records before/after counts for `repair_duplicate_polygons`, `repair_degenerate_triangles`, `repair_boundary_edges`, and `repair_non_manifold_edges`. Duplicate polygons are triangles that reference the same three vertices, regardless of winding. The `repair` report step also records `tolerance_policy`, including effective source/local units, declared target units, meter conversions, vertex merge tolerance in meters, degenerate area epsilon in square meters, and the status of vertex merge, degenerate-polygon cleanup, T-junction sewing, and non-manifold edge cracking.
 
 ## Feature-Preserving Simplification
 

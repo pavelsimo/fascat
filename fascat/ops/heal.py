@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -35,7 +36,13 @@ class BrepStatus:
         }
 
 
-def heal_brep_asset(asset: Asset, options: BrepHealOptions, *, selected_part_ids: set[str] | None = None) -> Asset:
+def heal_brep_asset(
+    asset: Asset,
+    options: BrepHealOptions,
+    *,
+    selected_part_ids: set[str] | None = None,
+    tolerance_policy: Mapping[str, object] | None = None,
+) -> Asset:
     result = asset.copy(keep_source=True)
     if options.remove_sliver_faces:
         result.report.add_warning(
@@ -71,6 +78,7 @@ def heal_brep_asset(asset: Asset, options: BrepHealOptions, *, selected_part_ids
             "brep_heal_operations": _operation_summary(options),
             "brep_before": str(before.to_dict()),
             "brep_after": str(after.to_dict()),
+            **_tolerance_policy_metadata("brep_heal", tolerance_policy),
         }
     return result
 
@@ -256,3 +264,40 @@ def _operation_summary(options: BrepHealOptions) -> str:
     if options.remove_sliver_faces:
         operations.append("remove_sliver_faces")
     return ",".join(operations)
+
+
+def _tolerance_policy_metadata(prefix: str, policy: Mapping[str, object] | None) -> dict[str, object]:
+    if policy is None:
+        return {}
+    metadata: dict[str, object] = {
+        f"{prefix}_coordinate_space": str(policy["coordinate_space"]),
+        f"{prefix}_effective_units": str(policy["effective_units"]),
+        f"{prefix}_effective_meters_per_unit": _format_metadata_float(policy["effective_meters_per_unit"]),
+        f"{prefix}_source_units": str(policy["source_units"]),
+        f"{prefix}_source_meters_per_unit": _format_metadata_float(policy["source_meters_per_unit"]),
+        f"{prefix}_target_units": str(policy["target_units"]),
+        f"{prefix}_target_meters_per_unit": _format_metadata_float(policy["target_meters_per_unit"]),
+    }
+    for key, value in policy.items():
+        if key.endswith("_meters") or key.endswith("_square_meters"):
+            metadata[f"{prefix}_{key}"] = _format_metadata_float(value)
+    operations = policy.get("operations")
+    if isinstance(operations, Mapping):
+        for key, value in operations.items():
+            metadata[f"{prefix}_{key}"] = str(value)
+    return metadata
+
+
+def _format_metadata_float(value: object) -> str:
+    if isinstance(value, bool):
+        numeric = 0.0
+    elif isinstance(value, int | float):
+        numeric = float(value)
+    elif isinstance(value, str):
+        try:
+            numeric = float(value)
+        except ValueError:
+            numeric = 0.0
+    else:
+        numeric = 0.0
+    return f"{numeric:.9g}"

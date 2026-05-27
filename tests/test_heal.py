@@ -61,6 +61,40 @@ def test_heal_brep_scopes_to_selected_parts_and_records_status(monkeypatch) -> N
     assert healed.report.steps[-1].options["matched"]["parts"] == 1
 
 
+def test_heal_brep_report_includes_unit_aware_tolerance_policy(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import fascat.ops.heal as heal
+
+    def fake_heal_shape(shape: object, _options: BrepHealOptions) -> tuple[object, BrepStatus, BrepStatus, list[str]]:
+        return (
+            shape,
+            BrepStatus(kind="surface", faces=1),
+            BrepStatus(kind="surface", faces=1),
+            [],
+        )
+
+    monkeypatch.setattr(heal, "heal_shape", fake_heal_shape)
+    asset = _asset_with_brep()
+    asset.units = "metre"
+    asset.meters_per_unit = 1.0
+    asset.metadata = {"source_units": "millimetre", "source_meters_per_unit": 0.001}
+
+    healed = asset.heal_brep(BrepHealOptions(tolerance=2.0, max_sliver_area=3.0))
+
+    step = healed.report.steps[-1]
+    policy = step.options["tolerance_policy"]
+    assert isinstance(policy, dict)
+    assert policy["coordinate_space"] == "source_local"
+    assert policy["effective_units"] == "millimetre"
+    assert policy["target_units"] == "metre"
+    assert policy["heal_tolerance_meters"] == pytest.approx(0.002)
+    assert policy["max_sliver_area_square_meters"] == pytest.approx(0.000003)
+    assert policy["operations"]["t_junction_sewing"] == "not_implemented"
+    assert healed.parts["selected"].metadata["brep_heal_effective_units"] == "millimetre"
+    assert healed.parts["selected"].metadata["brep_heal_target_units"] == "metre"
+    assert healed.parts["selected"].metadata["brep_heal_heal_tolerance_meters"] == "0.002"
+    assert healed.parts["selected"].metadata["brep_heal_max_sliver_area_square_meters"] == "3e-06"
+
+
 def test_brep_status_dict_includes_topology_risk_counts() -> None:
     status = BrepStatus(
         kind="open_surface",

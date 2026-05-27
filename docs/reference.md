@@ -198,6 +198,7 @@ Units and behavior notes:
 
 - Linear tolerances and sizes such as `--sag`, `--min-edge-length`, `--max-edge-length`, `--max-polygon-length`, `--heal-tolerance`, `--max-sliver-area`, `--region-size`, and `--max-hole-diameter` use the source asset's working units unless the option explicitly says otherwise.
 - Import space normalization uses a root transform: source BREP coordinates stay in source units, while the asset declares the target units, up-axis, and handedness and records the transform in the import report.
+- `heal_brep` and `repair` report steps include `tolerance_policy`, which records effective source/local units, declared target units, meter conversions, and whether related cleanup backends such as T-junction sewing or non-manifold cracking are implemented.
 - Angles such as `--angle`, `--normal-tolerance`, and `--hard-edge-angle` are degrees.
 - Ratios such as `--ratio`, `--lods`, and decimation target ratios are fractions between `0` and `1`; LOD ratios must be sorted from highest to lowest detail.
 - Explicit decimation requests that keep less than 20% of source triangles emit an LOD0 distortion warning. Use those aggressive ratios primarily for distant LODs unless visual validation says otherwise.

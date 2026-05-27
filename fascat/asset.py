@@ -262,6 +262,20 @@ class Asset:
         scope = self._operation_scope(where)
         before = self.stats()
         warning_count = len(self.report.warnings)
+        tolerance_policy = _tolerance_policy(
+            scope.asset,
+            length_tolerance=opts.tolerance,
+            area_tolerance=opts.area_epsilon,
+            length_key="vertex_merge_tolerance",
+            area_key="degenerate_area_epsilon",
+            operations={
+                "vertex_merge": "enabled" if opts.merge_vertices else "disabled",
+                "degenerate_polygon_cleanup": "enabled" if opts.delete_degenerate else "disabled",
+                "t_junction_sewing": "not_implemented",
+                "non_manifold_edge_cracking": "not_implemented",
+            },
+        )
+        repair_unit_metadata = _tolerance_policy_metadata("repair", tolerance_policy)
         with timed_step() as timer:
             asset = scope.asset.copy(keep_source=True)
             for part in asset.parts.values():
@@ -269,11 +283,12 @@ class Asset:
                     continue
                 if part.mesh is not None:
                     part.mesh = part.mesh.repair(opts)
+                    part.mesh.metadata = {**part.mesh.metadata, **repair_unit_metadata}
                     part.fingerprint = part.mesh.fingerprint()
         step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
             "repair",
-            options=_options_with_scope(opts.to_dict(), scope),
+            options=_options_with_scope({**opts.to_dict(), "tolerance_policy": tolerance_policy}, scope),
             before=before,
             after=asset.stats(),
             duration=timer.duration,
@@ -553,12 +568,32 @@ class Asset:
         scope = self._operation_scope(where)
         before = self.stats()
         warning_count = len(self.report.warnings)
+        tolerance_policy = _tolerance_policy(
+            scope.asset,
+            length_tolerance=opts.tolerance,
+            area_tolerance=opts.max_sliver_area,
+            length_key="heal_tolerance",
+            area_key="max_sliver_area",
+            operations={
+                "sew_faces": "enabled" if opts.sew_faces else "disabled",
+                "fix_edges": "enabled" if opts.fix_edges else "disabled",
+                "unify_tolerances": "enabled" if opts.unify_tolerances else "disabled",
+                "sliver_face_removal": "requested" if opts.remove_sliver_faces else "disabled",
+                "t_junction_sewing": "not_implemented",
+                "non_manifold_edge_cracking": "not_implemented",
+            },
+        )
         with timed_step() as timer:
-            asset = heal_brep_asset(scope.asset, opts, selected_part_ids=scope.selected_part_ids)
+            asset = heal_brep_asset(
+                scope.asset,
+                opts,
+                selected_part_ids=scope.selected_part_ids,
+                tolerance_policy=tolerance_policy,
+            )
         step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
             "heal_brep",
-            options=_options_with_scope(opts.to_dict(), scope),
+            options=_options_with_scope({**opts.to_dict(), "tolerance_policy": tolerance_policy}, scope),
             before=before,
             after=asset.stats(),
             duration=timer.duration,
@@ -748,6 +783,83 @@ def _options_with_scope(options: dict[str, object], scope: _OperationScope) -> d
         "where": scope.selection.filter.to_dict(),
         "matched": scope.selection.stats(),
     }
+
+
+def _tolerance_policy(
+    asset: Asset,
+    *,
+    length_tolerance: float,
+    area_tolerance: float,
+    length_key: str,
+    area_key: str,
+    operations: dict[str, str],
+) -> dict[str, object]:
+    source_units = _metadata_str(asset.metadata.get("source_units"), asset.units)
+    source_meters_per_unit = _metadata_float(asset.metadata.get("source_meters_per_unit"), asset.meters_per_unit)
+    coordinate_space = (
+        "source_local"
+        if source_units != asset.units or not np.isclose(source_meters_per_unit, asset.meters_per_unit)
+        else "asset"
+    )
+    return {
+        "coordinate_space": coordinate_space,
+        "effective_units": source_units,
+        "effective_meters_per_unit": source_meters_per_unit,
+        "source_units": source_units,
+        "source_meters_per_unit": source_meters_per_unit,
+        "target_units": asset.units,
+        "target_meters_per_unit": asset.meters_per_unit,
+        length_key: length_tolerance,
+        f"{length_key}_meters": length_tolerance * source_meters_per_unit,
+        area_key: area_tolerance,
+        f"{area_key}_square_meters": area_tolerance * source_meters_per_unit * source_meters_per_unit,
+        "operations": dict(operations),
+    }
+
+
+def _tolerance_policy_metadata(prefix: str, policy: dict[str, object]) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        f"{prefix}_coordinate_space": str(policy["coordinate_space"]),
+        f"{prefix}_effective_units": str(policy["effective_units"]),
+        f"{prefix}_effective_meters_per_unit": _format_metadata_float(policy["effective_meters_per_unit"]),
+        f"{prefix}_source_units": str(policy["source_units"]),
+        f"{prefix}_source_meters_per_unit": _format_metadata_float(policy["source_meters_per_unit"]),
+        f"{prefix}_target_units": str(policy["target_units"]),
+        f"{prefix}_target_meters_per_unit": _format_metadata_float(policy["target_meters_per_unit"]),
+    }
+    for key, value in policy.items():
+        if key.endswith("_meters") or key.endswith("_square_meters"):
+            metadata[f"{prefix}_{key}"] = _format_metadata_float(value)
+    operations = policy.get("operations")
+    if isinstance(operations, dict):
+        for key, value in operations.items():
+            metadata[f"{prefix}_{key}"] = str(value)
+    return metadata
+
+
+def _metadata_str(value: object, default: str) -> str:
+    if value is None:
+        return default
+    text = str(value).strip()
+    return text or default
+
+
+def _metadata_float(value: object, default: float) -> float:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _format_metadata_float(value: object) -> str:
+    numeric = _metadata_float(value, 0.0)
+    return f"{numeric:.9g}"
 
 
 def _hierarchy_report_stats(asset: Asset) -> dict[str, int]:
