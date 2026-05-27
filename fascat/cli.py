@@ -103,6 +103,8 @@ class Profile(str, Enum):
     REALTIME_WEB = "realtime-web"
     REALTIME_MOBILE = "realtime-mobile"
     VIRTUAL_REALITY = "virtual-reality"
+    AUGMENTED_REALITY = "augmented-reality"
+    MIXED_REALITY = "mixed-reality"
 
 
 class AxisMode(str, Enum):

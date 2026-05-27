@@ -52,6 +52,7 @@ fascat convert motor.step motor.usdc --profile realtime-desktop
 
 # Convert STEP to binary glTF for VR/runtime engines
 fascat convert motor.step motor.glb --profile virtual-reality
+fascat convert motor.step motor.glb --profile mixed-reality
 
 # Tune tessellation, UVs, optimization, and LODs
 fascat convert motor.step motor.usdc \

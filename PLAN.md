@@ -87,6 +87,8 @@ that are currently conservative approximations.
 - glTF write reports now include a runtime compatibility matrix for Unity
   glTFast, web, mobile, and XR targets with extension state, support, and
   fallback notes.
+- Augmented-reality and mixed-reality profiles now expose stricter AR/XR device
+  budgets through Python, CLI selection, tests, and docs.
 
 ## Unity Asset Transformer Parity
 
@@ -139,6 +141,12 @@ Second-pass gaps from the Unity references:
 - Add export comparison reports that show unoptimized GLB, optimized GLB,
   geometry-compressed GLB, and geometry-plus-texture-compressed GLB deltas once
   real Draco and KTX2 outputs exist.
+- Connect target-device budgets to actual pipeline choices, not only reports:
+  the selected device should drive decimation targets, LOD ratios, texture
+  resize limits, compression choices, and cleanup defaults.
+- Add a resolved conversion manifest that records the effective import,
+  tessellation, staging, optimization, LOD, and export settings so Unity-style
+  module-property choices are reproducible from a report.
 - Treat orientation as its own post-repair stage, not just a side effect of mesh
   cleanup or normal generation. Unity separates polygon orientation, normal
   orientation, and open-shell/unstitched-face handling; Fascat should report
@@ -211,7 +219,7 @@ Parity gaps to track:
    - Explicit decimation can now strip UV/tangent attributes through `uv_importance="ignore"` or preserve seams and then drop UVs with `uv_importance="preserve_seams"`.
 
 6. Materials and baking
-   - Add material-library import and CAD-material-to-PBR mapping, including CSV or TOML mapping tables.
+   - Add material-library import from glTF/GLB or native material-library assets and CAD-material-to-PBR mapping, including CSV or TOML mapping tables.
    - Add material mapping diagnostics that report replacements, missing library materials, source materials with no mapping, and unresolved texture dependencies.
    - Add material-combine planning that can bake many materials into one atlas when draw-call reduction is more important than material editability.
    - Replace constant embedded factor maps with real atlas/raster texture output for base color, opacity, roughness, metallic, normal, AO, and emissive maps.
@@ -260,7 +268,7 @@ Parity gaps to track:
    - Runtime extension compatibility reports now cover Unity glTFast, web, mobile, and XR targets for `MSFT_lod`, `EXT_meshopt_compression`, `KHR_draco_mesh_compression`, `KHR_texture_basisu`, quantization, and fallback behavior.
    - Add baseline-versus-optimized export comparisons so reports show how much each preparation step changed file size, and warn when draw-call merging increases export size by breaking instancing.
    - Add format-aware texture export policy and reporting: prefer KTX2/Basis for glTF/GLB, use PNG/JPEG fallbacks for texture-capable non-glTF exports, remove unused images before export, and warn when users compare source CAD file size directly against runtime mesh exports.
-   - Add named web, mobile, desktop, and VR export presets that combine geometry compression, texture compression, texture resizing, and cleanup choices.
+   - Add named web, mobile, desktop, VR, AR/XR, and custom-device export presets that combine geometry compression, texture compression, texture resizing, and cleanup choices.
    - Keep GLB as the preferred web/mobile runtime target while preserving USD/USDZ for OpenUSD workflows.
    - Expose Draco quantization bits for positions, normals, UVs, and vertex colors once a real encoder is available.
    - Expose PNG/JPEG fallback texture export settings, including PNG compression and JPEG quality, for formats or environments where KTX2 is not available.
@@ -269,7 +277,9 @@ Parity gaps to track:
    - Desktop, WebGL/web, mobile, and VR profiles now include documented target-FPS, triangle, vertex, per-mesh vertex/index-buffer, texture-resolution, texture-memory, estimated load-time, and draw-call budgets.
    - Conversion reports now include a `profile_budget` step for selected-profile budget status and warnings when output exceeds profile triangle, vertex, per-mesh vertex/index-buffer, texture-resolution, texture-memory, estimated load-time, or draw-call budgets.
    - Profile budgets now include explicit Unity reference ranges for each broad profile so users can see how Fascat's stricter defaults compare with Unity's desktop, mobile, VR, and WebGL guideline ranges.
-   - Add XR/AR device profiles and custom target-device overrides so budgets can model device-specific caps instead of only broad desktop/web/mobile/VR classes.
+   - Augmented-reality and mixed-reality profiles now model stricter AR/XR device caps; remaining work is custom target-device overrides beyond built-in profiles.
+   - Let custom target-device profiles be loaded from TOML/JSON and surfaced in reports with resolved FPS, triangle, vertex, draw-call, texture, load-time, compression-support, and runtime-extension caps.
+   - Use the selected platform budget to seed decimation, LOD, texture-resize, and export-compression defaults instead of only warning after conversion.
    - The platform-budget checklist is complete at diagnostic-report level; future work is measured engine/runtime load profiling.
 
 ## Near-Term Polish
@@ -358,7 +368,7 @@ These are intentionally outside the immediate plan unless a user need changes th
 - Convex decomposition and physics proxy generation.
 - Advanced retopology and subdivision workflows.
 - GPU-specific runtime packaging beyond standards-aligned glTF/USD output.
-- Animation and time-varying CAD data.
+- Animation and time-varying CAD data, including skeletal animation, morph targets, and animated GLB passthrough validation.
 
 ## Operating Checklist
 

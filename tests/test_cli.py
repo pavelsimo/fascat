@@ -275,6 +275,16 @@ def test_convert_dry_run_accepts_gltf_output_and_mobile_profile() -> None:
     assert '"profile": "realtime-mobile"' in result.output
 
 
+@pytest.mark.parametrize("profile", ["augmented-reality", "mixed-reality"])
+def test_convert_dry_run_accepts_xr_device_profiles(profile: str) -> None:
+    result = runner.invoke(
+        app,
+        ["--json", "--dry-run", "convert", "input.step", "output.glb", "--profile", profile],
+    )
+    assert result.exit_code == 0
+    assert f'"profile": "{profile}"' in result.output
+
+
 def test_convert_dry_run_accepts_pipeline_file(tmp_path: Path) -> None:
     pipeline_file = tmp_path / "realtime.toml"
     pipeline_file.write_text(

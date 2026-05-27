@@ -211,6 +211,66 @@ def virtual_reality(
     )
 
 
+def augmented_reality(
+    *,
+    tessellation_sag: float = 0.3,
+    angle: float = 22.5,
+    max_triangles: int = 100_000,
+    lod_ratios: list[float] | tuple[float, ...] = (0.5, 0.25),
+) -> ConversionProfile:
+    return ConversionProfile(
+        name="augmented-reality",
+        tessellation=Tessellation(sag=tessellation_sag, angle=angle),
+        repair=RepairOptions(tolerance=1e-7),
+        stage=StageOptions(uv0="box", uv1=None),
+        optimize=OptimizeOptions(target_triangles=max_triangles, simplify=True, optimize_buffers=True),
+        lods=LODOptions(ratios=tuple(lod_ratios)) if lod_ratios else None,
+        budget=PlatformBudget(
+            target_fps=60,
+            max_triangles=max_triangles,
+            max_vertices=max_triangles * 3,
+            max_vertices_per_mesh=65_535,
+            max_texture_resolution=1_024,
+            max_texture_memory_mb=64,
+            max_load_time_ms=1_500,
+            max_draw_calls=150,
+            unity_reference_profile="ar",
+            unity_reference_triangles=(50_000, 250_000),
+            unity_reference_draw_calls=500,
+        ),
+    )
+
+
+def mixed_reality(
+    *,
+    tessellation_sag: float = 0.35,
+    angle: float = 25.0,
+    max_triangles: int = 75_000,
+    lod_ratios: list[float] | tuple[float, ...] = (0.5, 0.25),
+) -> ConversionProfile:
+    return ConversionProfile(
+        name="mixed-reality",
+        tessellation=Tessellation(sag=tessellation_sag, angle=angle),
+        repair=RepairOptions(tolerance=1e-7),
+        stage=StageOptions(uv0="box", uv1=None),
+        optimize=OptimizeOptions(target_triangles=max_triangles, simplify=True, optimize_buffers=True),
+        lods=LODOptions(ratios=tuple(lod_ratios)) if lod_ratios else None,
+        budget=PlatformBudget(
+            target_fps=60,
+            max_triangles=max_triangles,
+            max_vertices=max_triangles * 3,
+            max_vertices_per_mesh=65_535,
+            max_texture_resolution=1_024,
+            max_texture_memory_mb=64,
+            max_load_time_ms=1_200,
+            max_draw_calls=100,
+            unity_reference_profile="mixed-reality",
+            unity_reference_triangles=(50_000, 200_000),
+            unity_reference_draw_calls=500,
+        ),
+    )
+
+
 def by_name(name: str) -> ConversionProfile:
     if name == "inspect-only":
         return inspect_only()
@@ -222,6 +282,10 @@ def by_name(name: str) -> ConversionProfile:
         return realtime_mobile()
     if name == "virtual-reality":
         return virtual_reality()
+    if name == "augmented-reality":
+        return augmented_reality()
+    if name == "mixed-reality":
+        return mixed_reality()
     raise ValueError(f"unknown profile: {name}")
 
 

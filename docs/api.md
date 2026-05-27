@@ -757,6 +757,7 @@ fc.convert("motor.step", "motor.usdc")
 fc.convert("motor.step", "motor.usda", debug=True)
 fc.convert("motor.step", "motor.glb", profile="virtual-reality")
 fc.convert("motor.step", "motor.glb", profile="realtime-mobile")
+fc.convert("motor.step", "motor.glb", profile="mixed-reality")
 fc.convert("motor.step", "motor.gltf", profile="realtime-web")
 ```
 
@@ -890,6 +891,8 @@ Available profiles:
 | `realtime-web` | lower triangle budgets for web delivery | 60 | 250,000 | 65,535 | 2,048px | 128 MB | 3,000 ms | 500 | 100K-1M triangles, under 200 draw calls |
 | `realtime-mobile` | tighter mobile runtime budget for app-store builds | 60 | 150,000 | 65,535 | 2,048px | 128 MB | 2,500 ms | 250 | 100K-500K triangles, under 1,000 draw calls |
 | `virtual-reality` | balanced triangle budgets and LODs for VR runtimes | 90 | 500,000 | 65,535 | 2,048px | 256 MB | 1,500 ms | 250 | 500K-2M triangles, under 1,000 draw calls |
+| `augmented-reality` | stricter phone and tablet AR runtime budget | 60 | 100,000 | 65,535 | 1,024px | 64 MB | 1,500 ms | 150 | 50K-250K triangles, under 500 draw calls |
+| `mixed-reality` | stricter headset budget for mixed-reality runtimes | 60 | 75,000 | 65,535 | 1,024px | 64 MB | 1,200 ms | 100 | 50K-200K triangles, under 500 draw calls |
 
 You can pass either a profile name or a `ConversionProfile` returned by `fc.profiles`. Conversion reports include a `profile_budget` step when the selected profile has a budget. That step records target FPS, triangle, vertex, per-mesh vertex, texture-resolution, texture-memory, estimated load-time, draw-call budgets, draw-call breakdown fields, and Unity reference triangle/draw-call ranges when the profile has them. Fascat's defaults are intentionally stricter than Unity's broad reference ranges for repeatable export checks. Load time is a deterministic estimate based on output file size, geometry bytes, baked texture bytes, and draw-call overhead; it is not a measured engine runtime.
 
