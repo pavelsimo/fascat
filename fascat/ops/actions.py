@@ -479,7 +479,7 @@ def _prepare_decimation_asset(
     options: DecimateOptions,
     selected_part_ids: set[str] | None,
 ) -> Asset:
-    if options.uv_importance != "ignore":
+    if options.uv_importance != "ignore" and not options.cleanup_attributes:
         return asset
     result = asset.copy(keep_source=True)
     for part in result.parts.values():
@@ -487,7 +487,10 @@ def _prepare_decimation_asset(
             continue
         if part.mesh is None:
             continue
-        part.mesh = _mesh_without_texture_coordinates(part.mesh)
+        plan = _decimation_pre_cleanup_plan(part.mesh, options)
+        if not plan.removes_attributes:
+            continue
+        part.mesh = _apply_decimation_pre_cleanup(part.mesh, plan)
         part.fingerprint = part.mesh.fingerprint()
     return result
 
@@ -617,6 +620,69 @@ def _finalize_decimated_mesh_uvs(mesh: Mesh, options: DecimateOptions) -> Mesh:
     return _mesh_without_texture_coordinates(mesh)
 
 
+def _apply_decimation_pre_cleanup(mesh: Mesh, plan: _DecimationPreCleanupPlan) -> Mesh:
+    if not plan.removes_attributes:
+        return mesh
+    result = mesh.copy()
+    if plan.removed_uv_channels:
+        result.uvs = {
+            channel: values for channel, values in result.uvs.items() if channel not in plan.removed_uv_channels
+        }
+    if plan.removed_tangents:
+        result.tangents = None
+    return result
+
+
+def _decimation_pre_cleanup_plan(mesh: Mesh, options: DecimateOptions) -> _DecimationPreCleanupPlan:
+    requested = tuple(options.cleanup_attributes)
+    source_uv_channels = tuple(sorted(mesh.uvs))
+    removed_uv_channels: set[int] = set()
+    if options.uv_importance == "ignore":
+        removed_uv_channels.update(source_uv_channels)
+    elif "unused_uvs" in requested:
+        removed_uv_channels.update(channel for channel in source_uv_channels if _is_unused_uv_channel(mesh, channel))
+
+    preserved_uv_channels = tuple(channel for channel in source_uv_channels if channel not in removed_uv_channels)
+    removed_tangents = bool(
+        mesh.tangents is not None
+        and (
+            "tangents" in requested
+            or options.uv_importance == "ignore"
+            or (source_uv_channels and len(removed_uv_channels) == len(source_uv_channels))
+        )
+    )
+    uv_constraint_status = "none"
+    if options.uv_importance == "ignore":
+        uv_constraint_status = "ignored"
+    elif preserved_uv_channels:
+        uv_constraint_status = "preserved_for_simplification"
+    elif removed_uv_channels:
+        uv_constraint_status = "cleanup_removed_unused_uvs"
+
+    return _DecimationPreCleanupPlan(
+        requested=requested,
+        removed_uv_channels=tuple(sorted(removed_uv_channels)),
+        preserved_uv_channels=preserved_uv_channels,
+        removed_tangents=removed_tangents,
+        uv_constraint_status=uv_constraint_status,
+        uv_seam_vertices=len(mesh._uv_seam_vertices()) if preserved_uv_channels else 0,
+    )
+
+
+def _is_unused_uv_channel(mesh: Mesh, channel: int) -> bool:
+    uv = mesh.uvs[channel]
+    if uv.shape[0] == 0 or uv.shape[0] < mesh.vertex_count or mesh.triangle_count == 0:
+        return True
+    span = uv.max(axis=0) - uv.min(axis=0)
+    if float(np.max(np.abs(span))) <= 1e-12:
+        return True
+    triangles = uv[mesh.faces]
+    edge_a = triangles[:, 1] - triangles[:, 0]
+    edge_b = triangles[:, 2] - triangles[:, 0]
+    areas = np.abs(0.5 * (edge_a[:, 0] * edge_b[:, 1] - edge_a[:, 1] * edge_b[:, 0]))
+    return not bool(np.any(areas > 1e-12))
+
+
 def _mesh_without_texture_coordinates(mesh: Mesh) -> Mesh:
     if not mesh.uvs and mesh.tangents is None:
         return mesh
@@ -683,12 +749,17 @@ def _annotate_decimation_result(
     simplification_passes = 0
     iterative_passes = 0
     max_part_passes = 0
+    pre_cleanup_removed_uv_channels: set[int] = set()
+    pre_cleanup_removed_tangent_parts = 0
+    uv_constrained_parts = 0
+    uv_seam_constraint_vertices = 0
     for part in asset.parts.values():
         if selected_part_ids is not None and part.id not in selected_part_ids:
             continue
         source = source_meshes.get(part.id)
         if source is None or part.mesh is None:
             continue
+        pre_cleanup = _decimation_pre_cleanup_plan(source, options)
         metrics = _decimation_metrics(source, part.mesh)
         counts = pass_counts.get(part.id, _DecimationPassCount())
         source_total += metrics.source_triangles
@@ -699,11 +770,13 @@ def _annotate_decimation_result(
         simplification_passes += counts.simplification_passes
         iterative_passes += counts.iterative_passes
         max_part_passes = max(max_part_passes, counts.simplification_passes)
-        part.metadata = {
+        metadata = {
             **part.metadata,
             "decimate_criterion": options.criterion,
             "decimate_budget_scope": options.budget_scope,
             "decimate_uv_importance": options.uv_importance,
+            "decimate_pre_cleanup_attributes": ",".join(options.cleanup_attributes) or "none",
+            "decimate_uv_constraint_status": pre_cleanup.uv_constraint_status,
             "decimate_iterative_threshold_triangles": str(options.iterative_threshold),
             "decimate_simplification_passes": str(counts.simplification_passes),
             "decimate_iterative_passes": str(counts.iterative_passes),
@@ -714,6 +787,23 @@ def _annotate_decimation_result(
             "decimate_mean_vertex_error": f"{metrics.mean_vertex_error:.9g}",
             "decimate_error_metric": "symmetric_vertex_nearest_distance",
         }
+        if pre_cleanup.removed_uv_channels:
+            metadata["decimate_pre_cleanup_removed_uv_channels"] = ",".join(
+                str(channel) for channel in pre_cleanup.removed_uv_channels
+            )
+            pre_cleanup_removed_uv_channels.update(pre_cleanup.removed_uv_channels)
+        if pre_cleanup.preserved_uv_channels:
+            metadata["decimate_preserved_uv_channels"] = ",".join(
+                str(channel) for channel in pre_cleanup.preserved_uv_channels
+            )
+        if pre_cleanup.removed_tangents:
+            metadata["decimate_pre_cleanup_removed_tangents"] = "true"
+            pre_cleanup_removed_tangent_parts += 1
+        if pre_cleanup.uv_constraint_status == "preserved_for_simplification":
+            uv_constrained_parts += 1
+            uv_seam_constraint_vertices += pre_cleanup.uv_seam_vertices
+            metadata["decimate_uv_seam_constraint_vertices"] = str(pre_cleanup.uv_seam_vertices)
+        part.metadata = metadata
         removed_uv_channels = sorted(set(source.uvs) - set(part.mesh.uvs))
         if removed_uv_channels:
             part.metadata["decimate_removed_uv_channels"] = ",".join(str(channel) for channel in removed_uv_channels)
@@ -731,6 +821,14 @@ def _annotate_decimation_result(
     asset.metadata["decimate_mean_vertex_error"] = f"{(weighted_error / measured_parts):.9g}"
     asset.metadata["decimate_error_metric"] = "symmetric_vertex_nearest_distance"
     asset.metadata["decimate_uv_importance"] = options.uv_importance
+    asset.metadata["decimate_pre_cleanup_attributes"] = ",".join(options.cleanup_attributes) or "none"
+    asset.metadata["decimate_pre_cleanup_removed_tangent_parts"] = str(pre_cleanup_removed_tangent_parts)
+    asset.metadata["decimate_uv_constrained_parts"] = str(uv_constrained_parts)
+    asset.metadata["decimate_uv_seam_constraint_vertices"] = str(uv_seam_constraint_vertices)
+    if pre_cleanup_removed_uv_channels:
+        asset.metadata["decimate_pre_cleanup_removed_uv_channels"] = ",".join(
+            str(channel) for channel in sorted(pre_cleanup_removed_uv_channels)
+        )
     asset.metadata["decimate_budget_allocation"] = (
         "global_selection" if options.budget_scope == "selection" else "per_part"
     )
@@ -749,6 +847,12 @@ def _annotate_decimation_result(
             f"decimation estimates {memory_plan.estimated_gb:.3g} GB RAM for {source_total} source triangles; "
             f"iterative decimation is recommended at or above {options.iterative_threshold} triangles"
         )
+    if uv_constrained_parts:
+        asset.report.add_warning(
+            f"decimation preserved UV seam/island data on {uv_constrained_parts} part(s); "
+            "preserved texture coordinates can reduce simplification efficiency. "
+            "Use uv_importance='ignore' or cleanup_attributes=('unused_uvs', 'tangents') when UVs are not needed"
+        )
     removed_asset_uv_channels: set[int] = set()
     for part_id, source in source_meshes.items():
         output_part = asset.parts.get(part_id)
@@ -765,6 +869,20 @@ def _annotate_decimation_result(
 class _DecimationPassCount:
     simplification_passes: int = 0
     iterative_passes: int = 0
+
+
+@dataclass(frozen=True)
+class _DecimationPreCleanupPlan:
+    requested: tuple[str, ...] = ()
+    removed_uv_channels: tuple[int, ...] = ()
+    preserved_uv_channels: tuple[int, ...] = ()
+    removed_tangents: bool = False
+    uv_constraint_status: str = "none"
+    uv_seam_vertices: int = 0
+
+    @property
+    def removes_attributes(self) -> bool:
+        return bool(self.removed_uv_channels or self.removed_tangents)
 
 
 @dataclass(frozen=True)

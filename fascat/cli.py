@@ -968,6 +968,13 @@ def cmd_convert(
         UVImportance,
         typer.Option("--uv-importance", help="Decimation UV importance: preserve-islands, preserve-seams, or ignore."),
     ] = UVImportance.PRESERVE_ISLANDS,
+    decimate_cleanup_attributes: Annotated[
+        str,
+        typer.Option(
+            "--decimate-cleanup-attributes",
+            help="Comma-separated pre-decimation cleanup attributes: unused-uvs,tangents.",
+        ),
+    ] = "",
     remove_holes: Annotated[
         bool,
         typer.Option("--remove-holes", help="Remove small hole features with mesh fallback."),
@@ -1241,6 +1248,7 @@ def cmd_convert(
         "protect_topology": protect_topology,
         "budget_scope": budget_scope.value,
         "uv_importance": uv_importance.value,
+        "decimate_cleanup_attributes": decimate_cleanup_attributes,
         "remove_holes": remove_holes,
         "hole_types": hole_types,
         "max_hole_diameter": max_hole_diameter,
@@ -1300,6 +1308,7 @@ def cmd_convert(
     lod_values = _parse_lods(lods, ctx, payload)
     bake_maps = _parse_bake_maps(bake, ctx, payload)
     enabled_hole_types = _parse_hole_types(hole_types, ctx, payload)
+    cleanup_attributes = _parse_decimate_cleanup_attributes(decimate_cleanup_attributes, ctx, payload)
     lod_coverages = _parse_lod_screen_coverage(lod_screen_coverage, ctx, payload)
     normalized_uv_channels = _parse_uv_channels(normalize_uvs, ctx, payload)
     if tangent_uv_channel < 0:
@@ -1307,6 +1316,7 @@ def cmd_convert(
     payload["lods"] = lod_values
     payload["bake"] = list(bake_maps)
     payload["hole_types"] = list(enabled_hole_types)
+    payload["decimate_cleanup_attributes"] = list(cleanup_attributes)
     payload["lod_screen_coverage"] = lod_coverages
     payload["normalize_uvs"] = list(normalized_uv_channels)
     _validate_step_input(input_path, ctx, payload)
@@ -1641,6 +1651,7 @@ def cmd_convert(
                 protect_topology=protect_topology,
                 budget_scope=budget_scope.value,
                 uv_importance=cast(Any, uv_importance.value.replace("-", "_")),
+                cleanup_attributes=cast(Any, cleanup_attributes),
             )
             if decimate
             else None
@@ -2083,6 +2094,15 @@ def _parse_bake_maps(value: str, ctx: typer.Context, payload: dict[str, Any]) ->
     if unknown:
         _fail(ctx, payload, f"Unsupported --bake maps: {', '.join(sorted(unknown))}.", code=2)
     return maps
+
+
+def _parse_decimate_cleanup_attributes(value: str, ctx: typer.Context, payload: dict[str, Any]) -> tuple[str, ...]:
+    attributes = tuple(item.strip().replace("-", "_") for item in value.split(",") if item.strip())
+    allowed = {"unused_uvs", "tangents"}
+    unknown = set(attributes) - allowed
+    if unknown:
+        _fail(ctx, payload, f"Unsupported --decimate-cleanup-attributes values: {', '.join(sorted(unknown))}.", code=2)
+    return tuple(dict.fromkeys(attributes))
 
 
 def _parse_hole_types(value: str, ctx: typer.Context, payload: dict[str, Any]) -> tuple[str, ...]:

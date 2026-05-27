@@ -441,6 +441,7 @@ def test_size_adaptive_tessellation_requires_bands() -> None:
         (lambda: fc.DecimateOptions(target_ratio=1.0), "target_ratio"),
         (lambda: fc.DecimateOptions(normal_tolerance=0.0), "normal_tolerance"),
         (lambda: fc.DecimateOptions(uv_importance="bad"), "uv_importance"),
+        (lambda: fc.DecimateOptions(cleanup_attributes=("bad",)), "cleanup_attributes"),
         (lambda: fc.DecimateOptions(iterative_threshold=0), "iterative_threshold"),
         (lambda: fc.RemoveHolesOptions(through=False, blind=False, surface=False), "hole type"),
         (lambda: fc.RemoveOccludedOptions(precision=0), "precision"),

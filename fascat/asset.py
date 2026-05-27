@@ -1202,6 +1202,9 @@ def _decimation_report_stats(asset: Asset) -> dict[str, int]:
         "decimate_simplification_passes",
         "decimate_iterative_passes",
         "decimate_max_part_simplification_passes",
+        "decimate_pre_cleanup_removed_tangent_parts",
+        "decimate_uv_constrained_parts",
+        "decimate_uv_seam_constraint_vertices",
     ):
         if key in asset.metadata:
             stats[key] = _metadata_int(asset.metadata[key], 0)

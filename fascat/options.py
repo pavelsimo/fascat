@@ -32,6 +32,7 @@ BakeMaterialMap = Literal["base_color", "opacity", "normal", "roughness", "metal
 DecimateCriterion = Literal["target", "quality"]
 BudgetScope = Literal["part", "selection"]
 DecimateUVImportance = Literal["preserve_islands", "preserve_seams", "ignore"]
+DecimateCleanupAttribute = Literal["unused_uvs", "tangents"]
 HoleType = Literal["through", "blind", "surface"]
 OcclusionStrategy = Literal["conservative", "exterior", "advanced"]
 OcclusionLevel = Literal["parts", "submeshes", "triangles"]
@@ -46,6 +47,7 @@ Handedness = Literal["right", "left"]
 
 _BAKE_MAPS = {"base_color", "opacity", "normal", "roughness", "metallic", "ao", "emissive"}
 _HOLE_TYPES = {"through", "blind", "surface"}
+_DECIMATE_CLEANUP_ATTRIBUTES = {"unused_uvs", "tangents"}
 
 _TESSELLATION_PART_SETTING_KEYS = {
     "sag",
@@ -564,9 +566,12 @@ class DecimateOptions:
     preserve_painted_areas: bool = False
     budget_scope: BudgetScope = "selection"
     uv_importance: DecimateUVImportance = "preserve_islands"
+    cleanup_attributes: tuple[DecimateCleanupAttribute, ...] = ()
     iterative_threshold: int = 1_000_000
 
     def __post_init__(self) -> None:
+        cleanup_attributes = tuple(str(item).replace("-", "_") for item in self.cleanup_attributes)
+        object.__setattr__(self, "cleanup_attributes", cleanup_attributes)
         if self.criterion not in {"target", "quality"}:
             raise ValueError("criterion must be one of: target, quality")
         if self.target_triangles is not None and self.target_triangles <= 0:
@@ -588,9 +593,13 @@ class DecimateOptions:
             raise ValueError("budget_scope must be one of: part, selection")
         if self.uv_importance not in {"preserve_islands", "preserve_seams", "ignore"}:
             raise ValueError("uv_importance must be one of: preserve_islands, preserve_seams, ignore")
+        unknown_cleanup = set(cleanup_attributes) - _DECIMATE_CLEANUP_ATTRIBUTES
+        if unknown_cleanup:
+            names = ", ".join(sorted(unknown_cleanup))
+            raise ValueError(f"unsupported cleanup_attributes values: {names}")
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        return {**asdict(self), "cleanup_attributes": list(self.cleanup_attributes)}
 
 
 @dataclass(frozen=True)

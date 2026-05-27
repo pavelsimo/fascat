@@ -451,6 +451,7 @@ def test_asset_operation_reports_include_options_and_before_after_counts() -> No
             "preserve_painted_areas",
             "budget_scope",
             "uv_importance",
+            "cleanup_attributes",
         },
         "remove_holes": {"through", "blind", "surface", "max_diameter", "prefer_brep"},
         "remove_occluded": {
@@ -667,6 +668,32 @@ def test_pipeline_validates_step_options_during_parse() -> None:
         match=r"pipeline step 1 \(decimate\): uv_importance",
     ):
         PipelineSpec.from_dict({"steps": [{"op": "decimate", "uv_importance": "bad"}]})
+    with pytest.raises(
+        ValueError,
+        match=r"pipeline step 1 \(decimate\): unsupported cleanup_attributes",
+    ):
+        PipelineSpec.from_dict({"steps": [{"op": "decimate", "cleanup_attributes": ["paint"]}]})
+
+
+def test_pipeline_decimate_accepts_cleanup_attributes() -> None:
+    spec = PipelineSpec.from_dict(
+        {"steps": [{"op": "decimate", "target_ratio": 0.5, "cleanup_attributes": "unused-uvs,tangents"}]}
+    )
+    asset = _triangle_asset()
+    mesh = asset.parts["part"].mesh
+    assert mesh is not None
+    mesh.uvs[0] = mesh.points[:, :2].copy()
+    mesh.uvs[1] = np.zeros((mesh.vertex_count, 2), dtype=float)
+    mesh.tangents = np.tile(np.asarray([1.0, 0.0, 0.0, 1.0], dtype=float), (mesh.vertex_count, 1))
+
+    decimated = spec.apply(asset)
+    output_mesh = decimated.parts["part"].mesh
+
+    assert output_mesh is not None
+    assert sorted(output_mesh.uvs) == [0]
+    assert output_mesh.tangents is None
+    assert decimated.report.steps[-1].options["cleanup_attributes"] == ["unused_uvs", "tangents"]
+    assert decimated.metadata["decimate_pre_cleanup_attributes"] == "unused_uvs,tangents"
 
 
 def test_pipeline_advises_unity_style_ordering() -> None:

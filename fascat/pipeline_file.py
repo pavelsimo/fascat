@@ -234,6 +234,7 @@ _DECIMATE_KEYS = frozenset(
         "preserve_painted_areas",
         "budget_scope",
         "uv_importance",
+        "cleanup_attributes",
     }
 )
 _REMOVE_HOLES_KEYS = frozenset({"through", "blind", "surface", "max_diameter", "prefer_brep"})
@@ -961,6 +962,10 @@ def _decimate_options(values: dict[str, object]) -> DecimateOptions:
         preserve_painted_areas=bool(values.get("preserve_painted_areas", False)),
         budget_scope=cast(Any, values.get("budget_scope", "selection")),
         uv_importance=cast(Any, _literal(values.get("uv_importance", "preserve_islands"))),
+        cleanup_attributes=cast(
+            Any,
+            tuple(_literal(item) for item in _string_list(values.get("cleanup_attributes", []))),
+        ),
     )
 
 

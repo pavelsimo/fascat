@@ -640,6 +640,7 @@ asset = asset.decimate(
         protect_topology=True,
         budget_scope="selection",
         uv_importance="preserve_islands",
+        cleanup_attributes=("unused_uvs", "tangents"),
         iterative_threshold=1_000_000,
     )
 )
@@ -659,7 +660,7 @@ asset = asset.run_lod_generators(
 )
 ```
 
-Material baking currently creates a shared flat material and constant embedded texture maps from material factors; it does not rasterize source textures into atlases. Hole removal uses deterministic mesh boundary classification and filling when BREP feature editing is unavailable. Occlusion removal uses deterministic visibility sampling, so the report records that thin occluders can require higher precision and asset metadata records the measured sample coverage, direction coverage, and confidence score. Decimation records `decimate_requested_keep_ratio` metadata when a requested ratio can be derived, and warns when the request keeps less than 20% of source triangles because those settings are usually appropriate for distant LODs rather than close-view LOD0 assets. Decimation also records a memory estimate using the Unity rule of thumb of 5 GB RAM per million source triangles; `iterative_threshold` controls when intermediate simplification passes run, and reports include `decimate_simplification_passes`, `decimate_iterative_passes`, and `decimate_iterative_recommended`. `uv_importance="ignore"` strips UV/tangent attributes before simplification; `"preserve_seams"` uses UVs for seam preservation and then strips them; `"preserve_islands"` keeps UVs through the output.
+Material baking currently creates a shared flat material and constant embedded texture maps from material factors; it does not rasterize source textures into atlases. Hole removal uses deterministic mesh boundary classification and filling when BREP feature editing is unavailable. Occlusion removal uses deterministic visibility sampling, so the report records that thin occluders can require higher precision and asset metadata records the measured sample coverage, direction coverage, and confidence score. Decimation records `decimate_requested_keep_ratio` metadata when a requested ratio can be derived, and warns when the request keeps less than 20% of source triangles because those settings are usually appropriate for distant LODs rather than close-view LOD0 assets. Decimation also records a memory estimate using the Unity rule of thumb of 5 GB RAM per million source triangles; `iterative_threshold` controls when intermediate simplification passes run, and reports include `decimate_simplification_passes`, `decimate_iterative_passes`, and `decimate_iterative_recommended`. `uv_importance="ignore"` strips UV/tangent attributes before simplification; `"preserve_seams"` uses UVs for seam preservation and then strips them; `"preserve_islands"` keeps UVs through the output. `cleanup_attributes=("unused_uvs", "tangents")` removes degenerate or unused UV channels and tangents before simplification, while reports still warn when preserved UV seams or islands can reduce simplification efficiency.
 
 LOD generation skips parts that do not have tessellated meshes, records `lod_status="skipped_no_mesh"` on those parts, and adds report warnings so partial LOD chains are visible. Asset metadata records `lod_generated_parts` and `lod_skipped_no_mesh_parts`.
 
@@ -684,6 +685,7 @@ Optimization action parameters:
 | `DecimateOptions` | `preserve_painted_areas` | Preserve metadata-marked or painted regions where present. |
 | `DecimateOptions` | `budget_scope` | `part` budgets each part separately. `selection` uses a global selected-geometry target so sparse/simple parts can stay intact while dense parts absorb more reduction. Global selection decimation also reports estimated RAM and iterative-threshold status. |
 | `DecimateOptions` | `uv_importance` | Texture-coordinate handling: `preserve_islands` keeps UVs, `preserve_seams` protects seam topology then drops UVs, and `ignore` strips UVs/tangents before decimation. |
+| `DecimateOptions` | `cleanup_attributes` | Pre-decimation cleanup for attribute streams that are not useful to simplification. `unused_uvs` removes empty, constant, or zero-area UV channels. `tangents` removes tangents before simplification. Reports record removed channels, removed tangent parts, preserved UV channels, and UV seam/island constraint status. |
 | `DecimateOptions` | `iterative_threshold` | Source-triangle threshold above which decimation inserts intermediate simplification passes before the final target and reports actual pass counts. |
 | `RemoveHolesOptions` | `through`, `blind`, `surface` | Hole-type filters for boundary-loop classification. `through` matches paired aligned openings, `blind` matches open pocket mouths, and `surface` matches remaining surface openings. |
 | `RemoveHolesOptions` | `max_diameter` | Only fill detected open boundary loops at or below the measured planar-span diameter. |

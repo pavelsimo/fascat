@@ -119,6 +119,9 @@ that are currently conservative approximations.
   normals, tangents, UVs, face groups, free-edge diagnostics, and BREP patch
   state so users can tell what came from tessellation versus imported meshes or
   later staging.
+- Explicit decimation now exposes pre-cleanup for unused UV channels and
+  tangents, records removed/preserved attribute metadata, and warns when
+  preserved UV seams or islands can reduce simplification efficiency.
 
 ## Unity Asset Transformer Parity
 
@@ -150,7 +153,7 @@ Comparison snapshot:
 | Import | STEP-centric import with hierarchy, transforms, metadata, colors, repeated-part handling, PMI presence reporting, existing-mesh reuse intent, construction-only point/line cleanup controls, source-space normalization reporting, import-decision reports, per-part loaded-representation reports, and BREP patch cleanup reporting after tessellation. | True multi-file/multi-root import semantics, design-variant import, typed/visual PMI, mixed BREP construction-curve cleanup, native CAD/JT/IFC/Parasolid/IGES coverage, and richer loaded-representation coverage for existing tessellations, typed PMI, variants, and product metadata. |
 | Repair and tessellation | BREP sewing/fix-edge path, mesh duplicate/degenerate/T-junction/boundary-gap/flipped-component diagnostics, unit-aware repair tolerance reporting, sag/sag-ratio/angle/max-length controls, bounding-box-derived tessellation helpers, free-edge diagnostics, reusable existing mesh control, retained patch / submesh risk warnings, and tessellation attribute-provenance metadata. | Open-shell grouping, unstitched-face handling, T-junction sewing, boundary-gap stitching, non-manifold edge cracking, tolerance-based overlapping-surface/z-fighting cleanup, non-orientable strip cracking, topology-only vertex connectivity with split render attributes, selectable face/normal orientation strategies, real tessellation-time tangent/UV/free-edge geometry generation controls, CAD-derived UV modes, targeted tessellation by material/metadata/curvature, and optional free-edge geometry output. |
 | Staging | Normal/tangent generation, box/unwrap/lightmap UV modes, UV copy/normalization, UV validation, UV island/distortion/packing diagnostics, material normalization, duplicate-material merge, and metadata-only atlas intent. | Unity-style UV0 tileable versus UV1 bake workflows with segmentation, sharp-edge seam and forbid-overlap UV policies, lines of interest, island merge/alignment, real repack/padding/share-map controls, material-library mapping, real atlas textures, AO/lightmap baking, and texture cleanup. |
-| Optimization | Mesh simplification, measured error reporting, sampled occlusion removal, exact instance reconstruction, scene merge/split utilities, draw-call breakdown reports, and UV-importance modes. | Global assembly target allocation with iterative memory thresholds, real geometric-error bounded simplification, AO/user-weighted decimation, pre-decimation cleanup for unused UV/color/weight streams, standard/advanced occlusion backends, retopology/proxy mesh generation with normal-map transfer, symmetry-aware loose/precise instance reconstruction, duplicate image/material cleanup, and merge reports that quantify culling, memory, and file-size tradeoffs. |
+| Optimization | Mesh simplification, measured error reporting, sampled occlusion removal, exact instance reconstruction, scene merge/split utilities, draw-call breakdown reports, UV-importance modes, and pre-decimation cleanup for unused UVs/tangents. | Global assembly target allocation with iterative memory thresholds, real geometric-error bounded simplification, AO/user-weighted decimation, cleanup for vertex colors/weights, standard/advanced occlusion backends, retopology/proxy mesh generation with normal-map transfer, symmetry-aware loose/precise instance reconstruction, duplicate image/material cleanup, and merge reports that quantify culling, memory, and file-size tradeoffs. |
 | LODs | LOD ratios, screen-coverage metadata, validation, skipped-part reporting, and glTF `MSFT_lod` metadata. | Occurrence-level LOD group authoring with preserved instance relationships, optimized LOD0 as master asset, explicit conservative LOD0 versus destructive distant-LOD policy, far-LOD one-mesh/one-material baking, LOD-count memory/file-size tradeoff reports, switching-distance validation, and engine-specific runtime export profiles. |
 | Export | USD/USDZ, glTF/GLB, OBJ, STL, glTF quantization, meshopt, extension reporting, file-size budgets, and rejection of unsupported Draco/KTX2 requests. | Real Draco compression settings, KTX2/Basis texture output, texture resize and PNG/JPEG fallback controls, unused texture cleanup, baseline-versus-optimized size comparisons, expected-versus-measured export size ladders, Unity/glTFast-oriented profiles, and web/mobile/VR/XR budget presets backed by runtime measurements. |
 
@@ -162,7 +165,7 @@ Function-level parity notes from the linked Unity pages:
 | Repair meshes | Duplicate and degenerate cleanup plus standalone degenerate-polygon deletion, T-junction, boundary-gap, non-manifold, and orientation diagnostics are reported. | Implement true T-junction sewing, boundary stitching, non-manifold edge cracking, tolerance-based overlap/z-fighting cleanup, non-orientable strip cracking, and explicit face/normal orientation strategies. |
 | Merge vertices | Standalone `merge_vertices` is exposed across Python, CLI, and TOML with normals, tangents, UV, and material-boundary protection plus before/after reports. | Add topology-only connectivity merging that can preserve hard-edge, UV, and material seams as split render attributes; also add stronger cross-bucket tolerance merging and richer reports for skipped merges by protection reason. |
 | Delete degenerate polygons | Standalone `delete_degenerate_polygons` is exposed across Python, CLI, and TOML with area-threshold controls, selection support, no-op reports, unit-aware area reporting, and before/after counts. | Extend cleanup beyond zero-area triangles to tolerance-based overlapping or z-fighting polygons. |
-| Decimate to target | Target count, ratio, UV-importance modes, topology intent, RAM estimates, configurable iterative threshold/pass reports, and measured-error reports exist. | Add enforced geometric error bounds, AO/user-weighted decimation, and an explicit cleanup step for texture coordinates or vertex streams that would otherwise make simplification less efficient. |
+| Decimate to target | Target count, ratio, UV-importance modes, topology intent, RAM estimates, configurable iterative threshold/pass reports, measured-error reports, and pre-cleanup for unused UVs/tangents exist. | Add enforced geometric error bounds, AO/user-weighted decimation, topology-protection metrics, and cleanup for future vertex colors/weights. |
 | Unwrap UV | UV0/UV1 unwrap intent, solver method, iteration, tolerance, sharp-edge seam and forbid-overlap policy intent, distortion, and packing diagnostics are represented. | Add destination-channel control, channel-as-destination behavior when lines of interest define islands, backend-enforced seam policies, create-seams-from-lines-of-interest, seam graph metadata, island merge/alignment, and real repack/padding/share-map controls. |
 
 Second-pass gaps from the Unity references:
@@ -232,11 +235,10 @@ Second-pass gaps from the Unity references:
   were disabled, missing, diagnostic-only, or deferred to staging. Remaining
   work is real CAD-derived UVs, tessellation-time tangents, and optional
   free-edge geometry output.
-- Add a pre-decimation attribute/resource cleanup operation. Unity recommends
-  removing unnecessary texture coordinates before target decimation because UVs
-  are treated as important data; Fascat should expose a cleanup step for unused
-  UV channels, colors, tangents, and future vertex weights, then report the
-  resulting simplification efficiency change.
+- Pre-decimation cleanup now removes unused UV channels and tangents before
+  simplification and reports removed/preserved attribute streams plus UV
+  constraint warnings. Remaining work is vertex-color/weight cleanup and
+  measured simplification-efficiency deltas.
 - Separate LOD policy from ordinary optimization policy. LOD0 should stay
   conservative and close-view safe, while LOD1+ can be progressively more
   destructive and the farthest levels can simplify materials, culling
@@ -334,7 +336,7 @@ Parity gaps to track:
    - Add target-device decimation presets, including XR/HoloLens-style triangle caps, so platform targets can drive simplification before export.
    - Replace quality-criterion heuristics with measured geometric error.
    - Explicit decimation now supports UV importance modes: preserve full UV islands, preserve seam topology only, or ignore UVs by stripping UV/tangent attributes before simplification.
-   - Add a pre-decimation cleanup path for unused texture coordinates and report when preserved UVs make simplification less efficient.
+   - Pre-decimation cleanup now removes unused UV channels and tangents, records removed/preserved attribute metadata, and reports when preserved UVs can make simplification less efficient. Remaining work is vertex-color/weight cleanup and measured efficiency deltas.
    - Make topology protection explicit and measured, especially for holes, boundary loops, singularities, and material/UV seam preservation.
    - Support AO or user-painted vertex weights as simplification constraints.
    - Explicit decimation now records the requested keep ratio when derivable and warns when the request keeps less than 20% of source triangles for close-view LOD0 assets.
@@ -406,8 +408,9 @@ These need more design and should not be mixed into documentation or diagnostics
    - Explicit decimation now records `decimate_requested_keep_ratio` when derivable and warns when the requested keep ratio is below 20% for close-view LOD0 assets.
    - Explicit decimation now supports UV importance modes for preserving islands, preserving seams only, or ignoring UV/tangent attributes before simplification.
    - Explicit decimation now records estimated RAM, budget-allocation mode, configurable iterative-threshold controls, and actual simplification pass counts.
+   - Explicit decimation now supports pre-cleanup for unused UV channels and tangents, reports removed/preserved attributes, and warns when preserved UV seams or islands can reduce simplification efficiency.
    - `criterion="quality"` now reports measured error, but still maps tolerances to a target ratio.
-   - Remaining polish: enforce geometric error bounds, preserve selected CAD features, add richer topology protection metrics, and add AO/user-weight constraints for very large meshes.
+   - Remaining polish: enforce geometric error bounds, preserve selected CAD features, add richer topology protection metrics, add vertex-color/weight cleanup, and add AO/user-weight constraints for very large meshes.
 
 5. BREP healing depth - first topology-risk reporting pass complete
    - BREP status now records wire, edge, free/unstitched-edge, small-edge, open-shell, and sliver-face counts.

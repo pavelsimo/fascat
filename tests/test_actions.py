@@ -303,6 +303,45 @@ def test_decimate_uv_importance_controls_texture_coordinate_cleanup() -> None:
         assert decimated.metadata["decimate_uv_importance"] == mode
 
 
+def test_decimate_cleanup_attributes_remove_unused_uvs_and_report_constraints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_simplify(self: Mesh, *, target_triangles: int | None = None, **_kwargs: object) -> Mesh:
+        assert target_triangles == 3
+        assert sorted(self.uvs) == [0]
+        assert self.tangents is None
+        return self.copy()
+
+    monkeypatch.setattr(Mesh, "simplify", fake_simplify)
+    mesh = _triangle_strip(6)
+    mesh.uvs[0] = mesh.points[:, :2].copy()
+    mesh.uvs[1] = np.zeros((mesh.vertex_count, 2), dtype=float)
+    mesh.tangents = np.tile(np.asarray([1.0, 0.0, 0.0, 1.0], dtype=float), (mesh.vertex_count, 1))
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="body", name="Body", part_id="body")]),
+        parts={"body": Part(id="body", name="Body", mesh=mesh)},
+    )
+
+    decimated = asset.decimate(DecimateOptions(target_ratio=0.5, cleanup_attributes=("unused_uvs", "tangents")))
+    part = decimated.parts["body"]
+    output_mesh = part.mesh
+    warnings = decimated.report.steps[-1].warnings
+
+    assert output_mesh is not None
+    assert sorted(output_mesh.uvs) == [0]
+    assert output_mesh.tangents is None
+    assert part.metadata["decimate_pre_cleanup_attributes"] == "unused_uvs,tangents"
+    assert part.metadata["decimate_pre_cleanup_removed_uv_channels"] == "1"
+    assert part.metadata["decimate_pre_cleanup_removed_tangents"] == "true"
+    assert part.metadata["decimate_preserved_uv_channels"] == "0"
+    assert part.metadata["decimate_uv_constraint_status"] == "preserved_for_simplification"
+    assert decimated.metadata["decimate_pre_cleanup_removed_uv_channels"] == "1"
+    assert decimated.metadata["decimate_pre_cleanup_removed_tangent_parts"] == "1"
+    assert decimated.metadata["decimate_uv_constrained_parts"] == "1"
+    assert decimated.report.steps[-1].after["decimate_pre_cleanup_removed_tangent_parts"] == 1
+    assert any("preserved texture coordinates can reduce simplification efficiency" in warning for warning in warnings)
+
+
 def test_remove_holes_fills_small_boundary_loop() -> None:
     mesh = Mesh(
         points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float),
@@ -636,6 +675,8 @@ def test_cli_convert_accepts_optimization_action_options_during_dry_run() -> Non
             "selection",
             "--uv-importance",
             "ignore",
+            "--decimate-cleanup-attributes",
+            "unused-uvs,tangents",
             "--remove-holes",
             "--hole-types",
             "through,blind,surface",
@@ -673,6 +714,7 @@ def test_cli_convert_accepts_optimization_action_options_during_dry_run() -> Non
     assert payload["bake"] == ["base_color", "opacity"]
     assert payload["decimate"] is True
     assert payload["uv_importance"] == "ignore"
+    assert payload["decimate_cleanup_attributes"] == ["unused_uvs", "tangents"]
     assert payload["decimate_iterative_threshold"] == 500
     assert payload["remove_holes"] is True
     assert payload["remove_occluded"] is True
