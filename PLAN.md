@@ -76,60 +76,79 @@ decimation controls, and final export compression.
 
 Parity gaps to track:
 
-1. Import controls
+1. Workflow validation
+   - Add a pipeline advisor that checks Unity-style ordering: import cleanup, BREP/mesh repair, tessellation, face orientation, attributes, staging, optimization, LOD generation, then export cleanup/compression.
+   - Warn when a pipeline decimates before repair, computes tangents before UV0, bakes AO without UV1, generates LODs before LOD0 optimization, or requests compression without real texture/geometry compression backends.
+   - Add report summaries that show which Unity-inspired preparation stages were run, skipped, approximated, or blocked by missing optional backends.
+
+2. Import controls
    - Add explicit import toggles for design variants, PMI, product metadata, existing mesh preference, and multi-file imports.
    - Add cleanup operations for free points, line geometry, and post-tessellation BREP patch deletion.
    - Decide whether line geometry should be deleted, preserved as metadata, or tessellated into renderable tubes.
+   - Report when retained CAD patches or per-face tessellation groups are likely to become excessive submeshes/draw calls.
 
-2. CAD and mesh repair depth
+3. CAD and mesh repair depth
    - Add an open-shell repair workflow: detect single open-shell parts, merge or group them before BREP healing, and keep separate warnings for unstitched faces.
    - Improve BREP healing beyond the current sewing/fix-edge path: sliver-face removal, duplicate face handling, tolerance unification, and visible report warnings for unsupported backend work.
-   - Extend mesh repair with true T-junction sewing, non-manifold edge cracking, and configurable face-orientation strategies for closed solids versus open shells.
+   - Extend mesh repair with duplicate-polygon deletion, true T-junction sewing, non-manifold edge cracking, and configurable face-orientation strategies for closed solids versus open shells.
+   - Add attribute-aware tolerance vertex merging that rebuilds connectivity across hard-edge and non-manifold borders without collapsing intentional material, normal, or UV seams.
+   - Add before/after repair metrics for duplicate polygons, degenerate polygons, T-junctions, non-manifold edges, boundary gaps, and flipped components.
 
-3. Tessellation controls
+4. Tessellation controls
    - Expose a separate sag-ratio option instead of overloading `relative=True`.
    - Support explicit override/reuse of existing tessellation when imported data already contains meshes.
    - Investigate CAD-parametric UV and tangent generation during tessellation, plus free-edge extraction for diagnostics.
+   - Add targeted tessellation profiles by part size, material, metadata, curvature, or filter so shiny/high-detail parts can use finer criteria than bulk structural parts.
+   - Expose max polygon length separately from cleanup subdivision and report when long triangles may cause lighting artifacts.
 
-4. UV staging
+5. UV staging
    - Add UV segmentation and seam planning, including sharp-edge seams and lines of interest.
    - Expose unwrap solver intent where the backend supports it: conformal versus isometric.
-   - Add UV island merge, alignment, overlap checks, repack, normalize, and per-channel validation.
+   - Add unwrap iteration and tolerance controls, plus diagnostics for solver failure or excessive distortion.
+   - Add UV copy between channels, UV island merge, alignment, overlap checks, repack, normalize, and per-channel validation.
    - Make UV0 tileable and UV1 baking requirements explicit: UV0 may overlap; UV1 must fit in `[0,1]` with padding and no overlaps.
+   - Add a cleanup step to remove unused UV channels before decimation when texture coordinates should not constrain simplification.
 
-5. Materials and baking
+6. Materials and baking
    - Add material-library import and CAD-material-to-PBR mapping, including CSV or TOML mapping tables.
    - Replace constant embedded factor maps with real atlas/raster texture output for base color, opacity, roughness, metallic, normal, AO, and emissive maps.
    - Add real ambient occlusion baking to textures and optionally to vertex colors for downstream decimation weights.
-   - Add image cleanup: merge duplicate images, remove unused images, resize textures to platform budgets.
+   - Add material and image cleanup: merge duplicate materials/images, remove unused images, resize textures to platform budgets, and keep PNG/JPEG fallbacks when KTX2 is unavailable.
 
-6. Optimization and draw-call reduction
+7. Optimization and draw-call reduction
    - Add acceleration structures, confidence metrics, and optional raster/GPU backends to the new sampled occlusion removal.
    - Add loose and precise instance reconstruction for similar, separately modeled parts.
    - Improve merge planning so reports show draw-call savings, instance loss, memory growth, and culling impact.
    - Add retopology or proxy-mesh paths for cases where decimation and occlusion are not enough.
+   - Add dedicated cleanup for unused texture coordinates, duplicate materials, and duplicate images before draw-call and file-size optimization.
 
-7. Decimation parity
+8. Decimation parity
    - Add iterative decimation thresholds for large meshes to control memory use.
    - Replace quality-criterion heuristics with measured geometric error.
    - Add texture-coordinate importance modes: preserve islands, preserve seams only, or ignore UVs.
    - Make topology protection explicit and measured, especially for holes and singularities.
    - Support AO or user-painted vertex weights as simplification constraints.
+   - Add warnings when requested target ratios are below practical quality ranges for close-view LOD0 assets.
+   - Keep skinning, bones, and animation preservation out of scope until Fascat supports animated mesh imports.
 
-8. LOD parity
+9. LOD parity
    - Preserve occurrence-level LOD chains and instance relationships across all LOD levels.
    - Add far-LOD generation that can merge to one mesh and one baked material for one-draw-call distant rendering.
    - Add LOD validation for screen coverage, monotonic triangle reduction, material simplification, and export runtime behavior.
+   - Add engine-specific LOD export metadata or profiles for Unity, Unreal, and standards-based glTF runtimes, including switching-distance validation.
 
-9. Export parity
+10. Export parity
    - Add a real Draco encoder path with compression level and quantization settings, or keep `draco=True` rejected.
    - Add real KTX2/Basis texture output with quality, compression level, and max-resolution controls.
    - Add export cleanup for unused images/materials and file-size reports broken down by geometry, textures, and metadata.
    - Keep GLB as the preferred web/mobile runtime target while preserving USD/USDZ for OpenUSD workflows.
+   - Expose Draco quantization bits for positions, normals, UVs, and vertex colors once a real encoder is available.
+   - Expose PNG/JPEG fallback texture export settings for formats or environments where KTX2 is not available.
 
-10. Platform budgets
+11. Platform budgets
    - Turn desktop, mobile, VR, and WebGL target triangle/draw-call budgets into documented profile checks.
    - Report when output exceeds the selected profile budget, not only an optional file-size budget.
+   - Add vertex-count, index-buffer, texture-memory, texture-resolution, and load-time budget checks alongside triangle and draw-call budgets.
 
 ## Near-Term Polish
 
