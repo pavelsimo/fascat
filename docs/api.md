@@ -243,6 +243,12 @@ asset = fc.read_step(
         multi_file=False,
         delete_free_vertices=False,
         delete_lines=False,
+        source_units=None,
+        source_up_axis="Z",
+        source_handedness="right",
+        target_units="metre",
+        target_up_axis="Y",
+        target_handedness="right",
     ),
 )
 
@@ -279,6 +285,10 @@ Metadata and PMI parameters:
 | `StepReadOptions` | `multi_file` | Request multi-file STEP assembly import intent. Current single-path imports report a warning instead of silently claiming external references were loaded. |
 | `StepReadOptions` | `delete_free_vertices` | Drop construction-only point shapes during import and record deletion counts in the import report. |
 | `StepReadOptions` | `delete_lines` | Drop construction-only line shapes during import and record deleted edge and vertex counts. Mixed BREP parts with faces are preserved. |
+| `StepReadOptions` | `source_units`, `source_meters_per_unit` | Override the source unit declaration when the STEP header is wrong or ambiguous. Known unit names include `metre`, `centimetre`, `millimetre`, `inch`, and `foot`; custom factors use meters per source unit. |
+| `StepReadOptions` | `source_up_axis`, `source_handedness` | Declare the source coordinate basis before normalization. Defaults are STEP-style `Z` up and `right` handed. |
+| `StepReadOptions` | `target_units`, `target_meters_per_unit` | Normalize the imported asset to a target unit by applying a root transform and updating the asset's declared units. |
+| `StepReadOptions` | `target_up_axis`, `target_handedness` | Normalize the imported asset to a target up-axis or handedness. Import reports include the exact normalization transform and whether it changed the asset space. |
 | `PmiAnnotation` | `id` | Stable annotation id used for references from parts or mesh groups. |
 | `PmiAnnotation` | `kind` | Annotation type such as `dimension`, `datum`, `tolerance`, `note`, or backend-specific kinds. |
 | `PmiAnnotation` | `text` | Human-readable annotation text. |
@@ -776,6 +786,9 @@ existing_meshes = true
 multi_file = false
 delete_free_vertices = false
 delete_lines = false
+target_units = "metre"
+target_up_axis = "Y"
+target_handedness = "right"
 
 [export]
 metadata = "summary"

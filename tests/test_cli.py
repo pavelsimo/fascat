@@ -287,6 +287,12 @@ existing_meshes = false
 multi_file = true
 delete_free_vertices = true
 delete_lines = true
+source_units = "millimetre"
+source_up_axis = "Z"
+source_handedness = "right"
+target_units = "metre"
+target_up_axis = "Y"
+target_handedness = "right"
 
 [export]
 metadata = "summary"
@@ -329,6 +335,10 @@ target_triangles = 80000
     assert payload["pipeline_import"]["multi_file"] is True
     assert payload["pipeline_import"]["delete_free_vertices"] is True
     assert payload["pipeline_import"]["delete_lines"] is True
+    assert payload["pipeline_import"]["source_units"] == "millimetre"
+    assert payload["pipeline_import"]["target_units"] == "metre"
+    assert payload["pipeline_import"]["target_up_axis"] == "Y"
+    assert payload["pipeline_import"]["target_handedness"] == "right"
     assert payload["pipeline_export"] == {"mode": "summary", "pmi": "none"}
     assert payload["pipeline_advisories"] == []
     assert payload["pipeline_filters"] == ["fasteners"]

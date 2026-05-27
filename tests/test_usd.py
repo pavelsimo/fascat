@@ -7,7 +7,7 @@ import pytest
 
 import fascat as fc
 from fascat.asset import Asset, Node, Part
-from fascat.io.usd import validate_usd, write_usd
+from fascat.io.usd import _usd_custom_data, validate_usd, write_usd
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.options import OptimizeOptions, UsdExportOptions
@@ -49,6 +49,12 @@ def cube_mesh() -> Mesh:
         dtype=int,
     )
     return Mesh(points=points, faces=faces).compute_normals().box_uv()
+
+
+def test_usd_custom_data_serializes_nested_transform_lists() -> None:
+    payload = _usd_custom_data({"transform": [[1.0, 0.0], [0.0, 1.0]], "unset": None})
+
+    assert payload == {"transform": "[[1.0, 0.0], [0.0, 1.0]]"}
 
 
 def author_triangle_mesh(stage: object, path: str, indices: list[int]) -> None:

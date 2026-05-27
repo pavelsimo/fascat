@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 import fascat as fc
@@ -13,6 +14,7 @@ from fascat.io.step import (
     _material_binding_plan,
     _shape_fingerprint,
     _ShapeTopologyCounts,
+    _space_normalization,
     _StepHeaderInfo,
 )
 from fascat.options import StepReadOptions
@@ -125,6 +127,33 @@ def test_step_import_cleanup_actions_cover_construction_only_shapes() -> None:
     assert _cleanup_action(point_counts, StepReadOptions(delete_free_vertices=True)) == "delete_free_vertices"
     assert _cleanup_action(line_counts, StepReadOptions(delete_lines=True)) == "delete_lines"
     assert _cleanup_action(brep_counts, StepReadOptions(delete_free_vertices=True, delete_lines=True)) is None
+
+
+def test_step_space_normalization_builds_reported_root_transform() -> None:
+    space = _space_normalization(
+        "millimetre",
+        0.001,
+        StepReadOptions(target_units="metre", target_up_axis="Y", target_handedness="right"),
+    )
+
+    assert space.source_units == "millimetre"
+    assert space.target_units == "metre"
+    assert space.source_up_axis == "Z"
+    assert space.target_up_axis == "Y"
+    assert space.changed is True
+    assert np.allclose(
+        space.transform,
+        np.array(
+            [
+                [0.001, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.001, 0.0],
+                [0.0, -0.001, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            dtype=float,
+        ),
+    )
+    assert space.metadata()["changed"] is True
 
 
 @pytest.mark.requires_ocp

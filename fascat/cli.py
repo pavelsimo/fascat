@@ -105,6 +105,16 @@ class Profile(str, Enum):
     VIRTUAL_REALITY = "virtual-reality"
 
 
+class AxisMode(str, Enum):
+    Y = "Y"
+    Z = "Z"
+
+
+class HandednessMode(str, Enum):
+    RIGHT = "right"
+    LEFT = "left"
+
+
 class UV0Mode(str, Enum):
     NONE = "none"
     BOX = "box"
@@ -363,6 +373,38 @@ def cmd_inspect(
         bool,
         typer.Option("--delete-lines/--keep-lines", help="Drop construction-only line shapes during STEP import."),
     ] = False,
+    source_units: Annotated[
+        str | None,
+        typer.Option("--source-units", help="Override source STEP units for normalization, for example millimetre."),
+    ] = None,
+    source_meters_per_unit: Annotated[
+        float | None,
+        typer.Option("--source-meters-per-unit", help="Override source meters-per-unit for normalization."),
+    ] = None,
+    source_up_axis: Annotated[
+        AxisMode,
+        typer.Option("--source-up-axis", help="Declared source up axis: Y or Z."),
+    ] = AxisMode.Z,
+    source_handedness: Annotated[
+        HandednessMode,
+        typer.Option("--source-handedness", help="Declared source handedness: right or left."),
+    ] = HandednessMode.RIGHT,
+    target_units: Annotated[
+        str | None,
+        typer.Option("--target-units", help="Normalize asset units to this unit, for example metre."),
+    ] = None,
+    target_meters_per_unit: Annotated[
+        float | None,
+        typer.Option("--target-meters-per-unit", help="Normalize asset units to this meters-per-unit value."),
+    ] = None,
+    target_up_axis: Annotated[
+        AxisMode | None,
+        typer.Option("--target-up-axis", help="Normalize asset up axis to Y or Z."),
+    ] = None,
+    target_handedness: Annotated[
+        HandednessMode | None,
+        typer.Option("--target-handedness", help="Normalize asset handedness to right or left."),
+    ] = None,
     heal_brep: Annotated[bool, typer.Option("--heal-brep", help="Run BREP healing before inspection output.")] = False,
     heal_tolerance: Annotated[float, typer.Option("--heal-tolerance", help="BREP healing tolerance.")] = 0.05,
     remove_sliver_faces: Annotated[
@@ -395,6 +437,14 @@ def cmd_inspect(
         "multi_file_import": multi_file_import,
         "delete_free_vertices": delete_free_vertices,
         "delete_lines": delete_lines,
+        "source_units": source_units,
+        "source_meters_per_unit": source_meters_per_unit,
+        "source_up_axis": source_up_axis.value,
+        "source_handedness": source_handedness.value,
+        "target_units": target_units,
+        "target_meters_per_unit": target_meters_per_unit,
+        "target_up_axis": None if target_up_axis is None else target_up_axis.value,
+        "target_handedness": None if target_handedness is None else target_handedness.value,
         "heal_brep": heal_brep,
         "heal_tolerance": heal_tolerance,
         "remove_sliver_faces": remove_sliver_faces,
@@ -408,6 +458,10 @@ def cmd_inspect(
         _fail(ctx, payload, "--heal-tolerance must be greater than 0.", code=2)
     if max_sliver_area < 0.0:
         _fail(ctx, payload, "--max-sliver-area must be greater than or equal to 0.", code=2)
+    if source_meters_per_unit is not None and source_meters_per_unit <= 0.0:
+        _fail(ctx, payload, "--source-meters-per-unit must be greater than 0.", code=2)
+    if target_meters_per_unit is not None and target_meters_per_unit <= 0.0:
+        _fail(ctx, payload, "--target-meters-per-unit must be greater than 0.", code=2)
     _validate_step_input(input_path, ctx, payload)
     if state.dry_run:
         _emit(ctx, payload, f"Would inspect {input_path} with profile {profile.value}.")
@@ -421,6 +475,14 @@ def cmd_inspect(
         multi_file=multi_file_import,
         delete_free_vertices=delete_free_vertices,
         delete_lines=delete_lines,
+        source_units=source_units,
+        source_meters_per_unit=source_meters_per_unit,
+        source_up_axis=source_up_axis.value,
+        source_handedness=source_handedness.value,
+        target_units=target_units,
+        target_meters_per_unit=target_meters_per_unit,
+        target_up_axis=None if target_up_axis is None else target_up_axis.value,
+        target_handedness=None if target_handedness is None else target_handedness.value,
     )
     asset = _read_step_for_cli(input_path, ctx, payload, import_options=import_options)
     if heal_brep:
@@ -686,6 +748,38 @@ def cmd_convert(
         bool,
         typer.Option("--delete-lines/--keep-lines", help="Drop construction-only line shapes during STEP import."),
     ] = False,
+    source_units: Annotated[
+        str | None,
+        typer.Option("--source-units", help="Override source STEP units for normalization, for example millimetre."),
+    ] = None,
+    source_meters_per_unit: Annotated[
+        float | None,
+        typer.Option("--source-meters-per-unit", help="Override source meters-per-unit for normalization."),
+    ] = None,
+    source_up_axis: Annotated[
+        AxisMode,
+        typer.Option("--source-up-axis", help="Declared source up axis: Y or Z."),
+    ] = AxisMode.Z,
+    source_handedness: Annotated[
+        HandednessMode,
+        typer.Option("--source-handedness", help="Declared source handedness: right or left."),
+    ] = HandednessMode.RIGHT,
+    target_units: Annotated[
+        str | None,
+        typer.Option("--target-units", help="Normalize asset units to this unit, for example metre."),
+    ] = None,
+    target_meters_per_unit: Annotated[
+        float | None,
+        typer.Option("--target-meters-per-unit", help="Normalize asset units to this meters-per-unit value."),
+    ] = None,
+    target_up_axis: Annotated[
+        AxisMode | None,
+        typer.Option("--target-up-axis", help="Normalize asset up axis to Y or Z."),
+    ] = None,
+    target_handedness: Annotated[
+        HandednessMode | None,
+        typer.Option("--target-handedness", help="Normalize asset handedness to right or left."),
+    ] = None,
     merge: Annotated[bool, typer.Option("--merge", help="Merge selected geometry before optimization.")] = False,
     merge_mode: Annotated[MergeMode, typer.Option("--merge-mode", help="Merge grouping mode.")] = MergeMode.ALL,
     keep_parent: Annotated[
@@ -1024,6 +1118,14 @@ def cmd_convert(
         "multi_file_import": multi_file_import,
         "delete_free_vertices": delete_free_vertices,
         "delete_lines": delete_lines,
+        "source_units": source_units,
+        "source_meters_per_unit": source_meters_per_unit,
+        "source_up_axis": source_up_axis.value,
+        "source_handedness": source_handedness.value,
+        "target_units": target_units,
+        "target_meters_per_unit": target_meters_per_unit,
+        "target_up_axis": None if target_up_axis is None else target_up_axis.value,
+        "target_handedness": None if target_handedness is None else target_handedness.value,
         "merge": merge,
         "merge_mode": merge_mode.value,
         "keep_parent": keep_parent,
@@ -1189,6 +1291,10 @@ def cmd_convert(
         _fail(ctx, payload, "--normal-tolerance must be greater than 0 and no more than 180.", code=2)
     if max_hole_diameter is not None and max_hole_diameter <= 0.0:
         _fail(ctx, payload, "--max-hole-diameter must be greater than 0.", code=2)
+    if source_meters_per_unit is not None and source_meters_per_unit <= 0.0:
+        _fail(ctx, payload, "--source-meters-per-unit must be greater than 0.", code=2)
+    if target_meters_per_unit is not None and target_meters_per_unit <= 0.0:
+        _fail(ctx, payload, "--target-meters-per-unit must be greater than 0.", code=2)
     if occlusion_precision <= 0:
         _fail(ctx, payload, "--occlusion-precision must be greater than 0.", code=2)
     if neighbors_preservation < 0:
@@ -1323,6 +1429,14 @@ def cmd_convert(
                 multi_file=multi_file_import,
                 delete_free_vertices=delete_free_vertices,
                 delete_lines=delete_lines,
+                source_units=source_units,
+                source_meters_per_unit=source_meters_per_unit,
+                source_up_axis=source_up_axis.value,
+                source_handedness=source_handedness.value,
+                target_units=target_units,
+                target_meters_per_unit=target_meters_per_unit,
+                target_up_axis=None if target_up_axis is None else target_up_axis.value,
+                target_handedness=None if target_handedness is None else target_handedness.value,
             )
         )
         export_metadata = (
@@ -1965,6 +2079,14 @@ def _step_read_options(
     multi_file: bool = False,
     delete_free_vertices: bool = False,
     delete_lines: bool = False,
+    source_units: str | None = None,
+    source_meters_per_unit: float | None = None,
+    source_up_axis: str = "Z",
+    source_handedness: str = "right",
+    target_units: str | None = None,
+    target_meters_per_unit: float | None = None,
+    target_up_axis: str | None = None,
+    target_handedness: str | None = None,
 ) -> StepReadOptions:
     metadata_enabled = metadata != MetadataMode.NONE
     pmi_enabled = pmi != PmiMode.NONE
@@ -1980,6 +2102,14 @@ def _step_read_options(
         multi_file=multi_file,
         delete_free_vertices=delete_free_vertices,
         delete_lines=delete_lines,
+        source_units=source_units,
+        source_meters_per_unit=source_meters_per_unit,
+        source_up_axis=cast(Any, source_up_axis),
+        source_handedness=cast(Any, source_handedness),
+        target_units=target_units,
+        target_meters_per_unit=target_meters_per_unit,
+        target_up_axis=cast(Any, target_up_axis),
+        target_handedness=cast(Any, target_handedness),
     )
 
 

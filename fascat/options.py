@@ -41,6 +41,8 @@ TextureCompression = Literal["ktx2", "basisu"]
 UsdPackageMode = Literal["default", "usdz"]
 MetadataExportMode = Literal["none", "summary", "full"]
 PmiExportMode = Literal["none", "summary", "metadata", "metadata_and_visuals", "full"]
+Axis = Literal["Y", "Z"]
+Handedness = Literal["right", "left"]
 
 _BAKE_MAPS = {"base_color", "opacity", "normal", "roughness", "metallic", "ao", "emissive"}
 _HOLE_TYPES = {"through", "blind", "surface"}
@@ -152,6 +154,28 @@ class StepReadOptions:
     multi_file: bool = False
     delete_free_vertices: bool = False
     delete_lines: bool = False
+    source_units: str | None = None
+    source_meters_per_unit: float | None = None
+    source_up_axis: Axis = "Z"
+    source_handedness: Handedness = "right"
+    target_units: str | None = None
+    target_meters_per_unit: float | None = None
+    target_up_axis: Axis | None = None
+    target_handedness: Handedness | None = None
+
+    def __post_init__(self) -> None:
+        if self.source_meters_per_unit is not None and self.source_meters_per_unit <= 0.0:
+            raise ValueError("source_meters_per_unit must be greater than 0 when set")
+        if self.target_meters_per_unit is not None and self.target_meters_per_unit <= 0.0:
+            raise ValueError("target_meters_per_unit must be greater than 0 when set")
+        if self.source_up_axis not in {"Y", "Z"}:
+            raise ValueError("source_up_axis must be one of: Y, Z")
+        if self.target_up_axis not in {None, "Y", "Z"}:
+            raise ValueError("target_up_axis must be one of: Y, Z")
+        if self.source_handedness not in {"right", "left"}:
+            raise ValueError("source_handedness must be one of: right, left")
+        if self.target_handedness not in {None, "right", "left"}:
+            raise ValueError("target_handedness must be one of: right, left")
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

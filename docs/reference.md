@@ -115,6 +115,14 @@ all listed formats are implemented.
 | `--multi-file-import / --single-file-import` | `false` | Request multi-file STEP assembly reference resolution when supported |
 | `--delete-free-vertices / --keep-free-vertices` | `false` | Drop construction-only point shapes during STEP import |
 | `--delete-lines / --keep-lines` | `false` | Drop construction-only line shapes during STEP import |
+| `--source-units` | STEP header | Override source units for normalization |
+| `--source-meters-per-unit` | STEP header | Override source meters per unit for normalization |
+| `--source-up-axis` | `Z` | Declared source up axis: `Y` or `Z` |
+| `--source-handedness` | `right` | Declared source handedness: `right` or `left` |
+| `--target-units` | source units | Normalize imported asset units, for example `metre` |
+| `--target-meters-per-unit` | source factor | Normalize imported asset meters per unit with a custom factor |
+| `--target-up-axis` | source axis | Normalize imported asset up axis to `Y` or `Z` |
+| `--target-handedness` | source handedness | Normalize imported asset handedness to `right` or `left` |
 | `--filter` | unset | Scope optimization and LOD work with a selector such as `path=*/Fasteners/*` |
 | `--exclude-filter` | unset | Exclude selector matches from `--filter` results |
 | `--merge` | `false` | Merge selected geometry before optimization |
@@ -189,6 +197,7 @@ all listed formats are implemented.
 Units and behavior notes:
 
 - Linear tolerances and sizes such as `--sag`, `--min-edge-length`, `--max-edge-length`, `--max-polygon-length`, `--heal-tolerance`, `--max-sliver-area`, `--region-size`, and `--max-hole-diameter` use the source asset's working units unless the option explicitly says otherwise.
+- Import space normalization uses a root transform: source BREP coordinates stay in source units, while the asset declares the target units, up-axis, and handedness and records the transform in the import report.
 - Angles such as `--angle`, `--normal-tolerance`, and `--hard-edge-angle` are degrees.
 - Ratios such as `--ratio`, `--lods`, and decimation target ratios are fractions between `0` and `1`; LOD ratios must be sorted from highest to lowest detail.
 - Explicit decimation requests that keep less than 20% of source triangles emit an LOD0 distortion warning. Use those aggressive ratios primarily for distant LODs unless visual validation says otherwise.
@@ -211,6 +220,14 @@ Units and behavior notes:
 | `--multi-file-import / --single-file-import` | `false` | Request multi-file STEP assembly reference resolution when supported |
 | `--delete-free-vertices / --keep-free-vertices` | `false` | Drop construction-only point shapes during STEP import |
 | `--delete-lines / --keep-lines` | `false` | Drop construction-only line shapes during STEP import |
+| `--source-units` | STEP header | Override source units for normalization |
+| `--source-meters-per-unit` | STEP header | Override source meters per unit for normalization |
+| `--source-up-axis` | `Z` | Declared source up axis: `Y` or `Z` |
+| `--source-handedness` | `right` | Declared source handedness: `right` or `left` |
+| `--target-units` | source units | Normalize imported asset units, for example `metre` |
+| `--target-meters-per-unit` | source factor | Normalize imported asset meters per unit with a custom factor |
+| `--target-up-axis` | source axis | Normalize imported asset up axis to `Y` or `Z` |
+| `--target-handedness` | source handedness | Normalize imported asset handedness to `right` or `left` |
 | `--heal-brep` | `false` | Run BREP healing before inspection output |
 | `--heal-tolerance` | `0.05` | BREP healing tolerance |
 | `--remove-sliver-faces` | `false` | Request tiny sliver-face removal during BREP healing; current backend support is limited and reports warnings when unavailable |
@@ -247,6 +264,9 @@ existing_meshes = true
 multi_file = false
 delete_free_vertices = false
 delete_lines = false
+target_units = "metre"
+target_up_axis = "Y"
+target_handedness = "right"
 
 [export]
 metadata = "summary"
@@ -304,7 +324,7 @@ fallbacks.
 
 | Capability | Fascat status | Report or diagnostic | Next step |
 |------------|---------------|----------------------|-----------|
-| STEP import, hierarchy, names, transforms, colors, metadata | Implemented for STEP | `import` report stats, cleanup counts, pipeline import options, loaded-representation metadata, and AP242 PMI warnings when typed PMI import is unavailable | Add real design variant loading, typed PMI entity extraction, mixed BREP construction-curve cleanup, and true multi-file import |
+| STEP import, hierarchy, names, transforms, colors, metadata | Implemented for STEP | `import` report stats, cleanup counts, pipeline import options, loaded-representation metadata, space normalization transforms, and AP242 PMI warnings when typed PMI import is unavailable | Add real design variant loading, typed PMI entity extraction, mixed BREP construction-curve cleanup, and true multi-file import |
 | BREP healing | Partial | `heal_brep`; records open shells, free/unstitched edges, small edges, and sliver counts; sliver removal warns that the backend leaves shapes unchanged | Implement sliver-face removal, duplicate-face cleanup, and deeper face/wire repair |
 | Tessellation | Implemented | `tessellate` report options, explicit sag-ratio, existing mesh reuse/retessellation controls, max-polygon-length diagnostics, free-edge diagnostics, and quality metadata | Add CAD UV/tangent extraction |
 | Mesh repair | Implemented for core cleanup | `repair` report step; mesh metadata records before/after duplicate polygon, degenerate triangle, boundary edge, and non-manifold edge counts | Add T-junction sewing, non-manifold cracking, and configurable orientation strategies |

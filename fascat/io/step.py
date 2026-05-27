@@ -4,7 +4,7 @@ import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -16,6 +16,33 @@ from fascat.options import StepReadOptions
 from fascat.report import Report, timed_step
 
 _PartIndex = dict[tuple[str, str, str, str], str]
+_UNIT_FACTORS = {
+    "metre": 1.0,
+    "meter": 1.0,
+    "m": 1.0,
+    "centimetre": 0.01,
+    "centimeter": 0.01,
+    "cm": 0.01,
+    "millimetre": 0.001,
+    "millimeter": 0.001,
+    "mm": 0.001,
+    "inch": 0.0254,
+    "in": 0.0254,
+    "foot": 0.3048,
+    "feet": 0.3048,
+    "ft": 0.3048,
+}
+_UNIT_NAMES = {
+    "meter": "metre",
+    "m": "metre",
+    "centimeter": "centimetre",
+    "cm": "centimetre",
+    "millimeter": "millimetre",
+    "mm": "millimetre",
+    "in": "inch",
+    "feet": "foot",
+    "ft": "foot",
+}
 
 
 @dataclass(frozen=True)
@@ -76,6 +103,37 @@ class _ImportCleanupStats:
         }
 
 
+@dataclass(frozen=True)
+class _SpaceNormalization:
+    source_units: str
+    source_meters_per_unit: float
+    source_up_axis: str
+    source_handedness: str
+    target_units: str
+    target_meters_per_unit: float
+    target_up_axis: str
+    target_handedness: str
+    transform: np.ndarray
+
+    @property
+    def changed(self) -> bool:
+        return not np.allclose(self.transform, np.eye(4, dtype=np.float64))
+
+    def metadata(self) -> dict[str, object]:
+        return {
+            "source_units": self.source_units,
+            "source_meters_per_unit": self.source_meters_per_unit,
+            "source_up_axis": self.source_up_axis,
+            "source_handedness": self.source_handedness,
+            "target_units": self.target_units,
+            "target_meters_per_unit": self.target_meters_per_unit,
+            "target_up_axis": self.target_up_axis,
+            "target_handedness": self.target_handedness,
+            "transform": self.transform.tolist(),
+            "changed": self.changed,
+        }
+
+
 def read_step(path: str | Path, *, options: StepReadOptions | None = None) -> Asset:
     source = Path(path)
     return _read_step_path(source, source_identity=str(source.resolve()), options=options or StepReadOptions())
@@ -91,11 +149,17 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
     cleanup = _ImportCleanupStats()
     with timed_step() as timer:
         document, shape_tool, color_tool, unit_name, meters_per_unit = _read_xde_document(source, options)
+        space = _space_normalization(unit_name, meters_per_unit, options)
         free_labels = _free_shape_labels(shape_tool)
         root = Node(
             id=_stable_id("node", f"{source_identity}:root"),
             name=source.stem,
-            metadata={"source": str(source), "source_identity": source_identity},
+            transform=space.transform,
+            metadata={
+                "source": str(source),
+                "source_identity": source_identity,
+                "space_normalization": space.metadata(),
+            },
         )
         parts: dict[str, Part] = {}
         part_index: _PartIndex = {}
@@ -121,11 +185,11 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         root=root,
         parts=parts,
         materials=materials,
-        units=unit_name,
-        meters_per_unit=meters_per_unit,
-        up_axis="Z",
+        units=space.target_units,
+        meters_per_unit=space.target_meters_per_unit,
+        up_axis=cast(Any, space.target_up_axis),
         source_path=source,
-        metadata=_asset_metadata(source, source_identity, unit_name, meters_per_unit, options, header_info, cleanup),
+        metadata=_asset_metadata(source, source_identity, options, header_info, cleanup, space),
         pmi=[],
         report=report,
     )
@@ -147,6 +211,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
             "pmi_schema": header_info.schema,
             "pmi_present": header_info.pmi_present,
             "cleanup": cleanup.to_dict(),
+            "space_normalization": space.metadata(),
         },
         before={"nodes": 0, "parts": 0, "occurrences": 0, "materials": 0, "vertices": 0, "triangles": 0},
         after=asset.stats(),
@@ -232,22 +297,132 @@ def _count_subshapes(shape: Any, shape_type: Any, explorer_factory: Any) -> int:
     return count
 
 
+def _space_normalization(unit_name: str, meters_per_unit: float, options: StepReadOptions) -> _SpaceNormalization:
+    source_units, source_meters_per_unit = _space_units(
+        unit_name,
+        meters_per_unit,
+        override_units=options.source_units,
+        override_meters_per_unit=options.source_meters_per_unit,
+    )
+    target_units, target_meters_per_unit = _space_units(
+        source_units,
+        source_meters_per_unit,
+        override_units=options.target_units,
+        override_meters_per_unit=options.target_meters_per_unit,
+    )
+    target_up_axis = options.target_up_axis or options.source_up_axis
+    target_handedness = options.target_handedness or options.source_handedness
+    transform = _space_transform(
+        source_meters_per_unit=source_meters_per_unit,
+        source_up_axis=options.source_up_axis,
+        source_handedness=options.source_handedness,
+        target_meters_per_unit=target_meters_per_unit,
+        target_up_axis=target_up_axis,
+        target_handedness=target_handedness,
+    )
+    return _SpaceNormalization(
+        source_units=source_units,
+        source_meters_per_unit=source_meters_per_unit,
+        source_up_axis=options.source_up_axis,
+        source_handedness=options.source_handedness,
+        target_units=target_units,
+        target_meters_per_unit=target_meters_per_unit,
+        target_up_axis=target_up_axis,
+        target_handedness=target_handedness,
+        transform=transform,
+    )
+
+
+def _space_units(
+    default_units: str,
+    default_meters_per_unit: float,
+    *,
+    override_units: str | None,
+    override_meters_per_unit: float | None,
+) -> tuple[str, float]:
+    unit_name = _canonical_unit_name(default_units)
+    meters_per_unit = float(default_meters_per_unit)
+    if override_units is not None:
+        unit_name = _canonical_unit_name(override_units)
+        meters_per_unit = _unit_factor(unit_name)
+    if override_meters_per_unit is not None:
+        meters_per_unit = float(override_meters_per_unit)
+        if override_units is None:
+            unit_name = "custom"
+    return unit_name, meters_per_unit
+
+
+def _canonical_unit_name(value: str) -> str:
+    key = value.strip().lower()
+    return _UNIT_NAMES.get(key, key or "unit")
+
+
+def _unit_factor(unit_name: str) -> float:
+    factor = _UNIT_FACTORS.get(unit_name)
+    if factor is None:
+        known = ", ".join(sorted({"metre", "centimetre", "millimetre", "inch", "foot"}))
+        raise ValueError(f"unsupported unit name for space normalization: {unit_name}; known units: {known}")
+    return factor
+
+
+def _space_transform(
+    *,
+    source_meters_per_unit: float,
+    source_up_axis: str,
+    source_handedness: str,
+    target_meters_per_unit: float,
+    target_up_axis: str,
+    target_handedness: str,
+) -> np.ndarray:
+    linear = (
+        np.linalg.inv(_to_canonical_space(target_up_axis, target_handedness))
+        @ _to_canonical_space(source_up_axis, source_handedness)
+        * (source_meters_per_unit / target_meters_per_unit)
+    )
+    transform = np.eye(4, dtype=np.float64)
+    transform[:3, :3] = linear
+    return transform
+
+
+def _to_canonical_space(up_axis: str, handedness: str) -> np.ndarray:
+    if up_axis == "Z":
+        axis = np.array(
+            [
+                [1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.0, -1.0, 0.0],
+            ],
+            dtype=np.float64,
+        )
+    else:
+        axis = np.eye(3, dtype=np.float64)
+    if handedness == "left":
+        return np.diag([-1.0, 1.0, 1.0]) @ axis
+    return axis
+
+
 def _asset_metadata(
     source: Path,
     source_identity: str,
-    unit_name: str,
-    meters_per_unit: float,
     options: StepReadOptions,
     header_info: _StepHeaderInfo,
     cleanup: _ImportCleanupStats,
+    space: _SpaceNormalization,
 ) -> Metadata:
     if not options.metadata:
         return {}
     metadata: Metadata = {
         "source": str(source),
         "source_identity": source_identity,
-        "units": unit_name,
-        "meters_per_unit": meters_per_unit,
+        "units": space.target_units,
+        "meters_per_unit": space.target_meters_per_unit,
+        "source_units": space.source_units,
+        "source_meters_per_unit": space.source_meters_per_unit,
+        "up_axis": space.target_up_axis,
+        "source_up_axis": space.source_up_axis,
+        "handedness": space.target_handedness,
+        "source_handedness": space.source_handedness,
+        "space_normalization": space.metadata(),
         "metadata_options": options.to_dict(),
         "import_cleanup": cleanup.to_dict(),
     }

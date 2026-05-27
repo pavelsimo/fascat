@@ -577,6 +577,12 @@ existing_meshes = false
 multi_file = true
 delete_free_vertices = true
 delete_lines = true
+source_units = "millimetre"
+source_up_axis = "Z"
+source_handedness = "right"
+target_units = "metre"
+target_up_axis = "Y"
+target_handedness = "right"
 
 [export]
 metadata = "summary"
@@ -613,6 +619,12 @@ op = "repair"
     assert import_options.multi_file is True
     assert import_options.delete_free_vertices is True
     assert import_options.delete_lines is True
+    assert import_options.source_units == "millimetre"
+    assert import_options.source_up_axis == "Z"
+    assert import_options.source_handedness == "right"
+    assert import_options.target_units == "metre"
+    assert import_options.target_up_axis == "Y"
+    assert import_options.target_handedness == "right"
     assert export_options.metadata.mode == "summary"
     assert export_options.metadata.pmi == "none"
     write_step = next(step for step in converted.report.steps if step.name == "write")

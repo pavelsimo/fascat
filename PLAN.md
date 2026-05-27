@@ -79,7 +79,7 @@ Comparison snapshot:
 
 | Area | Fascat today | Missing for closer Unity parity |
 | --- | --- | --- |
-| Import | STEP-centric import with hierarchy, transforms, metadata, colors, repeated-part handling, PMI presence reporting, existing-mesh reuse intent, construction-only point/line cleanup controls, and BREP patch cleanup reporting after tessellation. | True multi-file/multi-root import semantics, design-variant import, typed/visual PMI, mixed BREP construction-curve cleanup, native CAD/JT/IFC/Parasolid/IGES coverage, and richer per-part loaded-representation reports. |
+| Import | STEP-centric import with hierarchy, transforms, metadata, colors, repeated-part handling, PMI presence reporting, existing-mesh reuse intent, construction-only point/line cleanup controls, source-space normalization reporting, and BREP patch cleanup reporting after tessellation. | True multi-file/multi-root import semantics, design-variant import, typed/visual PMI, mixed BREP construction-curve cleanup, native CAD/JT/IFC/Parasolid/IGES coverage, and richer per-part loaded-representation reports. |
 | Repair and tessellation | BREP sewing/fix-edge path, mesh duplicate/degenerate cleanup, sag/sag-ratio/angle/max-length controls, free-edge diagnostics, and reusable existing mesh control. | Open-shell grouping, unstitched-face handling, T-junction sewing, non-manifold edge cracking, selectable face/normal orientation strategies, CAD-derived UV modes, targeted tessellation by part/material/metadata/curvature, and optional free-edge geometry output. |
 | Staging | Normal/tangent generation, box/unwrap/lightmap UV modes, UV copy/normalization, UV validation, material normalization, duplicate-material merge, and metadata-only atlas intent. | Unity-style UV0 tileable versus UV1 bake workflows with segmentation, lines of interest, island merge/alignment, repack/padding/share-map controls, distortion and pack-efficiency metrics, material-library mapping, real atlas textures, AO/lightmap baking, and texture cleanup. |
 | Optimization | Mesh simplification, measured error reporting, sampled occlusion removal, exact instance reconstruction, scene merge/split utilities, draw-call estimates, and UV-importance modes. | Global assembly target allocation with iterative memory thresholds, real geometric-error bounded simplification, AO/user-weighted decimation, standard/advanced occlusion backends, retopology/proxy mesh generation, duplicate image/material cleanup, and merge reports that quantify culling, instancing, memory, and file-size tradeoffs. |
@@ -92,7 +92,7 @@ Parity gaps to track:
    - Pipeline files now expose Unity-style ordering advisories through `PipelineSpec.advisories()`, dry-run `pipeline_advisories`, and conversion report warnings.
    - The advisor warns when a pipeline decimates before repair, computes tangents before UV0, bakes AO without UV1, or generates LODs before LOD0 optimization. Compression backend requests are still rejected by the CLI/options layer until real encoders exist.
    - Conversion reports now include a `workflow_summary` step that maps Unity-inspired preparation stages to run/skipped status and exact, approximate, or metadata-only levels, including import cleanup, orientation, UV preparation, material baking, LOD generation, export compression, and export.
-   - Remaining work: add a preflight parity checklist before expensive operations run, with missing prerequisites and missing optional backends called out before conversion starts.
+   - Remaining work: add a preflight parity checklist before expensive operations run, with missing prerequisites and missing optional backends called out before conversion starts. It should also flag missing patch cleanup, face/normal orientation, UV-before-tangent ordering, and export texture/compression prerequisites.
 
 2. Import controls
    - Reference docs now include a supported-format parity matrix. Unity's baseline covers many CAD and mesh formats; Fascat currently centers on STEP input and USD/glTF/OBJ/STL output, with IGES, Parasolid, JT, native CAD, IFC, 3MF, and QIF explicitly deferred.
@@ -101,7 +101,7 @@ Parity gaps to track:
    - Import cleanup now exposes `delete_free_vertices` and `delete_lines` for construction-only point and line shapes across Python, CLI, and TOML. Import reports include cleanup counts, and preserved parts record loaded representation plus source topology counts.
    - Tessellated parts now record `brep_patch_cleanup=deleted` or `retained` and `source_shape_retained`, matching `keep_brep` behavior.
    - Remaining work: decide whether mixed BREP construction curves should be deleted, preserved as metadata, or tessellated into renderable tubes.
-   - Add source-unit, axis/up-vector, and handedness normalization controls so CAD orientation changes are explicit and reported.
+   - Source unit, source up-axis, source handedness, target unit, target up-axis, and target handedness normalization controls now apply a root transform, update the asset's declared working space, and record the exact transform in import metadata and reports.
    - Report the loaded representation for each part: BREP, existing tessellation, construction points/lines, PMI, variants, product metadata, and the cleanup action applied.
    - Report when retained CAD patches or per-face tessellation groups are likely to become excessive submeshes/draw calls.
 
@@ -114,6 +114,7 @@ Parity gaps to track:
    - Add missing-normal generation controls for sharp-edge angle, area weighting, override behavior, and flipped-component reporting.
    - Add attribute-aware tolerance vertex merging that rebuilds connectivity across hard-edge and non-manifold borders without collapsing intentional material, normal, or UV seams.
    - Add before/after repair metrics for T-junctions, boundary gaps, and flipped components.
+   - Make repair tolerance policy unit-aware and report the effective source/target units used for BREP repair, mesh repair, vertex merge, T-junction sewing, and degenerate-polygon cleanup.
 
 4. Tessellation controls
    - Sag-ratio is now a first-class tessellation option across Python, CLI, TOML pipelines, per-part overrides, reports, and OCCT backend parameter mapping. `relative=True` remains for compatibility when `sag_ratio` is unset.
@@ -121,6 +122,7 @@ Parity gaps to track:
    - Free-edge tessellation diagnostics are now available through `free_edge_report` across Python, CLI, TOML pipelines, per-part overrides, metadata, and report warnings. Remaining work: investigate CAD-parametric UV and tangent generation during tessellation.
    - Add optional free-edge geometry output or retention, separate from diagnostics, for wire overlays, boundary inspection, and import cleanup validation.
    - Add targeted tessellation profiles by part size, material, metadata, curvature, or filter so shiny/high-detail parts can use finer criteria than bulk structural parts.
+   - Add bounding-box-derived tessellation profile helpers so sag, sag-ratio, angle, and polygon-length defaults can be selected per part instead of only globally.
    - Expose CAD-derived UV generation modes, including none, intrinsic surface UVs, and conformal/scaled UVs, instead of only post-mesh unwrapping.
    - Max polygon length is now exposed separately from cleanup subdivision. `max_edge_length` still subdivides geometry; `max_polygon_length` drives quality-report `long_edges`, metadata, and warnings for long tessellated edges that may cause lighting artifacts.
 
@@ -186,6 +188,7 @@ Parity gaps to track:
    - glTF write reports now list emitted runtime extensions, required extensions, `extras.fascat` metadata, unsupported Draco/KTX2 outputs, and expected runtime support.
    - Add Unity/glTFast-oriented GLB export profiles that combine extension support notes, Draco/KTX2 settings, fallback choices, and runtime compatibility warnings.
    - Add baseline-versus-optimized export comparisons so reports show how much each preparation step changed file size, and warn when draw-call merging increases export size by breaking instancing.
+   - Add format-aware texture export policy and reporting: prefer KTX2/Basis for glTF/GLB, use PNG/JPEG fallbacks for texture-capable non-glTF exports, remove unused images before export, and warn when users compare source CAD file size directly against runtime mesh exports.
    - Add named web, mobile, desktop, and VR export presets that combine geometry compression, texture compression, texture resizing, and cleanup choices.
    - Keep GLB as the preferred web/mobile runtime target while preserving USD/USDZ for OpenUSD workflows.
    - Expose Draco quantization bits for positions, normals, UVs, and vertex colors once a real encoder is available.

@@ -67,6 +67,14 @@ _IMPORT_KEYS = frozenset(
         "multi_file",
         "delete_free_vertices",
         "delete_lines",
+        "source_units",
+        "source_meters_per_unit",
+        "source_up_axis",
+        "source_handedness",
+        "target_units",
+        "target_meters_per_unit",
+        "target_up_axis",
+        "target_handedness",
     }
 )
 _EXPORT_KEYS = frozenset({"metadata", "pmi"})
@@ -587,6 +595,14 @@ def _import_options(value: object, location: _TomlLocation | None = None) -> Ste
             multi_file=bool(value.get("multi_file", False)),
             delete_free_vertices=bool(value.get("delete_free_vertices", False)),
             delete_lines=bool(value.get("delete_lines", False)),
+            source_units=cast(str | None, value.get("source_units")),
+            source_meters_per_unit=_as_optional_float(value.get("source_meters_per_unit")),
+            source_up_axis=cast(Any, _literal(value.get("source_up_axis", "Z"))),
+            source_handedness=cast(Any, _literal(value.get("source_handedness", "right"))),
+            target_units=cast(str | None, value.get("target_units")),
+            target_meters_per_unit=_as_optional_float(value.get("target_meters_per_unit")),
+            target_up_axis=cast(Any, _optional_literal(value.get("target_up_axis"))),
+            target_handedness=cast(Any, _optional_literal(value.get("target_handedness"))),
         )
     except ValueError as exc:
         message = str(exc)
@@ -1023,6 +1039,10 @@ def _as_optional_int(value: object) -> int | None:
 
 def _literal(value: object) -> object:
     return value.replace("-", "_") if isinstance(value, str) else value
+
+
+def _optional_literal(value: object) -> object | None:
+    return None if value is None else _literal(value)
 
 
 def _normalize_key(value: str) -> str:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import tempfile
 from pathlib import Path
@@ -426,13 +427,13 @@ def _usd_custom_data(value: Any) -> Any:
     from pxr import Vt
 
     if isinstance(value, dict):
-        return {str(key): _usd_custom_data(item) for key, item in value.items()}
+        return {str(key): _usd_custom_data(item) for key, item in value.items() if item is not None}
     if isinstance(value, list):
         if all(isinstance(item, str) for item in value):
             return Vt.StringArray(value)
         if all(isinstance(item, (int, float)) for item in value):
             return Vt.DoubleArray([float(item) for item in value])
-        return [_usd_custom_data(item) for item in value]
+        return json.dumps(value, default=str, sort_keys=True)
     return value
 
 
