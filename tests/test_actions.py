@@ -175,6 +175,23 @@ def test_decimate_uses_selection_budget() -> None:
     assert decimated.parts["body"].metadata["decimate_error_metric"] == "symmetric_vertex_nearest_distance"
 
 
+def test_decimate_warns_when_lod0_ratio_is_aggressive() -> None:
+    for options in (
+        DecimateOptions(target_ratio=0.1),
+        DecimateOptions(target_triangles=1, target_ratio=None),
+    ):
+        asset = Asset(
+            root=Node(id="root", name="root", children=[Node(id="body", name="Body", part_id="body")]),
+            parts={"body": Part(id="body", name="Body", mesh=_triangle_strip(10))},
+        )
+
+        decimated = asset.decimate(options)
+        warnings = decimated.report.steps[-1].warnings
+
+        assert decimated.metadata["decimate_requested_keep_ratio"] == "0.1"
+        assert any("ratios below 20% can visibly distort close-view LOD0 assets" in warning for warning in warnings)
+
+
 def test_quality_decimate_records_measured_error_metrics() -> None:
     asset = Asset(
         root=Node(id="root", name="root", children=[Node(id="body", name="Body", part_id="body")]),

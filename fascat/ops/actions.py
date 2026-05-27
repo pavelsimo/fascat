@@ -26,6 +26,8 @@ from fascat.options import (
 FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int64]
 
+_AGGRESSIVE_LOD0_RATIO = 0.2
+
 
 def bake_materials_asset(
     asset: Asset,
@@ -114,6 +116,7 @@ def decimate_asset(
             ),
             selected_part_ids=selected_part_ids,
         )
+        _warn_aggressive_lod0_decimation(result, source_meshes, options)
         if options.criterion == "quality":
             result.report.add_warning(_quality_decimation_warning())
         _enforce_triangle_budget(result, options, selected_part_ids=selected_part_ids)
@@ -122,6 +125,7 @@ def decimate_asset(
 
     result = asset.copy(keep_source=True)
     ratio = _decimate_ratio(options)
+    _warn_aggressive_lod0_decimation(result, source_meshes, options)
     if options.criterion == "quality":
         result.report.add_warning(_quality_decimation_warning())
     for part in result.parts.values():
@@ -471,6 +475,32 @@ def _quality_decimation_warning() -> str:
     )
 
 
+def _warn_aggressive_lod0_decimation(
+    asset: Asset,
+    source_meshes: dict[str, Mesh],
+    options: DecimateOptions,
+) -> None:
+    ratio = _requested_decimation_keep_ratio(source_meshes, options)
+    if ratio is None or ratio >= _AGGRESSIVE_LOD0_RATIO:
+        return
+    percent = f"{ratio:.1%}"
+    asset.report.add_warning(
+        f"decimation target keeps only {percent} of source triangles; ratios below 20% can visibly distort "
+        "close-view LOD0 assets and are usually better reserved for distant LODs"
+    )
+
+
+def _requested_decimation_keep_ratio(source_meshes: dict[str, Mesh], options: DecimateOptions) -> float | None:
+    source_counts = [mesh.triangle_count for mesh in source_meshes.values() if mesh.triangle_count > 0]
+    if not source_counts:
+        return None
+    if options.target_triangles is not None:
+        if options.budget_scope == "selection":
+            return min(1.0, options.target_triangles / sum(source_counts))
+        return min(1.0, min(options.target_triangles / count for count in source_counts))
+    return _decimate_ratio(options)
+
+
 def _source_meshes(asset: Asset, selected_part_ids: set[str] | None) -> dict[str, Mesh]:
     return {
         part.id: part.mesh.copy()
@@ -517,6 +547,9 @@ def _annotate_decimation_result(
     if source_total == 0:
         return
     reduction = (source_total - output_total) / source_total
+    requested_ratio = _requested_decimation_keep_ratio(source_meshes, options)
+    if requested_ratio is not None:
+        asset.metadata["decimate_requested_keep_ratio"] = f"{requested_ratio:.9g}"
     asset.metadata["decimate_source_triangles"] = str(source_total)
     asset.metadata["decimate_output_triangles"] = str(output_total)
     asset.metadata["decimate_triangle_reduction"] = f"{reduction:.9g}"

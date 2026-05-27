@@ -592,7 +592,7 @@ asset = asset.run_lod_generators(
 )
 ```
 
-Material baking currently creates a shared flat material and constant embedded texture maps from material factors; it does not rasterize source textures into atlases. Hole removal uses deterministic mesh boundary classification and filling when BREP feature editing is unavailable. Occlusion removal uses deterministic visibility sampling, so the report records that thin occluders can require higher precision and asset metadata records the measured sample coverage, direction coverage, and confidence score.
+Material baking currently creates a shared flat material and constant embedded texture maps from material factors; it does not rasterize source textures into atlases. Hole removal uses deterministic mesh boundary classification and filling when BREP feature editing is unavailable. Occlusion removal uses deterministic visibility sampling, so the report records that thin occluders can require higher precision and asset metadata records the measured sample coverage, direction coverage, and confidence score. Decimation records `decimate_requested_keep_ratio` metadata when a requested ratio can be derived, and warns when the request keeps less than 20% of source triangles because those settings are usually appropriate for distant LODs rather than close-view LOD0 assets.
 
 Optimization action parameters:
 
@@ -606,7 +606,7 @@ Optimization action parameters:
 | `BakeMaterialOptions` | `merge_output` | Replace selected materials with a shared baked output material. |
 | `DecimateOptions` | `criterion` | `target` prioritizes a triangle budget. `quality` maps tolerances to a target ratio, records measured vertex error, and warns because tolerance bounds are not enforced. |
 | `DecimateOptions` | `target_triangles` | Absolute triangle target for selected geometry. |
-| `DecimateOptions` | `target_ratio` | Fraction of source triangles to keep when no absolute target is set. |
+| `DecimateOptions` | `target_ratio` | Fraction of source triangles to keep when no absolute target is set. Ratios below 20% produce an LOD0 distortion warning. |
 | `DecimateOptions` | `surface_tolerance` | Tolerance input used by `criterion="quality"` to derive a reduction ratio; post-run metadata records measured vertex error but does not enforce this value. |
 | `DecimateOptions` | `line_tolerance` | Line-feature tolerance input used by `criterion="quality"` ratio derivation and reporting. |
 | `DecimateOptions` | `normal_tolerance` | Maximum normal deviation in degrees. |

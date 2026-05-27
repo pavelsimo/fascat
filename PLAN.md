@@ -129,7 +129,7 @@ Parity gaps to track:
    - Add texture-coordinate importance modes: preserve islands, preserve seams only, or ignore UVs.
    - Make topology protection explicit and measured, especially for holes and singularities.
    - Support AO or user-painted vertex weights as simplification constraints.
-   - Add warnings when requested target ratios are below practical quality ranges for close-view LOD0 assets.
+   - Explicit decimation now records the requested keep ratio when derivable and warns when the request keeps less than 20% of source triangles for close-view LOD0 assets.
    - Keep skinning, bones, and animation preservation out of scope until Fascat supports animated mesh imports.
 
 9. LOD parity
@@ -180,6 +180,7 @@ These need more design and should not be mixed into documentation or diagnostics
 
 4. Error-bounded simplification - first reporting pass complete
    - Decimation now records achieved triangle reduction and measured symmetric nearest-vertex error on parts and asset metadata.
+   - Explicit decimation now records `decimate_requested_keep_ratio` when derivable and warns when the requested keep ratio is below 20% for close-view LOD0 assets.
    - `criterion="quality"` now reports measured error, but still maps tolerances to a target ratio.
    - Remaining polish: enforce geometric error bounds, preserve selected CAD features, add richer topology protection metrics, iterative processing, and vertex-weight constraints for very large meshes.
 
