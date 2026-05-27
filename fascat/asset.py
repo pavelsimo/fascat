@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -11,6 +11,7 @@ from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.metadata import Metadata, PmiAnnotation
 from fascat.options import (
+    AnalyzeOptions,
     BakeMaterialOptions,
     BrepHealOptions,
     DecimateOptions,
@@ -30,6 +31,9 @@ from fascat.options import (
     UsdExportOptions,
 )
 from fascat.report import Report, timed_step
+
+if TYPE_CHECKING:
+    from fascat.analysis import AnalysisReport
 
 Transform = NDArray[np.float64]
 
@@ -220,6 +224,13 @@ class Asset:
         from fascat.ops.tessellate import build_tessellation_quality_report
 
         return build_tessellation_quality_report(self)
+
+    def analyze(self, options: AnalyzeOptions | None = None, *, where: Any | None = None) -> AnalysisReport:
+        from fascat.analysis import analyze_asset
+
+        opts = options or AnalyzeOptions()
+        scope = self._operation_scope(where)
+        return analyze_asset(scope.asset, opts, source_path=self.source_path)
 
     def _report_stats(self) -> dict[str, int]:
         return self.stats(include_lods=any(part.lod_meshes for part in self.parts.values()))

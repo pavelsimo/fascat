@@ -1,6 +1,7 @@
 """Convert CAD STEP data into realtime-ready OpenUSD and glTF assets."""
 
 from fascat import profiles
+from fascat.analysis import AnalysisReport
 from fascat.asset import Asset, Node, Part
 from fascat.filter import Filter, FilterExpressionError, SelectionMatch, SelectionResult
 from fascat.io.gltf import validate_gltf
@@ -10,6 +11,7 @@ from fascat.material import Material
 from fascat.mesh import Mesh, MeshValidationError
 from fascat.metadata import Metadata, PmiAnnotation, Tolerance
 from fascat.options import (
+    AnalyzeOptions,
     AtlasOptions,
     BakeMaterialOptions,
     BrepHealOptions,
@@ -33,6 +35,7 @@ from fascat.options import (
     UsdExportOptions,
 )
 from fascat.pipeline import (
+    analyze,
     bake_materials,
     convert,
     decimate,
@@ -58,6 +61,8 @@ __version__ = "0.1.0"
 
 __all__ = [
     "Asset",
+    "AnalysisReport",
+    "AnalyzeOptions",
     "AtlasOptions",
     "BakeMaterialOptions",
     "BrepHealOptions",
@@ -92,6 +97,7 @@ __all__ = [
     "UnwrapOptions",
     "UsdExportOptions",
     "__version__",
+    "analyze",
     "bake_materials",
     "convert",
     "decimate",

@@ -30,8 +30,8 @@ fascat inspect input.step --json
 | Command | Description |
 |---------|-------------|
 | `fascat inspect input.step` | Inspect STEP assembly metadata and planned conversion inputs |
-| `fascat convert input.step [output.usdc]` | Convert STEP CAD into OpenUSD or glTF |
-| `fascat validate output.usdc` | Validate generated USD or glTF output |
+| `fascat convert input.step [output.usdc]` | Convert STEP CAD into OpenUSD, glTF, OBJ, or STL |
+| `fascat validate output.usdc` | Validate generated USD, glTF, OBJ, or STL output |
 | `fascat help [command]` | Show top-level or command-specific help |
 | `fascat version` | Print version and exit |
 
@@ -175,6 +175,35 @@ Supported filter expressions:
 
 Repeated `--filter` flags are combined with logical AND. Use `--exclude-filter` for negative selectors.
 
+## Validate flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--geometry-quality` | `false` | Enable all geometry quality checks in the validation report |
+| `--non-manifold-edges` | `false` | Report non-manifold edge counts |
+| `--open-boundaries` | `false` | Report open boundary counts |
+| `--self-intersections` | `false` | Report self-intersection risk warnings |
+| `--sliver-triangles` | `false` | Report degenerate and sliver triangle stats |
+| `--tiny-parts` | `false` | Report tiny part stats |
+| `--draw-call-estimate` | `false` | Report material count and draw-call estimate |
+| `--visual-risk` | `false` | Report before/after visual risk warnings |
+| `--report` | unset | Write validation and geometry quality report as JSON |
+
+Example:
+
+```bash
+fascat validate motor.glb \
+  --geometry-quality \
+  --non-manifold-edges \
+  --open-boundaries \
+  --self-intersections \
+  --sliver-triangles \
+  --tiny-parts \
+  --draw-call-estimate \
+  --visual-risk \
+  --report report.json
+```
+
 ## File arguments
 
 Use `-` for standard streams:
@@ -189,7 +218,7 @@ When the convert output argument is omitted for a file input, Fascat writes besi
 
 When output is `-`, USD bytes are reserved for stdout and progress/errors stay on stderr.
 
-Supported output suffixes are `.usd`, `.usda`, `.usdc`, `.gltf`, and `.glb`.
+Supported output suffixes are `.usd`, `.usda`, `.usdc`, `.usdz`, `.gltf`, `.glb`, `.obj`, and `.stl`.
 
 `--debug` is only valid with `.usd` or `.usda` output. Binary `.usdc`, `.gltf`, and `.glb` output is rejected when debug mode is enabled.
 

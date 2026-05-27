@@ -143,6 +143,10 @@ def test_validate_help() -> None:
     result = runner.invoke(app, ["validate", "--help"])
     assert result.exit_code == 0
     assert "USD" in result.output
+    assert "--geometry-quality" in plain(result.output)
+    assert "--non-manifold-edges" in plain(result.output)
+    assert "--draw-call-estimate" in plain(result.output)
+    assert "--report" in plain(result.output)
 
 
 def test_convert_dry_run_json() -> None:

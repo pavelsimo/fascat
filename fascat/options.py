@@ -534,6 +534,34 @@ def _lod_preset_levels(preset: LODPreset) -> tuple[LODLevel, ...]:
 
 
 @dataclass(frozen=True)
+class AnalyzeOptions:
+    non_manifold_edges: bool = False
+    open_boundaries: bool = False
+    self_intersections: bool = False
+    sliver_triangles: bool = False
+    tiny_parts: bool = False
+    draw_call_estimate: bool = False
+    visual_risk: bool = False
+    sliver_aspect_ratio: float = 20.0
+    degenerate_area_epsilon: float = 1e-12
+    tiny_part_diagonal: float = 1.0
+    max_self_intersection_pairs: int = 10_000
+
+    def __post_init__(self) -> None:
+        if self.sliver_aspect_ratio <= 1.0:
+            raise ValueError("sliver_aspect_ratio must be greater than 1")
+        if self.degenerate_area_epsilon < 0.0:
+            raise ValueError("degenerate_area_epsilon must be greater than or equal to 0")
+        if self.tiny_part_diagonal < 0.0:
+            raise ValueError("tiny_part_diagonal must be greater than or equal to 0")
+        if self.max_self_intersection_pairs <= 0:
+            raise ValueError("max_self_intersection_pairs must be greater than 0")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class GltfExportOptions:
     quantize: bool = False
     meshopt: bool = False

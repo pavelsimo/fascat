@@ -29,6 +29,22 @@ def test_functional_api_wraps_asset_operations() -> None:
     assert len(part.lod_meshes) == 1
 
 
+def test_public_api_exposes_quality_analysis() -> None:
+    mesh = fc.Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    asset = fc.Asset(
+        root=fc.Node(id="root", name="root", children=[fc.Node(id="node", name="node", part_id="part")]),
+        parts={"part": fc.Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    report = fc.analyze(asset, options=fc.AnalyzeOptions(open_boundaries=True))
+
+    assert isinstance(report, fc.AnalysisReport)
+    assert report.summary["open_boundaries"] == 1
+
+
 def test_functional_api_wraps_tessellation_options() -> None:
     asset = fc.Asset(
         root=fc.Node(id="root", name="root", children=[fc.Node(id="node", name="node", part_id="part")]),

@@ -118,6 +118,7 @@ fascat convert input.step output.stl --stl-binary --force
 ```bash
 fascat validate output.usdc
 fascat validate output.glb
+fascat validate output.glb --geometry-quality --report quality-report.json
 ```
 
 ## JSON output

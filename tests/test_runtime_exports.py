@@ -96,3 +96,29 @@ def test_cli_convert_accepts_runtime_export_options_during_dry_run() -> None:
     assert payload["quantize"] is True
     assert payload["meshopt"] is True
     assert payload["file_size_budget_mb"] == 50
+
+
+def test_cli_validate_writes_geometry_quality_report(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    output = tmp_path / "triangle.gltf"
+    report_path = tmp_path / "quality.json"
+    _asset().write_gltf(output)
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "validate",
+            str(output),
+            "--geometry-quality",
+            "--report",
+            str(report_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert payload["analysis"]["summary"]["open_boundaries"] == 1
+    assert payload["analysis"]["summary"]["draw_call_estimate"] == 1
+    assert report["summary"]["boundary_edges"] == 3
+    assert report["stats"]["validated_triangles"] == 1

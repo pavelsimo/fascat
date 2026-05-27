@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from fascat import profiles
 from fascat.asset import Asset
@@ -17,6 +17,7 @@ from fascat.io.stl import write_stl as _write_stl
 from fascat.io.usd import validate_usd
 from fascat.io.usd import write_usd as _write_usd
 from fascat.options import (
+    AnalyzeOptions,
     AtlasOptions,
     BakeMaterialOptions,
     BrepHealOptions,
@@ -40,6 +41,9 @@ from fascat.options import (
     UVMode,
 )
 from fascat.report import timed_step
+
+if TYPE_CHECKING:
+    from fascat.analysis import AnalysisReport
 
 USD_SUFFIXES = {".usd", ".usda", ".usdc", ".usdz"}
 ExportFormat = Literal["usd", "gltf", "obj", "stl"]
@@ -297,6 +301,10 @@ def write_stl(asset: Asset, path: str | Path, *, options: StlExportOptions | Non
 def validate_output(path: str | Path) -> dict[str, int]:
     output_format = _export_format(path)
     return _validate_output(path, output_format)
+
+
+def analyze(asset: Asset, *, options: AnalyzeOptions | None = None, where: Filter | None = None) -> AnalysisReport:
+    return asset.analyze(options or AnalyzeOptions(), where=where)
 
 
 def _export_format(path: str | Path) -> ExportFormat:

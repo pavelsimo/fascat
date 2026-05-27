@@ -15,12 +15,14 @@ import typer.rich_utils as rich_utils
 from rich.console import Console
 
 from fascat import __version__
+from fascat.analysis import AnalysisReport, analyze_output
 from fascat.filter import Filter, FilterExpressionError
 from fascat.io.gltf import GLTF_SUFFIXES
 from fascat.io.obj import OBJ_SUFFIXES
 from fascat.io.step import read_step, read_step_bytes
 from fascat.io.stl import STL_SUFFIXES
 from fascat.options import (
+    AnalyzeOptions,
     AtlasOptions,
     BakeMaterialOptions,
     BrepHealOptions,
@@ -1249,6 +1251,7 @@ def cmd_convert(
     epilog=f"""Examples:
   fascat validate motor.usdc
   fascat validate motor.glb
+  fascat validate motor.glb --geometry-quality --report report.json
   fascat --json validate motor.usda
   cat motor.usdc | fascat validate -
 
@@ -1258,15 +1261,67 @@ def cmd_validate(
     ctx: typer.Context,
     output_path: Annotated[
         Path,
-        typer.Argument(help="Generated USD or glTF file to validate, or '-' for USD stdin.", allow_dash=True),
+        typer.Argument(
+            help="Generated USD, glTF, OBJ, or STL file to validate, or '-' for USD stdin.", allow_dash=True
+        ),
     ],
+    geometry_quality: Annotated[
+        bool,
+        typer.Option("--geometry-quality", help="Enable all geometry quality checks in the validation report."),
+    ] = False,
+    non_manifold_edges: Annotated[
+        bool,
+        typer.Option("--non-manifold-edges", help="Report non-manifold edge counts."),
+    ] = False,
+    open_boundaries: Annotated[
+        bool,
+        typer.Option("--open-boundaries", help="Report open boundary counts."),
+    ] = False,
+    self_intersections: Annotated[
+        bool,
+        typer.Option("--self-intersections", help="Report self-intersection risk warnings."),
+    ] = False,
+    sliver_triangles: Annotated[
+        bool,
+        typer.Option("--sliver-triangles", help="Report degenerate and sliver triangle stats."),
+    ] = False,
+    tiny_parts: Annotated[
+        bool,
+        typer.Option("--tiny-parts", help="Report tiny part stats."),
+    ] = False,
+    draw_call_estimate: Annotated[
+        bool,
+        typer.Option("--draw-call-estimate", help="Report material count and draw-call estimate."),
+    ] = False,
+    visual_risk: Annotated[
+        bool,
+        typer.Option("--visual-risk", help="Report before/after visual risk warnings."),
+    ] = False,
+    report: Annotated[
+        Path | None,
+        typer.Option("--report", help="Write validation and geometry quality report as JSON."),
+    ] = None,
 ) -> None:
-    """Validate a generated USD or glTF file."""
+    """Validate a generated USD, glTF, OBJ, or STL file."""
     state = _state(ctx)
+    analyze_options = _analyze_options(
+        geometry_quality=geometry_quality,
+        non_manifold_edges=non_manifold_edges,
+        open_boundaries=open_boundaries,
+        self_intersections=self_intersections,
+        sliver_triangles=sliver_triangles,
+        tiny_parts=tiny_parts,
+        draw_call_estimate=draw_call_estimate,
+        visual_risk=visual_risk,
+    )
+    should_analyze = report is not None or _analysis_requested(analyze_options)
     payload = {
         "command": "validate",
         "output": str(output_path),
         "dry_run": state.dry_run,
+        "geometry_quality": geometry_quality,
+        "analysis_options": analyze_options.to_dict() if should_analyze else None,
+        "report": str(report) if report else None,
     }
     _validate_export_output(output_path, ctx, payload)
     if state.dry_run:
@@ -1275,12 +1330,25 @@ def cmd_validate(
 
     _require_existing_file(output_path, "output", ctx, payload)
     try:
-        stats = _validate_output_for_cli(output_path)
+        stats, analysis = _validate_and_analyze_output_for_cli(
+            output_path,
+            analyze_options if should_analyze else None,
+        )
     except Exception as exc:
         _fail(ctx, payload, str(exc))
         raise AssertionError("unreachable") from exc
+    if report is not None and analysis is not None:
+        analysis.write_json(report)
+    json_payload = {**payload, "stats": stats}
+    if analysis is not None:
+        json_payload["analysis"] = analysis.to_dict()
+    message = f"{output_path}: valid {_export_label(output_path)}, {_format_stats(stats)}."
+    if report is not None:
+        message = f"{message} Wrote report {report}."
     _emit(
-        ctx, {**payload, "stats": stats}, f"{output_path}: valid {_export_label(output_path)}, {_format_stats(stats)}."
+        ctx,
+        json_payload,
+        message,
     )
 
 
@@ -1525,6 +1593,42 @@ def _brep_heal_options(
 def _write_tessellation_quality_report(asset: Any, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(asset.tessellation_quality_report(), indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _analyze_options(
+    *,
+    geometry_quality: bool,
+    non_manifold_edges: bool,
+    open_boundaries: bool,
+    self_intersections: bool,
+    sliver_triangles: bool,
+    tiny_parts: bool,
+    draw_call_estimate: bool,
+    visual_risk: bool,
+) -> AnalyzeOptions:
+    return AnalyzeOptions(
+        non_manifold_edges=geometry_quality or non_manifold_edges,
+        open_boundaries=geometry_quality or open_boundaries,
+        self_intersections=geometry_quality or self_intersections,
+        sliver_triangles=geometry_quality or sliver_triangles,
+        tiny_parts=geometry_quality or tiny_parts,
+        draw_call_estimate=geometry_quality or draw_call_estimate,
+        visual_risk=geometry_quality or visual_risk,
+    )
+
+
+def _analysis_requested(options: AnalyzeOptions) -> bool:
+    return any(
+        (
+            options.non_manifold_edges,
+            options.open_boundaries,
+            options.self_intersections,
+            options.sliver_triangles,
+            options.tiny_parts,
+            options.draw_call_estimate,
+            options.visual_risk,
+        )
+    )
 
 
 def _metadata_summary(asset: Any) -> dict[str, int]:
@@ -1792,7 +1896,10 @@ class _temporary_step_file:
             self._handle.close()
 
 
-def _validate_output_for_cli(path: Path) -> dict[str, int]:
+def _validate_and_analyze_output_for_cli(
+    path: Path,
+    options: AnalyzeOptions | None,
+) -> tuple[dict[str, int], AnalysisReport | None]:
     if _is_stdio(path):
         import tempfile
 
@@ -1802,14 +1909,26 @@ def _validate_output_for_cli(path: Path) -> dict[str, int]:
         with tempfile.NamedTemporaryFile(suffix=".usda") as handle:
             handle.write(data)
             handle.flush()
-            return validate_export(handle.name)
-    return validate_export(path)
+            stats = validate_export(handle.name)
+            analysis = (
+                analyze_output(handle.name, options, validation_stats=stats, source_path="-")
+                if options is not None
+                else None
+            )
+            return stats, analysis
+    stats = validate_export(path)
+    analysis = analyze_output(path, options, validation_stats=stats) if options is not None else None
+    return stats, analysis
 
 
 def _export_label(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix in GLTF_SUFFIXES:
         return "glTF"
+    if suffix in OBJ_SUFFIXES:
+        return "OBJ"
+    if suffix in STL_SUFFIXES:
+        return "STL"
     return "USD"
 
 

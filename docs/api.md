@@ -481,6 +481,27 @@ asset.report.write_json("report.json")
 
 The report records options, before/after counts, warnings, errors, and timings for each pipeline step.
 
+Use `Asset.analyze()` when you need geometry quality risks beyond raw part and triangle totals.
+
+```python
+report = asset.analyze(
+    fc.AnalyzeOptions(
+        non_manifold_edges=True,
+        open_boundaries=True,
+        self_intersections=True,
+        sliver_triangles=True,
+        tiny_parts=True,
+        draw_call_estimate=True,
+        visual_risk=True,
+    )
+)
+
+print(report.summary)
+report.write_json("quality-report.json")
+```
+
+The analysis report includes per-part topology counts, degenerate and sliver triangle stats, tiny-part stats, material count, draw-call estimate, and visual-risk warnings derived from mesh quality and before/after pipeline report steps.
+
 ## Validation
 
 Direct write calls produce files but do not automatically reopen and validate them. Validate direct writes explicitly when you need the same safety as `fc.convert()`.
@@ -493,6 +514,14 @@ asset.write_gltf("motor.glb")
 gltf_stats = fc.validate_gltf("motor.glb")
 
 stats = fc.validate_output("motor.glb")
+```
+
+The CLI can write a validation-time quality report for exported assets:
+
+```bash
+fascat validate motor.glb \
+  --geometry-quality \
+  --report quality-report.json
 ```
 
 ## Inspecting assets
