@@ -789,7 +789,7 @@ def cmd_convert(
     ] = False,
     texture_compression: Annotated[
         str | None,
-        typer.Option("--texture-compression", help="Texture compression intent: ktx2 or basisu; no files yet."),
+        typer.Option("--texture-compression", help="Unsupported until a KTX2/Basis encoder backend is integrated."),
     ] = None,
     package: Annotated[
         UsdPackage,
