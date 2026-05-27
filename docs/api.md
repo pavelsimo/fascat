@@ -541,6 +541,8 @@ asset = asset.stage(
             method="conformal",
             iterations=32,
             tolerance=0.001,
+            sharp_to_seam=True,
+            forbid_overlapping=True,
         ),
         atlas=fc.AtlasOptions(
             enabled=True,
@@ -553,9 +555,9 @@ asset = asset.stage(
 
 Atlas support currently records atlas and texture-bake metadata on materials and meshes. It does not write atlas images. Dedicated material baking is a separate optimization step; it emits constant embedded texture maps from material factors and glTF can export those maps as material textures.
 
-Staged meshes also record UV layout quality metadata for each channel: `uvN_domain`, `uvN_bounds`, `uvN_unit_domain_status`, `uvN_validation_status`, `uvN_out_of_unit_vertices`, `uvN_degenerate_faces`, and `uvN_overlap_pairs`. They also record diagnostic unwrap quality fields: `uvN_island_count`, `uvN_pack_efficiency`, `uvN_normalized_pack_efficiency`, `uvN_max_angle_distortion_degrees`, `uvN_mean_angle_distortion_degrees`, `uvN_max_edge_length_distortion`, and `uvN_mean_edge_length_distortion`. UV0 defaults to the `tileable` domain, where overlaps and coordinates outside 0..1 are allowed but still counted. UV1 and `lightmap` channels use the `bake` domain, where overlaps, degenerate UV faces, or coordinates outside 0..1 set `uvN_validation_status` and add stage warnings. Bake-domain channels generated with `unwrap` or `lightmap` also record `uvN_pack_status="missing_repack"` and warn that flattening alone is not a bake-ready repack with padding. Use `uv1="copy_uv0"` when the secondary channel should reuse the generated or existing UV0 layout; staging records `uv1_source_channel="0"` and warns if UV0 is missing. Use `normalize_uvs=(1,)` to rescale selected channels into the 0..1 domain; staging records the original bounds and warns when a requested channel is absent.
+Staged meshes also record UV layout quality metadata for each channel: `uvN_domain`, `uvN_bounds`, `uvN_unit_domain_status`, `uvN_validation_status`, `uvN_out_of_unit_vertices`, `uvN_degenerate_faces`, and `uvN_overlap_pairs`. They also record diagnostic unwrap quality fields: `uvN_island_count`, `uvN_pack_efficiency`, `uvN_normalized_pack_efficiency`, `uvN_max_angle_distortion_degrees`, `uvN_mean_angle_distortion_degrees`, `uvN_max_edge_length_distortion`, and `uvN_mean_edge_length_distortion`. UV0 defaults to the `tileable` domain, where overlaps and coordinates outside 0..1 are allowed but still counted. UV1 and `lightmap` channels use the `bake` domain, where overlaps, degenerate UV faces, or coordinates outside 0..1 set `uvN_validation_status` and add stage warnings. Bake-domain channels generated with `unwrap` or `lightmap` also record `uvN_pack_status="missing_repack"` and warn that flattening alone is not a bake-ready repack with padding. Unity-style UV policy controls are recorded per channel as `uvN_sharp_to_seam_requested`, `uvN_sharp_to_seam_enforced`, `uvN_forbid_overlapping_requested`, `uvN_forbid_overlapping_effective`, and `uvN_forbid_overlapping_status`; the current xatlas path records sharp-edge seam and forbid-overlap controls as intent and validates resulting UVs after generation. Use `uv1="copy_uv0"` when the secondary channel should reuse the generated or existing UV0 layout; staging records `uv1_source_channel="0"` and warns if UV0 is missing. Use `normalize_uvs=(1,)` to rescale selected channels into the 0..1 domain; staging records the original bounds and warns when a requested channel is absent.
 
-When `uv0` or `uv1` uses `unwrap` or `lightmap`, fascat currently uses the optional xatlas backend. `method`, `iterations`, and `tolerance` record Unity-style solver intent for conformal or isometric unwrapping and solver stopping criteria. The current xatlas integration does not expose those controls directly, and Fascat does not yet expose a separate repack/padding backend for bake UVs, so non-default solver values and missing bake repack work are reported instead of pretending those steps ran.
+When `uv0` or `uv1` uses `unwrap` or `lightmap`, fascat currently uses the optional xatlas backend. `method`, `iterations`, `tolerance`, `sharp_to_seam`, and `forbid_overlapping` record Unity-style solver and policy intent. The current xatlas integration does not expose those controls directly, and Fascat does not yet expose a separate repack/padding backend for bake UVs, so non-default solver values, UV policy requests, and missing bake repack work are reported instead of pretending those steps ran.
 
 Staging, UV, and material parameters:
 
@@ -575,6 +577,8 @@ Staging, UV, and material parameters:
 | `UnwrapOptions` | `method` | Requested unwrap solver intent: `default`, `conformal`, or `isometric`. Non-default values are recorded as intent with the xatlas backend. |
 | `UnwrapOptions` | `iterations` | Requested unwrap solver iteration budget. Recorded as intent until a backend exposes this control. |
 | `UnwrapOptions` | `tolerance` | Requested unwrap solver error threshold. Recorded as intent until a backend exposes this control. |
+| `UnwrapOptions` | `sharp_to_seam` | Request sharp edges as UV seams for unwrap/lightmap channels. Recorded as intent until a backend exposes explicit seam policy controls. |
+| `UnwrapOptions` | `forbid_overlapping` | Request non-overlapping UV islands. Current backends validate and warn about overlaps instead of guaranteeing repacking. |
 | `AtlasOptions` | `enabled` | Record atlas metadata and prepare materials for later baking. |
 | `AtlasOptions` | `max_size` | Maximum atlas texture size in pixels. |
 

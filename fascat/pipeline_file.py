@@ -179,6 +179,8 @@ _STAGE_KEYS = frozenset(
         "unwrap_method",
         "unwrap_iterations",
         "unwrap_tolerance",
+        "sharp_to_seam",
+        "forbid_overlapping",
         "atlas",
         "atlas_size",
         "max_size",
@@ -876,6 +878,8 @@ def _stage_options(values: dict[str, object]) -> StageOptions:
             method=cast(Any, _literal(values.get("unwrap_method", "default"))),
             iterations=_as_optional_int(values.get("unwrap_iterations")),
             tolerance=_as_optional_float(values.get("unwrap_tolerance")),
+            sharp_to_seam=bool(values.get("sharp_to_seam", False)),
+            forbid_overlapping=bool(values.get("forbid_overlapping", False)),
         ),
         atlas=AtlasOptions(
             enabled=bool(values.get("atlas", False)),

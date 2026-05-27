@@ -730,6 +730,8 @@ def test_pipeline_stage_unwrap_solver_controls_are_parsed() -> None:
                     "unwrap_method": "isometric",
                     "unwrap_iterations": 16,
                     "unwrap_tolerance": 0.001,
+                    "sharp_to_seam": True,
+                    "forbid_overlapping": True,
                 }
             ]
         }
@@ -746,6 +748,8 @@ def test_pipeline_stage_unwrap_solver_controls_are_parsed() -> None:
         "method": "isometric",
         "iterations": 16,
         "tolerance": 0.001,
+        "sharp_to_seam": True,
+        "forbid_overlapping": True,
     }
 
 

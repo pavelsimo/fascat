@@ -103,6 +103,10 @@ that are currently conservative approximations.
 - Degenerate-polygon cleanup is now available as a standalone Unity-style
   operation through Python, CLI flags, and TOML pipelines with area-threshold
   controls, scoped selection support, no-op reports, and before/after counts.
+- Unity-style UV policy controls for sharp edges as seams and forbidden overlap
+  are now exposed through Python, CLI flags, and TOML pipelines, with
+  per-channel requested/enforced metadata and warnings when the xatlas backend
+  can only record policy intent.
 - Conversion reports now include a resolved conversion manifest with the
   effective profile, import options, direct or pipeline operation settings, and
   export settings needed to reproduce a run.
@@ -150,7 +154,7 @@ Function-level parity notes from the linked Unity pages:
 | Merge vertices | Standalone `merge_vertices` is exposed across Python, CLI, and TOML with normals, tangents, UV, and material-boundary protection plus before/after reports. | Add topology-only connectivity merging that can preserve hard-edge, UV, and material seams as split render attributes; also add stronger cross-bucket tolerance merging and richer reports for skipped merges by protection reason. |
 | Delete degenerate polygons | Standalone `delete_degenerate_polygons` is exposed across Python, CLI, and TOML with area-threshold controls, selection support, no-op reports, unit-aware area reporting, and before/after counts. | Extend cleanup beyond zero-area triangles to tolerance-based overlapping or z-fighting polygons. |
 | Decimate to target | Target count, ratio, UV-importance modes, topology intent, RAM estimates, and measured-error reports exist. | Add real global target allocation, configurable iterative thresholds/pass reports, enforced geometric error bounds, and AO/user-weighted decimation. |
-| Unwrap UV | UV0/UV1 unwrap intent, solver method, iteration, tolerance, distortion, and packing diagnostics are represented. | Add destination-channel control, sharp-edge seam and forbid-overlap policies, create-seams-from-lines-of-interest, seam graph metadata, island merge/alignment, and real repack/padding/share-map controls. |
+| Unwrap UV | UV0/UV1 unwrap intent, solver method, iteration, tolerance, sharp-edge seam and forbid-overlap policy intent, distortion, and packing diagnostics are represented. | Add destination-channel control, backend-enforced seam policies, create-seams-from-lines-of-interest, seam graph metadata, island merge/alignment, and real repack/padding/share-map controls. |
 
 Second-pass gaps from the Unity references:
 
@@ -196,9 +200,10 @@ Second-pass gaps from the Unity references:
   optionally creating seams from LoI, unwrapping, merging, aligning, repacking,
   and normalizing should be modeled as distinct UV steps with per-channel
   metadata.
-- Track Unity's automatic UV mapping controls explicitly: sharp edges as seams
-  and forbidden overlap should be first-class UV policies, with report warnings
-  when the active backend cannot enforce them.
+- Unity-style automatic UV mapping controls are now explicit: sharp edges as
+  seams and forbidden overlap are first-class UV policies with per-channel
+  requested/enforced metadata. Remaining work is backend-enforced seam and
+  overlap prevention rather than intent plus validation.
 - Expose Unity-style function-level repair steps where useful. `repair` can stay
   the high-level default, but face orientation, normal orientation, and patch
   cleanup still need standalone operations for reproducible expert pipelines.
@@ -254,7 +259,7 @@ Parity gaps to track:
 5. UV staging
    - Extend existing box UVs into Unity-style AABB projection controls: local versus shared/global AABB, real-world UV scale or `uv3dSize`, destination channel, override policy, and unit reporting.
    - Add UV segmentation and seam planning, including sharp-edge seams, material-boundary seams, user-supplied seam curves, and lines of interest.
-   - Expose automatic UV mapping policy controls equivalent to Unity's `sharpToSeam` and `forbidOverlapping`, with per-channel report fields for requested and enforced behavior.
+   - Automatic UV mapping policy controls equivalent to Unity's `sharpToSeam` and `forbidOverlapping` are now exposed across Python, CLI, TOML pipelines, metadata, and reports. The current xatlas backend records them as intent and validates overlaps after generation; remaining work is backend-enforced seam and overlap prevention.
    - Add a complete UV workflow model: segment, unwrap, optionally merge islands, align tileable UV0 islands, repack UV1, normalize, validate overlaps, and record which steps ran per channel.
    - Add lines-of-interest seam controls equivalent to Unity's create-seams-from-LoI path, with persisted seam graph metadata and warnings when the backend falls back to existing UV islands.
    - Staging now warns when bake-domain UVs were only unwrapped and not repacked, because unwrap alone does not prove islands were packed into `[0,1]` with padding for lightmap, AO, or material baking.
@@ -404,7 +409,7 @@ These need more design and should not be mixed into documentation or diagnostics
    - Tangent lifecycle validation now reports generated, regenerated, preserved, invalidated, missing-UV0, and dropped tangent states, with explicit override support for forced regeneration.
    - UV0-to-UV1 copy now records source-channel and missing-source metadata, and emits a warning when the source channel is unavailable.
    - UV normalization now rescales selected channels into 0..1 and records original bounds plus missing-channel warnings.
-   - Remaining polish: add seam segmentation, backend-enforced solver controls, island merging, and real packing.
+   - Remaining polish: add seam segmentation, backend-enforced solver/policy controls, island merging, and real packing.
 
 10. Instance reconstruction - exact mesh pass complete
    - `optimize_scene(instance_policy="auto"|"preserve")` now reconstructs shared instances for separately modeled parts with matching mesh fingerprints, vertex attributes, material assignments, and metadata.

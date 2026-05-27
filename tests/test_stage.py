@@ -559,7 +559,13 @@ def test_stage_unwrap_uv_uses_xatlas_backend() -> None:
         StageOptions(
             uv0="unwrap",
             uv1="unwrap",
-            unwrap=UnwrapOptions(method="conformal", iterations=8, tolerance=0.01),
+            unwrap=UnwrapOptions(
+                method="conformal",
+                iterations=8,
+                tolerance=0.01,
+                sharp_to_seam=True,
+                forbid_overlapping=True,
+            ),
         )
     )
     staged_mesh = staged.parts["part"].mesh
@@ -574,10 +580,48 @@ def test_stage_unwrap_uv_uses_xatlas_backend() -> None:
     assert staged_mesh.metadata["uv0_unwrap_iterations_status"] == "intent"
     assert staged_mesh.metadata["uv0_unwrap_tolerance"] == "0.01"
     assert staged_mesh.metadata["uv0_unwrap_tolerance_status"] == "intent"
+    assert staged_mesh.metadata["uv0_sharp_to_seam_requested"] == "true"
+    assert staged_mesh.metadata["uv0_sharp_to_seam_enforced"] == "false"
+    assert staged_mesh.metadata["uv0_sharp_to_seam_status"] == "intent"
+    assert staged_mesh.metadata["uv0_forbid_overlapping_requested"] == "true"
+    assert staged_mesh.metadata["uv0_forbid_overlapping_effective"] == "true"
+    assert staged_mesh.metadata["uv0_forbid_overlapping_enforced"] == "false"
+    assert staged_mesh.metadata["uv0_forbid_overlapping_status"] == "validated_not_enforced"
+    assert staged.metadata["stage_uv_policy_intent_channels"] == "4"
+    assert staged.report.steps[-1].after["stage_uv_policy_intent_channels"] == 4
     assert sorted(staged_mesh.uvs) == [0, 1]
     assert any(
         "records method, iteration, and tolerance controls as intent" in warning for warning in staged.report.warnings
     )
+    assert any(
+        "records sharp-to-seam, forbid-overlapping UV policy controls as intent" in warning
+        for warning in staged.report.warnings
+    )
+
+
+def test_stage_records_forbid_overlapping_policy_for_tileable_uv0() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [1, 3, 2]], dtype=int),
+        uvs={0: np.array([[0, 0], [1, 0], [0, 1], [0.8, 0.1]], dtype=float)},
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    staged = asset.stage(StageOptions(uv0="none", uv1=None, unwrap=UnwrapOptions(forbid_overlapping=True)))
+    staged_mesh = staged.parts["part"].mesh
+
+    assert staged_mesh is not None
+    assert staged_mesh.metadata["uv0_domain"] == "tileable"
+    assert staged_mesh.metadata["uv0_forbid_overlapping_requested"] == "true"
+    assert staged_mesh.metadata["uv0_forbid_overlapping_effective"] == "true"
+    assert staged_mesh.metadata["uv0_forbid_overlapping_status"] == "violation"
+    assert staged_mesh.metadata["uv0_validation_status"] == "overlap_pairs"
+    assert staged.metadata["stage_uv_forbid_overlapping_violations"] == "1"
+    assert staged.report.steps[-1].after["stage_uv_forbid_overlapping_violations"] == 1
+    assert any("violates requested forbid-overlapping UV policy" in warning for warning in staged.report.warnings)
 
 
 @pytest.mark.requires_xatlas

@@ -760,6 +760,20 @@ def cmd_convert(
         float | None,
         typer.Option("--unwrap-tolerance", help="Requested unwrap solver tolerance metadata."),
     ] = None,
+    uv_sharp_to_seam: Annotated[
+        bool,
+        typer.Option(
+            "--uv-sharp-to-seam/--uv-no-sharp-to-seam",
+            help="Request sharp edges as UV seams for unwrap and lightmap channels.",
+        ),
+    ] = False,
+    uv_forbid_overlapping: Annotated[
+        bool,
+        typer.Option(
+            "--uv-forbid-overlapping/--uv-allow-overlapping",
+            help="Request non-overlapping UV islands and report overlaps as policy violations.",
+        ),
+    ] = False,
     atlas: Annotated[bool, typer.Option("--atlas", help="Tag materials and UVs for a generated atlas.")] = False,
     atlas_size: Annotated[int, typer.Option("--atlas-size", help="Maximum atlas texture size.")] = 4096,
     metadata: Annotated[
@@ -1170,6 +1184,8 @@ def cmd_convert(
         "unwrap_method": unwrap_method.value,
         "unwrap_iterations": unwrap_iterations,
         "unwrap_tolerance": unwrap_tolerance,
+        "uv_sharp_to_seam": uv_sharp_to_seam,
+        "uv_forbid_overlapping": uv_forbid_overlapping,
         "atlas": atlas,
         "atlas_size": atlas_size,
         "metadata": metadata.value,
@@ -1482,6 +1498,8 @@ def cmd_convert(
                 method=unwrap_method.value,
                 iterations=unwrap_iterations,
                 tolerance=unwrap_tolerance,
+                sharp_to_seam=uv_sharp_to_seam,
+                forbid_overlapping=uv_forbid_overlapping,
             ),
             atlas=AtlasOptions(enabled=atlas, max_size=atlas_size),
             uv0=uv0.value,

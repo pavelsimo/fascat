@@ -12,6 +12,8 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
     result = asset.copy(keep_source=True)
     uv_summary = {
         "bake_missing_repack": 0,
+        "policy_intent": 0,
+        "forbid_overlapping_violations": 0,
     }
     tangent_summary = {
         "generated": 0,
@@ -28,6 +30,7 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
         _require_xatlas()
     if options.uv0 in {"unwrap", "lightmap"} or options.uv1 in {"unwrap", "lightmap"}:
         _warn_unwrap_solver_limits(result, options)
+        _warn_uv_policy_limits(result, options)
     if options.merge_equivalent_materials:
         _merge_equivalent_materials(result, selected_part_ids=selected_part_ids)
     if options.material_mode == "pbr":
@@ -99,7 +102,7 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
         )
         if options.validate_normals:
             mesh.validate_normals(require_tangents=options.tangents)
-        uv_summary["bake_missing_repack"] += _tag_uv_layout_quality(result, part.id, mesh, uv_modes)
+        _tag_uv_layout_quality(result, part.id, mesh, uv_modes, options, uv_summary)
         part.mesh = mesh
         part.fingerprint = mesh.fingerprint()
     _tag_uv_summary(result, uv_summary)
@@ -217,6 +220,14 @@ def _tag_uv_metadata(mesh: Mesh, channel: int, mode: str, options: StageOptions)
         if options.unwrap.tolerance is not None:
             mesh.metadata[f"{prefix}_unwrap_tolerance"] = str(options.unwrap.tolerance)
             mesh.metadata[f"{prefix}_unwrap_tolerance_status"] = "intent"
+        mesh.metadata[f"{prefix}_sharp_to_seam_requested"] = str(options.unwrap.sharp_to_seam).lower()
+        mesh.metadata[f"{prefix}_sharp_to_seam_enforced"] = "false"
+        mesh.metadata[f"{prefix}_sharp_to_seam_status"] = "intent" if options.unwrap.sharp_to_seam else "not_requested"
+        mesh.metadata[f"{prefix}_forbid_overlapping_requested"] = str(options.unwrap.forbid_overlapping).lower()
+        mesh.metadata[f"{prefix}_forbid_overlapping_enforced"] = "false"
+        mesh.metadata[f"{prefix}_forbid_overlapping_status"] = (
+            "intent" if options.unwrap.forbid_overlapping else "domain_default"
+        )
     if options.atlas.enabled:
         mesh.metadata[f"{prefix}_atlas"] = "atlas_0"
         mesh.metadata[f"{prefix}_atlas_size"] = str(options.atlas.max_size)
@@ -353,15 +364,37 @@ def _warn_unwrap_solver_limits(asset: Asset, options: StageOptions) -> None:
     )
 
 
-def _tag_uv_layout_quality(asset: Asset, part_id: str, mesh: Mesh, uv_modes: dict[int, str]) -> int:
-    bake_missing_repack = 0
+def _warn_uv_policy_limits(asset: Asset, options: StageOptions) -> None:
+    policies = []
+    if options.unwrap.sharp_to_seam:
+        policies.append("sharp-to-seam")
+    if options.unwrap.forbid_overlapping:
+        policies.append("forbid-overlapping")
+    if not policies:
+        return
+    asset.report.add_warning(
+        f"xatlas unwrap backend records {', '.join(policies)} UV policy controls as intent; "
+        "the current backend does not expose those controls, so Fascat validates resulting UVs after generation"
+    )
+
+
+def _tag_uv_layout_quality(
+    asset: Asset,
+    part_id: str,
+    mesh: Mesh,
+    uv_modes: dict[int, str],
+    options: StageOptions,
+    uv_summary: dict[str, int],
+) -> None:
     for channel in sorted(mesh.uvs):
         prefix = f"uv{channel}"
         mode = uv_modes.get(channel, str(mesh.metadata.get(f"{prefix}_mode", mesh.metadata.get(prefix, "existing"))))
         stats = mesh.uv_layout_stats(channel)
         distortion = mesh.uv_distortion_metrics(channel)
         domain = _uv_domain(channel, mode)
-        validation_problems = _uv_validation_problems(stats, domain=domain)
+        forbid_overlapping = options.unwrap.forbid_overlapping or domain == "bake"
+        validation_problems = _uv_validation_problems(stats, domain=domain, forbid_overlapping=forbid_overlapping)
+        _tag_uv_policy_metadata(mesh, prefix, mode, domain, stats, options, uv_summary)
         mesh.metadata[f"{prefix}_domain"] = domain
         mesh.metadata[f"{prefix}_bounds"] = _uv_bounds(mesh.uvs[channel])
         mesh.metadata[f"{prefix}_unit_domain_status"] = _uv_unit_domain_status(stats["out_of_unit_vertices"])
@@ -390,9 +423,14 @@ def _tag_uv_layout_quality(asset: Asset, part_id: str, mesh: Mesh, uv_modes: dic
         )
         mesh.metadata[f"{prefix}_workflow_steps"] = _uv_workflow_steps(mesh, prefix, mode)
         if domain != "bake":
+            if options.unwrap.forbid_overlapping and stats["overlapping_face_pairs"]:
+                asset.report.add_warning(
+                    f"part {part_id} {prefix} violates requested forbid-overlapping UV policy: "
+                    f"{stats['overlapping_face_pairs']} overlapping UV face pairs"
+                )
             continue
         if mode in {"unwrap", "lightmap"}:
-            bake_missing_repack += 1
+            uv_summary["bake_missing_repack"] += 1
             mesh.metadata[f"{prefix}_pack_status"] = "missing_repack"
             mesh.metadata[f"{prefix}_padding_status"] = "metadata_only"
             asset.report.add_warning(
@@ -404,13 +442,60 @@ def _tag_uv_layout_quality(asset: Asset, part_id: str, mesh: Mesh, uv_modes: dic
             asset.report.add_warning(
                 f"part {part_id} {prefix} violates lightmap/baking constraints: {', '.join(problems)}"
             )
-    return bake_missing_repack
+
+
+def _tag_uv_policy_metadata(
+    mesh: Mesh,
+    prefix: str,
+    mode: str,
+    domain: str,
+    stats: dict[str, int],
+    options: StageOptions,
+    uv_summary: dict[str, int],
+) -> None:
+    sharp_applicable = mode in {"unwrap", "lightmap"}
+    if f"{prefix}_sharp_to_seam_requested" not in mesh.metadata:
+        mesh.metadata[f"{prefix}_sharp_to_seam_requested"] = str(options.unwrap.sharp_to_seam).lower()
+        mesh.metadata[f"{prefix}_sharp_to_seam_enforced"] = "false"
+        if options.unwrap.sharp_to_seam and sharp_applicable:
+            mesh.metadata[f"{prefix}_sharp_to_seam_status"] = "intent"
+        elif options.unwrap.sharp_to_seam:
+            mesh.metadata[f"{prefix}_sharp_to_seam_status"] = "not_applicable"
+        else:
+            mesh.metadata[f"{prefix}_sharp_to_seam_status"] = "not_requested"
+    if options.unwrap.sharp_to_seam and sharp_applicable:
+        uv_summary["policy_intent"] += 1
+
+    requested_forbid = options.unwrap.forbid_overlapping
+    effective_forbid = requested_forbid or domain == "bake"
+    overlap_pairs = stats["overlapping_face_pairs"]
+    mesh.metadata[f"{prefix}_forbid_overlapping_requested"] = str(requested_forbid).lower()
+    mesh.metadata[f"{prefix}_forbid_overlapping_effective"] = str(effective_forbid).lower()
+    mesh.metadata[f"{prefix}_forbid_overlapping_enforced"] = "false"
+    if not effective_forbid:
+        status = "not_requested"
+    elif overlap_pairs:
+        status = "violation"
+        uv_summary["forbid_overlapping_violations"] += 1
+    elif requested_forbid:
+        status = "validated_not_enforced"
+    else:
+        status = "domain_default"
+    mesh.metadata[f"{prefix}_forbid_overlapping_status"] = status
+    if requested_forbid and mode in {"unwrap", "lightmap"}:
+        uv_summary["policy_intent"] += 1
 
 
 def _tag_uv_summary(asset: Asset, uv_summary: dict[str, int]) -> None:
     missing = uv_summary["bake_missing_repack"]
     if missing:
         asset.metadata["stage_bake_uv_channels_missing_repack"] = str(missing)
+    policy_intent = uv_summary["policy_intent"]
+    if policy_intent:
+        asset.metadata["stage_uv_policy_intent_channels"] = str(policy_intent)
+    forbid_violations = uv_summary["forbid_overlapping_violations"]
+    if forbid_violations:
+        asset.metadata["stage_uv_forbid_overlapping_violations"] = str(forbid_violations)
 
 
 def _uv_workflow_steps(mesh: Mesh, prefix: str, mode: str) -> str:
@@ -450,13 +535,13 @@ def _uv_unit_domain_status(out_of_unit_vertices: int) -> str:
     return "ok" if out_of_unit_vertices == 0 else "outside_0_1"
 
 
-def _uv_validation_problems(stats: dict[str, int], *, domain: str) -> list[str]:
+def _uv_validation_problems(stats: dict[str, int], *, domain: str, forbid_overlapping: bool = False) -> list[str]:
     problems: list[str] = []
     if domain == "bake" and stats["out_of_unit_vertices"]:
         problems.append("outside_0_1")
     if stats["degenerate_faces"]:
         problems.append("degenerate_faces")
-    if domain == "bake" and stats["overlapping_face_pairs"]:
+    if forbid_overlapping and stats["overlapping_face_pairs"]:
         problems.append("overlap_pairs")
     return problems
 

@@ -139,6 +139,8 @@ def test_convert_help() -> None:
     assert "--unwrap-method" in plain(result.output)
     assert "--unwrap-iterations" in plain(result.output)
     assert "--unwrap-tolerance" in plain(result.output)
+    assert "--uv-sharp-to-seam" in plain(result.output)
+    assert "--uv-forbid-overlapping" in plain(result.output)
     assert "--remove-holes" in plain(result.output)
     assert "--remove-occluded" in plain(result.output)
     assert "--explode" in plain(result.output)
@@ -180,6 +182,8 @@ def test_convert_dry_run_json() -> None:
     assert payload["unwrap_method"] == "default"
     assert payload["unwrap_iterations"] is None
     assert payload["unwrap_tolerance"] is None
+    assert payload["uv_sharp_to_seam"] is False
+    assert payload["uv_forbid_overlapping"] is False
     diagnostics = {item["operation"]: item for item in payload["operation_diagnostics"]}
     assert diagnostics["import"]["level"] == "exact"
     assert diagnostics["tessellate"]["level"] == "exact"
@@ -999,6 +1003,8 @@ def test_convert_writes_tessellation_quality_report(monkeypatch, tmp_path: Path)
         assert stage.unwrap.method == "isometric"
         assert stage.unwrap.iterations == 32
         assert stage.unwrap.tolerance == 0.001
+        assert stage.unwrap.sharp_to_seam is True
+        assert stage.unwrap.forbid_overlapping is True
         return asset
 
     monkeypatch.setattr(cli, "_convert_for_cli", fake_convert)
@@ -1024,6 +1030,8 @@ def test_convert_writes_tessellation_quality_report(monkeypatch, tmp_path: Path)
             "32",
             "--unwrap-tolerance",
             "0.001",
+            "--uv-sharp-to-seam",
+            "--uv-forbid-overlapping",
             "--quality-report",
             str(quality_file),
         ],

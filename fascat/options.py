@@ -252,6 +252,8 @@ class UnwrapOptions:
     method: UnwrapMethod = "default"
     iterations: int | None = None
     tolerance: float | None = None
+    sharp_to_seam: bool = False
+    forbid_overlapping: bool = False
 
     def __post_init__(self) -> None:
         if self.texel_density is not None and self.texel_density <= 0.0:

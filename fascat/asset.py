@@ -1179,6 +1179,16 @@ def _stage_report_stats(asset: Asset) -> dict[str, int]:
             asset.metadata["stage_bake_uv_channels_missing_repack"],
             0,
         )
+    if "stage_uv_policy_intent_channels" in asset.metadata:
+        stats["stage_uv_policy_intent_channels"] = _metadata_int(
+            asset.metadata["stage_uv_policy_intent_channels"],
+            0,
+        )
+    if "stage_uv_forbid_overlapping_violations" in asset.metadata:
+        stats["stage_uv_forbid_overlapping_violations"] = _metadata_int(
+            asset.metadata["stage_uv_forbid_overlapping_violations"],
+            0,
+        )
     return stats
 
 
