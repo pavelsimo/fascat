@@ -117,3 +117,53 @@ def test_lods_can_omit_tiny_parts_at_lower_screen_coverage() -> None:
     assert with_lods.parts["cube"].lod_meshes[0].triangle_count > 0
     assert with_lods.parts["cube"].lod_meshes[1].triangle_count == 0
     assert with_lods.parts["cube"].lod_meshes[1].metadata["lod_omitted"] == "tiny_part"
+
+
+def test_lods_warn_when_selected_parts_have_no_mesh() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="mesh_node", name="Mesh", part_id="mesh"),
+                Node(id="empty_node", name="Untessellated", part_id="empty"),
+            ],
+        ),
+        parts={
+            "mesh": Part(id="mesh", name="Mesh", mesh=mesh),
+            "empty": Part(id="empty", name="Untessellated", mesh=None),
+        },
+    )
+
+    with_lods = asset.lods(LODOptions((0.5,)))
+    warnings = with_lods.report.steps[-1].warnings
+
+    assert len(with_lods.parts["mesh"].lod_meshes) == 1
+    assert with_lods.parts["empty"].lod_meshes == []
+    assert with_lods.parts["empty"].metadata["lod_status"] == "skipped_no_mesh"
+    assert with_lods.metadata["lod_generated_parts"] == "1"
+    assert with_lods.metadata["lod_skipped_no_mesh_parts"] == "1"
+    assert len(warnings) == 1
+    assert "LOD generation skipped part without tessellated mesh: Untessellated" in warnings[0]
+
+
+def test_lods_warn_when_no_tessellated_parts_match() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="empty_node", name="Untessellated", part_id="empty")]),
+        parts={"empty": Part(id="empty", name="Untessellated", mesh=None)},
+    )
+
+    with_lods = asset.lods(LODOptions((0.5,)))
+    warnings = with_lods.report.steps[-1].warnings
+
+    assert with_lods.parts["empty"].lod_meshes == []
+    assert with_lods.parts["empty"].metadata["lod_status"] == "skipped_no_mesh"
+    assert with_lods.metadata["lod_generated_parts"] == "0"
+    assert with_lods.metadata["lod_skipped_no_mesh_parts"] == "1"
+    assert len(warnings) == 2
+    assert "LOD generation skipped part without tessellated mesh: Untessellated" in warnings[0]
+    assert warnings[1] == "LOD generation matched no tessellated mesh-bearing parts"

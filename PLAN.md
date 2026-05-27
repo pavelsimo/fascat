@@ -155,7 +155,7 @@ Parity gaps to track:
    - Add far-LOD generation that can merge to one mesh and one baked material for one-draw-call distant rendering.
    - Add LOD validation for screen coverage, monotonic triangle reduction, material simplification, switching distances, and export runtime behavior.
    - Add LOD generation reports that show whether each level reused instances, merged materials, baked textures, or changed culling granularity.
-   - Report non-mesh or untessellated selections that are skipped during LOD chain generation instead of quietly producing partial chains.
+   - Non-mesh or untessellated selections are now skipped with part metadata, generated/skipped counts, and report warnings instead of quietly producing partial chains.
    - Add engine-specific LOD export metadata or profiles for Unity, Unreal, and standards-based glTF runtimes, including switching-distance validation.
 
 10. Export parity

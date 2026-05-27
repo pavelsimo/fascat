@@ -10,12 +10,18 @@ from fascat.options import LODOptions
 def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str] | None = None) -> Asset:
     result = asset.copy(keep_source=True)
     screen_coverage = _screen_coverage(options)
+    generated_parts = 0
+    skipped_parts = 0
     for part in result.parts.values():
         if selected_part_ids is not None and part.id not in selected_part_ids:
             continue
         part.lod_meshes = []
         if part.mesh is None:
+            skipped_parts += 1
+            part.metadata["lod_status"] = "skipped_no_mesh"
+            result.report.add_warning(f"LOD generation skipped part without tessellated mesh: {part.name}")
             continue
+        generated_parts += 1
         previous_count = part.mesh.triangle_count
         diagonal = _mesh_diagonal(part.mesh)
         for index, ratio in enumerate(options.ratios):
@@ -55,6 +61,10 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
         }
     result.metadata["lod_mode"] = options.mode
     result.metadata["lod_screen_coverage"] = ",".join(f"{value:.9g}" for value in screen_coverage)
+    result.metadata["lod_generated_parts"] = str(generated_parts)
+    result.metadata["lod_skipped_no_mesh_parts"] = str(skipped_parts)
+    if generated_parts == 0 and skipped_parts:
+        result.report.add_warning("LOD generation matched no tessellated mesh-bearing parts")
     if options.validate:
         _validate_lods(result, selected_part_ids=selected_part_ids)
     return result

@@ -537,6 +537,22 @@ def test_run_lod_generators_records_screen_coverage_metadata() -> None:
     assert with_lods.report.steps[-1].name == "run_lod_generators"
 
 
+def test_run_lod_generators_warns_for_untessellated_parts() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="empty", name="Untessellated", part_id="empty")]),
+        parts={"empty": Part(id="empty", name="Untessellated", mesh=None)},
+    )
+
+    with_lods = asset.run_lod_generators(LODGeneratorOptions(levels=(LODLevel(screen_coverage=0.5, target_ratio=0.5),)))
+    warnings = with_lods.report.steps[-1].warnings
+
+    assert with_lods.parts["empty"].metadata["lod_status"] == "skipped_no_mesh"
+    assert with_lods.metadata["lod_skipped_no_mesh_parts"] == "1"
+    assert with_lods.report.steps[-1].name == "run_lod_generators"
+    assert any("LOD generation skipped part without tessellated mesh" in warning for warning in warnings)
+    assert any("matched no tessellated mesh-bearing parts" in warning for warning in warnings)
+
+
 def test_cli_convert_accepts_optimization_action_options_during_dry_run() -> None:
     result = runner.invoke(
         app,

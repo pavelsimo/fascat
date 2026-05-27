@@ -597,6 +597,8 @@ asset = asset.run_lod_generators(
 
 Material baking currently creates a shared flat material and constant embedded texture maps from material factors; it does not rasterize source textures into atlases. Hole removal uses deterministic mesh boundary classification and filling when BREP feature editing is unavailable. Occlusion removal uses deterministic visibility sampling, so the report records that thin occluders can require higher precision and asset metadata records the measured sample coverage, direction coverage, and confidence score. Decimation records `decimate_requested_keep_ratio` metadata when a requested ratio can be derived, and warns when the request keeps less than 20% of source triangles because those settings are usually appropriate for distant LODs rather than close-view LOD0 assets. `uv_importance="ignore"` strips UV/tangent attributes before simplification; `"preserve_seams"` uses UVs for seam preservation and then strips them; `"preserve_islands"` keeps UVs through the output.
 
+LOD generation skips parts that do not have tessellated meshes, records `lod_status="skipped_no_mesh"` on those parts, and adds report warnings so partial LOD chains are visible. Asset metadata records `lod_generated_parts` and `lod_skipped_no_mesh_parts`.
+
 Optimization action parameters:
 
 | Option | Parameter | Meaning |
