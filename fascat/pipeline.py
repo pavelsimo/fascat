@@ -52,6 +52,9 @@ if TYPE_CHECKING:
 
 USD_SUFFIXES = {".usd", ".usda", ".usdc", ".usdz"}
 ExportFormat = Literal["usd", "gltf", "obj", "stl"]
+_LOAD_ESTIMATE_BYTES_PER_MS = 50_000
+_LOAD_ESTIMATE_VERTEX_BYTES = 32
+_LOAD_ESTIMATE_TRIANGLE_INDEX_BYTES = 12
 
 
 def convert(
@@ -346,6 +349,21 @@ def _add_profile_budget_report(asset: Asset, profile: ConversionProfile) -> None
                 f"profile budget exceeded for {profile.name}: estimated texture memory "
                 f"{estimated_bytes} bytes > {budget_bytes} bytes"
             )
+    if budget.max_load_time_ms is not None:
+        load_time = _estimated_load_time(asset)
+        over = max(0, load_time["estimated_ms"] - budget.max_load_time_ms)
+        after["profile_load_time_budget_ms"] = budget.max_load_time_ms
+        after["profile_estimated_load_time_ms"] = load_time["estimated_ms"]
+        after["profile_load_time_file_bytes"] = load_time["file_bytes"]
+        after["profile_load_time_geometry_bytes"] = load_time["geometry_bytes"]
+        after["profile_load_time_texture_bytes"] = load_time["texture_bytes"]
+        after["profile_load_time_over_budget_ms"] = over
+        if over:
+            violations += 1
+            warnings.append(
+                f"profile budget exceeded for {profile.name}: estimated load time "
+                f"{load_time['estimated_ms']}ms > {budget.max_load_time_ms}ms"
+            )
     if budget.max_draw_calls is not None:
         after["profile_draw_call_budget"] = budget.max_draw_calls
         over = max(0, asset.draw_call_count - budget.max_draw_calls)
@@ -383,6 +401,45 @@ def _estimated_texture_memory(asset: Asset) -> tuple[int, int]:
         texture_count += count
         estimated_bytes += resolution * resolution * 4 * count
     return texture_count, estimated_bytes
+
+
+def _estimated_load_time(asset: Asset) -> dict[str, int]:
+    _texture_count, texture_bytes = _estimated_texture_memory(asset)
+    geometry_bytes = _estimated_geometry_bytes(asset)
+    file_bytes = _output_file_size_bytes(asset)
+    estimated_ms = _ceil_div(file_bytes + geometry_bytes + texture_bytes, _LOAD_ESTIMATE_BYTES_PER_MS)
+    estimated_ms += asset.draw_call_count
+    return {
+        "estimated_ms": estimated_ms,
+        "file_bytes": file_bytes,
+        "geometry_bytes": geometry_bytes,
+        "texture_bytes": texture_bytes,
+    }
+
+
+def _estimated_geometry_bytes(asset: Asset) -> int:
+    vertex_count = 0
+    triangle_count = 0
+    for part in asset.parts.values():
+        if part.mesh is not None:
+            vertex_count += part.mesh.vertex_count
+            triangle_count += part.mesh.triangle_count
+        for lod_mesh in part.lod_meshes:
+            vertex_count += lod_mesh.vertex_count
+            triangle_count += lod_mesh.triangle_count
+    return vertex_count * _LOAD_ESTIMATE_VERTEX_BYTES + triangle_count * _LOAD_ESTIMATE_TRIANGLE_INDEX_BYTES
+
+
+def _output_file_size_bytes(asset: Asset) -> int:
+    for step in reversed(asset.report.steps):
+        if step.name == "write":
+            size = step.after.get("file_size_bytes")
+            return size if isinstance(size, int) and not isinstance(size, bool) and size > 0 else 0
+    return 0
+
+
+def _ceil_div(value: int, divisor: int) -> int:
+    return (value + divisor - 1) // divisor
 
 
 def _material_texture_summaries(asset: Asset) -> list[tuple[int, int]]:

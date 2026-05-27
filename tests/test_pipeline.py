@@ -657,6 +657,7 @@ def test_convert_report_checks_profile_budget(monkeypatch, tmp_path: Path) -> No
             max_vertices_per_mesh=2,
             max_texture_resolution=1_024,
             max_texture_memory_mb=1,
+            max_load_time_ms=1,
             max_draw_calls=1,
         ),
     )
@@ -683,6 +684,7 @@ def test_convert_report_checks_profile_budget(monkeypatch, tmp_path: Path) -> No
         "max_vertices_per_mesh": 2,
         "max_texture_resolution": 1024,
         "max_texture_memory_mb": 1,
+        "max_load_time_ms": 1,
         "max_draw_calls": 1,
     }
     assert budget_step.before["triangles"] == 1
@@ -702,15 +704,22 @@ def test_convert_report_checks_profile_budget(monkeypatch, tmp_path: Path) -> No
     assert budget_step.after["profile_texture_memory_texture_count"] == 2
     assert budget_step.after["profile_estimated_texture_memory_bytes"] == 33_554_432
     assert budget_step.after["profile_texture_memory_over_budget_bytes"] == 32_554_432
+    assert budget_step.after["profile_load_time_budget_ms"] == 1
+    assert budget_step.after["profile_estimated_load_time_ms"] == 673
+    assert budget_step.after["profile_load_time_file_bytes"] == 0
+    assert budget_step.after["profile_load_time_geometry_bytes"] == 108
+    assert budget_step.after["profile_load_time_texture_bytes"] == 33_554_432
+    assert budget_step.after["profile_load_time_over_budget_ms"] == 672
     assert budget_step.after["profile_draw_calls_over_budget"] == 0
-    assert budget_step.after["profile_budget_violations"] == 4
+    assert budget_step.after["profile_budget_violations"] == 5
     assert budget_step.warnings == [
         "profile budget exceeded for strict: vertices 3 > 2",
         "profile budget exceeded for strict: 1 mesh(es) exceed 2 vertices (largest 3)",
         "profile budget exceeded for strict: 1 texture set(s) exceed 1024px (largest 2048px)",
         "profile budget exceeded for strict: estimated texture memory 33554432 bytes > 1000000 bytes",
+        "profile budget exceeded for strict: estimated load time 673ms > 1ms",
     ]
-    assert converted.report.warnings[-4:] == budget_step.warnings
+    assert converted.report.warnings[-5:] == budget_step.warnings
 
 
 def test_convert_report_finishes_when_validation_is_disabled(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]

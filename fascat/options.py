@@ -741,6 +741,7 @@ class PlatformBudget:
     max_vertices_per_mesh: int | None = None
     max_texture_resolution: int | None = None
     max_texture_memory_mb: int | None = None
+    max_load_time_ms: int | None = None
     max_draw_calls: int | None = None
 
     def __post_init__(self) -> None:
@@ -756,6 +757,8 @@ class PlatformBudget:
             raise ValueError("max_texture_resolution must be greater than 0 when set")
         if self.max_texture_memory_mb is not None and self.max_texture_memory_mb <= 0:
             raise ValueError("max_texture_memory_mb must be greater than 0 when set")
+        if self.max_load_time_ms is not None and self.max_load_time_ms <= 0:
+            raise ValueError("max_load_time_ms must be greater than 0 when set")
         if self.max_draw_calls is not None and self.max_draw_calls <= 0:
             raise ValueError("max_draw_calls must be greater than 0 when set")
 
