@@ -285,6 +285,45 @@ def test_convert_dry_run_accepts_xr_device_profiles(profile: str) -> None:
     assert f'"profile": "{profile}"' in result.output
 
 
+def test_convert_dry_run_accepts_target_device_profile_file(tmp_path: Path) -> None:
+    profile_file = tmp_path / "phone-ar.toml"
+    profile_file.write_text(
+        """
+name = "phone-ar-low"
+
+[budget]
+max_triangles = 42000
+max_texture_resolution = 512
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "--dry-run",
+            "convert",
+            "input.step",
+            "output.glb",
+            "--profile",
+            "realtime-mobile",
+            "--target-device-profile",
+            str(profile_file),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["profile"] == "phone-ar-low"
+    assert payload["base_profile"] == "realtime-mobile"
+    assert payload["target_device_profile"] == str(profile_file)
+    assert payload["profile_options"]["budget"]["max_triangles"] == 42_000
+    assert payload["profile_options"]["budget"]["max_vertices"] == 126_000
+    assert payload["profile_options"]["budget"]["max_texture_resolution"] == 512
+    assert payload["profile_options"]["budget"]["max_draw_calls"] == 250
+
+
 def test_convert_dry_run_accepts_pipeline_file(tmp_path: Path) -> None:
     pipeline_file = tmp_path / "realtime.toml"
     pipeline_file.write_text(

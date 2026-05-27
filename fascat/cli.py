@@ -27,6 +27,7 @@ from fascat.options import (
     AtlasOptions,
     BakeMaterialOptions,
     BrepHealOptions,
+    ConversionProfile,
     DecimateOptions,
     ExplodeOptions,
     GltfExportOptions,
@@ -52,6 +53,7 @@ from fascat.pipeline import convert
 from fascat.pipeline import validate_output as validate_export
 from fascat.pipeline_file import PipelineSpec
 from fascat.profiles import by_name
+from fascat.profiles import from_file as profile_from_file
 from fascat.report import Report
 
 DOCS_URL = "https://pavelsimo.github.io/fascat"
@@ -548,6 +550,10 @@ def cmd_convert(
         ),
     ] = None,
     profile: Annotated[Profile, typer.Option("--profile", help="Conversion profile.")] = Profile.REALTIME_DESKTOP,
+    target_device_profile: Annotated[
+        Path | None,
+        typer.Option("--target-device-profile", help="TOML or JSON file overriding the selected profile budget."),
+    ] = None,
     pipeline: Annotated[
         Path | None,
         typer.Option("--pipeline", help="TOML pipeline file with named filters and ordered steps."),
@@ -1068,6 +1074,8 @@ def cmd_convert(
         "input": str(input_path),
         "output": str(output_path) if output_path is not None else None,
         "profile": profile.value,
+        "base_profile": None,
+        "target_device_profile": str(target_device_profile) if target_device_profile else None,
         "pipeline": str(pipeline) if pipeline else None,
         "sag": sag,
         "sag_ratio": sag_ratio,
@@ -1345,9 +1353,15 @@ def cmd_convert(
     if quality_report is not None and report is not None and quality_report.resolve() == report.resolve():
         _fail(ctx, payload, "--quality-report must use a different path than --report.", code=2)
 
+    profile_options = _profile_for_cli(profile, target_device_profile, ctx, payload)
+    payload["profile"] = profile_options.name
+    if target_device_profile is not None:
+        payload["base_profile"] = profile.value
+        payload["profile_options"] = profile_options.to_dict()
+
     payload["operation_diagnostics"] = _convert_operation_diagnostics(payload)
     if state.dry_run:
-        _emit(ctx, payload, f"Would convert {input_path} to {output_path} with profile {profile.value}.")
+        _emit(ctx, payload, f"Would convert {input_path} to {output_path} with profile {profile_options.name}.")
         return
 
     _require_existing_file(input_path, "input", ctx, payload)
@@ -1355,7 +1369,6 @@ def cmd_convert(
         _fail(ctx, payload, f"Output already exists: {output_path}. Pass --force to overwrite.")
 
     try:
-        profile_options = by_name(profile.value)
         base_tessellation = profile_options.tessellation
         if base_tessellation is None:
             _fail(ctx, payload, "The inspect-only profile cannot be used for conversion.", code=2)
@@ -1596,7 +1609,7 @@ def cmd_convert(
         asset = _convert_for_cli(
             input_path,
             output_path,
-            profile=profile.value,
+            profile=profile_options,
             pipeline=pipeline_spec,
             tessellation=tessellation,
             stage=stage_options,
@@ -2122,6 +2135,22 @@ def _metadata_export_options(metadata: MetadataMode, pmi: PmiMode) -> MetadataEx
     )
 
 
+def _profile_for_cli(
+    profile: Profile,
+    target_device_profile: Path | None,
+    ctx: typer.Context,
+    payload: dict[str, Any],
+) -> ConversionProfile:
+    if target_device_profile is None:
+        return by_name(profile.value)
+    _require_existing_file(target_device_profile, "target device profile", ctx, payload)
+    try:
+        return profile_from_file(target_device_profile, base=profile.value)
+    except Exception as exc:
+        _fail(ctx, payload, f"Invalid target device profile: {exc}", code=2)
+    raise AssertionError("unreachable")
+
+
 def _read_pipeline_for_cli(path: Path, ctx: typer.Context, payload: dict[str, Any]) -> PipelineSpec:
     _require_existing_file(path, "pipeline", ctx, payload)
     try:
@@ -2255,7 +2284,7 @@ def _convert_for_cli(
     input_path: Path,
     output_path: Path,
     *,
-    profile: str,
+    profile: str | ConversionProfile,
     pipeline: PipelineSpec | None,
     tessellation: Tessellation,
     stage: StageOptions,
@@ -2346,7 +2375,7 @@ def _convert_for_cli(
 def _convert_output(
     input_path: Path,
     output_path: Path,
-    profile: str,
+    profile: str | ConversionProfile,
     pipeline: PipelineSpec | None,
     tessellation: Tessellation,
     stage: StageOptions,

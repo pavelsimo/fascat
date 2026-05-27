@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 import fascat as fc
@@ -232,6 +235,66 @@ def test_lod_options_normalize_list_ratios() -> None:
 
     assert options.ratios == (0.5, 0.25, 0.1)
     assert options.to_dict()["ratios"] == [0.5, 0.25, 0.1]
+
+
+def test_target_device_profile_from_toml_overlays_base_budget(tmp_path: Path) -> None:
+    profile_file = tmp_path / "factory-tablet.toml"
+    profile_file.write_text(
+        """
+name = "factory-tablet-ar"
+
+[budget]
+target_fps = 60
+max_triangles = 42000
+max_texture_resolution = 512
+unity_reference_profile = "tablet-ar"
+unity_reference_triangles = [30000, 60000]
+""",
+        encoding="utf-8",
+    )
+
+    profile = profiles.from_file(profile_file, base="realtime-mobile")
+
+    assert profile.name == "factory-tablet-ar"
+    assert profile.tessellation == profiles.realtime_mobile().tessellation
+    assert profile.optimize == profiles.realtime_mobile().optimize
+    assert profile.budget is not None
+    assert profile.budget.max_triangles == 42_000
+    assert profile.budget.max_vertices == 126_000
+    assert profile.budget.max_texture_resolution == 512
+    assert profile.budget.max_draw_calls == 250
+    assert profile.budget.unity_reference_profile == "tablet-ar"
+    assert profile.budget.unity_reference_triangles == (30_000, 60_000)
+
+
+def test_target_device_profile_from_json_overlays_base_budget(tmp_path: Path) -> None:
+    profile_file = tmp_path / "headset.json"
+    profile_file.write_text(
+        json.dumps({"name": "warehouse-headset", "budget": {"max_draw_calls": 80, "max_load_time_ms": 900}}),
+        encoding="utf-8",
+    )
+
+    profile = profiles.from_file(profile_file, base=profiles.mixed_reality())
+
+    assert profile.name == "warehouse-headset"
+    assert profile.budget is not None
+    assert profile.budget.max_triangles == 75_000
+    assert profile.budget.max_vertices == 225_000
+    assert profile.budget.max_draw_calls == 80
+    assert profile.budget.max_load_time_ms == 900
+
+
+@pytest.mark.parametrize(
+    ("values", "message"),
+    [
+        ({"name": "bad"}, "must include a budget table"),
+        ({"name": "bad", "budget": {"max_triangles": 10}, "bad": True}, "unsupported key"),
+        ({"name": "bad", "budget": {"bad": True}}, "unsupported key"),
+    ],
+)
+def test_target_device_profile_rejects_invalid_mappings(values: dict[str, object], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        profiles.from_mapping(values)
 
 
 def test_size_adaptive_tessellation_builds_part_settings_from_bounds() -> None:

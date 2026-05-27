@@ -896,6 +896,27 @@ Available profiles:
 
 You can pass either a profile name or a `ConversionProfile` returned by `fc.profiles`. Conversion reports include a `profile_budget` step when the selected profile has a budget. That step records target FPS, triangle, vertex, per-mesh vertex, texture-resolution, texture-memory, estimated load-time, draw-call budgets, draw-call breakdown fields, and Unity reference triangle/draw-call ranges when the profile has them. Fascat's defaults are intentionally stricter than Unity's broad reference ranges for repeatable export checks. Load time is a deterministic estimate based on output file size, geometry bytes, baked texture bytes, and draw-call overhead; it is not a measured engine runtime.
 
+Custom target-device profiles can overlay a budget on any built-in base profile:
+
+```toml
+name = "factory-tablet-ar"
+
+[budget]
+target_fps = 60
+max_triangles = 42000
+max_texture_resolution = 512
+max_draw_calls = 120
+unity_reference_profile = "tablet-ar"
+unity_reference_triangles = [30000, 60000]
+```
+
+```python
+profile = fc.profiles.from_file("factory-tablet.toml", base="realtime-mobile")
+asset = fc.convert("motor.step", "motor.glb", profile=profile)
+```
+
+The CLI equivalent is `fascat convert motor.step motor.glb --profile realtime-mobile --target-device-profile factory-tablet.toml`. Profile files may be TOML or JSON and currently act as target-device budget overlays; tessellation, repair, staging, optimization, and LOD defaults still come from the selected base profile. When a file overrides `max_triangles` without `max_vertices`, Fascat derives `max_vertices` as three times the triangle budget.
+
 ## Functional wrappers
 
 The top-level functions mirror the fluent `Asset` methods.

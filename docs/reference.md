@@ -61,6 +61,7 @@ all listed formats are implemented.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--profile` | `realtime-desktop` | Conversion profile: `inspect-only`, `realtime-desktop`, `realtime-web`, `realtime-mobile`, `virtual-reality`, `augmented-reality`, or `mixed-reality` |
+| `--target-device-profile` | unset | TOML or JSON target-device budget overlay for the selected profile |
 | `--pipeline` | unset | TOML pipeline file with named filters and ordered conversion steps |
 | `--sag` | profile value | CAD tessellation sag tolerance |
 | `--sag-ratio` | unset | Relative CAD tessellation sag ratio; enables explicit relative deflection when set |

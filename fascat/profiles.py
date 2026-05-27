@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
+import tomli
 
 from fascat.options import (
     ConversionProfile,
@@ -14,6 +17,23 @@ from fascat.options import (
     RepairOptions,
     StageOptions,
     Tessellation,
+)
+
+_PROFILE_FILE_KEYS = frozenset({"name", "budget"})
+_BUDGET_FILE_KEYS = frozenset(
+    {
+        "target_fps",
+        "max_triangles",
+        "max_vertices",
+        "max_vertices_per_mesh",
+        "max_texture_resolution",
+        "max_texture_memory_mb",
+        "max_load_time_ms",
+        "max_draw_calls",
+        "unity_reference_profile",
+        "unity_reference_triangles",
+        "unity_reference_draw_calls",
+    }
 )
 
 
@@ -77,6 +97,47 @@ def size_adaptive_tessellation(
     values = options.to_dict()
     values["part_settings"] = part_settings
     return Tessellation(**cast(Any, values))
+
+
+def from_mapping(
+    values: dict[str, object],
+    *,
+    base: str | ConversionProfile = "realtime-desktop",
+) -> ConversionProfile:
+    """Build a custom target-device profile by overlaying a budget on a base profile."""
+
+    _validate_mapping_keys(values, _PROFILE_FILE_KEYS, "target-device profile")
+    base_profile = by_name(base) if isinstance(base, str) else base
+    name = values.get("name", base_profile.name)
+    if not isinstance(name, str) or not name:
+        raise ValueError("target-device profile name must be a non-empty string")
+    budget_values = values.get("budget")
+    if not isinstance(budget_values, dict):
+        raise ValueError("target-device profile must include a budget table")
+    _validate_mapping_keys(budget_values, _BUDGET_FILE_KEYS, "target-device profile budget")
+    merged_budget = {} if base_profile.budget is None else base_profile.budget.to_dict()
+    merged_budget.update(budget_values)
+    if "max_triangles" in budget_values and "max_vertices" not in budget_values:
+        merged_budget["max_vertices"] = int(cast(Any, budget_values["max_triangles"])) * 3
+    return ConversionProfile(
+        name=name,
+        tessellation=base_profile.tessellation,
+        repair=base_profile.repair,
+        stage=base_profile.stage,
+        optimize=base_profile.optimize,
+        lods=base_profile.lods,
+        budget=PlatformBudget(**cast(Any, merged_budget)),
+    )
+
+
+def from_file(
+    path: str | Path,
+    *,
+    base: str | ConversionProfile = "realtime-desktop",
+) -> ConversionProfile:
+    """Load a custom target-device budget profile from TOML or JSON."""
+
+    return from_mapping(_load_profile_file(path), base=base)
 
 
 def inspect_only() -> ConversionProfile:
@@ -287,6 +348,27 @@ def by_name(name: str) -> ConversionProfile:
     if name == "mixed-reality":
         return mixed_reality()
     raise ValueError(f"unknown profile: {name}")
+
+
+def _load_profile_file(path: str | Path) -> dict[str, object]:
+    profile_path = Path(path)
+    text = profile_path.read_text(encoding="utf-8")
+    suffix = profile_path.suffix.lower()
+    if suffix == ".json":
+        values = json.loads(text)
+    elif suffix in {".toml", ".tml"}:
+        values = tomli.loads(text)
+    else:
+        raise ValueError("target-device profile files must use .toml or .json")
+    if not isinstance(values, dict):
+        raise ValueError("target-device profile file must contain a top-level table/object")
+    return cast(dict[str, object], values)
+
+
+def _validate_mapping_keys(values: dict[str, object], allowed: frozenset[str], context: str) -> None:
+    unknown = sorted(set(values) - allowed)
+    if unknown:
+        raise ValueError(f"{context} contains unsupported key(s): {', '.join(unknown)}")
 
 
 def _band_for_diagonal(diagonal: float, bands: Sequence[TessellationSizeBand]) -> TessellationSizeBand | None:
