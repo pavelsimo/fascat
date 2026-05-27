@@ -19,7 +19,8 @@ def test_functional_api_wraps_asset_operations() -> None:
     )
 
     repaired = fc.repair(asset)
-    staged = fc.stage(repaired, uv0="box", uv1="box")
+    merged = fc.merge_vertices(repaired)
+    staged = fc.stage(merged, uv0="box", uv1="box")
     optimized = fc.optimize(staged, target_triangles=1, preserve_instances=True)
     with_lods = fc.lods(optimized, ratios=(0.5,))
     lod_part = with_lods.parts["part"]

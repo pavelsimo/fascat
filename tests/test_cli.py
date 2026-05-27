@@ -218,6 +218,33 @@ def test_convert_dry_run_reports_approximate_and_metadata_only_operations() -> N
     assert diagnostics["remove_occluded"]["level"] == "approximate"
 
 
+def test_convert_dry_run_reports_merge_vertices_operation() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "--dry-run",
+            "convert",
+            "input.step",
+            "output.glb",
+            "--merge-vertices",
+            "--merge-vertex-tolerance",
+            "0.001",
+            "--drop-merge-vertex-attributes",
+            "--ignore-merge-vertex-material-boundaries",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    diagnostics = {item["operation"]: item for item in payload["operation_diagnostics"]}
+    assert payload["merge_vertices"] is True
+    assert payload["merge_vertex_tolerance"] == 0.001
+    assert payload["preserve_merge_vertex_attributes"] is False
+    assert payload["preserve_merge_vertex_material_boundaries"] is False
+    assert diagnostics["merge_vertices"]["level"] == "exact"
+
+
 def test_convert_dry_run_defaults_output_to_usdc() -> None:
     result = runner.invoke(app, ["--json", "--dry-run", "convert", "input.step"])
     assert result.exit_code == 0

@@ -153,6 +153,26 @@ class RepairOptions:
 
 
 @dataclass(frozen=True)
+class MergeVerticesOptions:
+    tolerance: float = 0.0
+    preserve_normals: bool = True
+    preserve_tangents: bool = True
+    preserve_uvs: bool = True
+    preserve_material_boundaries: bool = True
+    delete_degenerate: bool = True
+    area_epsilon: float = 1e-12
+
+    def __post_init__(self) -> None:
+        if self.tolerance < 0.0:
+            raise ValueError("merge vertices tolerance must be greater than or equal to 0")
+        if self.area_epsilon < 0.0:
+            raise ValueError("area_epsilon must be greater than or equal to 0")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class StepReadOptions:
     metadata: bool = True
     product_metadata: bool = True

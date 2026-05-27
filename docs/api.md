@@ -100,6 +100,7 @@ Core pipeline calls:
 | `fc.read_step(path, options=None)` | `path` is a STEP file path or `-` for stdin. `options` is `StepReadOptions`. | Import STEP assembly hierarchy, metadata, materials, and source BREP handles when the backend exposes them. |
 | `asset.tessellate(options, where=None)` | `options` is `Tessellation`. `where` optionally scopes the operation with a `Filter`. | Convert source BREP geometry into meshes. |
 | `asset.repair(options, where=None)` | `options` is `RepairOptions`. `where` optionally scopes selected parts. | Clean mesh-level issues after tessellation. |
+| `asset.merge_vertices(options, where=None)` | `options` is `MergeVerticesOptions`. `where` optionally scopes selected parts. | Merge exact or tolerance-close vertices with attribute and material-boundary protection. |
 | `asset.stage(options, where=None)` | `options` is `StageOptions`. `where` optionally scopes selected parts. | Prepare materials, normals, tangents, and UV metadata for runtime export. |
 | `asset.optimize(options, where=None)` | `options` is `OptimizeOptions`. `where` optionally scopes selected parts. | Reduce mesh complexity while preserving selected mechanical features. |
 | `asset.lods(options, where=None)` | `options` is `LODOptions`. `where` optionally scopes selected parts. | Generate lower-detail runtime meshes. |
@@ -433,6 +434,8 @@ Repair parameters:
 
 Repair metadata records before/after counts for `repair_duplicate_polygons`, `repair_degenerate_triangles`, `repair_boundary_edges`, `repair_non_manifold_edges`, `repair_t_junctions`, and `repair_boundary_gaps`. Duplicate polygons are triangles that reference the same three vertices, regardless of winding. T-junction counts identify vertices that lie on another triangle edge without splitting that edge; non-zero counts after repair emit a warning because T-junction sewing is still not implemented. Boundary-gap counts identify nearby, unconnected boundary vertices within the repair tolerance; non-zero counts after repair warn because boundary stitching is also not implemented. Before winding normalization runs, repair records `repair_orientation_components_before_orientation`, `repair_non_orientable_edges_before_orientation`, `repair_closed_orientation_components_before_orientation`, and `repair_flipped_components_before_orientation`; after orientation it records closed and flipped component counts again. Closed flipped components are coherent closed shells whose signed volume is inward; non-zero counts after repair emit a warning because outward face orientation was not produced. Non-zero non-orientable counts emit a report warning because Mobius-like topology cannot be fixed by ordinary face flipping. The `repair` report step also records `tolerance_policy`, including effective source/local units, declared target units, meter conversions, vertex merge tolerance in meters, degenerate area epsilon in square meters, and the status of vertex merge, degenerate-polygon cleanup, T-junction sewing, boundary-gap stitching, and non-manifold edge cracking.
 
+Use `MergeVerticesOptions` when you want Unity-style vertex merge as a standalone pipeline step instead of the broad repair pass. `tolerance=0.0` merges exact duplicate positions; larger values merge tolerance-close positions. By default the operation keeps normals, tangents, UVs, and material-boundary signatures in the merge key so hard edges and UV seams are not collapsed accidentally. Set `preserve_normals=False`, `preserve_tangents=False`, or `preserve_uvs=False` to ignore and drop those attributes during merging. Reports include `merge_vertices_removed`, `merge_vertices_degenerate_triangles_removed`, and a unit-aware `tolerance_policy`.
+
 ## Feature-Preserving Simplification
 
 Optimization can protect mechanical features while reducing triangle count. Preservation flags keep protected faces from being dropped when a target would otherwise remove them.
@@ -762,7 +765,7 @@ fc.convert("motor.step", "motor.gltf", profile="realtime-web")
 ```
 
 `fc.convert()` validates generated output by default. Pass `validate_output=False` only when another step in your pipeline validates the asset.
-When `where` is provided to `fc.convert()`, tessellation, repair, and staging still run for the full asset, while merge, scene optimization, optimization actions, optimization, and LOD generation are scoped to the matched assembly subset.
+When `where` is provided to `fc.convert()`, tessellation, repair, and staging still run for the full asset, while standalone vertex merging, hierarchy merge, scene optimization, optimization actions, optimization, and LOD generation are scoped to the matched assembly subset.
 
 Conversion parameters:
 
@@ -775,6 +778,7 @@ Conversion parameters:
 | `tessellation` | Overrides the profile tessellation step. |
 | `heal_brep` | Optional BREP healing step before tessellation. |
 | `stage` | Overrides the profile staging step. |
+| `merge_vertices` | Optional standalone vertex merge step after staging. |
 | `merge`, `explode`, `replace` | Optional hierarchy operations run after staging. |
 | `scene` | Optional scene optimization step. |
 | `bake_materials`, `remove_holes`, `remove_occluded`, `decimate`, `lod_generator` | Optional explicit optimization actions. |
@@ -929,6 +933,7 @@ import fascat as fc
 asset = fc.read_step("motor.step")
 asset = fc.tessellate(asset, sag=0.1, angle=15.0)
 asset = fc.repair(asset, tolerance=0.05)
+asset = fc.merge_vertices(asset, tolerance=0.001)
 asset = fc.stage(asset, materials="cad", uv0="box")
 asset = fc.optimize(asset, target_triangles=500_000)
 asset = fc.lods(asset, ratios=(0.5, 0.25, 0.1))

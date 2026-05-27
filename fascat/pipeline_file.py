@@ -19,6 +19,7 @@ from fascat.options import (
     LODLevel,
     LODOptions,
     MergeOptions,
+    MergeVerticesOptions,
     MetadataExportOptions,
     OptimizeOptions,
     RemoveHolesOptions,
@@ -37,6 +38,7 @@ _SUPPORTED_STEP_OPS = frozenset(
         "heal_brep",
         "tessellate",
         "repair",
+        "merge_vertices",
         "stage",
         "merge",
         "explode",
@@ -129,6 +131,17 @@ _REPAIR_KEYS = frozenset(
         "delete_degenerate",
         "fix_winding",
         "fill_small_holes",
+        "area_epsilon",
+    }
+)
+_MERGE_VERTICES_KEYS = frozenset(
+    {
+        "tolerance",
+        "preserve_normals",
+        "preserve_tangents",
+        "preserve_uvs",
+        "preserve_material_boundaries",
+        "delete_degenerate",
         "area_epsilon",
     }
 )
@@ -263,6 +276,7 @@ _STEP_OPTION_KEYS = {
     "heal_brep": _BREP_HEAL_KEYS,
     "tessellate": _TESSELLATION_KEYS,
     "repair": _REPAIR_KEYS,
+    "merge_vertices": _MERGE_VERTICES_KEYS,
     "stage": _STAGE_KEYS,
     "merge": _MERGE_KEYS,
     "explode": _EXPLODE_KEYS,
@@ -700,6 +714,8 @@ def _validate_step_options(
             _tessellation(step.values)
         elif step.op == "repair":
             _repair_options(step.values)
+        elif step.op == "merge_vertices":
+            _merge_vertices_options(step.values)
         elif step.op == "stage":
             _stage_options(step.values)
         elif step.op == "merge":
@@ -743,6 +759,8 @@ def _apply_step(asset: Asset, step: PipelineStep, where: Filter | None) -> Asset
         return asset.tessellate(_tessellation(values), where=where)
     if step.op == "repair":
         return asset.repair(_repair_options(values), where=where)
+    if step.op == "merge_vertices":
+        return asset.merge_vertices(_merge_vertices_options(values), where=where)
     if step.op == "stage":
         return asset.stage(_stage_options(values), where=where)
     if step.op == "merge":
@@ -798,6 +816,18 @@ def _repair_options(values: dict[str, object]) -> RepairOptions:
         delete_degenerate=bool(values.get("delete_degenerate", True)),
         fix_winding=bool(values.get("fix_winding", True)),
         fill_small_holes=bool(values.get("fill_small_holes", False)),
+        area_epsilon=_as_float(values.get("area_epsilon", 1e-12)),
+    )
+
+
+def _merge_vertices_options(values: dict[str, object]) -> MergeVerticesOptions:
+    return MergeVerticesOptions(
+        tolerance=_as_float(values.get("tolerance", 0.0)),
+        preserve_normals=bool(values.get("preserve_normals", True)),
+        preserve_tangents=bool(values.get("preserve_tangents", True)),
+        preserve_uvs=bool(values.get("preserve_uvs", True)),
+        preserve_material_boundaries=bool(values.get("preserve_material_boundaries", True)),
+        delete_degenerate=bool(values.get("delete_degenerate", True)),
         area_epsilon=_as_float(values.get("area_epsilon", 1e-12)),
     )
 

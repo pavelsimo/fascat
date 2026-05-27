@@ -28,6 +28,7 @@ from fascat.options import (
     LODGeneratorOptions,
     LODOptions,
     MergeOptions,
+    MergeVerticesOptions,
     MetadataExportOptions,
     ObjExportOptions,
     OptimizeOptions,
@@ -71,6 +72,7 @@ def convert(
     import_options: StepReadOptions | None = None,
     tessellation: Tessellation | None = None,
     heal_brep: BrepHealOptions | None = None,
+    merge_vertices: MergeVerticesOptions | None = None,
     stage: StageOptions | None = None,
     merge: MergeOptions | None = None,
     explode: ExplodeOptions | None = None,
@@ -151,6 +153,10 @@ def convert(
         asset = asset.stage(stage or selected.stage)
         if progress is not None:
             progress("stage", asset.stats())
+        if merge_vertices is not None:
+            asset = asset.merge_vertices(merge_vertices, where=where)
+            if progress is not None:
+                progress("merge_vertices", asset.stats())
         if merge is not None:
             asset = asset.merge(merge, where=where)
             if progress is not None:
@@ -281,6 +287,7 @@ def convert(
         pipeline=pipeline,
         tessellation=planned_tessellation,
         heal_brep=heal_brep,
+        merge_vertices=merge_vertices,
         stage=planned_stage,
         merge=merge,
         explode=explode,
@@ -927,6 +934,7 @@ def _add_conversion_manifest_report(
     pipeline: PipelineSpec | None,
     tessellation: Tessellation | None,
     heal_brep: BrepHealOptions | None,
+    merge_vertices: MergeVerticesOptions | None,
     stage: StageOptions | None,
     merge: MergeOptions | None,
     explode: ExplodeOptions | None,
@@ -946,6 +954,7 @@ def _add_conversion_manifest_report(
         "brep_heal": _manifest_options(heal_brep),
         "repair": profile.repair.to_dict(),
         "stage": _manifest_options(stage),
+        "merge_vertices": _manifest_options(merge_vertices),
         "merge": _manifest_options(merge),
         "explode": _manifest_options(explode),
         "replace": _manifest_options(replace),
@@ -1018,7 +1027,7 @@ def _workflow_summary_stages(
         else "input import did not run in this report",
     )
 
-    cleanup_ops = [name for name in ("heal_brep", "repair") if name in steps]
+    cleanup_ops = [name for name in ("heal_brep", "repair", "merge_vertices") if name in steps]
     add(
         "import_cleanup",
         "run" if cleanup_ops else "skipped",
@@ -1513,6 +1522,18 @@ def repair(asset: Asset, *, tolerance: float = 0.0, where: Filter | None = None)
     from fascat.options import RepairOptions
 
     return asset.repair(RepairOptions(tolerance=tolerance), where=where)
+
+
+def merge_vertices(
+    asset: Asset,
+    *,
+    options: MergeVerticesOptions | None = None,
+    tolerance: float | None = None,
+    where: Filter | None = None,
+) -> Asset:
+    if options is not None:
+        return asset.merge_vertices(options, where=where)
+    return asset.merge_vertices(MergeVerticesOptions(tolerance=0.0 if tolerance is None else tolerance), where=where)
 
 
 def heal_brep(

@@ -35,6 +35,7 @@ from fascat.options import (
     LODLevel,
     LODOptions,
     MergeOptions,
+    MergeVerticesOptions,
     MetadataExportOptions,
     ObjExportOptions,
     OptimizeOptions,
@@ -693,6 +694,39 @@ def cmd_convert(
         bool,
         typer.Option("--merge-equivalent-materials", help="Merge CAD materials with matching PBR values."),
     ] = False,
+    merge_vertices: Annotated[
+        bool,
+        typer.Option("--merge-vertices", help="Merge exact or tolerance-close vertices after staging."),
+    ] = False,
+    merge_vertex_tolerance: Annotated[
+        float,
+        typer.Option("--merge-vertex-tolerance", help="Position tolerance used by --merge-vertices."),
+    ] = 0.0,
+    preserve_merge_vertex_attributes: Annotated[
+        bool,
+        typer.Option(
+            "--preserve-merge-vertex-attributes/--drop-merge-vertex-attributes",
+            help="Protect normals, tangents, and UV seams when --merge-vertices is used.",
+        ),
+    ] = True,
+    preserve_merge_vertex_material_boundaries: Annotated[
+        bool,
+        typer.Option(
+            "--preserve-merge-vertex-material-boundaries/--ignore-merge-vertex-material-boundaries",
+            help="Protect material-boundary vertices when --merge-vertices is used.",
+        ),
+    ] = True,
+    delete_merge_vertex_degenerate: Annotated[
+        bool,
+        typer.Option(
+            "--delete-merge-vertex-degenerate/--keep-merge-vertex-degenerate",
+            help="Delete degenerate polygons created by --merge-vertices.",
+        ),
+    ] = True,
+    merge_vertex_area_epsilon: Annotated[
+        float,
+        typer.Option("--merge-vertex-area-epsilon", help="Area threshold for degenerate polygons after merging."),
+    ] = 1e-12,
     texel_density: Annotated[
         float | None,
         typer.Option("--texel-density", help="UV texel density metadata for unwrap and atlas workflows."),
@@ -1113,6 +1147,12 @@ def cmd_convert(
         "materials": materials.value,
         "material_mode": material_mode.value,
         "merge_equivalent_materials": merge_equivalent_materials,
+        "merge_vertices": merge_vertices,
+        "merge_vertex_tolerance": merge_vertex_tolerance,
+        "preserve_merge_vertex_attributes": preserve_merge_vertex_attributes,
+        "preserve_merge_vertex_material_boundaries": preserve_merge_vertex_material_boundaries,
+        "delete_merge_vertex_degenerate": delete_merge_vertex_degenerate,
+        "merge_vertex_area_epsilon": merge_vertex_area_epsilon,
         "texel_density": texel_density,
         "uv_padding": uv_padding,
         "max_stretch": max_stretch,
@@ -1282,6 +1322,10 @@ def cmd_convert(
         _fail(ctx, payload, "--uv-padding must be greater than or equal to 0.", code=2)
     if max_stretch is not None and max_stretch < 0.0:
         _fail(ctx, payload, "--max-stretch must be greater than or equal to 0.", code=2)
+    if merge_vertex_tolerance < 0.0:
+        _fail(ctx, payload, "--merge-vertex-tolerance must be greater than or equal to 0.", code=2)
+    if merge_vertex_area_epsilon < 0.0:
+        _fail(ctx, payload, "--merge-vertex-area-epsilon must be greater than or equal to 0.", code=2)
     if unwrap_iterations is not None and unwrap_iterations <= 0:
         _fail(ctx, payload, "--unwrap-iterations must be greater than 0.", code=2)
     if unwrap_tolerance is not None and unwrap_tolerance < 0.0:
@@ -1432,6 +1476,19 @@ def cmd_convert(
             uv0=uv0.value,
             uv1=cast(Any, uv1.value.replace("-", "_")),
             normalize_uvs=normalized_uv_channels,
+        )
+        merge_vertices_options = (
+            MergeVerticesOptions(
+                tolerance=merge_vertex_tolerance,
+                preserve_normals=preserve_merge_vertex_attributes,
+                preserve_tangents=preserve_merge_vertex_attributes,
+                preserve_uvs=preserve_merge_vertex_attributes,
+                preserve_material_boundaries=preserve_merge_vertex_material_boundaries,
+                delete_degenerate=delete_merge_vertex_degenerate,
+                area_epsilon=merge_vertex_area_epsilon,
+            )
+            if merge_vertices
+            else None
         )
         import_options = (
             pipeline_spec.import_options
@@ -1615,6 +1672,7 @@ def cmd_convert(
             stage=stage_options,
             import_options=import_options,
             heal_brep=heal_options,
+            merge_vertices=merge_vertices_options,
             merge=merge_options,
             explode=explode_options,
             replace=replace_options,
@@ -1905,6 +1963,12 @@ def _convert_operation_diagnostics(payload: dict[str, Any]) -> list[dict[str, st
     if payload["atlas"]:
         add("atlas", "metadata_only", "atlas settings are recorded as metadata; atlas images are not written")
     add("stage", "exact", "material, normal, tangent, and UV staging options are applied before optimization")
+    if payload["merge_vertices"]:
+        add(
+            "merge_vertices",
+            "exact",
+            "exact or tolerance-close vertices are merged with selected attribute and material-boundary protections",
+        )
     if payload["merge"]:
         add("merge", "exact", "selected hierarchy is merged according to the requested merge mode")
     if payload["explode"] is not None:
@@ -2290,6 +2354,7 @@ def _convert_for_cli(
     stage: StageOptions,
     import_options: StepReadOptions,
     heal_brep: BrepHealOptions | None,
+    merge_vertices: MergeVerticesOptions | None,
     merge: MergeOptions | None,
     explode: ExplodeOptions | None,
     replace: ReplaceOptions | None,
@@ -2323,6 +2388,7 @@ def _convert_for_cli(
                 stage,
                 import_options,
                 heal_brep,
+                merge_vertices,
                 merge,
                 explode,
                 replace,
@@ -2351,6 +2417,7 @@ def _convert_for_cli(
         stage,
         import_options,
         heal_brep,
+        merge_vertices,
         merge,
         explode,
         replace,
@@ -2381,6 +2448,7 @@ def _convert_output(
     stage: StageOptions,
     import_options: StepReadOptions,
     heal_brep: BrepHealOptions | None,
+    merge_vertices: MergeVerticesOptions | None,
     merge: MergeOptions | None,
     explode: ExplodeOptions | None,
     replace: ReplaceOptions | None,
@@ -2414,6 +2482,7 @@ def _convert_output(
                 import_options=import_options,
                 tessellation=tessellation,
                 heal_brep=heal_brep,
+                merge_vertices=merge_vertices,
                 stage=stage,
                 merge=merge,
                 explode=explode,
@@ -2446,6 +2515,7 @@ def _convert_output(
         import_options=import_options,
         tessellation=tessellation,
         heal_brep=heal_brep,
+        merge_vertices=merge_vertices,
         stage=stage,
         merge=merge,
         explode=explode,

@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from fascat.mesh import Mesh, MeshValidationError
-from fascat.options import RepairOptions
+from fascat.options import MergeVerticesOptions, RepairOptions
 
 
 def valid_triangle(**overrides: object) -> Mesh:
@@ -129,7 +129,45 @@ def test_mesh_removes_degenerate_and_duplicate_faces() -> None:
     assert repaired.metadata["repair_duplicate_polygons_after"] == "0"
     assert repaired.metadata["repair_degenerate_triangles_before"] == "1"
     assert repaired.metadata["repair_degenerate_triangles_after"] == "0"
-    repaired.validate()
+
+
+def test_merge_vertices_preserves_attribute_seams_by_default() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [3, 2, 1]], dtype=int),
+        normals=np.array([[0, 0, 1], [0, 0, 1], [0, 0, 1], [0, 1, 0]], dtype=float),
+        uvs={0: np.array([[0, 0], [1, 0], [0, 1], [0.5, 0.5]], dtype=float)},
+    )
+
+    merged = mesh.merge_vertices(MergeVerticesOptions())
+
+    assert merged.vertex_count == 4
+    assert merged.normals is not None
+    assert sorted(merged.uvs) == [0]
+    assert merged.metadata["merge_vertices_removed"] == "0"
+
+
+def test_merge_vertices_can_ignore_attributes_and_remove_degenerates() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [0, 1, 3]], dtype=int),
+        normals=np.array([[0, 0, 1], [0, 0, 1], [0, 0, 1], [0, 1, 0]], dtype=float),
+        tangents=np.array([[1, 0, 0, 1], [1, 0, 0, 1], [1, 0, 0, 1], [0, 1, 0, -1]], dtype=float),
+        uvs={0: np.array([[0, 0], [1, 0], [0, 1], [0.5, 0.5]], dtype=float)},
+    )
+
+    merged = mesh.merge_vertices(
+        MergeVerticesOptions(preserve_normals=False, preserve_tangents=False, preserve_uvs=False)
+    )
+
+    assert merged.vertex_count == 3
+    assert merged.triangle_count == 1
+    assert merged.normals is None
+    assert merged.tangents is None
+    assert merged.uvs == {}
+    assert merged.metadata["merge_vertices_removed"] == "1"
+    assert merged.metadata["merge_vertices_degenerate_triangles_removed"] == "1"
+    merged.validate()
 
 
 def test_quality_metrics_counts_duplicate_polygons() -> None:

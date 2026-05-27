@@ -97,6 +97,9 @@ that are currently conservative approximations.
 - Custom target-device budgets now record supported compression methods and
   runtime glTF extension caps, and profile budget reports warn when emitted
   runtime dependencies exceed those caps.
+- Vertex merging is now available as a standalone Unity-style operation through
+  Python, CLI flags, and TOML pipelines with attribute/material-boundary
+  protection, unit-aware tolerance reporting, and before/after merge counts.
 - Conversion reports now include a resolved conversion manifest with the
   effective profile, import options, direct or pipeline operation settings, and
   export settings needed to reproduce a run.
@@ -141,7 +144,7 @@ Function-level parity notes from the linked Unity pages:
 | --- | --- | --- |
 | Tessellate models | Sag, sag-ratio, angle, max-polygon-length, per-part overrides, and size-adaptive helpers are represented. | Add CAD-derived UV modes, optional free-edge geometry output, and material/metadata/curvature-driven tessellation profiles. |
 | Repair meshes | Duplicate and degenerate cleanup plus T-junction, boundary-gap, non-manifold, and orientation diagnostics are reported. | Implement true T-junction sewing, boundary stitching, non-manifold edge cracking, and explicit face/normal orientation strategies. |
-| Merge vertices | Vertex merging exists inside mesh repair. | Expose a standalone attribute-aware `merge_vertices` operation across Python, CLI, and TOML with seam/material/normal protection and before/after reports. |
+| Merge vertices | Standalone `merge_vertices` is exposed across Python, CLI, and TOML with normals, tangents, UV, and material-boundary protection plus before/after reports. | Add stronger cross-bucket tolerance merging and richer reports for skipped merges by protection reason. |
 | Delete degenerate polygons | Degenerate deletion exists inside mesh repair. | Expose a standalone degenerate-polygon cleanup operation with area/tolerance controls, selection support, and reportable no-op behavior. |
 | Decimate to target | Target count, ratio, UV-importance modes, topology intent, RAM estimates, and measured-error reports exist. | Add real global target allocation, configurable iterative thresholds/pass reports, enforced geometric error bounds, and AO/user-weighted decimation. |
 | Unwrap UV | UV0/UV1 unwrap intent, solver method, iteration, tolerance, distortion, and packing diagnostics are represented. | Add destination-channel control, create-seams-from-lines-of-interest, seam graph metadata, island merge/alignment, and real repack/padding/share-map controls. |
@@ -182,9 +185,9 @@ Second-pass gaps from the Unity references:
   and normalizing should be modeled as distinct UV steps with per-channel
   metadata.
 - Expose Unity-style function-level repair steps where useful. `repair` can stay
-  the high-level default, but `merge_vertices`, `delete_degenerate_polygons`,
-  face orientation, normal orientation, and patch cleanup need standalone
-  operations for reproducible expert pipelines.
+  the high-level default, but `delete_degenerate_polygons`, face orientation,
+  normal orientation, and patch cleanup still need standalone operations for
+  reproducible expert pipelines.
 - Add an export-aware merge-versus-instance advisor. Unity's export guidance
   favors preserving instances for file size even when merging can reduce draw
   calls, so Fascat should warn when a merge helps batching but hurts GLB size,
@@ -218,7 +221,7 @@ Parity gaps to track:
    - Mesh repair now detects non-orientable strips before face orientation so Mobius-like topology is reported separately from ordinary flipped faces.
    - Add explicit face-orientation and normal-orientation report steps with selectable strategies for exterior solids, single-sided open shells, unstitched-face groups, and preserved two-sided surfaces.
    - Add missing-normal generation controls for sharp-edge angle, area weighting, and override behavior.
-   - Add attribute-aware tolerance vertex merging that rebuilds connectivity across hard-edge and non-manifold borders without collapsing intentional material, normal, or UV seams.
+   - Standalone vertex merging now rebuilds connectivity without collapsing intentional material, normal, tangent, or UV seams by default. Remaining work: report skipped merge reasons and improve cross-bucket tolerance matching.
    - Mesh repair now records before/after T-junction, nearby boundary-gap, and flipped closed-component counts. It warns that sewing/stitching remains unavailable and warns when outward orientation is still not produced.
    - BREP healing and mesh repair now report unit-aware tolerance policy: effective source/local units, declared target units, meters-per-unit conversions, vertex-merge and degenerate-polygon cleanup status, and missing T-junction/non-manifold backend operations.
 

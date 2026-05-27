@@ -17,6 +17,7 @@ from fascat.options import (
     LODGeneratorOptions,
     LODLevel,
     LODOptions,
+    MergeVerticesOptions,
     OptimizeOptions,
     PlatformBudget,
     RemoveHolesOptions,
@@ -300,6 +301,33 @@ def test_repair_report_includes_flipped_component_metrics() -> None:
     assert any("flipped closed orientation component" in warning for warning in step.warnings)
 
 
+def test_merge_vertices_asset_operation_reports_counts() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [0, 1, 3]], dtype=int),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    merged = asset.merge_vertices(MergeVerticesOptions())
+    part = merged.parts["part"]
+    step = merged.report.steps[-1]
+
+    assert part.mesh is not None
+    assert part.mesh.vertex_count == 3
+    assert part.mesh.triangle_count == 1
+    assert part.mesh.metadata["merge_vertices_removed"] == "1"
+    assert step.name == "merge_vertices"
+    assert step.options["tolerance"] == 0.0
+    assert step.options["preserve_uvs"] is True
+    assert step.after["vertices"] == 3
+    assert step.after["triangles"] == 1
+    assert step.after["merge_vertices_removed"] == 1
+    assert step.after["merge_vertices_degenerate_triangles_removed"] == 1
+
+
 def test_asset_operation_reports_include_options_and_before_after_counts() -> None:
     required_counts = {"nodes", "parts", "occurrences", "materials", "vertices", "triangles"}
     required_options = {
@@ -327,6 +355,15 @@ def test_asset_operation_reports_include_options_and_before_after_counts() -> No
             "delete_degenerate",
             "fix_winding",
             "fill_small_holes",
+            "area_epsilon",
+        },
+        "merge_vertices": {
+            "tolerance",
+            "preserve_normals",
+            "preserve_tangents",
+            "preserve_uvs",
+            "preserve_material_boundaries",
+            "delete_degenerate",
             "area_epsilon",
         },
         "stage": {
@@ -403,6 +440,7 @@ def test_asset_operation_reports_include_options_and_before_after_counts() -> No
     operations = [
         ("tessellate", lambda asset: asset.tessellate()),
         ("repair", lambda asset: asset.repair(RepairOptions())),
+        ("merge_vertices", lambda asset: asset.merge_vertices(MergeVerticesOptions())),
         ("stage", lambda asset: asset.stage(StageOptions(uv0="none", uv1=None))),
         ("optimize", lambda asset: asset.optimize()),
         ("lods", lambda asset: asset.lods(LODOptions((0.5,)))),
@@ -535,6 +573,36 @@ def test_pipeline_rejects_unknown_step_keys_with_line(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="line 3: unsupported key for repair pipeline step: tolerence"):
         PipelineSpec.from_file(pipeline_file)
+
+
+def test_pipeline_applies_merge_vertices_step() -> None:
+    spec = PipelineSpec.from_dict(
+        {
+            "steps": [
+                {
+                    "op": "merge_vertices",
+                    "preserve_normals": False,
+                    "preserve_tangents": False,
+                    "preserve_uvs": False,
+                }
+            ]
+        }
+    )
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [0, 1, 3]], dtype=int),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    merged = spec.apply(asset)
+
+    assert merged.parts["part"].mesh is not None
+    assert merged.parts["part"].mesh.vertex_count == 3
+    assert merged.report.steps[-1].name == "merge_vertices"
+    assert merged.report.steps[-1].options["preserve_uvs"] is False
 
 
 def test_pipeline_validates_step_options_during_parse() -> None:

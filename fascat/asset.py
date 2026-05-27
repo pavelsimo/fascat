@@ -20,6 +20,7 @@ from fascat.options import (
     LODGeneratorOptions,
     LODOptions,
     MergeOptions,
+    MergeVerticesOptions,
     ObjExportOptions,
     OptimizeOptions,
     RemoveHolesOptions,
@@ -355,6 +356,44 @@ class Asset:
             after=_repair_report_stats(asset),
             duration=timer.duration,
             warnings=step_warnings,
+        )
+        return asset
+
+    def merge_vertices(self, options: MergeVerticesOptions | None = None, *, where: Any | None = None) -> Asset:
+        opts = options or MergeVerticesOptions()
+        scope = self._operation_scope(where)
+        before = self.stats()
+        tolerance_policy = _tolerance_policy(
+            scope.asset,
+            length_tolerance=opts.tolerance,
+            area_tolerance=opts.area_epsilon,
+            length_key="merge_vertices_tolerance",
+            area_key="merge_vertices_area_epsilon",
+            operations={
+                "attribute_protection": "enabled"
+                if (opts.preserve_normals or opts.preserve_tangents or opts.preserve_uvs)
+                else "disabled",
+                "material_boundary_protection": "enabled" if opts.preserve_material_boundaries else "disabled",
+                "degenerate_polygon_cleanup": "enabled" if opts.delete_degenerate else "disabled",
+            },
+        )
+        merge_unit_metadata = _tolerance_policy_metadata("merge_vertices", tolerance_policy)
+        with timed_step() as timer:
+            asset = scope.asset.copy(keep_source=True)
+            for part in asset.parts.values():
+                if scope.selected_part_ids is not None and part.id not in scope.selected_part_ids:
+                    continue
+                if part.mesh is None:
+                    continue
+                part.mesh = part.mesh.merge_vertices(opts)
+                part.mesh.metadata = {**part.mesh.metadata, **merge_unit_metadata}
+                part.fingerprint = part.mesh.fingerprint()
+        asset.report.add_step(
+            "merge_vertices",
+            options=_options_with_scope({**opts.to_dict(), "tolerance_policy": tolerance_policy}, scope),
+            before=before,
+            after=_merge_vertices_report_stats(asset),
+            duration=timer.duration,
         )
         return asset
 
@@ -1055,6 +1094,23 @@ def _repair_report_stats(asset: Asset) -> dict[str, int]:
     if flipped_components_before or flipped_components_after:
         stats["repair_flipped_components_before_orientation"] = flipped_components_before
         stats["repair_flipped_components_after_orientation"] = flipped_components_after
+    return stats
+
+
+def _merge_vertices_report_stats(asset: Asset) -> dict[str, int]:
+    stats = asset.stats()
+    removed_vertices = 0
+    removed_degenerate_triangles = 0
+    for part in asset.parts.values():
+        if part.mesh is None:
+            continue
+        removed_vertices += _metadata_int(part.mesh.metadata.get("merge_vertices_removed"), 0)
+        removed_degenerate_triangles += _metadata_int(
+            part.mesh.metadata.get("merge_vertices_degenerate_triangles_removed"),
+            0,
+        )
+    stats["merge_vertices_removed"] = removed_vertices
+    stats["merge_vertices_degenerate_triangles_removed"] = removed_degenerate_triangles
     return stats
 
 

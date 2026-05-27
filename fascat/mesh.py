@@ -11,7 +11,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from fascat.metadata import Metadata
-from fascat.options import RepairOptions
+from fascat.options import MergeVerticesOptions, RepairOptions
 
 FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int64]
@@ -104,6 +104,12 @@ def _triangle_overlap_area_2d(left: FloatArray, right: FloatArray, *, tolerance:
         return 0.0
     intersection = _clip_polygon_to_triangle(subject, clip, tolerance=tolerance)
     return abs(_polygon_area_2d(intersection))
+
+
+def _position_key(point: FloatArray, tolerance: float) -> tuple[float, ...] | tuple[int, ...]:
+    if tolerance <= 0.0:
+        return tuple(float(value) for value in point)
+    return tuple(int(value) for value in np.round(point / tolerance).astype(np.int64))
 
 
 @dataclass
@@ -307,6 +313,89 @@ class Mesh:
         mesh.tangents = None
         mesh.uvs = {}
         return mesh.remove_degenerate_faces()
+
+    def merge_vertices(self, options: MergeVerticesOptions | None = None) -> Mesh:
+        opts = options or MergeVerticesOptions()
+        if self.vertex_count == 0:
+            return self.copy()
+        before_vertex_count = self.vertex_count
+        before_triangle_count = self.triangle_count
+        material_signatures = self._vertex_material_signatures() if opts.preserve_material_boundaries else None
+        old_to_new = np.empty(self.vertex_count, dtype=np.int64)
+        representative_indices: list[int] = []
+        key_to_new: dict[tuple[object, ...], int] = {}
+        for vertex_index in range(self.vertex_count):
+            key = self._merge_vertex_key(vertex_index, opts, material_signatures)
+            new_index = key_to_new.get(key)
+            if new_index is None:
+                new_index = len(representative_indices)
+                key_to_new[key] = new_index
+                representative_indices.append(vertex_index)
+            old_to_new[vertex_index] = new_index
+
+        representatives = np.asarray(representative_indices, dtype=np.int64)
+        mesh = self.copy()
+        mesh.points = self.points[representatives].copy()
+        mesh.faces = old_to_new[self.faces]
+        mesh.normals = (
+            None if self.normals is None or not opts.preserve_normals else self.normals[representatives].copy()
+        )
+        mesh.tangents = (
+            None if self.tangents is None or not opts.preserve_tangents else self.tangents[representatives].copy()
+        )
+        mesh.uvs = (
+            {}
+            if not opts.preserve_uvs
+            else {channel: values[representatives].copy() for channel, values in self.uvs.items()}
+        )
+        if opts.delete_degenerate:
+            mesh = mesh.remove_degenerate_faces(opts.area_epsilon)
+        removed_vertices = before_vertex_count - mesh.vertex_count
+        removed_triangles = before_triangle_count - mesh.triangle_count
+        mesh.metadata = {
+            **mesh.metadata,
+            "merge_vertices_tolerance": f"{opts.tolerance:g}",
+            "merge_vertices_before": str(before_vertex_count),
+            "merge_vertices_after": str(mesh.vertex_count),
+            "merge_vertices_removed": str(removed_vertices),
+            "merge_vertices_triangles_before": str(before_triangle_count),
+            "merge_vertices_triangles_after": str(mesh.triangle_count),
+            "merge_vertices_degenerate_triangles_removed": str(removed_triangles),
+            "merge_vertices_preserve_normals": str(opts.preserve_normals).lower(),
+            "merge_vertices_preserve_tangents": str(opts.preserve_tangents).lower(),
+            "merge_vertices_preserve_uvs": str(opts.preserve_uvs).lower(),
+            "merge_vertices_preserve_material_boundaries": str(opts.preserve_material_boundaries).lower(),
+        }
+        mesh.validate()
+        return mesh
+
+    def _merge_vertex_key(
+        self,
+        vertex_index: int,
+        options: MergeVerticesOptions,
+        material_signatures: tuple[tuple[int, ...], ...] | None,
+    ) -> tuple[object, ...]:
+        key: list[object] = [_position_key(self.points[vertex_index], options.tolerance)]
+        if options.preserve_normals and self.normals is not None:
+            key.append(tuple(float(value) for value in self.normals[vertex_index]))
+        if options.preserve_tangents and self.tangents is not None:
+            key.append(tuple(float(value) for value in self.tangents[vertex_index]))
+        if options.preserve_uvs:
+            for channel in sorted(self.uvs):
+                key.append((channel, tuple(float(value) for value in self.uvs[channel][vertex_index])))
+        if material_signatures is not None:
+            key.append(("materials", material_signatures[vertex_index]))
+        return tuple(key)
+
+    def _vertex_material_signatures(self) -> tuple[tuple[int, ...], ...]:
+        if self.material_indices is None:
+            return tuple(() for _index in range(self.vertex_count))
+        signatures: list[set[int]] = [set() for _index in range(self.vertex_count)]
+        for face_index, face in enumerate(self.faces):
+            material_index = int(self.material_indices[face_index])
+            for vertex_index in face.astype(int).tolist():
+                signatures[vertex_index].add(material_index)
+        return tuple(tuple(sorted(signature)) for signature in signatures)
 
     def remove_duplicate_faces(self) -> Mesh:
         if self.triangle_count == 0:

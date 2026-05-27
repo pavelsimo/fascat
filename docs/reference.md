@@ -101,6 +101,12 @@ all listed formats are implemented.
 | `--materials` | `cad` | Material staging mode: `cad`, `display`, or `none` |
 | `--material-mode` | `cad` | Material normalization mode: `cad` or `pbr` |
 | `--merge-equivalent-materials` | `false` | Merge CAD materials with matching PBR values |
+| `--merge-vertices` | `false` | Merge exact or tolerance-close vertices after staging |
+| `--merge-vertex-tolerance` | `0.0` | Position tolerance used by `--merge-vertices` |
+| `--preserve-merge-vertex-attributes / --drop-merge-vertex-attributes` | `true` | Keep normals, tangents, and UV seams as merge constraints |
+| `--preserve-merge-vertex-material-boundaries / --ignore-merge-vertex-material-boundaries` | `true` | Keep material-boundary signatures as merge constraints |
+| `--delete-merge-vertex-degenerate / --keep-merge-vertex-degenerate` | `true` | Delete degenerate polygons created by vertex merging |
+| `--merge-vertex-area-epsilon` | `1e-12` | Area threshold for degenerate polygons after vertex merging |
 | `--texel-density` | unset | UV texel density metadata for unwrap and atlas workflows |
 | `--uv-padding` | `2` | UV island padding metadata in pixels |
 | `--max-stretch` | unset | Maximum UV stretch metadata for unwrap workflows |
@@ -307,6 +313,12 @@ sag = 0.2
 angle = 20.0
 
 [[steps]]
+op = "merge_vertices"
+tolerance = 0.001
+preserve_uvs = true
+preserve_material_boundaries = true
+
+[[steps]]
 op = "merge"
 where = "fasteners"
 mode = "by_material"
@@ -335,7 +347,7 @@ fallbacks.
 | STEP import, hierarchy, names, transforms, colors, metadata | Implemented for STEP | `import` report stats, cleanup counts, pipeline import options, loaded-representation metadata, space normalization transforms, and AP242 PMI warnings when typed PMI import is unavailable | Add real design variant loading, typed PMI entity extraction, mixed BREP construction-curve cleanup, and true multi-file import |
 | BREP healing | Partial | `heal_brep`; records open shells, free/unstitched edges, small edges, and sliver counts; sliver removal warns that the backend leaves shapes unchanged | Implement sliver-face removal, duplicate-face cleanup, and deeper face/wire repair |
 | Tessellation | Implemented | `tessellate` report options, explicit sag-ratio, existing mesh reuse/retessellation controls, size-adaptive `part_settings` helpers, max-polygon-length diagnostics, free-edge diagnostics, retained-patch/submesh risk warnings, and quality metadata | Add CAD UV/tangent extraction and material/metadata/curvature-targeted profiles |
-| Mesh repair | Implemented for core cleanup | `repair` report step; mesh metadata records before/after duplicate polygon, degenerate triangle, boundary edge, boundary gap, non-manifold edge, T-junction, flipped closed-component, and non-orientable shared-edge counts | Add T-junction sewing, boundary-gap stitching, non-manifold cracking, and configurable orientation strategies |
+| Mesh repair | Implemented for core cleanup | `repair` report step; mesh metadata records before/after duplicate polygon, degenerate triangle, boundary edge, boundary gap, non-manifold edge, T-junction, flipped closed-component, and non-orientable shared-edge counts; standalone `merge_vertices` is available through Python, CLI flags, and TOML pipelines with attribute/material-boundary protection and before/after reports | Add T-junction sewing, boundary-gap stitching, non-manifold cracking, standalone degenerate-polygon cleanup, and configurable orientation strategies |
 | Staging, normals, tangents, UV metadata | Partial | `stage` report step; tangents require the selected UV channel when generated; existing tangents are preserved by default and mesh/asset metadata report generated, regenerated, preserved, missing, invalidated, or dropped tangent states; UV metadata records per-channel domain, bounds, validation status, degenerates, overlap counts, island counts, pack efficiency, normalized-space utilization, angle/edge distortion, UV0-to-UV1 copy status, explicit normalization status, unwrap solver intent, and missing bake repack status, with warnings for UV1/lightmap bake violations, missing repack/padding, and unsupported solver controls | Add seam planning, backend-enforced unwrap solver controls, island merge, and real repack/padding controls |
 | Material baking | Approximate | `bake_materials` emits constant embedded texture maps from material factors and warns that raster baking is not implemented | Generate real atlas textures from source texture/material inputs |
 | Hole removal | Approximate | `remove_holes` warns when it falls back to mesh boundary classification and filling | Add BREP feature-level removal for closed cylindrical and pocket holes |
