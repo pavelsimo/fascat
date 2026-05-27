@@ -883,4 +883,4 @@ glTF export writes valid glTF 2.0 files for runtime use:
 - geometry is exported in metres and Y-up
 - original units and source up-axis are preserved in top-level Fascat extras
 - material subsets are exported as separate glTF primitives
-- generated LOD meshes are included and referenced from Fascat node extras
+- generated LOD meshes are included as Fascat extras and as node-level `MSFT_lod` extension references, with `MSFT_screencoverage` hints when coverage metadata is available

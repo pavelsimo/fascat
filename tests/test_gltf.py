@@ -42,6 +42,7 @@ def _asset_with_materials_and_lods() -> Asset:
     lod_mesh = Mesh(
         points=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=float),
         faces=np.array([[0, 1, 2]], dtype=int),
+        metadata={"lod_ratio": "0.5", "lod_screen_coverage": "0.35"},
     )
     transform = np.eye(4, dtype=float)
     transform[0, 3] = 2.0
@@ -106,7 +107,16 @@ def test_glb_export_writes_valid_scene_materials_uvs_and_lod_metadata(tmp_path: 
     assert "_fascat_index" not in document["materials"][0]
     assert occurrence["matrix"][12:15] == [2.0, 0.0, 0.0]
     assert occurrence["extras"]["fascat"]["lodMeshIndices"] == [1]
-    assert occurrence["extras"]["fascat"]["lods"] == [{"level": 1, "mesh": 1}]
+    assert occurrence["extras"]["fascat"]["lods"] == [{"level": 1, "mesh": 1, "ratio": 0.5, "screenCoverage": 0.35}]
+    assert "MSFT_lod" in document["extensionsUsed"]
+    assert "MSFT_lod" not in document.get("extensionsRequired", [])
+    assert occurrence["extras"]["MSFT_screencoverage"] == [0.35]
+    lod_node_index = occurrence["extensions"]["MSFT_lod"]["ids"][0]
+    lod_node = document["nodes"][lod_node_index]
+    assert lod_node["mesh"] == 1
+    assert lod_node["name"] == "Occurrence_lod1"
+    assert lod_node["matrix"] == occurrence["matrix"]
+    assert lod_node["extras"]["fascat"] == {"nodeId": "node_lod1", "sourceNodeId": "node", "lod": 1}
     assert len(binary) >= document["buffers"][0]["byteLength"]
 
 

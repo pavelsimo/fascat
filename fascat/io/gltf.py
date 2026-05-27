@@ -31,6 +31,7 @@ _FLOAT = 5126
 _UNSIGNED_SHORT = 5123
 _UNSIGNED_INT = 5125
 _KHR_MESH_QUANTIZATION = "KHR_mesh_quantization"
+_MSFT_LOD = "MSFT_lod"
 
 _COMPONENT_SIZES = {
     _BYTE: 1,
@@ -255,6 +256,8 @@ def _build_document(
     if quantization:
         _add_extension_used(document, _KHR_MESH_QUANTIZATION)
         _add_extension_required(document, _KHR_MESH_QUANTIZATION)
+    if _uses_msft_lod(nodes):
+        _add_extension_used(document, _MSFT_LOD)
     return document, binary
 
 
@@ -687,9 +690,7 @@ def _append_node(
         "name": node.name or node.id,
         "extras": {"fascat": fascat_extras},
     }
-    transform = _matrix_to_export_space(node.transform, export_space)
-    if node.part_id is not None and node.part_id in quantization:
-        transform = transform @ quantization[node.part_id].matrix
+    transform = _node_transform(node, export_space, quantization)
     if not np.allclose(transform, np.eye(4)):
         gltf_node["matrix"] = transform.T.reshape(-1).astype(float).tolist()
     if node.part_id is not None and node.part_id in part_meshes:
@@ -698,6 +699,16 @@ def _append_node(
         if lods:
             gltf_node["extras"]["fascat"]["lodMeshIndices"] = [entry["mesh"] for entry in lods]
             gltf_node["extras"]["fascat"]["lods"] = lods
+            msft_lods = [entry for entry in lods if "omitted" not in entry]
+            msft_lod_node_indices = [
+                _append_lod_node(nodes, node, entry, export_space, metadata_options, quantization)
+                for entry in msft_lods
+            ]
+            if msft_lod_node_indices:
+                gltf_node.setdefault("extensions", {})[_MSFT_LOD] = {"ids": msft_lod_node_indices}
+                screen_coverage = [entry["screenCoverage"] for entry in msft_lods if "screenCoverage" in entry]
+                if screen_coverage:
+                    gltf_node["extras"]["MSFT_screencoverage"] = screen_coverage
     index = len(nodes)
     nodes.append(gltf_node)
     children = [
@@ -707,6 +718,51 @@ def _append_node(
     if children:
         gltf_node["children"] = children
     return index
+
+
+def _append_lod_node(
+    nodes: list[dict[str, Any]],
+    node: Node,
+    lod_entry: dict[str, object],
+    export_space: _ExportSpace,
+    metadata_options: MetadataExportOptions,
+    quantization: dict[str, _PartQuantization],
+) -> int:
+    level = _int(lod_entry["level"], "LOD level")
+    mesh_index = _int(lod_entry["mesh"], "LOD mesh index")
+    gltf_node: dict[str, Any] = {
+        "name": f"{node.name or node.id}_lod{level}",
+        "mesh": mesh_index,
+        "extras": {
+            "fascat": {
+                "nodeId": f"{node.id}_lod{level}",
+                "sourceNodeId": node.id,
+                "lod": level,
+            }
+        },
+    }
+    if metadata_options.mode == "full" and node.metadata:
+        gltf_node["extras"]["fascat"]["metadata"] = dict(node.metadata)
+    transform = _node_transform(node, export_space, quantization)
+    if not np.allclose(transform, np.eye(4)):
+        gltf_node["matrix"] = transform.T.reshape(-1).astype(float).tolist()
+    nodes.append(gltf_node)
+    return len(nodes) - 1
+
+
+def _node_transform(
+    node: Node,
+    export_space: _ExportSpace,
+    quantization: dict[str, _PartQuantization],
+) -> NDArray[np.float64]:
+    transform = _matrix_to_export_space(node.transform, export_space)
+    if node.part_id is not None and node.part_id in quantization:
+        transform = transform @ quantization[node.part_id].matrix
+    return transform
+
+
+def _uses_msft_lod(nodes: list[dict[str, Any]]) -> bool:
+    return any(_MSFT_LOD in node.get("extensions", {}) for node in nodes)
 
 
 def _pmi_by_part(asset: Asset) -> dict[str, list[str]]:
