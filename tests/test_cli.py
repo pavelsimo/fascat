@@ -320,6 +320,28 @@ def test_convert_dry_run_accepts_tangent_uv_channel() -> None:
     assert payload["override_tangents"] is True
 
 
+def test_convert_dry_run_accepts_normal_generation_controls() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "--dry-run",
+            "convert",
+            "input.step",
+            "--normals",
+            "smooth",
+            "--normal-weighting",
+            "area",
+            "--preserve-normals",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["normals"] == "smooth"
+    assert payload["normal_weighting"] == "area"
+    assert payload["override_normals"] is False
+
+
 def test_convert_dry_run_accepts_gltf_output_and_mobile_profile() -> None:
     result = runner.invoke(
         app,

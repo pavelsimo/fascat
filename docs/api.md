@@ -47,8 +47,10 @@ asset = asset.stage(
         merge_equivalent_materials=False,
         normals=True,
         normal_mode="smooth",
+        normal_weighting="angle",
         hard_edge_angle=30.0,
         preserve_face_boundaries=False,
+        override_normals=True,
         tangents=False,
         tangent_uv_channel=0,
         override_tangents=False,
@@ -490,7 +492,7 @@ Optimization parameters:
 
 ## Hard-Edge Normals And Tangents
 
-Staging can generate smooth, flat, or hard-edge normals and glTF-ready tangents. Hard-edge mode splits vertices across hard normal edges, material boundaries, and optional CAD face-group boundaries.
+Staging can generate smooth, flat, or hard-edge normals and glTF-ready tangents. Smooth and hard-edge normals can use angle or area weighting. Hard-edge mode splits vertices across hard normal edges, material boundaries, and optional CAD face-group boundaries.
 
 ```python
 asset = asset.stage(
@@ -498,8 +500,10 @@ asset = asset.stage(
         materials="cad",
         normals=True,
         normal_mode="hard_edges",
+        normal_weighting="angle",
         hard_edge_angle=30.0,
         preserve_face_boundaries=True,
+        override_normals=True,
         tangents=True,
         tangent_uv_channel=0,
         override_tangents=False,
@@ -517,8 +521,10 @@ Normal and tangent parameters:
 |-----------|---------|
 | `normals` | Generate or preserve vertex normals. Automatically disabled when `normal_mode="none"`. |
 | `normal_mode` | `smooth` averages face normals, `flat` keeps face normals, `hard_edges` splits vertices along hard edges, and `none` omits normals. |
+| `normal_weighting` | `angle` weights smooth or hard-edge normals by corner angle; `area` weights by triangle area. |
 | `hard_edge_angle` | Edge angle threshold in degrees for `normal_mode="hard_edges"`. |
 | `preserve_face_boundaries` | Treat CAD face-group boundaries as hard normal boundaries. |
+| `override_normals` | Regenerate existing normals. Set `False` to preserve existing normals and only generate normals when missing. |
 | `tangents` | Ensure glTF-ready tangent vectors exist. Existing valid tangents are preserved by default. |
 | `tangent_uv_channel` | UV channel used when tangents need to be generated or regenerated. Defaults to `0`. |
 | `override_tangents` | Regenerate existing tangents instead of preserving them when `tangents=True`. |

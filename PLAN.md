@@ -134,6 +134,9 @@ that are currently conservative approximations.
 - LOD generation now reports per-level instance reuse, material merge, texture
   bake, and culling-granularity policy so users can see what each level changed
   before far-LOD baking or merge workflows exist.
+- Staging normal generation now exposes angle versus area weighting and
+  preserve-versus-override controls, with generated, regenerated, preserved, or
+  disabled normal status in mesh and asset metadata.
 
 ## Unity Asset Transformer Parity
 
@@ -291,7 +294,7 @@ Parity gaps to track:
    - Mesh repair now detects non-orientable strips before face orientation so Mobius-like topology is reported separately from ordinary flipped faces.
    - Add optional cracking of non-orientable/Mobius-like strips before face orientation when a backend can split them safely.
    - Add explicit face-orientation and normal-orientation report steps with selectable strategies for exterior solids, single-sided open shells, unstitched-face groups, and preserved two-sided surfaces.
-   - Add missing-normal generation controls for sharp-edge angle, area weighting, and override behavior.
+   - Missing-normal generation now supports sharp-edge angle, angle or area weighting, and preserve-versus-override behavior with report metadata.
    - Standalone vertex merging now rebuilds connectivity without collapsing intentional material, normal, tangent, or UV seams by default. Remaining work: support topology-only connectivity merging with split render attributes, report skipped merge reasons, and improve cross-bucket tolerance matching.
    - Mesh repair now records before/after T-junction, nearby boundary-gap, and flipped closed-component counts. It warns that sewing/stitching remains unavailable and warns when outward orientation is still not produced.
    - BREP healing and mesh repair now report unit-aware tolerance policy: effective source/local units, declared target units, meters-per-unit conversions, vertex-merge and degenerate-polygon cleanup status, and missing T-junction/non-manifold backend operations.

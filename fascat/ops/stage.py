@@ -24,6 +24,12 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
         "missing_uv_channel": 0,
         "preserved": 0,
     }
+    normal_summary = {
+        "generated": 0,
+        "regenerated": 0,
+        "preserved": 0,
+        "disabled": 0,
+    }
     if options.uv1 in {"unwrap", "lightmap"}:
         _require_xatlas()
     if options.uv0 in {"unwrap", "lightmap"}:
@@ -49,17 +55,7 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
         original_tangents = None if mesh.tangents is None else mesh.tangents.copy()
         uv_modes: dict[int, str] = {}
         edited_uv_channels: set[int] = set()
-        if options.normals and options.normal_mode == "hard_edges":
-            mesh = mesh.compute_hard_edge_normals(
-                hard_edge_angle=options.hard_edge_angle,
-                preserve_face_boundaries=options.preserve_face_boundaries,
-            )
-        elif options.normals and options.normal_mode == "flat":
-            mesh = mesh.compute_flat_normals()
-        elif options.normals:
-            mesh = mesh.compute_normals()
-        else:
-            mesh.tangents = None
+        mesh = _stage_normals(result, part.id, mesh, options, normal_summary)
         if options.uv0 == "box":
             mesh = mesh.box_uv(0)
             _tag_uv_metadata(mesh, 0, "box", options)
@@ -106,8 +102,51 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
         part.mesh = mesh
         part.fingerprint = mesh.fingerprint()
     _tag_uv_summary(result, uv_summary)
+    _tag_normal_summary(result, normal_summary)
     _tag_tangent_summary(result, tangent_summary)
     return result
+
+
+def _stage_normals(asset: Asset, part_id: str, mesh: Mesh, options: StageOptions, summary: dict[str, int]) -> Mesh:
+    had_normals = mesh.normals is not None
+    if not options.normals:
+        mesh = mesh.copy()
+        mesh.tangents = None
+        mesh.metadata["normal_generation_status"] = "disabled" if not had_normals else "preserved"
+        mesh.metadata["normal_mode"] = "none"
+        summary["disabled" if not had_normals else "preserved"] += 1
+        return mesh
+
+    if had_normals and not options.override_normals:
+        mesh = mesh.copy()
+        mesh.metadata["normal_generation_status"] = "preserved"
+        mesh.metadata["normal_source"] = "existing"
+        mesh.metadata["normal_override"] = "false"
+        summary["preserved"] += 1
+        return mesh
+
+    if options.normal_mode == "hard_edges":
+        mesh = mesh.compute_hard_edge_normals(
+            hard_edge_angle=options.hard_edge_angle,
+            preserve_face_boundaries=options.preserve_face_boundaries,
+            angle_weighted=options.normal_weighting == "angle",
+        )
+    elif options.normal_mode == "flat":
+        mesh = mesh.compute_flat_normals()
+    else:
+        mesh = mesh.compute_normals(angle_weighted=options.normal_weighting == "angle")
+
+    status = "regenerated" if had_normals else "generated"
+    mesh.metadata["normal_generation_status"] = status
+    mesh.metadata["normal_mode"] = options.normal_mode
+    if options.normal_mode in {"smooth", "hard_edges"}:
+        mesh.metadata["normal_weighting"] = options.normal_weighting
+    if had_normals and options.override_normals:
+        mesh.metadata["normal_override"] = "true"
+    if options.normal_mode == "hard_edges":
+        mesh.metadata["normal_hard_edge_angle"] = f"{options.hard_edge_angle:g}"
+    summary[status] += 1
+    return mesh
 
 
 def _stage_materials(asset: Asset, options: StageOptions, *, selected_part_ids: set[str] | None) -> None:
@@ -353,6 +392,12 @@ def _tag_tangent_summary(asset: Asset, tangent_summary: dict[str, int]) -> None:
     for name, count in tangent_summary.items():
         if count:
             asset.metadata[f"stage_tangents_{name}_parts"] = str(count)
+
+
+def _tag_normal_summary(asset: Asset, normal_summary: dict[str, int]) -> None:
+    for name, count in normal_summary.items():
+        if count:
+            asset.metadata[f"stage_normals_{name}_parts"] = str(count)
 
 
 def _warn_unwrap_solver_limits(asset: Asset, options: StageOptions) -> None:

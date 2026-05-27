@@ -412,6 +412,7 @@ def test_size_adaptive_tessellation_requires_bands() -> None:
         (lambda: fc.StageOptions(materials="bad"), "materials"),
         (lambda: fc.StageOptions(material_mode="bad"), "material_mode"),
         (lambda: fc.StageOptions(normal_mode="bad"), "normal_mode"),
+        (lambda: fc.StageOptions(normal_weighting="bad"), "normal_weighting"),
         (lambda: fc.StageOptions(hard_edge_angle=0), "hard_edge_angle"),
         (lambda: fc.StageOptions(uv0="bad"), "uv0"),
         (lambda: fc.StageOptions(uv1="bad"), "uv1"),

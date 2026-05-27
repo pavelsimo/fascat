@@ -1214,6 +1214,14 @@ def _stage_report_stats(asset: Asset) -> dict[str, int]:
             asset.metadata["stage_uv_forbid_overlapping_violations"],
             0,
         )
+    for key in (
+        "stage_normals_generated_parts",
+        "stage_normals_regenerated_parts",
+        "stage_normals_preserved_parts",
+        "stage_normals_disabled_parts",
+    ):
+        if key in asset.metadata:
+            stats[key] = _metadata_int(asset.metadata[key], 0)
     return stats
 
 

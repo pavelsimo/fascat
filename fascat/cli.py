@@ -160,6 +160,11 @@ class NormalMode(str, Enum):
     FLAT = "flat"
 
 
+class NormalWeighting(str, Enum):
+    ANGLE = "angle"
+    AREA = "area"
+
+
 class MergeMode(str, Enum):
     ALL = "all"
     BY_MATERIAL = "by-material"
@@ -654,10 +659,21 @@ def cmd_convert(
         NormalMode,
         typer.Option("--normals", help="Normal generation mode: none, smooth, hard-edges, or flat."),
     ] = NormalMode.SMOOTH,
+    normal_weighting: Annotated[
+        NormalWeighting,
+        typer.Option("--normal-weighting", help="Normal averaging weights for smooth or hard-edge normals."),
+    ] = NormalWeighting.ANGLE,
     preserve_face_boundaries: Annotated[
         bool,
         typer.Option("--preserve-face-boundaries", help="Treat CAD face-group boundaries as hard normal edges."),
     ] = False,
+    override_normals: Annotated[
+        bool,
+        typer.Option(
+            "--override-normals/--preserve-normals",
+            help="Regenerate existing normals instead of preserving them during staging.",
+        ),
+    ] = True,
     tangents: Annotated[
         bool,
         typer.Option("--tangents", help="Generate glTF-compatible vertex tangents from the selected UV channel."),
@@ -1173,7 +1189,9 @@ def cmd_convert(
         "lod_drop_tiny_parts": lod_drop_tiny_parts,
         "lod_tiny_part_screen_size": lod_tiny_part_screen_size,
         "normals": normals.value,
+        "normal_weighting": normal_weighting.value,
         "preserve_face_boundaries": preserve_face_boundaries,
+        "override_normals": override_normals,
         "tangents": tangents,
         "tangent_uv_channel": tangent_uv_channel,
         "override_tangents": override_tangents,
@@ -1512,8 +1530,10 @@ def cmd_convert(
             merge_equivalent_materials=merge_equivalent_materials,
             normals=normals != NormalMode.NONE,
             normal_mode=cast(Any, normals.value.replace("-", "_")),
+            normal_weighting=normal_weighting.value,
             hard_edge_angle=hard_edge_angle,
             preserve_face_boundaries=preserve_face_boundaries,
+            override_normals=override_normals,
             tangents=tangents,
             tangent_uv_channel=tangent_uv_channel,
             override_tangents=override_tangents,

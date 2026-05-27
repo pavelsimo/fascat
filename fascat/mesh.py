@@ -704,20 +704,31 @@ class Mesh:
         *,
         hard_edge_angle: float = 30.0,
         preserve_face_boundaries: bool = False,
+        angle_weighted: bool = True,
     ) -> Mesh:
         if self.triangle_count == 0:
-            return self.compute_normals()
+            return self.compute_normals(angle_weighted=angle_weighted)
         hard_edges = self._hard_normal_edges(
             hard_edge_angle=hard_edge_angle,
             preserve_face_boundaries=preserve_face_boundaries,
         )
         if not hard_edges:
-            mesh = self.compute_normals()
-            mesh.metadata = {**mesh.metadata, "normal_mode": "hard_edges"}
+            mesh = self.compute_normals(angle_weighted=angle_weighted)
+            mesh.metadata = {
+                **mesh.metadata,
+                "normal_mode": "hard_edges",
+                "normal_weighting": "angle" if angle_weighted else "area",
+            }
             return mesh
 
         edge_faces = self._edge_faces_map()
         face_normals = self._face_unit_normals()
+        triangle_points = self.points[self.faces]
+        corner_angles = _triangle_corner_angles(triangle_points)
+        p0 = triangle_points[:, 0]
+        p1 = triangle_points[:, 1]
+        p2 = triangle_points[:, 2]
+        raw_face_normals = np.cross(p1 - p0, p2 - p0)
         incident_faces: dict[int, set[int]] = {index: set() for index in range(self.vertex_count)}
         for face_index, face in enumerate(self.faces.astype(int).tolist()):
             for vertex in face:
@@ -749,7 +760,14 @@ class Mesh:
                                 remaining.remove(neighbor)
                                 component.add(neighbor)
                                 stack.append(neighbor)
-                normal = face_normals[list(component)].sum(axis=0)
+                if angle_weighted:
+                    normal = np.zeros(3, dtype=np.float64)
+                    for face_index in component:
+                        face_vertices = self.faces[face_index].astype(int).tolist()
+                        corner = face_vertices.index(vertex)
+                        normal += face_normals[face_index] * corner_angles[face_index, corner]
+                else:
+                    normal = raw_face_normals[list(component)].sum(axis=0)
                 length = float(np.linalg.norm(normal))
                 if length > 0.0:
                     normal = normal / length
@@ -791,6 +809,7 @@ class Mesh:
                 "normal_mode": "hard_edges",
                 "hard_edge_angle": str(hard_edge_angle),
                 "preserve_face_boundaries": str(preserve_face_boundaries).lower(),
+                "normal_weighting": "angle" if angle_weighted else "area",
             },
         )
         mesh.validate_normals()

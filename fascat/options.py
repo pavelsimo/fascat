@@ -8,6 +8,7 @@ UV1Mode = Literal["none", "box", "unwrap", "lightmap", "copy_uv0"]
 UVMode = UV0Mode
 UnwrapMethod = Literal["default", "conformal", "isometric"]
 NormalMode = Literal["none", "smooth", "hard_edges", "flat"]
+NormalWeighting = Literal["angle", "area"]
 MaterialMode = Literal["cad", "display", "none"]
 MaterialPipelineMode = Literal["cad", "pbr"]
 LODMode = Literal["variants", "extras", "separate"]
@@ -295,8 +296,10 @@ class StageOptions:
     merge_equivalent_materials: bool = False
     normals: bool = True
     normal_mode: NormalMode = "smooth"
+    normal_weighting: NormalWeighting = "angle"
     hard_edge_angle: float = 30.0
     preserve_face_boundaries: bool = False
+    override_normals: bool = True
     tangents: bool = False
     tangent_uv_channel: int = 0
     override_tangents: bool = False
@@ -322,6 +325,8 @@ class StageOptions:
             raise ValueError("material_mode must be one of: cad, pbr")
         if self.normal_mode not in {"none", "smooth", "hard_edges", "flat"}:
             raise ValueError("normal_mode must be one of: none, smooth, hard_edges, flat")
+        if self.normal_weighting not in {"angle", "area"}:
+            raise ValueError("normal_weighting must be one of: angle, area")
         if self.hard_edge_angle <= 0.0 or self.hard_edge_angle > 180.0:
             raise ValueError("hard_edge_angle must be greater than 0 and no more than 180")
         if self.tangent_uv_channel < 0:

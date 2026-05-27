@@ -349,6 +349,66 @@ def test_stage_preserves_existing_normals_when_generation_is_disabled() -> None:
     assert np.array_equal(staged_mesh.normals, original_normals)
 
 
+def test_stage_can_preserve_existing_normals_when_generation_is_enabled() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+        normals=np.array([[1, 0, 0], [1, 0, 0], [1, 0, 0]], dtype=float),
+    )
+    original_normals = mesh.normals.copy()
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    staged = asset.stage(StageOptions(override_normals=False, uv0="none", uv1=None))
+    staged_mesh = staged.parts["part"].mesh
+
+    assert staged_mesh is not None
+    assert staged_mesh.normals is not None
+    assert np.array_equal(staged_mesh.normals, original_normals)
+    assert staged_mesh.metadata["normal_generation_status"] == "preserved"
+    assert staged_mesh.metadata["normal_source"] == "existing"
+    assert staged_mesh.metadata["normal_override"] == "false"
+    assert staged.metadata["stage_normals_preserved_parts"] == "1"
+    assert staged.report.steps[-1].after["stage_normals_preserved_parts"] == 1
+
+
+def test_stage_supports_area_weighted_smooth_normals() -> None:
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [4, 0, 0],
+                [0, 1, 0],
+                [0, 0, 2],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [0, 3, 1]], dtype=int),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    angle = asset.stage(StageOptions(normal_weighting="angle", uv0="none", uv1=None))
+    area = asset.stage(StageOptions(normal_weighting="area", uv0="none", uv1=None))
+    angle_mesh = angle.parts["part"].mesh
+    area_mesh = area.parts["part"].mesh
+
+    assert angle_mesh is not None
+    assert area_mesh is not None
+    assert angle_mesh.normals is not None
+    assert area_mesh.normals is not None
+    assert not np.allclose(angle_mesh.normals[0], area_mesh.normals[0])
+    assert area_mesh.metadata["normal_generation_status"] == "generated"
+    assert area_mesh.metadata["normal_mode"] == "smooth"
+    assert area_mesh.metadata["normal_weighting"] == "area"
+    assert area.metadata["stage_normals_generated_parts"] == "1"
+    assert area.report.steps[-1].after["stage_normals_generated_parts"] == 1
+
+
 def test_stage_generates_hard_edge_normals_and_tangents() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float),
