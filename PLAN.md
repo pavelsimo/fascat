@@ -60,6 +60,9 @@ that are currently conservative approximations.
 - Tessellation now warns when retained BREP patches, CAD face groups, or
   material splits are likely to increase submesh, draw-call, or export-size
   pressure.
+- Tessellation profiles now include a size-adaptive helper that generates
+  per-part sag, sag-ratio, angle, and max-polygon-length settings from
+  bounding-box bands.
 - Platform budgets now record Unity reference triangle and draw-call ranges in
   profile definitions, conversion reports, and documentation tables.
 - Decimation now records RAM estimates, budget-allocation mode, and
@@ -107,7 +110,7 @@ Comparison snapshot:
 | Area | Fascat today | Missing for closer Unity parity |
 | --- | --- | --- |
 | Import | STEP-centric import with hierarchy, transforms, metadata, colors, repeated-part handling, PMI presence reporting, existing-mesh reuse intent, construction-only point/line cleanup controls, source-space normalization reporting, and BREP patch cleanup reporting after tessellation. | True multi-file/multi-root import semantics, design-variant import, typed/visual PMI, mixed BREP construction-curve cleanup, native CAD/JT/IFC/Parasolid/IGES coverage, and richer per-part loaded-representation reports. |
-| Repair and tessellation | BREP sewing/fix-edge path, mesh duplicate/degenerate/T-junction/boundary-gap/flipped-component diagnostics, unit-aware repair tolerance reporting, sag/sag-ratio/angle/max-length controls, free-edge diagnostics, reusable existing mesh control, and retained patch / submesh risk warnings. | Open-shell grouping, unstitched-face handling, T-junction sewing, boundary-gap stitching, non-manifold edge cracking, selectable face/normal orientation strategies, CAD-derived UV modes, targeted tessellation by part/material/metadata/curvature, and optional free-edge geometry output. |
+| Repair and tessellation | BREP sewing/fix-edge path, mesh duplicate/degenerate/T-junction/boundary-gap/flipped-component diagnostics, unit-aware repair tolerance reporting, sag/sag-ratio/angle/max-length controls, bounding-box-derived tessellation helpers, free-edge diagnostics, reusable existing mesh control, and retained patch / submesh risk warnings. | Open-shell grouping, unstitched-face handling, T-junction sewing, boundary-gap stitching, non-manifold edge cracking, selectable face/normal orientation strategies, CAD-derived UV modes, targeted tessellation by material/metadata/curvature, and optional free-edge geometry output. |
 | Staging | Normal/tangent generation, box/unwrap/lightmap UV modes, UV copy/normalization, UV validation, UV island/distortion/packing diagnostics, material normalization, duplicate-material merge, and metadata-only atlas intent. | Unity-style UV0 tileable versus UV1 bake workflows with segmentation, lines of interest, island merge/alignment, real repack/padding/share-map controls, material-library mapping, real atlas textures, AO/lightmap baking, and texture cleanup. |
 | Optimization | Mesh simplification, measured error reporting, sampled occlusion removal, exact instance reconstruction, scene merge/split utilities, draw-call breakdown reports, and UV-importance modes. | Global assembly target allocation with iterative memory thresholds, real geometric-error bounded simplification, AO/user-weighted decimation, standard/advanced occlusion backends, retopology/proxy mesh generation, duplicate image/material cleanup, and merge reports that quantify culling, memory, and file-size tradeoffs. |
 | LODs | LOD ratios, screen-coverage metadata, validation, skipped-part reporting, and glTF `MSFT_lod` metadata. | Occurrence-level LOD group authoring with preserved instance relationships, optimized LOD0 as master asset, far-LOD one-mesh/one-material baking, switching-distance validation, and engine-specific runtime export profiles. |
@@ -130,6 +133,18 @@ Second-pass gaps from the Unity references:
 - Add export comparison reports that show unoptimized GLB, optimized GLB,
   geometry-compressed GLB, and geometry-plus-texture-compressed GLB deltas once
   real Draco and KTX2 outputs exist.
+- Treat orientation as its own post-repair stage, not just a side effect of mesh
+  cleanup or normal generation. Unity separates polygon orientation, normal
+  orientation, and open-shell/unstitched-face handling; Fascat should report
+  those decisions separately.
+- Track Unity's lines-of-interest UV workflow explicitly. Segmenting seams,
+  optionally creating seams from LoI, unwrapping, merging, aligning, repacking,
+  and normalizing should be modeled as distinct UV steps with per-channel
+  metadata.
+- Add an export-aware merge-versus-instance advisor. Unity's export guidance
+  favors preserving instances for file size even when merging can reduce draw
+  calls, so Fascat should warn when a merge helps batching but hurts GLB size,
+  memory, or culling.
 
 Parity gaps to track:
 
@@ -156,7 +171,7 @@ Parity gaps to track:
    - Mesh repair now deletes duplicate polygons and records before/after duplicate, degenerate, boundary-edge, and non-manifold metrics.
    - Extend mesh repair with true T-junction sewing, non-manifold edge cracking, and configurable face-orientation strategies for closed solids versus open shells.
    - Mesh repair now detects non-orientable strips before face orientation so Mobius-like topology is reported separately from ordinary flipped faces.
-   - Add explicit face and normal orientation passes with selectable strategies for exterior solids, single-sided open shells, and preserved two-sided surfaces.
+   - Add explicit face-orientation and normal-orientation report steps with selectable strategies for exterior solids, single-sided open shells, unstitched-face groups, and preserved two-sided surfaces.
    - Add missing-normal generation controls for sharp-edge angle, area weighting, and override behavior.
    - Add attribute-aware tolerance vertex merging that rebuilds connectivity across hard-edge and non-manifold borders without collapsing intentional material, normal, or UV seams.
    - Mesh repair now records before/after T-junction, nearby boundary-gap, and flipped closed-component counts. It warns that sewing/stitching remains unavailable and warns when outward orientation is still not produced.
@@ -167,23 +182,24 @@ Parity gaps to track:
    - Existing imported meshes now have an explicit `reuse_existing_meshes` control across Python, CLI, TOML pipelines, per-part overrides, and reports. The default preserves imported meshes; disabling it retessellates from source BREP where available.
    - Free-edge tessellation diagnostics are now available through `free_edge_report` across Python, CLI, TOML pipelines, per-part overrides, metadata, and report warnings. Remaining work: investigate CAD-parametric UV and tangent generation during tessellation.
    - Add optional free-edge geometry output or retention, separate from diagnostics, for wire overlays, boundary inspection, and import cleanup validation.
-   - Add targeted tessellation profiles by part size, material, metadata, curvature, or filter so shiny/high-detail parts can use finer criteria than bulk structural parts.
-   - Add bounding-box-derived tessellation profile helpers so sag, sag-ratio, angle, and polygon-length defaults can be selected per part instead of only globally.
+   - Size-adaptive tessellation helpers now generate per-part `part_settings` from bounding-box diagonal bands, so sag, sag-ratio, angle, and polygon-length defaults can vary by part size.
+   - Remaining targeted-profile work: material, metadata, curvature, or filter driven tessellation so shiny/high-detail parts can use finer criteria than bulk structural parts.
    - Expose CAD-derived UV generation modes, including none, intrinsic surface UVs, and conformal/scaled UVs, instead of only post-mesh unwrapping.
    - Max polygon length is now exposed separately from cleanup subdivision. `max_edge_length` still subdivides geometry; `max_polygon_length` drives quality-report `long_edges`, metadata, and warnings for long tessellated edges that may cause lighting artifacts.
 
 5. UV staging
    - Extend existing box UVs into Unity-style AABB projection controls: local versus shared/global AABB, real-world UV scale or `uv3dSize`, destination channel, override policy, and unit reporting.
-   - Add UV segmentation and seam planning, including sharp-edge seams and lines of interest.
+   - Add UV segmentation and seam planning, including sharp-edge seams, material-boundary seams, user-supplied seam curves, and lines of interest.
    - Add a complete UV workflow model: segment, unwrap, optionally merge islands, align tileable UV0 islands, repack UV1, normalize, validate overlaps, and record which steps ran per channel.
+   - Add lines-of-interest seam controls equivalent to Unity's create-seams-from-LoI path, with persisted seam graph metadata and warnings when the backend falls back to existing UV islands.
    - Staging now warns when bake-domain UVs were only unwrapped and not repacked, because unwrap alone does not prove islands were packed into `[0,1]` with padding for lightmap, AO, or material baking.
    - Add affine UV island merge and alignment controls for tileable UV0 workflows, including allowed transforms, polygon weighting, and rotation-step quantization.
    - Unwrap solver intent is now accepted across Python, CLI, TOML pipelines, metadata, and reports with `default`, `conformal`, and `isometric` values. The current xatlas backend records non-default solver methods as intent and warns that it cannot enforce them directly.
    - Unwrap iteration and tolerance controls are now accepted across Python, CLI, TOML pipelines, metadata, and reports. Remaining work: add a backend that enforces those controls and reports solver failure or excessive distortion.
    - UV layout diagnostics now record island count, pack efficiency, normalized-space utilization, conformal angle distortion, and isometric edge-length distortion per channel.
-   - UV0-to-UV1 copy is now supported through `uv1="copy_uv0"` / `--uv1 copy-uv0`, with copied/missing-source metadata and warnings. UV normalization is now explicit through `normalize_uvs=(...)` / `--normalize-uvs`, with original-bounds metadata and missing-channel warnings. UV validation now records per-channel domains, bounds, unit-domain status, validation status, distortion metrics, and packing efficiency. Remaining work: UV island merge, alignment, repack, padding/resolution/share-map controls, overlap removal, uniform versus non-uniform normalization, shared versus per-part UV space, and null-island handling.
+   - UV0-to-UV1 copy is now supported through `uv1="copy_uv0"` / `--uv1 copy-uv0`, with copied/missing-source metadata and warnings. UV normalization is now explicit through `normalize_uvs=(...)` / `--normalize-uvs`, with original-bounds metadata and missing-channel warnings. UV validation now records per-channel domains, bounds, unit-domain status, validation status, distortion metrics, and packing efficiency. Remaining work: UV island merge, alignment, repack, padding/resolution/share-map controls, overlap removal, uniform versus non-uniform normalization, shared versus per-part UV space, destination-channel controls, and null-island handling.
    - Make UV0 tileable and UV1 baking requirements explicit: UV0 may overlap; UV1 must fit in `[0,1]` with padding and no overlaps.
-   - Add UV1 bake packing controls for atlas resolution, pixel padding, shared versus per-part UV space, overlap removal, and normalized-space utilization reports.
+   - Add UV1 bake packing controls for atlas resolution, pixel padding, share-map behavior, uniform versus non-uniform scaling, shared versus per-part UV space, overlap removal, destination channel, null-island handling, and normalized-space utilization reports.
    - Tangent lifecycle validation now warns when UV0 is missing, invalidates tangents after UV edits, and records generated, regenerated, preserved, invalidated, missing, or dropped tangent states on mesh and asset metadata.
    - Tangent generation can now use an explicit source UV channel and preserves existing tangents by default, with `override_tangents` available across Python, CLI, TOML pipelines, metadata, and reports when regeneration is required.
    - Explicit decimation can now strip UV/tangent attributes through `uv_importance="ignore"` or preserve seams and then drop UVs with `uv_importance="preserve_seams"`.
@@ -202,12 +218,13 @@ Parity gaps to track:
    - Expose standard versus advanced occlusion-removal parameters such as resolution, sphere count or ray direction set, adjacency depth, hemisphere-only evaluation, cavity preservation, and GPU/backend requirements.
    - Add loose and precise instance reconstruction for similar, separately modeled parts.
    - Improve merge planning so reports show draw-call savings, instance loss, memory growth, culling impact, and export file-size risk when merging destroys repeated geometry.
+   - Add an export-aware merge advisor that recommends preserving or reconstructing instances when file size, memory, or culling is more important than reducing draw calls.
    - Draw-call budget analysis now separates mesh count, referenced material count, submesh/material slots, instances, reused instances, and merged batches.
    - Add retopology or proxy-mesh paths for cases where decimation and occlusion are not enough.
    - Add dedicated cleanup for unused texture coordinates, duplicate materials, and duplicate images before draw-call and file-size optimization.
 
 8. Decimation parity
-   - Add global target allocation across a selected assembly while decimating at part level, so sparse parts stay intact and dense parts carry most of the reduction.
+   - Add Unity-style global target allocation across a selected assembly while decimating at part level, so sparse/simple parts stay intact and dense parts carry most of the reduction, with before/after allocation reports.
    - Decimation now records RAM estimates using the Unity 5 GB per million polygons rule of thumb, reports global versus per-part budget allocation, and warns when the selected source triangle count reaches the iterative threshold.
    - Add target-device decimation presets, including XR/HoloLens-style triangle caps, so platform targets can drive simplification before export.
    - Replace quality-criterion heuristics with measured geometric error.
@@ -234,6 +251,7 @@ Parity gaps to track:
    - Add texture-resize preprocessing with before/after dimensions, byte estimates, and per-profile maximums before KTX2/PNG/JPEG export decisions.
    - glTF write reports now list emitted runtime extensions, required extensions, `extras.fascat` metadata, unsupported Draco/KTX2 outputs, and expected runtime support.
    - Add Unity/glTFast-oriented GLB export profiles that combine extension support notes, Draco/KTX2 settings, fallback choices, and runtime compatibility warnings.
+   - Add a runtime extension compatibility matrix for Unity glTFast, web, mobile, and XR targets covering `MSFT_lod`, `EXT_meshopt_compression`, `KHR_draco_mesh_compression`, `KHR_texture_basisu`, quantization, and fallback behavior.
    - Add baseline-versus-optimized export comparisons so reports show how much each preparation step changed file size, and warn when draw-call merging increases export size by breaking instancing.
    - Add format-aware texture export policy and reporting: prefer KTX2/Basis for glTF/GLB, use PNG/JPEG fallbacks for texture-capable non-glTF exports, remove unused images before export, and warn when users compare source CAD file size directly against runtime mesh exports.
    - Add named web, mobile, desktop, and VR export presets that combine geometry compression, texture compression, texture resizing, and cleanup choices.

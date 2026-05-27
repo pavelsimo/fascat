@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any, cast
+
+import numpy as np
+
 from fascat.options import (
     ConversionProfile,
     LODOptions,
@@ -9,6 +15,68 @@ from fascat.options import (
     StageOptions,
     Tessellation,
 )
+
+
+@dataclass(frozen=True)
+class TessellationSizeBand:
+    max_diagonal: float | None
+    sag: float | None = None
+    sag_ratio: float | None = None
+    angle: float | None = None
+    max_polygon_length: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.max_diagonal is not None and self.max_diagonal <= 0.0:
+            raise ValueError("max_diagonal must be greater than 0 when set")
+        if self.sag is not None and self.sag <= 0.0:
+            raise ValueError("sag must be greater than 0 when set")
+        if self.sag_ratio is not None and self.sag_ratio <= 0.0:
+            raise ValueError("sag_ratio must be greater than 0 when set")
+        if self.angle is not None and (self.angle <= 0.0 or self.angle > 180.0):
+            raise ValueError("angle must be greater than 0 and no more than 180 when set")
+        if self.max_polygon_length is not None and self.max_polygon_length <= 0.0:
+            raise ValueError("max_polygon_length must be greater than 0 when set")
+
+    def to_part_settings(self) -> dict[str, object]:
+        settings: dict[str, object] = {}
+        if self.sag is not None:
+            settings["sag"] = self.sag
+        if self.sag_ratio is not None:
+            settings["sag_ratio"] = self.sag_ratio
+        if self.angle is not None:
+            settings["angle"] = self.angle
+        if self.max_polygon_length is not None:
+            settings["max_polygon_length"] = self.max_polygon_length
+        return settings
+
+
+def size_adaptive_tessellation(
+    asset: Any,
+    *,
+    base: Tessellation | None = None,
+    bands: Sequence[TessellationSizeBand],
+) -> Tessellation:
+    if not bands:
+        raise ValueError("at least one tessellation size band is required")
+
+    options = base or Tessellation()
+    part_settings = {part_id: dict(settings) for part_id, settings in options.part_settings.items()}
+    for part in getattr(asset, "parts", {}).values():
+        if part.id in part_settings or part.name in part_settings:
+            continue
+        diagonal = _part_diagonal(part)
+        if diagonal is None:
+            continue
+        band = _band_for_diagonal(diagonal, bands)
+        if band is None:
+            continue
+        settings = band.to_part_settings()
+        if settings:
+            part_settings[part.id] = settings
+
+    values = options.to_dict()
+    values["part_settings"] = part_settings
+    return Tessellation(**cast(Any, values))
 
 
 def inspect_only() -> ConversionProfile:
@@ -155,3 +223,37 @@ def by_name(name: str) -> ConversionProfile:
     if name == "virtual-reality":
         return virtual_reality()
     raise ValueError(f"unknown profile: {name}")
+
+
+def _band_for_diagonal(diagonal: float, bands: Sequence[TessellationSizeBand]) -> TessellationSizeBand | None:
+    for band in bands:
+        if band.max_diagonal is None or diagonal <= band.max_diagonal:
+            return band
+    return None
+
+
+def _part_diagonal(part: Any) -> float | None:
+    mesh = getattr(part, "mesh", None)
+    if mesh is not None:
+        mins, maxs = mesh.bounds()
+        return float(np.linalg.norm(maxs - mins))
+    return _source_shape_diagonal(getattr(part, "source_shape", None))
+
+
+def _source_shape_diagonal(shape: object | None) -> float | None:
+    if shape is None:
+        return None
+    try:
+        from OCP.Bnd import Bnd_Box
+        from OCP.BRepBndLib import BRepBndLib
+
+        bounds = Bnd_Box()
+        BRepBndLib.Add_s(shape, bounds)
+        if bounds.IsVoid():
+            return None
+        xmin, ymin, zmin, xmax, ymax, zmax = bounds.Get()
+    except Exception:
+        return None
+    mins = np.asarray([xmin, ymin, zmin], dtype=np.float64)
+    maxs = np.asarray([xmax, ymax, zmax], dtype=np.float64)
+    return float(np.linalg.norm(maxs - mins))

@@ -4,7 +4,19 @@ import pytest
 
 import fascat as fc
 from fascat import profiles
+from fascat.mesh import Mesh
 from fascat.options import ConversionProfile
+
+
+def _sized_mesh(size: float) -> Mesh:
+    return Mesh(
+        points=[
+            [0.0, 0.0, 0.0],
+            [size, 0.0, 0.0],
+            [0.0, size, 0.0],
+        ],
+        faces=[[0, 1, 2]],
+    )
 
 
 @pytest.mark.parametrize(
@@ -184,6 +196,59 @@ def test_lod_options_normalize_list_ratios() -> None:
 
     assert options.ratios == (0.5, 0.25, 0.1)
     assert options.to_dict()["ratios"] == [0.5, 0.25, 0.1]
+
+
+def test_size_adaptive_tessellation_builds_part_settings_from_bounds() -> None:
+    asset = fc.Asset(
+        root=fc.Node(
+            id="root",
+            name="root",
+            children=[
+                fc.Node(id="small_node", name="Small", part_id="small"),
+                fc.Node(id="large_node", name="Large", part_id="large"),
+                fc.Node(id="bulk_node", name="Bulk", part_id="bulk"),
+                fc.Node(id="empty_node", name="Empty", part_id="empty"),
+            ],
+        ),
+        parts={
+            "small": fc.Part(id="small", name="Small", mesh=_sized_mesh(1.0)),
+            "large": fc.Part(id="large", name="Large", mesh=_sized_mesh(10.0)),
+            "bulk": fc.Part(id="bulk", name="Bulk", mesh=_sized_mesh(10.0)),
+            "empty": fc.Part(id="empty", name="Empty"),
+        },
+    )
+
+    adaptive = profiles.size_adaptive_tessellation(
+        asset,
+        base=fc.Tessellation(sag=0.5, angle=30.0, part_settings={"Large": {"angle": 12.0}}),
+        bands=(
+            profiles.TessellationSizeBand(max_diagonal=2.0, sag=0.02, angle=8.0, max_polygon_length=0.5),
+            profiles.TessellationSizeBand(max_diagonal=None, sag=0.2, sag_ratio=0.01, angle=18.0),
+        ),
+    )
+
+    assert adaptive.sag == 0.5
+    assert adaptive.angle == 30.0
+    assert adaptive.part_settings["small"] == {
+        "sag": 0.02,
+        "angle": 8.0,
+        "max_polygon_length": 0.5,
+    }
+    assert adaptive.part_settings["Large"] == {"angle": 12.0}
+    assert "large" not in adaptive.part_settings
+    assert adaptive.part_settings["bulk"] == {
+        "sag": 0.2,
+        "sag_ratio": 0.01,
+        "angle": 18.0,
+    }
+    assert "empty" not in adaptive.part_settings
+
+
+def test_size_adaptive_tessellation_requires_bands() -> None:
+    asset = fc.Asset(root=fc.Node(id="root", name="root"))
+
+    with pytest.raises(ValueError, match="size band"):
+        profiles.size_adaptive_tessellation(asset, bands=())
 
 
 @pytest.mark.parametrize(

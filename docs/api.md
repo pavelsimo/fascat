@@ -379,6 +379,26 @@ quality = asset.tessellation_quality_report()
 
 `part_settings` keys match a part id or part name. Quality reports include per-part edge length, triangle area, aspect ratio, skinny triangle, duplicate polygon, boundary edge, and non-manifold edge counts. Tessellated parts also record `tessellation_face_groups`, `tessellation_estimated_draw_calls`, and retained-patch counts when available; the tessellation step warns when retained BREP patches, CAD face groups, or material splits are likely to increase submesh, draw-call, or export-size pressure.
 
+Size-adaptive tessellation helpers can generate `part_settings` from part
+bounding-box diagonals, using existing mesh bounds or source BREP bounds when
+the OCCT backend is available:
+
+```python
+asset = fc.read_step("motor.step")
+tessellation = fc.profiles.size_adaptive_tessellation(
+    asset,
+    base=fc.Tessellation(sag=0.1, angle=15.0, quality_report=True),
+    bands=(
+        fc.profiles.TessellationSizeBand(max_diagonal=25.0, sag=0.02, angle=8.0, max_polygon_length=1.0),
+        fc.profiles.TessellationSizeBand(max_diagonal=None, sag=0.12, sag_ratio=0.01, angle=18.0),
+    ),
+)
+asset = asset.tessellate(tessellation)
+```
+
+Explicit `part_settings` on `base` remain authoritative; the helper only fills
+settings for parts that do not already have a part-id or part-name override.
+
 Tessellation parameters:
 
 | Parameter | Meaning |
