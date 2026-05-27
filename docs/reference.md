@@ -112,9 +112,9 @@ Dry-run JSON for `convert` includes `operation_diagnostics`, a list of planned o
 | `--uv-tolerance` | unset | UV deviation tolerance metadata for decimation |
 | `--protect-topology / --no-protect-topology` | `true` | Preserve topology-sensitive faces during decimation |
 | `--budget-scope` | `selection` | Decimation budget scope: `part` or `selection` |
-| `--remove-holes` | `false` | Remove small hole features with mesh fallback |
-| `--hole-types` | `through,blind,surface` | Hole types to remove |
-| `--max-hole-diameter` | `3.0` | Maximum hole diameter to remove |
+| `--remove-holes` | `false` | Remove small open hole loops with mesh boundary classification |
+| `--hole-types` | `through,blind,surface` | Boundary hole types to remove |
+| `--max-hole-diameter` | `3.0` | Maximum planar-span hole diameter to remove |
 | `--prefer-brep / --no-prefer-brep` | `true` | Prefer BREP feature removal when available |
 | `--remove-occluded` | `false` | Remove geometry hidden from sampled exterior visibility rays |
 | `--occlusion-strategy` | `advanced` | Occlusion strategy: `conservative`, `exterior`, or `advanced` |
@@ -158,7 +158,7 @@ Units and behavior notes:
 - Ratios such as `--ratio`, `--lods`, and decimation target ratios are fractions between `0` and `1`; LOD ratios must be sorted from highest to lowest detail.
 - Screen coverage values are fractions between `0` and `1`; file-size budgets are megabytes; atlas and bake sizes are pixels.
 - `--decimate-criterion quality` currently maps tolerances to a target ratio and reports a warning because error-bounded simplification is not implemented.
-- `--remove-holes` uses mesh boundary filling when BREP hole removal is unavailable; `--hole-types` are recorded as intent by the mesh fallback.
+- `--remove-holes` uses mesh boundary classification and filling when BREP hole removal is unavailable. `--hole-types` filters inferred through, blind, and surface boundary loops; closed BREP feature holes still require a BREP feature backend.
 - `--remove-occluded` uses deterministic sampled visibility. Strategy changes the direction set, `--hemi-evaluation` restricts rays to upper-hemisphere and side views, and `--occlusion-level` controls whether fully hidden parts, material groups, or triangles are removed.
 - `--draco` is rejected until a Draco encoder backend is integrated.
 
@@ -258,7 +258,7 @@ warnings to distinguish exact work from fallbacks.
 | Mesh repair | Implemented for core cleanup | `repair` report step | Add T-junction sewing, non-manifold cracking, and configurable orientation strategies |
 | Staging, normals, tangents, UV metadata | Partial | `stage` report step; tangents require UV0 | Add seam planning, unwrap method selection, UV overlap checks, repack, normalize, and per-channel validation |
 | Material baking | Metadata-only | `bake_materials` warns texture image baking is not implemented | Generate real base-color, opacity, roughness, metallic, normal, AO, and emissive textures |
-| Hole removal | Approximate | `remove_holes` warns about the mesh boundary-fill fallback and hole-type metadata limits | Add BREP feature-level hole classification and removal |
+| Hole removal | Approximate | `remove_holes` warns when it falls back to mesh boundary classification and filling | Add BREP feature-level removal for closed cylindrical and pocket holes |
 | Occlusion removal | Approximate | `remove_occluded` warns that sampled visibility may require higher precision for thin occluders | Add acceleration structures, measured confidence, and raster/GPU backends for high-poly production scenes |
 | Decimation | Partial | `decimate`; quality criterion is reported as heuristic in dry-run diagnostics | Add measured geometric error, topology protection metrics, iterative limits, and UV/AO importance modes |
 | LOD generation | Partial | `run_lod_generators` / `lods` report steps | Preserve occurrence-level LOD chains and add far-LOD merge plus validation |

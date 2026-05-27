@@ -566,7 +566,7 @@ asset = asset.run_lod_generators(
 )
 ```
 
-Material baking currently creates a shared flat material and metadata for baked maps; it does not write texture images. Hole removal uses a deterministic mesh-level fallback when BREP feature editing is unavailable. Occlusion removal uses deterministic visibility sampling, so the report records that thin occluders can require higher precision.
+Material baking currently creates a shared flat material and metadata for baked maps; it does not write texture images. Hole removal uses deterministic mesh boundary classification and filling when BREP feature editing is unavailable. Occlusion removal uses deterministic visibility sampling, so the report records that thin occluders can require higher precision.
 
 Optimization action parameters:
 
@@ -588,9 +588,9 @@ Optimization action parameters:
 | `DecimateOptions` | `protect_topology` | Avoid topology changes that would remove important boundaries. |
 | `DecimateOptions` | `preserve_painted_areas` | Preserve metadata-marked or painted regions where present. |
 | `DecimateOptions` | `budget_scope` | `part` budgets each part separately. `selection` lets dense selected parts absorb more reduction. |
-| `RemoveHolesOptions` | `through`, `blind`, `surface` | Requested hole-type filters. Mesh fallback cannot classify these types and records them as intent. |
-| `RemoveHolesOptions` | `max_diameter` | Only fill detected open boundary loops at or below this measured boundary diameter. |
-| `RemoveHolesOptions` | `prefer_brep` | Request BREP-level feature removal. Current implementation warns and uses mesh boundary filling. |
+| `RemoveHolesOptions` | `through`, `blind`, `surface` | Hole-type filters for boundary-loop classification. `through` matches paired aligned openings, `blind` matches open pocket mouths, and `surface` matches remaining surface openings. |
+| `RemoveHolesOptions` | `max_diameter` | Only fill detected open boundary loops at or below the measured planar-span diameter. |
+| `RemoveHolesOptions` | `prefer_brep` | Request BREP-level feature removal. Current implementation warns and uses mesh boundary classification and filling. |
 | `RemoveOccludedOptions` | `strategy` | Visibility direction set: `conservative` checks cardinal views, `exterior` adds exterior diagonals, and `advanced` uses the densest deterministic direction set. |
 | `RemoveOccludedOptions` | `level` | Removal granularity: `parts` removes fully hidden occurrences, `submeshes` removes fully hidden material groups, and `triangles` removes hidden faces. |
 | `RemoveOccludedOptions` | `precision` | Maximum part-level face sample count before deterministic downsampling. Higher values can help thin occluders and large parts. |
@@ -635,7 +635,7 @@ Report examples for destructive and approximate operations:
   "before": {"triangles": 8400},
   "after": {"triangles": 8412},
   "warnings": [
-    "BREP hole removal is not implemented; using mesh boundary-fill fallback"
+    "BREP feature-level hole removal is not implemented; using mesh boundary classification and fill"
   ]
 }
 ```

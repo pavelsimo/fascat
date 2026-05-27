@@ -1596,7 +1596,7 @@ def _convert_operation_diagnostics(payload: dict[str, Any]) -> list[dict[str, st
         add(
             "remove_holes",
             "approximate",
-            "hole removal uses mesh boundary filling when BREP feature removal is unavailable",
+            "hole removal uses mesh boundary classification and filling when BREP feature removal is unavailable",
         )
     if payload["remove_occluded"]:
         add(

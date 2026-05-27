@@ -147,10 +147,10 @@ These need more design and should not be mixed into documentation or diagnostics
    - Strategy changes the direction set, and hemispherical evaluation restricts rays to top/side views.
    - Remaining polish: add acceleration structures, measured confidence, and optional raster/GPU backends for very large production meshes.
 
-2. Better hole removal
-   - Add a real BREP path for cylindrical or feature-level holes when source shape data is available.
-   - Respect through, blind, and surface hole options.
-   - Improve diameter measurement beyond boundary-loop max distance.
+2. Better hole removal - first mesh-classification pass complete
+   - Mesh fallback now classifies boundary loops as through, blind, or surface and respects the enabled hole types.
+   - Diameter filtering now uses planar-span measurement instead of boundary-loop diagonal distance.
+   - Remaining polish: add real BREP feature-level removal for closed cylindrical holes and blind pockets when source shape data is available.
 
 3. Material baking
    - Generate actual texture atlas files, not only flat merged materials.
