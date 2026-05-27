@@ -81,6 +81,9 @@ that are currently conservative approximations.
   that remaining gaps still need a stitching backend.
 - Mesh repair now records before/after flipped closed-component counts and
   flips coherent inward shells during winding repair when possible.
+- glTF write reports now include a runtime compatibility matrix for Unity
+  glTFast, web, mobile, and XR targets with extension state, support, and
+  fallback notes.
 
 ## Unity Asset Transformer Parity
 
@@ -249,9 +252,9 @@ Parity gaps to track:
    - Add real KTX2/Basis texture output with quality, compression level, and max-resolution controls.
    - Add export cleanup for unused images/materials and file-size reports broken down by geometry, textures, and metadata.
    - Add texture-resize preprocessing with before/after dimensions, byte estimates, and per-profile maximums before KTX2/PNG/JPEG export decisions.
-   - glTF write reports now list emitted runtime extensions, required extensions, `extras.fascat` metadata, unsupported Draco/KTX2 outputs, and expected runtime support.
+   - glTF write reports now list emitted runtime extensions, required extensions, `extras.fascat` metadata, unsupported Draco/KTX2 outputs, expected runtime support, and target compatibility notes with fallback behavior.
    - Add Unity/glTFast-oriented GLB export profiles that combine extension support notes, Draco/KTX2 settings, fallback choices, and runtime compatibility warnings.
-   - Add a runtime extension compatibility matrix for Unity glTFast, web, mobile, and XR targets covering `MSFT_lod`, `EXT_meshopt_compression`, `KHR_draco_mesh_compression`, `KHR_texture_basisu`, quantization, and fallback behavior.
+   - Runtime extension compatibility reports now cover Unity glTFast, web, mobile, and XR targets for `MSFT_lod`, `EXT_meshopt_compression`, `KHR_draco_mesh_compression`, `KHR_texture_basisu`, quantization, and fallback behavior.
    - Add baseline-versus-optimized export comparisons so reports show how much each preparation step changed file size, and warn when draw-call merging increases export size by breaking instancing.
    - Add format-aware texture export policy and reporting: prefer KTX2/Basis for glTF/GLB, use PNG/JPEG fallbacks for texture-capable non-glTF exports, remove unused images before export, and warn when users compare source CAD file size directly against runtime mesh exports.
    - Add named web, mobile, desktop, and VR export presets that combine geometry compression, texture compression, texture resizing, and cleanup choices.

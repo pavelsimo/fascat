@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import struct
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -37,6 +38,14 @@ _KHR_DRACO_MESH_COMPRESSION = "KHR_draco_mesh_compression"
 _KHR_TEXTURE_BASISU = "KHR_texture_basisu"
 _MSFT_LOD = "MSFT_lod"
 _FASCAT_EXTRAS = "extras.fascat"
+_RUNTIME_MATRIX_EXTENSIONS = (
+    _KHR_MESH_QUANTIZATION,
+    _EXT_MESHOPT_COMPRESSION,
+    _MSFT_LOD,
+    _KHR_DRACO_MESH_COMPRESSION,
+    _KHR_TEXTURE_BASISU,
+    _FASCAT_EXTRAS,
+)
 
 _COMPONENT_SIZES = {
     _BYTE: 1,
@@ -47,6 +56,77 @@ _COMPONENT_SIZES = {
     _FLOAT: 4,
 }
 _ACCESSOR_WIDTHS = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT4": 16}
+
+
+@dataclass(frozen=True)
+class _RuntimeTarget:
+    label: str
+    notes: tuple[str, ...]
+    support: dict[str, str]
+
+
+_RUNTIME_TARGETS = {
+    "unity_gltfast": _RuntimeTarget(
+        label="Unity glTFast",
+        notes=(
+            "prefer GLB for Unity runtime import",
+            "validate installed package support for optional extensions before shipping",
+        ),
+        support={
+            _KHR_MESH_QUANTIZATION: "loader must support quantized accessors when this required extension is emitted",
+            _EXT_MESHOPT_COMPRESSION: "optional; decoder support enables compressed bufferView payloads",
+            _MSFT_LOD: "optional handoff metadata; map to engine LOD groups during import if the loader ignores it",
+            _KHR_DRACO_MESH_COMPRESSION: "future encoder output must be matched with a Draco-capable loader",
+            _KHR_TEXTURE_BASISU: "future KTX2/Basis output must be matched with a texture-transcoding loader",
+            _FASCAT_EXTRAS: "safe metadata channel for custom Unity import scripts",
+        },
+    ),
+    "web": _RuntimeTarget(
+        label="Web",
+        notes=(
+            "prefer GLB for browser delivery",
+            "test exact loader extension support before relying on compressed payloads",
+        ),
+        support={
+            _KHR_MESH_QUANTIZATION: "requires a quantization-capable glTF loader",
+            _EXT_MESHOPT_COMPRESSION: "optional; fallback buffer data remains available to generic loaders",
+            _MSFT_LOD: "optional; app code may need to interpret LOD metadata",
+            _KHR_DRACO_MESH_COMPRESSION: "future encoder output must be paired with a Draco decoder",
+            _KHR_TEXTURE_BASISU: "future texture output should use KTX2/Basis with PNG/JPEG fallbacks when needed",
+            _FASCAT_EXTRAS: "generic web loaders may ignore Fascat extras",
+        },
+    ),
+    "mobile": _RuntimeTarget(
+        label="Mobile",
+        notes=(
+            "prioritize small geometry and texture payloads",
+            "keep conservative fallbacks for older embedded loaders",
+        ),
+        support={
+            _KHR_MESH_QUANTIZATION: "use when loader support and precision loss are validated on target devices",
+            _EXT_MESHOPT_COMPRESSION: "optional; fallback buffers trade larger files for broader compatibility",
+            _MSFT_LOD: "optional; app or engine integration should author native runtime LOD groups",
+            _KHR_DRACO_MESH_COMPRESSION: "future encoder output must account for mobile decode cost",
+            _KHR_TEXTURE_BASISU: "future KTX2/Basis output should honor mobile texture budget presets",
+            _FASCAT_EXTRAS: "safe to preserve for diagnostics; ignored by normal rendering paths",
+        },
+    ),
+    "xr": _RuntimeTarget(
+        label="XR",
+        notes=(
+            "validate visual quality and decode cost on headset-class hardware",
+            "prefer predictable fallbacks for performance-critical scenes",
+        ),
+        support={
+            _KHR_MESH_QUANTIZATION: "requires loader support and visual validation for close-view CAD edges",
+            _EXT_MESHOPT_COMPRESSION: "optional; fallback buffers avoid hard dependency on decoder setup",
+            _MSFT_LOD: "optional; convert to engine-native LOD groups for reliable runtime switching",
+            _KHR_DRACO_MESH_COMPRESSION: "future encoder output must be tested for headset decode latency",
+            _KHR_TEXTURE_BASISU: "future KTX2/Basis output should be profiled against XR texture-memory budgets",
+            _FASCAT_EXTRAS: "metadata can drive custom XR import or validation tools",
+        },
+    ),
+}
 
 
 def write_gltf(asset: Asset, path: str | Path, *, options: GltfExportOptions | None = None) -> None:
@@ -98,11 +178,69 @@ def runtime_dependency_report(asset: Asset, options: GltfExportOptions | None = 
             "pmi": opts.metadata.pmi,
         },
         "expected_runtime_support": expected_support,
+        "runtime_compatibility": _runtime_compatibility_matrix(
+            extensions_used=extensions_used,
+            extensions_required=extensions_required,
+        ),
         "not_written": {
             _KHR_DRACO_MESH_COMPRESSION: "unsupported; draco=True is rejected before export",
             _KHR_TEXTURE_BASISU: "unsupported; texture_compression is rejected before export",
         },
     }
+
+
+def _runtime_compatibility_matrix(
+    *,
+    extensions_used: Sequence[str],
+    extensions_required: Sequence[str],
+) -> dict[str, object]:
+    states = {
+        extension: _runtime_extension_state(extension, extensions_used, extensions_required)
+        for extension in _RUNTIME_MATRIX_EXTENSIONS
+    }
+    return {
+        target_id: {
+            "label": target.label,
+            "notes": list(target.notes),
+            "extensions": {
+                extension: {
+                    "state": states[extension],
+                    "support": target.support[extension],
+                    "fallback": _runtime_extension_fallback(extension),
+                }
+                for extension in _RUNTIME_MATRIX_EXTENSIONS
+            },
+        }
+        for target_id, target in _RUNTIME_TARGETS.items()
+    }
+
+
+def _runtime_extension_state(
+    extension: str,
+    extensions_used: Sequence[str],
+    extensions_required: Sequence[str],
+) -> str:
+    if extension == _FASCAT_EXTRAS:
+        return "metadata"
+    if extension in extensions_required:
+        return "required"
+    if extension in extensions_used:
+        return "optional"
+    if extension in {_KHR_DRACO_MESH_COMPRESSION, _KHR_TEXTURE_BASISU}:
+        return "not_written"
+    return "not_used"
+
+
+def _runtime_extension_fallback(extension: str) -> str:
+    if extension == _KHR_MESH_QUANTIZATION:
+        return "no fallback when emitted; the extension is marked required"
+    if extension == _EXT_MESHOPT_COMPRESSION:
+        return "fallback buffer data is included for loaders that ignore meshopt"
+    if extension == _MSFT_LOD:
+        return "LOD0 remains loadable when the runtime ignores MSFT_lod"
+    if extension in {_KHR_DRACO_MESH_COMPRESSION, _KHR_TEXTURE_BASISU}:
+        return "not written by Fascat yet; requests are rejected before export"
+    return "generic loaders may ignore Fascat extras without breaking geometry"
 
 
 def _has_exportable_meshes(asset: Asset) -> bool:

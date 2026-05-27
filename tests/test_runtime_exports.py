@@ -68,6 +68,14 @@ def test_gltf_export_options_write_meshopt_extension_and_file_budget(tmp_path) -
     assert runtime_dependencies["extensions_used"] == ["KHR_mesh_quantization", "EXT_meshopt_compression"]
     assert runtime_dependencies["extensions_required"] == ["KHR_mesh_quantization"]
     assert "EXT_meshopt_compression" in runtime_dependencies["expected_runtime_support"]
+    compatibility = runtime_dependencies["runtime_compatibility"]
+    assert set(compatibility) == {"unity_gltfast", "web", "mobile", "xr"}
+    web_extensions = compatibility["web"]["extensions"]
+    assert web_extensions["KHR_mesh_quantization"]["state"] == "required"
+    assert web_extensions["KHR_mesh_quantization"]["fallback"].startswith("no fallback")
+    assert web_extensions["EXT_meshopt_compression"]["state"] == "optional"
+    assert "fallback buffer data" in web_extensions["EXT_meshopt_compression"]["fallback"]
+    assert web_extensions["KHR_texture_basisu"]["state"] == "not_written"
     assert asset.report.steps[-1].after["file_size_bytes"] > 0
     assert asset.report.steps[-1].after["file_size_budget_bytes"] == 1
     assert "file size budget exceeded" in asset.report.warnings[-1]
@@ -92,6 +100,10 @@ def test_gltf_write_reports_lod_and_metadata_runtime_dependencies(tmp_path) -> N
     assert "extras.fascat" in runtime_dependencies["expected_runtime_support"]
     assert runtime_dependencies["not_written"]["KHR_draco_mesh_compression"].startswith("unsupported")
     assert runtime_dependencies["not_written"]["KHR_texture_basisu"].startswith("unsupported")
+    unity_extensions = runtime_dependencies["runtime_compatibility"]["unity_gltfast"]["extensions"]
+    assert unity_extensions["MSFT_lod"]["state"] == "optional"
+    assert unity_extensions["EXT_meshopt_compression"]["state"] == "not_used"
+    assert unity_extensions["extras.fascat"]["state"] == "metadata"
 
 
 def test_obj_export_writes_mesh_and_mtl_sidecar(tmp_path) -> None:  # type: ignore[no-untyped-def]
