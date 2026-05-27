@@ -551,6 +551,13 @@ def cmd_convert(
         int,
         typer.Option("--tangent-uv-channel", help="UV channel used for tangent generation."),
     ] = 0,
+    override_tangents: Annotated[
+        bool,
+        typer.Option(
+            "--override-tangents/--preserve-tangents",
+            help="Regenerate existing tangents instead of preserving them when --tangents is used.",
+        ),
+    ] = False,
     validate_normals: Annotated[
         bool,
         typer.Option("--validate-normals", help="Validate staged normals and tangents."),
@@ -922,6 +929,7 @@ def cmd_convert(
         "preserve_face_boundaries": preserve_face_boundaries,
         "tangents": tangents,
         "tangent_uv_channel": tangent_uv_channel,
+        "override_tangents": override_tangents,
         "validate_normals": validate_normals,
         "uv0": uv0.value,
         "uv1": uv1.value,
@@ -1212,6 +1220,7 @@ def cmd_convert(
             preserve_face_boundaries=preserve_face_boundaries,
             tangents=tangents,
             tangent_uv_channel=tangent_uv_channel,
+            override_tangents=override_tangents,
             validate_normals=validate_normals,
             unwrap=UnwrapOptions(
                 texel_density=texel_density,

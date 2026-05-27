@@ -71,8 +71,9 @@ Dry-run JSON for `convert` includes `operation_diagnostics`, a list of planned o
 | `--validate-lods` | `false` | Validate generated LOD monotonicity |
 | `--normals` | `smooth` | Normal generation mode: `none`, `smooth`, `hard-edges`, or `flat` |
 | `--preserve-face-boundaries` | `false` | Treat CAD face-group boundaries as hard normal edges |
-| `--tangents` | `false` | Generate glTF-compatible vertex tangents from the selected UV channel and report generated, regenerated, missing, or dropped tangent states |
-| `--tangent-uv-channel` | `0` | UV channel used for tangent generation |
+| `--tangents` | `false` | Ensure glTF-compatible vertex tangents exist; existing tangents are preserved unless invalidated or overridden |
+| `--tangent-uv-channel` | `0` | UV channel used when tangent generation or regeneration is needed |
+| `--override-tangents / --preserve-tangents` | `false` | Regenerate existing tangents instead of preserving them when `--tangents` is used |
 | `--validate-normals` | `false` | Validate staged normals and tangents |
 | `--uv0` | `box` | UV0 generation mode: `none`, `box`, `unwrap`, or `lightmap` |
 | `--uv1` | `none` | UV1 generation mode: `none`, `box`, `unwrap`, `lightmap`, or `copy-uv0` |
@@ -272,7 +273,7 @@ warnings to distinguish exact work from fallbacks.
 | BREP healing | Partial | `heal_brep`; records open shells, free/unstitched edges, small edges, and sliver counts; sliver removal warns that the backend leaves shapes unchanged | Implement sliver-face removal, duplicate-face cleanup, and deeper face/wire repair |
 | Tessellation | Implemented | `tessellate` report options, explicit sag-ratio, existing mesh reuse/retessellation controls, max-polygon-length diagnostics, free-edge diagnostics, and quality metadata | Add CAD UV/tangent extraction |
 | Mesh repair | Implemented for core cleanup | `repair` report step; mesh metadata records before/after duplicate polygon, degenerate triangle, boundary edge, and non-manifold edge counts | Add T-junction sewing, non-manifold cracking, and configurable orientation strategies |
-| Staging, normals, tangents, UV metadata | Partial | `stage` report step; tangents require UV0; mesh and asset metadata report generated, regenerated, missing, invalidated, or dropped tangent states; UV metadata records per-channel domain, bounds, validation status, degenerates, overlap counts, UV0-to-UV1 copy status, explicit normalization status, and unwrap solver intent, with warnings for UV1/lightmap bake violations and unsupported solver controls | Add seam planning, backend-enforced unwrap solver controls, island merge, repack, padding controls, and distortion metrics |
+| Staging, normals, tangents, UV metadata | Partial | `stage` report step; tangents require the selected UV channel when generated; existing tangents are preserved by default and mesh/asset metadata report generated, regenerated, preserved, missing, invalidated, or dropped tangent states; UV metadata records per-channel domain, bounds, validation status, degenerates, overlap counts, UV0-to-UV1 copy status, explicit normalization status, and unwrap solver intent, with warnings for UV1/lightmap bake violations and unsupported solver controls | Add seam planning, backend-enforced unwrap solver controls, island merge, repack, padding controls, and distortion metrics |
 | Material baking | Approximate | `bake_materials` emits constant embedded texture maps from material factors and warns that raster baking is not implemented | Generate real atlas textures from source texture/material inputs |
 | Hole removal | Approximate | `remove_holes` warns when it falls back to mesh boundary classification and filling | Add BREP feature-level removal for closed cylindrical and pocket holes |
 | Occlusion removal | Approximate | `remove_occluded` warns that sampled visibility may require higher precision and records candidate counts, sampled face coverage, direction coverage, and confidence metadata | Add acceleration structures and optional raster/GPU backends for high-poly production scenes |

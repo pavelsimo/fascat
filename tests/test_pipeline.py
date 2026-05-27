@@ -156,6 +156,7 @@ def test_asset_operation_reports_include_options_and_before_after_counts() -> No
             "preserve_face_boundaries",
             "tangents",
             "tangent_uv_channel",
+            "override_tangents",
             "validate_normals",
             "unwrap",
             "atlas",
@@ -436,6 +437,31 @@ def test_pipeline_stage_unwrap_solver_controls_are_parsed() -> None:
         "iterations": 16,
         "tolerance": 0.001,
     }
+
+
+def test_pipeline_stage_tangent_override_is_parsed() -> None:
+    spec = PipelineSpec.from_dict(
+        {
+            "steps": [
+                {
+                    "op": "stage",
+                    "tangents": True,
+                    "tangent_uv_channel": 1,
+                    "override_tangents": True,
+                    "uv0": "none",
+                    "uv1": "none",
+                }
+            ]
+        }
+    )
+
+    staged = spec.apply(_triangle_asset())
+    step = staged.report.steps[-1]
+
+    assert step.name == "stage"
+    assert step.options["tangents"] is True
+    assert step.options["tangent_uv_channel"] == 1
+    assert step.options["override_tangents"] is True
 
 
 def test_pipeline_advisories_are_added_to_convert_report(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]

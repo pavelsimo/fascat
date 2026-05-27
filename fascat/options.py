@@ -223,6 +223,7 @@ class StageOptions:
     preserve_face_boundaries: bool = False
     tangents: bool = False
     tangent_uv_channel: int = 0
+    override_tangents: bool = False
     validate_normals: bool = False
     unwrap: UnwrapOptions = field(default_factory=UnwrapOptions)
     atlas: AtlasOptions = field(default_factory=AtlasOptions)

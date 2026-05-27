@@ -121,8 +121,8 @@ Parity gaps to track:
    - UV0-to-UV1 copy is now supported through `uv1="copy_uv0"` / `--uv1 copy-uv0`, with copied/missing-source metadata and warnings. UV normalization is now explicit through `normalize_uvs=(...)` / `--normalize-uvs`, with original-bounds metadata and missing-channel warnings. UV validation now records per-channel domains, bounds, unit-domain status, and validation status. Remaining work: UV island merge, alignment, repack, padding/resolution/share-map controls, overlap removal, uniform versus non-uniform normalization, shared versus per-part UV space, null-island handling, distortion metrics, and packing efficiency reports.
    - Make UV0 tileable and UV1 baking requirements explicit: UV0 may overlap; UV1 must fit in `[0,1]` with padding and no overlaps.
    - Add UV1 bake packing controls for atlas resolution, pixel padding, shared versus per-part UV space, overlap removal, and normalized-space utilization reports.
-   - Tangent lifecycle validation now warns when UV0 is missing, invalidates tangents after UV edits, and records generated, regenerated, invalidated, missing, or dropped tangent states on mesh and asset metadata.
-   - Tangent generation can now use an explicit source UV channel across Python, CLI, TOML pipelines, metadata, and reports. Remaining work: add override/preserve-existing behavior instead of automatic replacement.
+   - Tangent lifecycle validation now warns when UV0 is missing, invalidates tangents after UV edits, and records generated, regenerated, preserved, invalidated, missing, or dropped tangent states on mesh and asset metadata.
+   - Tangent generation can now use an explicit source UV channel and preserves existing tangents by default, with `override_tangents` available across Python, CLI, TOML pipelines, metadata, and reports when regeneration is required.
    - Explicit decimation can now strip UV/tangent attributes through `uv_importance="ignore"` or preserve seams and then drop UVs with `uv_importance="preserve_seams"`.
 
 6. Materials and baking
@@ -241,7 +241,7 @@ These need more design and should not be mixed into documentation or diagnostics
    - Stage now records per-channel UV domain, bounds, unit-domain status, validation status, degenerate UV face counts, and overlap-pair counts on mesh metadata.
    - UV1 or `lightmap` channels warn on bake-domain violations, while UV0 overlaps remain metadata-only for tileable texture workflows.
    - Unwrap method, iteration, and tolerance controls are now represented as solver intent; non-default values warn when xatlas cannot enforce them directly.
-   - Tangent lifecycle validation now reports generated, regenerated, invalidated, missing-UV0, and dropped tangent states.
+   - Tangent lifecycle validation now reports generated, regenerated, preserved, invalidated, missing-UV0, and dropped tangent states, with explicit override support for forced regeneration.
    - UV0-to-UV1 copy now records source-channel and missing-source metadata, and emits a warning when the source channel is unavailable.
    - UV normalization now rescales selected channels into 0..1 and records original bounds plus missing-channel warnings.
    - Remaining polish: add seam segmentation, backend-enforced solver controls, island merging, packing, distortion metrics, and packing efficiency reports.

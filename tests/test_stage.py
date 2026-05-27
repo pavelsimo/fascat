@@ -420,6 +420,62 @@ def test_stage_generates_tangents_from_requested_uv_channel() -> None:
     assert staged.report.steps[-1].warnings == []
 
 
+def test_stage_preserves_existing_tangents_by_default() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+        uvs={0: np.array([[0, 0], [1, 0], [0, 1]], dtype=float)},
+    ).compute_normals()
+    mesh = mesh.compute_tangents()
+    assert mesh.tangents is not None
+    original_tangents = mesh.tangents.copy()
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    staged = asset.stage(StageOptions(tangents=True, uv0="none", uv1=None))
+    staged_mesh = staged.parts["part"].mesh
+
+    assert staged_mesh is not None
+    assert staged_mesh.tangents is not None
+    assert np.array_equal(staged_mesh.tangents, original_tangents)
+    assert staged_mesh.metadata["tangents_status"] == "preserved"
+    assert staged_mesh.metadata["tangents_source"] == "existing"
+    assert staged_mesh.metadata["tangents_requested_uv_channel"] == "0"
+    assert staged.metadata["stage_tangents_preserved_parts"] == "1"
+    assert "stage_tangents_generated_parts" not in staged.metadata
+    assert staged.report.steps[-1].warnings == []
+
+
+def test_stage_can_override_existing_tangents() -> None:
+    custom_tangents = np.array([[0, 1, 0, 1], [0, 1, 0, 1], [0, 1, 0, 1]], dtype=float)
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+        uvs={0: np.array([[0, 0], [1, 0], [0, 1]], dtype=float)},
+        tangents=custom_tangents,
+    ).compute_normals()
+    mesh.tangents = custom_tangents
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    staged = asset.stage(StageOptions(tangents=True, override_tangents=True, uv0="none", uv1=None))
+    staged_mesh = staged.parts["part"].mesh
+
+    assert staged_mesh is not None
+    assert staged_mesh.tangents is not None
+    assert not np.array_equal(staged_mesh.tangents, custom_tangents)
+    assert staged_mesh.metadata["tangents_status"] == "regenerated"
+    assert staged_mesh.metadata["tangents_override"] == "true"
+    assert staged_mesh.metadata["tangents_uv_channel"] == "0"
+    assert staged.metadata["stage_tangents_generated_parts"] == "1"
+    assert staged.metadata["stage_tangents_regenerated_parts"] == "1"
+    assert staged.report.steps[-1].warnings == []
+
+
 def test_stage_warns_when_requested_tangent_uv_channel_is_missing() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),

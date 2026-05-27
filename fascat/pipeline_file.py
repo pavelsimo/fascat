@@ -132,6 +132,7 @@ _STAGE_KEYS = frozenset(
         "preserve_face_boundaries",
         "tangents",
         "tangent_uv_channel",
+        "override_tangents",
         "validate_normals",
         "texel_density",
         "padding",
@@ -789,6 +790,7 @@ def _stage_options(values: dict[str, object]) -> StageOptions:
         preserve_face_boundaries=bool(values.get("preserve_face_boundaries", False)),
         tangents=bool(values.get("tangents", False)),
         tangent_uv_channel=_as_int(values.get("tangent_uv_channel", 0)),
+        override_tangents=bool(values.get("override_tangents", False)),
         validate_normals=bool(values.get("validate_normals", False)),
         unwrap=UnwrapOptions(
             texel_density=_as_optional_float(values.get("texel_density")),

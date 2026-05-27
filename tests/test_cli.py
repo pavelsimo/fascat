@@ -247,12 +247,22 @@ def test_convert_dry_run_accepts_uv_normalization_channels() -> None:
 def test_convert_dry_run_accepts_tangent_uv_channel() -> None:
     result = runner.invoke(
         app,
-        ["--json", "--dry-run", "convert", "input.step", "--tangents", "--tangent-uv-channel", "1"],
+        [
+            "--json",
+            "--dry-run",
+            "convert",
+            "input.step",
+            "--tangents",
+            "--tangent-uv-channel",
+            "1",
+            "--override-tangents",
+        ],
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["tangents"] is True
     assert payload["tangent_uv_channel"] == 1
+    assert payload["override_tangents"] is True
 
 
 def test_convert_dry_run_accepts_gltf_output_and_virtual_reality_profile() -> None:

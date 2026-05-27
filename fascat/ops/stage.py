@@ -17,6 +17,7 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
         "invalidated": 0,
         "missing_uv0": 0,
         "missing_uv_channel": 0,
+        "preserved": 0,
     }
     if options.uv1 in {"unwrap", "lightmap"}:
         _require_xatlas()
@@ -39,6 +40,7 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
             continue
         mesh = part.mesh
         had_tangents = mesh.tangents is not None
+        original_tangents = None if mesh.tangents is None else mesh.tangents.copy()
         uv_modes: dict[int, str] = {}
         edited_uv_channels: set[int] = set()
         if options.normals and options.normal_mode == "hard_edges":
@@ -88,6 +90,7 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
             mesh,
             options,
             had_tangents=had_tangents,
+            original_tangents=original_tangents,
             edited_uv_channels=edited_uv_channels,
             tangent_summary=tangent_summary,
         )
@@ -260,6 +263,7 @@ def _stage_tangents(
     options: StageOptions,
     *,
     had_tangents: bool,
+    original_tangents: np.ndarray | None,
     edited_uv_channels: set[int],
     tangent_summary: dict[str, int],
 ) -> Mesh:
@@ -271,6 +275,23 @@ def _stage_tangents(
 
     if options.tangents:
         channel = options.tangent_uv_channel
+        if (
+            had_tangents
+            and not options.override_tangents
+            and not invalidated_by_uv_edit
+            and options.normals
+            and original_tangents is not None
+            and original_tangents.shape == (mesh.vertex_count, 4)
+            and channel in mesh.uvs
+        ):
+            if mesh.tangents is None:
+                mesh = mesh.copy()
+                mesh.tangents = original_tangents.copy()
+            mesh.metadata["tangents_status"] = "preserved"
+            mesh.metadata["tangents_source"] = "existing"
+            mesh.metadata["tangents_requested_uv_channel"] = str(channel)
+            tangent_summary["preserved"] += 1
+            return mesh
         if channel not in mesh.uvs:
             mesh = mesh.copy()
             mesh.tangents = None
@@ -284,10 +305,13 @@ def _stage_tangents(
             )
             return mesh
         mesh = mesh.compute_tangents(channel=channel)
-        mesh.metadata["tangents_status"] = "regenerated" if invalidated_by_uv_edit else "generated"
+        regenerated = invalidated_by_uv_edit or had_tangents
+        mesh.metadata["tangents_status"] = "regenerated" if regenerated else "generated"
         mesh.metadata["tangents_uv_channel"] = str(channel)
+        if had_tangents and options.override_tangents:
+            mesh.metadata["tangents_override"] = "true"
         tangent_summary["generated"] += 1
-        if invalidated_by_uv_edit:
+        if regenerated:
             tangent_summary["regenerated"] += 1
         return mesh
 
