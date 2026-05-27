@@ -352,6 +352,17 @@ def cmd_inspect(
             help="Request multi-file STEP assembly reference resolution when supported.",
         ),
     ] = False,
+    delete_free_vertices: Annotated[
+        bool,
+        typer.Option(
+            "--delete-free-vertices/--keep-free-vertices",
+            help="Drop construction-only point shapes during STEP import.",
+        ),
+    ] = False,
+    delete_lines: Annotated[
+        bool,
+        typer.Option("--delete-lines/--keep-lines", help="Drop construction-only line shapes during STEP import."),
+    ] = False,
     heal_brep: Annotated[bool, typer.Option("--heal-brep", help="Run BREP healing before inspection output.")] = False,
     heal_tolerance: Annotated[float, typer.Option("--heal-tolerance", help="BREP healing tolerance.")] = 0.05,
     remove_sliver_faces: Annotated[
@@ -382,6 +393,8 @@ def cmd_inspect(
         "design_variants": design_variants,
         "import_existing_meshes": import_existing_meshes,
         "multi_file_import": multi_file_import,
+        "delete_free_vertices": delete_free_vertices,
+        "delete_lines": delete_lines,
         "heal_brep": heal_brep,
         "heal_tolerance": heal_tolerance,
         "remove_sliver_faces": remove_sliver_faces,
@@ -406,6 +419,8 @@ def cmd_inspect(
         design_variants=design_variants,
         existing_meshes=import_existing_meshes,
         multi_file=multi_file_import,
+        delete_free_vertices=delete_free_vertices,
+        delete_lines=delete_lines,
     )
     asset = _read_step_for_cli(input_path, ctx, payload, import_options=import_options)
     if heal_brep:
@@ -659,6 +674,17 @@ def cmd_convert(
             "--multi-file-import/--single-file-import",
             help="Request multi-file STEP assembly reference resolution when supported.",
         ),
+    ] = False,
+    delete_free_vertices: Annotated[
+        bool,
+        typer.Option(
+            "--delete-free-vertices/--keep-free-vertices",
+            help="Drop construction-only point shapes during STEP import.",
+        ),
+    ] = False,
+    delete_lines: Annotated[
+        bool,
+        typer.Option("--delete-lines/--keep-lines", help="Drop construction-only line shapes during STEP import."),
     ] = False,
     merge: Annotated[bool, typer.Option("--merge", help="Merge selected geometry before optimization.")] = False,
     merge_mode: Annotated[MergeMode, typer.Option("--merge-mode", help="Merge grouping mode.")] = MergeMode.ALL,
@@ -996,6 +1022,8 @@ def cmd_convert(
         "design_variants": design_variants,
         "import_existing_meshes": import_existing_meshes,
         "multi_file_import": multi_file_import,
+        "delete_free_vertices": delete_free_vertices,
+        "delete_lines": delete_lines,
         "merge": merge,
         "merge_mode": merge_mode.value,
         "keep_parent": keep_parent,
@@ -1293,6 +1321,8 @@ def cmd_convert(
                 design_variants=design_variants,
                 existing_meshes=import_existing_meshes,
                 multi_file=multi_file_import,
+                delete_free_vertices=delete_free_vertices,
+                delete_lines=delete_lines,
             )
         )
         export_metadata = (
@@ -1933,6 +1963,8 @@ def _step_read_options(
     design_variants: bool = False,
     existing_meshes: bool = True,
     multi_file: bool = False,
+    delete_free_vertices: bool = False,
+    delete_lines: bool = False,
 ) -> StepReadOptions:
     metadata_enabled = metadata != MetadataMode.NONE
     pmi_enabled = pmi != PmiMode.NONE
@@ -1946,6 +1978,8 @@ def _step_read_options(
         design_variants=design_variants,
         existing_meshes=existing_meshes,
         multi_file=multi_file,
+        delete_free_vertices=delete_free_vertices,
+        delete_lines=delete_lines,
     )
 
 

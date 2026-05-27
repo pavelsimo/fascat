@@ -113,6 +113,8 @@ all listed formats are implemented.
 | `--design-variants / --no-design-variants` | `false` | Request STEP design variant import; unsupported requests are reported as import warnings |
 | `--import-existing-meshes / --no-import-existing-meshes` | `true` | Prefer existing STEP tessellation payloads when the importer exposes them |
 | `--multi-file-import / --single-file-import` | `false` | Request multi-file STEP assembly reference resolution when supported |
+| `--delete-free-vertices / --keep-free-vertices` | `false` | Drop construction-only point shapes during STEP import |
+| `--delete-lines / --keep-lines` | `false` | Drop construction-only line shapes during STEP import |
 | `--filter` | unset | Scope optimization and LOD work with a selector such as `path=*/Fasteners/*` |
 | `--exclude-filter` | unset | Exclude selector matches from `--filter` results |
 | `--merge` | `false` | Merge selected geometry before optimization |
@@ -207,6 +209,8 @@ Units and behavior notes:
 | `--design-variants / --no-design-variants` | `false` | Request STEP design variant import; unsupported requests are reported as import warnings |
 | `--import-existing-meshes / --no-import-existing-meshes` | `true` | Prefer existing STEP tessellation payloads when the importer exposes them |
 | `--multi-file-import / --single-file-import` | `false` | Request multi-file STEP assembly reference resolution when supported |
+| `--delete-free-vertices / --keep-free-vertices` | `false` | Drop construction-only point shapes during STEP import |
+| `--delete-lines / --keep-lines` | `false` | Drop construction-only line shapes during STEP import |
 | `--heal-brep` | `false` | Run BREP healing before inspection output |
 | `--heal-tolerance` | `0.05` | BREP healing tolerance |
 | `--remove-sliver-faces` | `false` | Request tiny sliver-face removal during BREP healing; current backend support is limited and reports warnings when unavailable |
@@ -241,6 +245,8 @@ pmi = true
 design_variants = false
 existing_meshes = true
 multi_file = false
+delete_free_vertices = false
+delete_lines = false
 
 [export]
 metadata = "summary"
@@ -298,7 +304,7 @@ fallbacks.
 
 | Capability | Fascat status | Report or diagnostic | Next step |
 |------------|---------------|----------------------|-----------|
-| STEP import, hierarchy, names, transforms, colors, metadata | Implemented for STEP | `import` report stats and pipeline import options; AP242 PMI markers warn when typed PMI import is unavailable | Add design variants, typed PMI entity extraction, existing mesh preference, and multi-file import |
+| STEP import, hierarchy, names, transforms, colors, metadata | Implemented for STEP | `import` report stats, cleanup counts, pipeline import options, loaded-representation metadata, and AP242 PMI warnings when typed PMI import is unavailable | Add real design variant loading, typed PMI entity extraction, mixed BREP construction-curve cleanup, and true multi-file import |
 | BREP healing | Partial | `heal_brep`; records open shells, free/unstitched edges, small edges, and sliver counts; sliver removal warns that the backend leaves shapes unchanged | Implement sliver-face removal, duplicate-face cleanup, and deeper face/wire repair |
 | Tessellation | Implemented | `tessellate` report options, explicit sag-ratio, existing mesh reuse/retessellation controls, max-polygon-length diagnostics, free-edge diagnostics, and quality metadata | Add CAD UV/tangent extraction |
 | Mesh repair | Implemented for core cleanup | `repair` report step; mesh metadata records before/after duplicate polygon, degenerate triangle, boundary edge, and non-manifold edge counts | Add T-junction sewing, non-manifold cracking, and configurable orientation strategies |

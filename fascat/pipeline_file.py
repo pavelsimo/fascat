@@ -65,6 +65,8 @@ _IMPORT_KEYS = frozenset(
         "design_variants",
         "existing_meshes",
         "multi_file",
+        "delete_free_vertices",
+        "delete_lines",
     }
 )
 _EXPORT_KEYS = frozenset({"metadata", "pmi"})
@@ -583,6 +585,8 @@ def _import_options(value: object, location: _TomlLocation | None = None) -> Ste
             design_variants=bool(value.get("design_variants", False)),
             existing_meshes=bool(value.get("existing_meshes", True)),
             multi_file=bool(value.get("multi_file", False)),
+            delete_free_vertices=bool(value.get("delete_free_vertices", False)),
+            delete_lines=bool(value.get("delete_lines", False)),
         )
     except ValueError as exc:
         message = str(exc)

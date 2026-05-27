@@ -24,6 +24,58 @@ class _StepHeaderInfo:
     pmi_present: bool = False
 
 
+@dataclass(frozen=True)
+class _ShapeTopologyCounts:
+    vertices: int = 0
+    edges: int = 0
+    faces: int = 0
+
+
+@dataclass
+class _ImportCleanupStats:
+    brep_parts: int = 0
+    construction_point_parts: int = 0
+    construction_line_parts: int = 0
+    empty_shape_parts: int = 0
+    deleted_free_vertex_parts: int = 0
+    deleted_free_vertices: int = 0
+    deleted_line_parts: int = 0
+    deleted_line_edges: int = 0
+    deleted_line_vertices: int = 0
+
+    def record_loaded(self, representation: str) -> None:
+        if representation == "brep":
+            self.brep_parts += 1
+        elif representation == "construction_points":
+            self.construction_point_parts += 1
+        elif representation == "construction_lines":
+            self.construction_line_parts += 1
+        elif representation == "empty_shape":
+            self.empty_shape_parts += 1
+
+    def record_deleted(self, action: str, counts: _ShapeTopologyCounts) -> None:
+        if action == "delete_free_vertices":
+            self.deleted_free_vertex_parts += 1
+            self.deleted_free_vertices += counts.vertices
+        elif action == "delete_lines":
+            self.deleted_line_parts += 1
+            self.deleted_line_edges += counts.edges
+            self.deleted_line_vertices += counts.vertices
+
+    def to_dict(self) -> dict[str, int]:
+        return {
+            "brep_parts": self.brep_parts,
+            "construction_point_parts": self.construction_point_parts,
+            "construction_line_parts": self.construction_line_parts,
+            "empty_shape_parts": self.empty_shape_parts,
+            "deleted_free_vertex_parts": self.deleted_free_vertex_parts,
+            "deleted_free_vertices": self.deleted_free_vertices,
+            "deleted_line_parts": self.deleted_line_parts,
+            "deleted_line_edges": self.deleted_line_edges,
+            "deleted_line_vertices": self.deleted_line_vertices,
+        }
+
+
 def read_step(path: str | Path, *, options: StepReadOptions | None = None) -> Asset:
     source = Path(path)
     return _read_step_path(source, source_identity=str(source.resolve()), options=options or StepReadOptions())
@@ -36,6 +88,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         raise ValueError(f"unsupported STEP extension: {source.suffix or '<none>'}")
 
     header_info = _step_header_info(source)
+    cleanup = _ImportCleanupStats()
     with timed_step() as timer:
         document, shape_tool, color_tool, unit_name, meters_per_unit = _read_xde_document(source, options)
         free_labels = _free_shape_labels(shape_tool)
@@ -58,6 +111,8 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
                     parts,
                     part_index,
                     materials,
+                    options,
+                    cleanup,
                 )
             )
 
@@ -70,7 +125,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         meters_per_unit=meters_per_unit,
         up_axis="Z",
         source_path=source,
-        metadata=_asset_metadata(source, source_identity, unit_name, meters_per_unit, options, header_info),
+        metadata=_asset_metadata(source, source_identity, unit_name, meters_per_unit, options, header_info, cleanup),
         pmi=[],
         report=report,
     )
@@ -91,6 +146,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
             "unsupported_pmi_count": unsupported_pmi_count,
             "pmi_schema": header_info.schema,
             "pmi_present": header_info.pmi_present,
+            "cleanup": cleanup.to_dict(),
         },
         before={"nodes": 0, "parts": 0, "occurrences": 0, "materials": 0, "vertices": 0, "triangles": 0},
         after=asset.stats(),
@@ -156,6 +212,26 @@ def _free_shape_labels(shape_tool: Any) -> list[Any]:
     return [labels.Value(index) for index in range(labels.Lower(), labels.Upper() + 1)]
 
 
+def _shape_topology_counts(shape: Any) -> _ShapeTopologyCounts:
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
+    from OCP.TopExp import TopExp_Explorer
+
+    return _ShapeTopologyCounts(
+        vertices=_count_subshapes(shape, TopAbs_VERTEX, TopExp_Explorer),
+        edges=_count_subshapes(shape, TopAbs_EDGE, TopExp_Explorer),
+        faces=_count_subshapes(shape, TopAbs_FACE, TopExp_Explorer),
+    )
+
+
+def _count_subshapes(shape: Any, shape_type: Any, explorer_factory: Any) -> int:
+    explorer = explorer_factory(shape, shape_type)
+    count = 0
+    while explorer.More():
+        count += 1
+        explorer.Next()
+    return count
+
+
 def _asset_metadata(
     source: Path,
     source_identity: str,
@@ -163,6 +239,7 @@ def _asset_metadata(
     meters_per_unit: float,
     options: StepReadOptions,
     header_info: _StepHeaderInfo,
+    cleanup: _ImportCleanupStats,
 ) -> Metadata:
     if not options.metadata:
         return {}
@@ -172,6 +249,7 @@ def _asset_metadata(
         "units": unit_name,
         "meters_per_unit": meters_per_unit,
         "metadata_options": options.to_dict(),
+        "import_cleanup": cleanup.to_dict(),
     }
     if header_info.schema:
         metadata["step_schema"] = header_info.schema
@@ -217,6 +295,26 @@ def _import_warnings(
     return warnings
 
 
+def _loaded_representation(counts: _ShapeTopologyCounts) -> str:
+    if counts.faces > 0:
+        return "brep"
+    if counts.edges > 0:
+        return "construction_lines"
+    if counts.vertices > 0:
+        return "construction_points"
+    return "empty_shape"
+
+
+def _cleanup_action(counts: _ShapeTopologyCounts, options: StepReadOptions) -> str | None:
+    if counts.faces > 0:
+        return None
+    if counts.edges > 0 and options.delete_lines:
+        return "delete_lines"
+    if counts.edges == 0 and counts.vertices > 0 and options.delete_free_vertices:
+        return "delete_free_vertices"
+    return None
+
+
 def _metadata_count(asset: Asset) -> int:
     return (
         len(asset.metadata)
@@ -235,6 +333,8 @@ def _build_node(
     parts: dict[str, Part],
     part_index: _PartIndex,
     materials: dict[str, Material],
+    options: StepReadOptions,
+    cleanup: _ImportCleanupStats,
 ) -> Node:
     from OCP.TDF import TDF_LabelSequence
     from OCP.XCAFDoc import XCAFDoc_ShapeTool
@@ -262,6 +362,8 @@ def _build_node(
                     parts,
                     part_index,
                     materials,
+                    options,
+                    cleanup,
                 )
             )
         return node
@@ -270,6 +372,22 @@ def _build_node(
     shape = XCAFDoc_ShapeTool.GetShape_s(shape_label)
     if shape.IsNull():
         return node
+    topology = _shape_topology_counts(shape)
+    representation = _loaded_representation(topology)
+    cleanup_action = _cleanup_action(topology, options)
+    if cleanup_action is not None:
+        cleanup.record_deleted(cleanup_action, topology)
+        node.metadata.update(
+            {
+                "loaded_representation": representation,
+                "import_cleanup": cleanup_action,
+                "source_vertices": str(topology.vertices),
+                "source_edges": str(topology.edges),
+                "source_faces": str(topology.faces),
+            }
+        )
+        return node
+    cleanup.record_loaded(representation)
 
     part_entry = _label_entry(shape_label)
     color = _label_color(label) or _label_color(shape_label) or (0.75, 0.75, 0.75, 1.0)
@@ -304,6 +422,10 @@ def _build_node(
             "source_identity": source_identity,
             "source_name": _label_name(shape_label) or "",
             "shape_fingerprint": shape_hash,
+            "loaded_representation": representation,
+            "source_vertices": str(topology.vertices),
+            "source_edges": str(topology.edges),
+            "source_faces": str(topology.faces),
         }
         if any(index != 0 for index in face_material_indices):
             metadata["occt_face_material_indices"] = ",".join(str(index) for index in face_material_indices)

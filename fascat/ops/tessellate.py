@@ -53,6 +53,7 @@ def tessellate_asset(asset: Asset, options: Tessellation, *, selected_part_ids: 
             part.mesh = cached_mesh.copy()
         part.fingerprint = part.mesh.fingerprint()
         _record_tessellation_diagnostics(result, part, part_options)
+        _record_brep_patch_cleanup(part, part_options)
         if not part_options.keep_brep:
             part.source_shape = None
     if selected_part_ids is not None:
@@ -279,6 +280,16 @@ def _warn_long_polygons(
     part.metadata["tessellation_max_polygon_length"] = str(options.max_polygon_length)
     if long_edges > 0:
         asset.report.add_warning(f"part has {long_edges} tessellated edges longer than max_polygon_length: {part.name}")
+
+
+def _record_brep_patch_cleanup(part: Part, options: Tessellation) -> None:
+    if part.source_shape is None:
+        return
+    cleanup = "retained" if options.keep_brep else "deleted"
+    part.metadata["brep_patch_cleanup"] = cleanup
+    part.metadata["source_shape_retained"] = str(options.keep_brep).lower()
+    if part.mesh is not None:
+        part.mesh.metadata["brep_patch_cleanup"] = cleanup
 
 
 def _tessellation_mesh_options(options: Tessellation) -> dict[str, object]:

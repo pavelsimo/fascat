@@ -7,9 +7,12 @@ import pytest
 import fascat as fc
 from fascat.io.step import (
     _canonical_part_id,
+    _cleanup_action,
     _import_warnings,
+    _loaded_representation,
     _material_binding_plan,
     _shape_fingerprint,
+    _ShapeTopologyCounts,
     _StepHeaderInfo,
 )
 from fascat.options import StepReadOptions
@@ -109,6 +112,19 @@ def test_step_import_warnings_report_unsupported_import_intent() -> None:
         "STEP design variant import is not implemented; variants are omitted",
         "multi-file STEP assembly import is not implemented; external references are not loaded",
     ]
+
+
+def test_step_import_cleanup_actions_cover_construction_only_shapes() -> None:
+    point_counts = _ShapeTopologyCounts(vertices=3)
+    line_counts = _ShapeTopologyCounts(vertices=4, edges=2)
+    brep_counts = _ShapeTopologyCounts(vertices=8, edges=12, faces=6)
+
+    assert _loaded_representation(point_counts) == "construction_points"
+    assert _loaded_representation(line_counts) == "construction_lines"
+    assert _loaded_representation(brep_counts) == "brep"
+    assert _cleanup_action(point_counts, StepReadOptions(delete_free_vertices=True)) == "delete_free_vertices"
+    assert _cleanup_action(line_counts, StepReadOptions(delete_lines=True)) == "delete_lines"
+    assert _cleanup_action(brep_counts, StepReadOptions(delete_free_vertices=True, delete_lines=True)) is None
 
 
 @pytest.mark.requires_ocp

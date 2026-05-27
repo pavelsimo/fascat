@@ -241,6 +241,8 @@ asset = fc.read_step(
         design_variants=False,
         existing_meshes=True,
         multi_file=False,
+        delete_free_vertices=False,
+        delete_lines=False,
     ),
 )
 
@@ -275,6 +277,8 @@ Metadata and PMI parameters:
 | `StepReadOptions` | `design_variants` | Request STEP design variant import. Current backend support is limited and reports a warning when requested variants cannot be loaded. |
 | `StepReadOptions` | `existing_meshes` | Prefer existing tessellation payloads from the source file when the importer exposes them. Tessellation `reuse_existing_meshes` still controls whether loaded meshes are retessellated later. |
 | `StepReadOptions` | `multi_file` | Request multi-file STEP assembly import intent. Current single-path imports report a warning instead of silently claiming external references were loaded. |
+| `StepReadOptions` | `delete_free_vertices` | Drop construction-only point shapes during import and record deletion counts in the import report. |
+| `StepReadOptions` | `delete_lines` | Drop construction-only line shapes during import and record deleted edge and vertex counts. Mixed BREP parts with faces are preserved. |
 | `PmiAnnotation` | `id` | Stable annotation id used for references from parts or mesh groups. |
 | `PmiAnnotation` | `kind` | Annotation type such as `dimension`, `datum`, `tolerance`, `note`, or backend-specific kinds. |
 | `PmiAnnotation` | `text` | Human-readable annotation text. |
@@ -382,7 +386,7 @@ Tessellation parameters:
 | `quality_report` | Record per-part tessellation quality metrics for later reporting. |
 | `free_edge_report` | Record free/boundary edge and non-manifold edge counts on tessellated parts and warn when free edges are present. |
 | `create_normals` | Generate normals during tessellation when the backend can provide them. |
-| `keep_brep` | Keep source BREP handles on parts after tessellation for later BREP-aware operations. |
+| `keep_brep` | Keep source BREP handles on parts after tessellation for later BREP-aware operations. Tessellated parts record `brep_patch_cleanup=retained` or `deleted`. |
 | `reuse_existing_meshes` | Reuse meshes already present on imported parts. Set to `False` to retessellate from source BREP where available. |
 | `part_settings` | Per-part overrides keyed by part id or part name. Supports the same tessellation option names. |
 
@@ -770,6 +774,8 @@ pmi = true
 design_variants = false
 existing_meshes = true
 multi_file = false
+delete_free_vertices = false
+delete_lines = false
 
 [export]
 metadata = "summary"

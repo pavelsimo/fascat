@@ -150,6 +150,8 @@ class StepReadOptions:
     design_variants: bool = False
     existing_meshes: bool = True
     multi_file: bool = False
+    delete_free_vertices: bool = False
+    delete_lines: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

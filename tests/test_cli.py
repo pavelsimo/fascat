@@ -285,6 +285,8 @@ pmi = false
 design_variants = true
 existing_meshes = false
 multi_file = true
+delete_free_vertices = true
+delete_lines = true
 
 [export]
 metadata = "summary"
@@ -325,6 +327,8 @@ target_triangles = 80000
     assert payload["pipeline_import"]["design_variants"] is True
     assert payload["pipeline_import"]["existing_meshes"] is False
     assert payload["pipeline_import"]["multi_file"] is True
+    assert payload["pipeline_import"]["delete_free_vertices"] is True
+    assert payload["pipeline_import"]["delete_lines"] is True
     assert payload["pipeline_export"] == {"mode": "summary", "pmi": "none"}
     assert payload["pipeline_advisories"] == []
     assert payload["pipeline_filters"] == ["fasteners"]

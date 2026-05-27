@@ -207,6 +207,10 @@ def test_tessellation_keep_brep_controls_source_shape_retention(monkeypatch) -> 
     assert calls == [source_shape, source_shape]
     assert dropped.parts["part"].source_shape is None
     assert kept.parts["part"].source_shape is source_shape
+    assert dropped.parts["part"].metadata["brep_patch_cleanup"] == "deleted"
+    assert dropped.parts["part"].metadata["source_shape_retained"] == "false"
+    assert kept.parts["part"].metadata["brep_patch_cleanup"] == "retained"
+    assert kept.parts["part"].metadata["source_shape_retained"] == "true"
 
 
 def test_tessellate_reuses_existing_meshes_by_default(monkeypatch) -> None:  # type: ignore[no-untyped-def]

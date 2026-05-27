@@ -156,6 +156,8 @@ def test_cli_inspect_can_emit_metadata_and_pmi(monkeypatch) -> None:  # type: ig
             "--design-variants",
             "--no-import-existing-meshes",
             "--multi-file-import",
+            "--delete-free-vertices",
+            "--delete-lines",
         ],
     )
 
@@ -166,9 +168,13 @@ def test_cli_inspect_can_emit_metadata_and_pmi(monkeypatch) -> None:  # type: ig
     assert captured["options"].design_variants is True
     assert captured["options"].existing_meshes is False
     assert captured["options"].multi_file is True
+    assert captured["options"].delete_free_vertices is True
+    assert captured["options"].delete_lines is True
     assert payload["design_variants"] is True
     assert payload["import_existing_meshes"] is False
     assert payload["multi_file_import"] is True
+    assert payload["delete_free_vertices"] is True
+    assert payload["delete_lines"] is True
     assert payload["metadata_summary"] == {"asset": 2, "nodes": 2, "parts": 2, "materials": 1}
     assert payload["asset_metadata"]["author"] == "qa"
     assert payload["pmi_summary"]["count"] == 1
@@ -191,6 +197,8 @@ def test_cli_convert_accepts_metadata_and_pmi_during_dry_run() -> None:
             "--design-variants",
             "--no-import-existing-meshes",
             "--multi-file-import",
+            "--delete-free-vertices",
+            "--delete-lines",
         ],
     )
 
@@ -201,3 +209,5 @@ def test_cli_convert_accepts_metadata_and_pmi_during_dry_run() -> None:
     assert payload["design_variants"] is True
     assert payload["import_existing_meshes"] is False
     assert payload["multi_file_import"] is True
+    assert payload["delete_free_vertices"] is True
+    assert payload["delete_lines"] is True

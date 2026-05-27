@@ -575,6 +575,8 @@ pmi = false
 design_variants = true
 existing_meshes = false
 multi_file = true
+delete_free_vertices = true
+delete_lines = true
 
 [export]
 metadata = "summary"
@@ -609,6 +611,8 @@ op = "repair"
     assert import_options.design_variants is True
     assert import_options.existing_meshes is False
     assert import_options.multi_file is True
+    assert import_options.delete_free_vertices is True
+    assert import_options.delete_lines is True
     assert export_options.metadata.mode == "summary"
     assert export_options.metadata.pmi == "none"
     write_step = next(step for step in converted.report.steps if step.name == "write")
