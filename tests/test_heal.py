@@ -111,7 +111,7 @@ def test_convert_runs_heal_brep_before_tessellation(monkeypatch, tmp_path: Path)
     monkeypatch.setattr(pipeline, "read_step", lambda _path: asset)
     monkeypatch.setattr(heal, "heal_shape", fake_heal_shape)
     monkeypatch.setattr(tessellate, "tessellate_asset", fake_tessellate_asset)
-    monkeypatch.setattr(pipeline, "_write_gltf", lambda _asset, _path: None)
+    monkeypatch.setattr(pipeline, "_write_gltf", lambda _asset, _path, *, options=None: None)
 
     converted = convert(
         "input.step",

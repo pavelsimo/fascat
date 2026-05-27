@@ -17,24 +17,30 @@ from rich.console import Console
 from fascat import __version__
 from fascat.filter import Filter, FilterExpressionError
 from fascat.io.gltf import GLTF_SUFFIXES
+from fascat.io.obj import OBJ_SUFFIXES
 from fascat.io.step import read_step, read_step_bytes
+from fascat.io.stl import STL_SUFFIXES
 from fascat.options import (
     AtlasOptions,
     BakeMaterialOptions,
     BrepHealOptions,
     DecimateOptions,
+    GltfExportOptions,
     LODGeneratorOptions,
     LODLevel,
     LODOptions,
     MergeOptions,
+    ObjExportOptions,
     OptimizeOptions,
     RemoveHolesOptions,
     RemoveOccludedOptions,
     SceneOptimizeOptions,
     StageOptions,
     StepReadOptions,
+    StlExportOptions,
     Tessellation,
     UnwrapOptions,
+    UsdExportOptions,
 )
 from fascat.pipeline import convert
 from fascat.pipeline import validate_output as validate_export
@@ -45,8 +51,8 @@ DOCS_URL = "https://pavelsimo.github.io/fascat"
 ISSUES_URL = "https://github.com/pavelsimo/fascat/issues"
 rich_utils.MAX_WIDTH = 120
 STEP_SUFFIXES = {".step", ".stp"}
-USD_SUFFIXES = {".usd", ".usda", ".usdc"}
-EXPORT_SUFFIXES = USD_SUFFIXES | GLTF_SUFFIXES
+USD_SUFFIXES = {".usd", ".usda", ".usdc", ".usdz"}
+EXPORT_SUFFIXES = USD_SUFFIXES | GLTF_SUFFIXES | OBJ_SUFFIXES | STL_SUFFIXES
 COMMAND_NAMES = ("inspect", "convert", "validate", "version", "help")
 GLOBAL_FLAG_ALIASES = {
     "--json",
@@ -190,6 +196,11 @@ class LODMode(str, Enum):
     VARIANTS = "variants"
     EXTRAS = "extras"
     SEPARATE = "separate"
+
+
+class UsdPackage(str, Enum):
+    DEFAULT = "default"
+    USDZ = "usdz"
 
 
 class MetadataMode(str, Enum):
@@ -730,6 +741,50 @@ def cmd_convert(
         bool,
         typer.Option("--preserve-silhouette", help="Protect faces on bounding-box silhouette extremes."),
     ] = False,
+    quantize: Annotated[
+        bool,
+        typer.Option("--quantize", help="Record glTF quantization intent in export metadata."),
+    ] = False,
+    meshopt: Annotated[
+        bool,
+        typer.Option("--meshopt", help="Record glTF meshopt compression intent in export metadata."),
+    ] = False,
+    draco: Annotated[
+        bool,
+        typer.Option("--draco", help="Record glTF Draco compression intent in export metadata."),
+    ] = False,
+    texture_compression: Annotated[
+        str | None,
+        typer.Option("--texture-compression", help="Texture compression intent: ktx2 or basisu."),
+    ] = None,
+    package: Annotated[
+        UsdPackage,
+        typer.Option("--package", help="USD package mode: default or usdz."),
+    ] = UsdPackage.DEFAULT,
+    file_size_budget_mb: Annotated[
+        float | None,
+        typer.Option("--file-size-budget-mb", help="Warn in reports when output exceeds this size."),
+    ] = None,
+    obj_materials: Annotated[
+        bool,
+        typer.Option("--obj-materials/--no-obj-materials", help="Write OBJ material assignments."),
+    ] = True,
+    write_mtl: Annotated[
+        bool,
+        typer.Option("--write-mtl/--no-write-mtl", help="Write an OBJ MTL sidecar."),
+    ] = True,
+    preserve_groups: Annotated[
+        bool,
+        typer.Option("--preserve-groups/--no-preserve-groups", help="Preserve OBJ groups per occurrence."),
+    ] = True,
+    stl_binary: Annotated[
+        bool,
+        typer.Option("--stl-binary/--stl-ascii", help="Write binary STL instead of ASCII STL."),
+    ] = True,
+    stl_merge: Annotated[
+        bool,
+        typer.Option("--stl-merge/--no-stl-merge", help="Merge STL output into one triangle stream."),
+    ] = True,
     debug: Annotated[bool, typer.Option("--debug", help="Prefer debuggable USDA output conventions.")] = False,
     report: Annotated[Path | None, typer.Option("--report", help="Write a JSON conversion report sidecar.")] = None,
     force: Annotated[bool, typer.Option("--force", "-f", help="Overwrite an existing output file.")] = False,
@@ -831,6 +886,17 @@ def cmd_convert(
         "preserve_small_parts": preserve_small_parts,
         "small_part_triangle_threshold": small_part_triangle_threshold,
         "preserve_silhouette": preserve_silhouette,
+        "quantize": quantize,
+        "meshopt": meshopt,
+        "draco": draco,
+        "texture_compression": texture_compression,
+        "package": package.value,
+        "file_size_budget_mb": file_size_budget_mb,
+        "obj_materials": obj_materials,
+        "write_mtl": write_mtl,
+        "preserve_groups": preserve_groups,
+        "stl_binary": stl_binary,
+        "stl_merge": stl_merge,
         "debug": debug,
         "report": str(report) if report else None,
         "force": force,
@@ -930,6 +996,12 @@ def cmd_convert(
             )
     if lod_tiny_part_screen_size < 0.0:
         _fail(ctx, payload, "--lod-tiny-part-screen-size must be greater than or equal to 0.", code=2)
+    if texture_compression not in {None, "ktx2", "basisu"}:
+        _fail(ctx, payload, "--texture-compression must be one of: ktx2, basisu.", code=2)
+    if file_size_budget_mb is not None and file_size_budget_mb <= 0.0:
+        _fail(ctx, payload, "--file-size-budget-mb must be greater than 0.", code=2)
+    if package == UsdPackage.USDZ and not _is_stdio(output_path) and output_path.suffix.lower() != ".usdz":
+        _fail(ctx, payload, "--package usdz requires a .usdz output path.", code=2)
     if debug and not _is_stdio(output_path) and output_path.suffix.lower() not in {".usd", ".usda"}:
         _fail(ctx, payload, "--debug requires .usd or .usda output.", code=2)
     if quality_report is not None and report is not None and quality_report.resolve() == report.resolve():
@@ -1105,6 +1177,22 @@ def cmd_convert(
             lod_tiny_part_screen_size,
             validate_lods,
         )
+        usd_package = "usdz" if (package == UsdPackage.USDZ or output_path.suffix.lower() == ".usdz") else "default"
+        gltf_options = GltfExportOptions(
+            quantize=quantize,
+            meshopt=meshopt,
+            draco=draco,
+            texture_compression=cast(Any, texture_compression),
+            file_size_budget_mb=file_size_budget_mb,
+        )
+        usd_options = UsdExportOptions(package=cast(Any, usd_package), file_size_budget_mb=file_size_budget_mb)
+        obj_options = ObjExportOptions(
+            materials=obj_materials,
+            write_mtl=write_mtl,
+            preserve_groups=preserve_groups,
+            file_size_budget_mb=file_size_budget_mb,
+        )
+        stl_options = StlExportOptions(binary=stl_binary, merge=stl_merge, file_size_budget_mb=file_size_budget_mb)
         asset = _convert_for_cli(
             input_path,
             output_path,
@@ -1125,6 +1213,10 @@ def cmd_convert(
             where=where,
             progress=_progress_callback(ctx, output_path),
             debug=debug,
+            gltf_options=gltf_options,
+            usd_options=usd_options,
+            obj_options=obj_options,
+            stl_options=stl_options,
         )
     except typer.Exit:
         raise
@@ -1461,7 +1553,8 @@ def _validate_export_output(path: Path, ctx: typer.Context, payload: dict[str, A
         _fail(
             ctx,
             payload,
-            f"Unsupported export extension: {path.suffix or '<none>'}. Use .usd, .usda, .usdc, .gltf, or .glb.",
+            "Unsupported export extension: "
+            f"{path.suffix or '<none>'}. Use .usd, .usda, .usdc, .usdz, .gltf, .glb, .obj, or .stl.",
             code=2,
         )
 
@@ -1519,6 +1612,10 @@ def _convert_for_cli(
     where: Filter | None,
     progress: Callable[[str, dict[str, int]], None] | None,
     debug: bool,
+    gltf_options: GltfExportOptions | None,
+    usd_options: UsdExportOptions | None,
+    obj_options: ObjExportOptions | None,
+    stl_options: StlExportOptions | None,
 ) -> Any:
     if _is_stdio(input_path):
         data = sys.stdin.buffer.read()
@@ -1545,6 +1642,10 @@ def _convert_for_cli(
                 where,
                 progress,
                 debug,
+                gltf_options,
+                usd_options,
+                obj_options,
+                stl_options,
             )
     return _convert_output(
         input_path,
@@ -1566,6 +1667,10 @@ def _convert_for_cli(
         where,
         progress,
         debug,
+        gltf_options,
+        usd_options,
+        obj_options,
+        stl_options,
     )
 
 
@@ -1589,6 +1694,10 @@ def _convert_output(
     where: Filter | None,
     progress: Callable[[str, dict[str, int]], None] | None,
     debug: bool,
+    gltf_options: GltfExportOptions | None,
+    usd_options: UsdExportOptions | None,
+    obj_options: ObjExportOptions | None,
+    stl_options: StlExportOptions | None,
 ) -> Any:
     if _is_stdio(output_path):
         import tempfile
@@ -1616,6 +1725,10 @@ def _convert_output(
                 where=where,
                 progress=progress,
                 debug=debug,
+                gltf_options=gltf_options,
+                usd_options=usd_options,
+                obj_options=obj_options,
+                stl_options=stl_options,
             )
             stdout = click.get_binary_stream("stdout")
             stdout.write(Path(handle.name).read_bytes())
@@ -1641,6 +1754,10 @@ def _convert_output(
         where=where,
         progress=progress,
         debug=debug,
+        gltf_options=gltf_options,
+        usd_options=usd_options,
+        obj_options=obj_options,
+        stl_options=stl_options,
     )
 
 

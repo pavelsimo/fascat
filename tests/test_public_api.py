@@ -77,19 +77,26 @@ def test_functional_write_usd_records_report_step(monkeypatch, tmp_path: Path) -
     output = tmp_path / "output.usda"
     calls: dict[str, object] = {}
 
-    def fake_write_usd(written_asset: fc.Asset, path: str | Path, *, debug: bool = False) -> None:
+    def fake_write_usd(
+        written_asset: fc.Asset,
+        path: str | Path,
+        *,
+        debug: bool = False,
+        options: fc.UsdExportOptions | None = None,
+    ) -> None:
         calls["asset"] = written_asset
         calls["path"] = path
         calls["debug"] = debug
+        calls["options"] = options
 
     monkeypatch.setattr(usd, "write_usd", fake_write_usd)
 
     fc.write_usd(asset, output, debug=True)
     step = asset.report.steps[-1]
 
-    assert calls == {"asset": asset, "path": output, "debug": True}
+    assert calls == {"asset": asset, "path": output, "debug": True, "options": fc.UsdExportOptions()}
     assert step.name == "write"
-    assert step.options == {"format": "OpenUSD", "debug": True}
+    assert step.options == {"format": "OpenUSD", "debug": True, "package": "default", "file_size_budget_mb": None}
     assert asset.report.finished_at is not None
 
 
@@ -98,7 +105,13 @@ def test_functional_write_usd_attaches_failure_report(monkeypatch, tmp_path: Pat
 
     asset = fc.Asset(root=fc.Node(id="root", name="root"))
 
-    def fail_write_usd(_asset: fc.Asset, _path: str | Path, *, debug: bool = False) -> None:
+    def fail_write_usd(
+        _asset: fc.Asset,
+        _path: str | Path,
+        *,
+        debug: bool = False,
+        options: fc.UsdExportOptions | None = None,
+    ) -> None:
         raise RuntimeError("disk full")
 
     monkeypatch.setattr(usd, "write_usd", fail_write_usd)
@@ -121,18 +134,31 @@ def test_functional_write_gltf_records_report_step(monkeypatch, tmp_path: Path) 
     output = tmp_path / "output.glb"
     calls: dict[str, object] = {}
 
-    def fake_write_gltf(written_asset: fc.Asset, path: str | Path) -> None:
+    def fake_write_gltf(
+        written_asset: fc.Asset,
+        path: str | Path,
+        *,
+        options: fc.GltfExportOptions | None = None,
+    ) -> None:
         calls["asset"] = written_asset
         calls["path"] = path
+        calls["options"] = options
 
     monkeypatch.setattr(gltf, "write_gltf", fake_write_gltf)
 
     fc.write_gltf(asset, output)
     step = asset.report.steps[-1]
 
-    assert calls == {"asset": asset, "path": output}
+    assert calls == {"asset": asset, "path": output, "options": fc.GltfExportOptions()}
     assert step.name == "write"
-    assert step.options == {"format": "glTF"}
+    assert step.options == {
+        "format": "glTF",
+        "quantize": False,
+        "meshopt": False,
+        "draco": False,
+        "texture_compression": None,
+        "file_size_budget_mb": None,
+    }
     assert asset.report.finished_at is not None
 
 
@@ -141,7 +167,12 @@ def test_functional_write_gltf_attaches_failure_report(monkeypatch, tmp_path: Pa
 
     asset = fc.Asset(root=fc.Node(id="root", name="root"))
 
-    def fail_write_gltf(_asset: fc.Asset, _path: str | Path) -> None:
+    def fail_write_gltf(
+        _asset: fc.Asset,
+        _path: str | Path,
+        *,
+        options: fc.GltfExportOptions | None = None,
+    ) -> None:
         raise RuntimeError("disk full")
 
     monkeypatch.setattr(gltf, "write_gltf", fail_write_gltf)

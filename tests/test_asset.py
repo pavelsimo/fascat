@@ -225,19 +225,28 @@ def test_asset_write_usd_records_report_step(monkeypatch: pytest.MonkeyPatch, tm
     output = tmp_path / "output.usda"
     calls: dict[str, object] = {}
 
-    def fake_write_usd(written_asset: Asset, path: str | Path, *, debug: bool = False) -> None:
+    def fake_write_usd(
+        written_asset: Asset,
+        path: str | Path,
+        *,
+        debug: bool = False,
+        options: object = None,
+    ) -> None:
         calls["asset"] = written_asset
         calls["path"] = path
         calls["debug"] = debug
+        calls["options"] = options
 
     monkeypatch.setattr(usd, "write_usd", fake_write_usd)
 
     asset.write_usd(output, debug=True)
     step = asset.report.steps[-1]
 
-    assert calls == {"asset": asset, "path": output, "debug": True}
+    assert calls["asset"] is asset
+    assert calls["path"] == output
+    assert calls["debug"] is True
     assert step.name == "write"
-    assert step.options == {"format": "OpenUSD", "debug": True}
+    assert step.options == {"format": "OpenUSD", "debug": True, "package": "default", "file_size_budget_mb": None}
     assert step.before == asset.stats()
     assert step.after == asset.stats()
     assert step.duration >= 0.0
@@ -250,7 +259,7 @@ def test_asset_write_usd_records_failure_report(monkeypatch: pytest.MonkeyPatch,
 
     asset = Asset(root=Node(id="root", name="root"))
 
-    def fail_write_usd(_asset: Asset, _path: str | Path, *, debug: bool = False) -> None:
+    def fail_write_usd(_asset: Asset, _path: str | Path, *, debug: bool = False, options: object = None) -> None:
         raise RuntimeError("disk full")
 
     monkeypatch.setattr(usd, "write_usd", fail_write_usd)
@@ -274,18 +283,27 @@ def test_asset_write_gltf_records_report_step(monkeypatch: pytest.MonkeyPatch, t
     output = tmp_path / "output.glb"
     calls: dict[str, object] = {}
 
-    def fake_write_gltf(written_asset: Asset, path: str | Path) -> None:
+    def fake_write_gltf(written_asset: Asset, path: str | Path, *, options: object = None) -> None:
         calls["asset"] = written_asset
         calls["path"] = path
+        calls["options"] = options
 
     monkeypatch.setattr(gltf, "write_gltf", fake_write_gltf)
 
     asset.write_gltf(output)
     step = asset.report.steps[-1]
 
-    assert calls == {"asset": asset, "path": output}
+    assert calls["asset"] is asset
+    assert calls["path"] == output
     assert step.name == "write"
-    assert step.options == {"format": "glTF"}
+    assert step.options == {
+        "format": "glTF",
+        "quantize": False,
+        "meshopt": False,
+        "draco": False,
+        "texture_compression": None,
+        "file_size_budget_mb": None,
+    }
     assert step.before == asset.stats()
     assert step.after == asset.stats()
     assert step.duration >= 0.0
@@ -298,7 +316,7 @@ def test_asset_write_gltf_records_failure_report(monkeypatch: pytest.MonkeyPatch
 
     asset = Asset(root=Node(id="root", name="root"))
 
-    def fail_write_gltf(_asset: Asset, _path: str | Path) -> None:
+    def fail_write_gltf(_asset: Asset, _path: str | Path, *, options: object = None) -> None:
         raise RuntimeError("disk full")
 
     monkeypatch.setattr(gltf, "write_gltf", fail_write_gltf)

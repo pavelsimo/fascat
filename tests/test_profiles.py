@@ -104,6 +104,11 @@ def test_lod_options_normalize_list_ratios() -> None:
         (lambda: fc.LODOptions((0.5,), mode="payloads"), "LOD mode"),
         (lambda: fc.LODOptions((0.5,), screen_coverage=(0.5, 0.25)), "one value per LOD"),
         (lambda: fc.LODOptions((0.5,), tiny_part_screen_size=-1.0), "tiny_part_screen_size"),
+        (lambda: fc.GltfExportOptions(texture_compression="zip"), "texture_compression"),
+        (lambda: fc.GltfExportOptions(file_size_budget_mb=0), "file_size_budget_mb"),
+        (lambda: fc.UsdExportOptions(package="zip"), "package"),
+        (lambda: fc.ObjExportOptions(file_size_budget_mb=0), "file_size_budget_mb"),
+        (lambda: fc.StlExportOptions(file_size_budget_mb=0), "file_size_budget_mb"),
     ],
 )
 def test_options_validate_bad_inputs(factory: object, message: str) -> None:

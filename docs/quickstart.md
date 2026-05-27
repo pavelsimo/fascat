@@ -101,6 +101,18 @@ fascat convert input.step output.usdc \
 
 Use `.usda` or `.usd` with `--debug` when you want inspectable text output. Binary `.usdc`, `.gltf`, and `.glb` output is rejected in debug mode.
 
+## Runtime export handoff
+
+```bash
+fascat convert input.step output.glb \
+  --quantize \
+  --meshopt \
+  --file-size-budget-mb 50
+
+fascat convert input.step output.obj --obj-materials --write-mtl --force
+fascat convert input.step output.stl --stl-binary --force
+```
+
 ## Validate output
 
 ```bash

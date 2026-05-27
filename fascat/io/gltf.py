@@ -13,6 +13,7 @@ from numpy.typing import NDArray
 from fascat.asset import Asset, Node, Part
 from fascat.material import Material
 from fascat.mesh import Mesh
+from fascat.options import GltfExportOptions
 
 GLTF_SUFFIXES = {".gltf", ".glb"}
 
@@ -38,7 +39,8 @@ _COMPONENT_SIZES = {
 _ACCESSOR_WIDTHS = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT4": 16}
 
 
-def write_gltf(asset: Asset, path: str | Path) -> None:
+def write_gltf(asset: Asset, path: str | Path, *, options: GltfExportOptions | None = None) -> None:
+    opts = options or GltfExportOptions()
     output_path = Path(path)
     suffix = output_path.suffix.lower()
     if suffix not in GLTF_SUFFIXES:
@@ -46,6 +48,7 @@ def write_gltf(asset: Asset, path: str | Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     document, binary = _build_document(asset, binary_uri=suffix == ".gltf")
+    _apply_export_options(document, opts)
     if suffix == ".glb":
         output_path.write_bytes(_pack_glb(document, binary))
         return
@@ -308,6 +311,22 @@ def _append_mesh(
     }
     meshes.append(gltf_mesh)
     return len(meshes) - 1
+
+
+def _apply_export_options(document: dict[str, Any], options: GltfExportOptions) -> None:
+    fascat_extras = document.setdefault("extras", {}).setdefault("fascat", {})
+    fascat_extras["exportOptions"] = options.to_dict()
+    compression: dict[str, object] = {}
+    if options.quantize:
+        compression["quantize"] = True
+    if options.meshopt:
+        compression["meshopt"] = True
+    if options.draco:
+        compression["draco"] = True
+    if options.texture_compression is not None:
+        compression["textureCompression"] = options.texture_compression
+    if compression:
+        fascat_extras["compression"] = compression
 
 
 def _lod_entry(mesh_index: int, lod: int, mesh: Mesh) -> dict[str, object]:

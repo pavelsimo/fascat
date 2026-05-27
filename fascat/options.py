@@ -31,6 +31,8 @@ OcclusionStrategy = Literal["conservative", "exterior", "advanced"]
 OcclusionLevel = Literal["parts", "submeshes", "triangles"]
 LODPreset = Literal["desktop", "web", "mobile", "vr"]
 LODOutput = Literal["variants", "extras", "separate"]
+TextureCompression = Literal["ktx2", "basisu"]
+UsdPackageMode = Literal["default", "usdz"]
 
 _BAKE_MAPS = {"base_color", "opacity", "normal", "roughness", "metallic", "ao", "emissive"}
 _HOLE_TYPES = {"through", "blind", "surface"}
@@ -529,6 +531,68 @@ def _lod_preset_levels(preset: LODPreset) -> tuple[LODLevel, ...]:
     if preset == "vr":
         return (LODLevel(0.5, 0.5), LODLevel(0.2, 0.25), LODLevel(0.05, 0.1))
     return (LODLevel(0.5, 0.5), LODLevel(0.25, 0.25), LODLevel(0.1, 0.1))
+
+
+@dataclass(frozen=True)
+class GltfExportOptions:
+    quantize: bool = False
+    meshopt: bool = False
+    draco: bool = False
+    texture_compression: TextureCompression | None = None
+    file_size_budget_mb: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.texture_compression not in {None, "ktx2", "basisu"}:
+            raise ValueError("texture_compression must be one of: ktx2, basisu")
+        if self.file_size_budget_mb is not None and self.file_size_budget_mb <= 0.0:
+            raise ValueError("file_size_budget_mb must be greater than 0 when set")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class UsdExportOptions:
+    package: UsdPackageMode = "default"
+    file_size_budget_mb: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.package not in {"default", "usdz"}:
+            raise ValueError("package must be one of: default, usdz")
+        if self.file_size_budget_mb is not None and self.file_size_budget_mb <= 0.0:
+            raise ValueError("file_size_budget_mb must be greater than 0 when set")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class ObjExportOptions:
+    materials: bool = True
+    write_mtl: bool = True
+    preserve_groups: bool = True
+    file_size_budget_mb: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.file_size_budget_mb is not None and self.file_size_budget_mb <= 0.0:
+            raise ValueError("file_size_budget_mb must be greater than 0 when set")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class StlExportOptions:
+    binary: bool = True
+    merge: bool = True
+    file_size_budget_mb: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.file_size_budget_mb is not None and self.file_size_budget_mb <= 0.0:
+            raise ValueError("file_size_budget_mb must be greater than 0 when set")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
 
 
 @dataclass(frozen=True)

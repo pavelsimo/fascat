@@ -130,6 +130,17 @@ fascat inspect input.step --json
 | `--preserve-small-parts` | `false` | Skip simplification for small parts |
 | `--small-part-triangle-threshold` | `64` | Triangle threshold for `--preserve-small-parts` |
 | `--preserve-silhouette` | `false` | Protect faces on bounding-box silhouette extremes |
+| `--quantize` | `false` | Record glTF quantization intent in export metadata |
+| `--meshopt` | `false` | Record glTF meshopt compression intent in export metadata |
+| `--draco` | `false` | Record glTF Draco compression intent in export metadata |
+| `--texture-compression` | unset | Texture compression intent: `ktx2` or `basisu` |
+| `--package` | `default` | USD package mode: `default` or `usdz` |
+| `--file-size-budget-mb` | unset | Warn in reports when output exceeds this size |
+| `--obj-materials / --no-obj-materials` | `true` | Write OBJ material assignments |
+| `--write-mtl / --no-write-mtl` | `true` | Write an OBJ MTL sidecar |
+| `--preserve-groups / --no-preserve-groups` | `true` | Preserve OBJ groups per occurrence |
+| `--stl-binary / --stl-ascii` | `true` | Write binary STL instead of ASCII STL |
+| `--stl-merge / --no-stl-merge` | `true` | Merge STL output into one triangle stream |
 | `--debug` | `false` | Require text `.usd` or `.usda` output for debugging |
 | `--report` | unset | Write a JSON conversion report sidecar |
 | `--force` | `false` | Overwrite an existing output file |

@@ -132,6 +132,11 @@ def test_convert_help() -> None:
     assert "--lod-mode" in plain(result.output)
     assert "--lod-per-part-budget" in plain(result.output)
     assert "--lod-drop-tiny-parts" in plain(result.output)
+    assert "--quantize" in plain(result.output)
+    assert "--meshopt" in plain(result.output)
+    assert "--file-size-budget-mb" in plain(result.output)
+    assert "--obj-materials" in plain(result.output)
+    assert "--stl-binary" in plain(result.output)
 
 
 def test_validate_help() -> None:

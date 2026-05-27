@@ -14,16 +14,20 @@ from fascat.options import (
     BakeMaterialOptions,
     BrepHealOptions,
     DecimateOptions,
+    GltfExportOptions,
     LODGeneratorOptions,
     LODOptions,
     MergeOptions,
+    ObjExportOptions,
     OptimizeOptions,
     RemoveHolesOptions,
     RemoveOccludedOptions,
     RepairOptions,
     SceneOptimizeOptions,
     StageOptions,
+    StlExportOptions,
     Tessellation,
+    UsdExportOptions,
 )
 from fascat.report import Report, timed_step
 
@@ -499,22 +503,35 @@ class Asset:
         )
         return asset
 
-    def write_usd(self, path: str | Path, *, debug: bool = False) -> None:
+    def write_usd(
+        self,
+        path: str | Path,
+        *,
+        debug: bool = False,
+        options: UsdExportOptions | None = None,
+    ) -> None:
         from fascat.io.usd import write_usd
 
+        if Path(path).suffix.lower() == ".usdz" and (options is None or options.package != "usdz"):
+            opts = UsdExportOptions(
+                package="usdz",
+                file_size_budget_mb=None if options is None else options.file_size_budget_mb,
+            )
+        else:
+            opts = options or UsdExportOptions()
         before = self._report_stats()
-        options: dict[str, object] = {"format": "OpenUSD", "debug": debug}
+        step_options: dict[str, object] = {"format": "OpenUSD", "debug": debug, **opts.to_dict()}
         timer = timed_step()
         try:
             with timer:
-                write_usd(self, path, debug=debug)
+                write_usd(self, path, debug=debug, options=opts)
         except Exception as exc:
             self.report.add_error(str(exc) or exc.__class__.__name__)
             self.report.add_step(
                 "write",
-                options=options,
+                options=step_options,
                 before=before,
-                after=self._report_stats(),
+                after=_stats_with_file_size(self._report_stats(), path, opts.file_size_budget_mb, self),
                 duration=timer.duration,
             )
             self.report.finish(self._report_stats())
@@ -522,29 +539,30 @@ class Asset:
             raise
         self.report.add_step(
             "write",
-            options=options,
+            options=step_options,
             before=before,
-            after=self._report_stats(),
+            after=_stats_with_file_size(self._report_stats(), path, opts.file_size_budget_mb, self),
             duration=timer.duration,
         )
         self.report.finish(self._report_stats())
 
-    def write_gltf(self, path: str | Path) -> None:
+    def write_gltf(self, path: str | Path, *, options: GltfExportOptions | None = None) -> None:
         from fascat.io.gltf import write_gltf
 
+        opts = options or GltfExportOptions()
         before = self._report_stats()
-        options: dict[str, object] = {"format": "glTF"}
+        step_options: dict[str, object] = {"format": "glTF", **opts.to_dict()}
         timer = timed_step()
         try:
             with timer:
-                write_gltf(self, path)
+                write_gltf(self, path, options=opts)
         except Exception as exc:
             self.report.add_error(str(exc) or exc.__class__.__name__)
             self.report.add_step(
                 "write",
-                options=options,
+                options=step_options,
                 before=before,
-                after=self._report_stats(),
+                after=_stats_with_file_size(self._report_stats(), path, opts.file_size_budget_mb, self),
                 duration=timer.duration,
             )
             self.report.finish(self._report_stats())
@@ -552,9 +570,45 @@ class Asset:
             raise
         self.report.add_step(
             "write",
-            options=options,
+            options=step_options,
             before=before,
-            after=self._report_stats(),
+            after=_stats_with_file_size(self._report_stats(), path, opts.file_size_budget_mb, self),
+            duration=timer.duration,
+        )
+        self.report.finish(self._report_stats())
+
+    def write_obj(self, path: str | Path, *, options: ObjExportOptions | None = None) -> None:
+        from fascat.io.obj import write_obj
+
+        opts = options or ObjExportOptions()
+        before = self._report_stats()
+        step_options: dict[str, object] = {"format": "OBJ", **opts.to_dict()}
+        timer = timed_step()
+        with timer:
+            write_obj(self, path, options=opts)
+        self.report.add_step(
+            "write",
+            options=step_options,
+            before=before,
+            after=_stats_with_file_size(self._report_stats(), path, opts.file_size_budget_mb, self),
+            duration=timer.duration,
+        )
+        self.report.finish(self._report_stats())
+
+    def write_stl(self, path: str | Path, *, options: StlExportOptions | None = None) -> None:
+        from fascat.io.stl import write_stl
+
+        opts = options or StlExportOptions()
+        before = self._report_stats()
+        step_options: dict[str, object] = {"format": "STL", **opts.to_dict()}
+        timer = timed_step()
+        with timer:
+            write_stl(self, path, options=opts)
+        self.report.add_step(
+            "write",
+            options=step_options,
+            before=before,
+            after=_stats_with_file_size(self._report_stats(), path, opts.file_size_budget_mb, self),
             duration=timer.duration,
         )
         self.report.finish(self._report_stats())
@@ -630,6 +684,25 @@ def _options_with_scope(options: dict[str, object], scope: _OperationScope) -> d
 
 def _hierarchy_report_stats(asset: Asset) -> dict[str, int]:
     return {**asset.stats(include_lods=True), "draw_calls": asset.draw_call_count}
+
+
+def _stats_with_file_size(
+    stats: dict[str, int],
+    path: str | Path,
+    budget_mb: float | None,
+    asset: Asset,
+) -> dict[str, int]:
+    output_path = Path(path)
+    if str(path) == "-" or not output_path.exists():
+        return stats
+    size = output_path.stat().st_size
+    result = {**stats, "file_size_bytes": size}
+    if budget_mb is not None:
+        budget_bytes = int(budget_mb * 1_000_000)
+        result["file_size_budget_bytes"] = budget_bytes
+        if size > budget_bytes:
+            asset.report.add_warning(f"file size budget exceeded: {size} bytes > {budget_bytes} bytes")
+    return result
 
 
 def _unique_part_id(parts: dict[str, Part], base: str) -> str:

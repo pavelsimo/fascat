@@ -239,7 +239,7 @@ def test_convert_report_includes_timed_write_and_validate_steps(monkeypatch, tmp
 
     monkeypatch.setattr(pipeline, "read_step", lambda _path: asset)
 
-    def fake_write_usd(asset: Asset, path: str | Path, *, debug: bool = False) -> None:
+    def fake_write_usd(asset: Asset, path: str | Path, *, debug: bool = False, options: object = None) -> None:
         written["path"] = str(path)
         written["debug"] = debug
         written["triangles"] = asset.triangle_count
@@ -279,7 +279,7 @@ def test_convert_dispatches_gltf_writer_and_validator(monkeypatch, tmp_path: Pat
 
     monkeypatch.setattr(pipeline, "read_step", lambda _path: asset)
 
-    def fake_write_gltf(asset: Asset, path: str | Path) -> None:
+    def fake_write_gltf(asset: Asset, path: str | Path, *, options: object = None) -> None:
         written["path"] = str(path)
         written["triangles"] = asset.triangle_count
 
@@ -295,7 +295,14 @@ def test_convert_dispatches_gltf_writer_and_validator(monkeypatch, tmp_path: Pat
 
     assert written["path"] == str(tmp_path / "output.glb")
     assert written["triangles"] == 1
-    assert steps["write"].options == {"format": "glTF"}
+    assert steps["write"].options == {
+        "format": "glTF",
+        "quantize": False,
+        "meshopt": False,
+        "draco": False,
+        "texture_compression": None,
+        "file_size_budget_mb": None,
+    }
     assert steps["validate"].options == {"backend": "fascat-gltf"}
     assert steps["validate"].after["validated_triangles"] == 1
 
@@ -304,7 +311,7 @@ def test_convert_report_output_stats_include_lod_totals(monkeypatch, tmp_path: P
     import fascat.pipeline as pipeline
 
     monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
-    monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False: None)
+    monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False, options=None: None)
     monkeypatch.setattr(pipeline, "validate_usd", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
 
     converted = convert(
@@ -325,7 +332,7 @@ def test_convert_report_finishes_when_validation_is_disabled(monkeypatch, tmp_pa
     import fascat.pipeline as pipeline
 
     monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
-    monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False: None)
+    monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False, options=None: None)
 
     converted = convert(
         "input.step",
@@ -345,7 +352,7 @@ def test_convert_report_records_write_failure(monkeypatch, tmp_path: Path) -> No
     captured: dict[str, Asset] = {}
     monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
 
-    def fail_write_usd(asset: Asset, _path: str | Path, *, debug: bool = False) -> None:
+    def fail_write_usd(asset: Asset, _path: str | Path, *, debug: bool = False, options: object = None) -> None:
         captured["asset"] = asset
         raise RuntimeError("disk full")
 
@@ -370,7 +377,7 @@ def test_convert_report_records_validation_failure(monkeypatch, tmp_path: Path) 
     captured: dict[str, Asset] = {}
     monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
     monkeypatch.setattr(
-        pipeline, "_write_usd", lambda asset, _path, *, debug=False: captured.setdefault("asset", asset)
+        pipeline, "_write_usd", lambda asset, _path, *, debug=False, options=None: captured.setdefault("asset", asset)
     )
     monkeypatch.setattr(pipeline, "validate_usd", lambda _path: (_ for _ in ()).throw(RuntimeError("invalid usd")))
 

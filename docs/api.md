@@ -392,6 +392,33 @@ fc.convert("motor.step", "motor.gltf", profile="realtime-web")
 `fc.convert()` validates generated output by default. Pass `validate_output=False` only when another step in your pipeline validates the asset.
 When `where` is provided to `fc.convert()`, tessellation, repair, and staging still run for the full asset, while merge, scene optimization, optimization actions, optimization, and LOD generation are scoped to the matched assembly subset.
 
+## Runtime Export Options
+
+glTF and USD exports accept runtime delivery options, and OBJ/STL are available for mesh-only handoff workflows.
+
+```python
+asset.write_gltf(
+    "motor.glb",
+    options=fc.GltfExportOptions(
+        quantize=True,
+        meshopt=True,
+        draco=False,
+        texture_compression=None,
+        file_size_budget_mb=50,
+    ),
+)
+
+asset.write_usd(
+    "motor.usdz",
+    options=fc.UsdExportOptions(package="usdz", file_size_budget_mb=100),
+)
+
+asset.write_obj("motor.obj", options=fc.ObjExportOptions(materials=True, write_mtl=True))
+asset.write_stl("motor.stl", options=fc.StlExportOptions(binary=True, merge=True))
+```
+
+Compression flags are recorded in glTF extras so downstream packaging can make the final compression pass. Write report steps include output file size and file-size budget warnings when a budget is provided.
+
 ## Profiles
 
 Profiles provide practical defaults for tessellation, staging, optimization, and LODs.

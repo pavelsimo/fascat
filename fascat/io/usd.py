@@ -8,17 +8,21 @@ import numpy as np
 
 from fascat.asset import Asset, Node, Part
 from fascat.material import Material
+from fascat.options import UsdExportOptions
 
 
-def write_usd(asset: Asset, path: str | Path, *, debug: bool = False) -> None:
+def write_usd(asset: Asset, path: str | Path, *, debug: bool = False, options: UsdExportOptions | None = None) -> None:
+    opts = options or UsdExportOptions()
     try:
         from pxr import Usd, UsdGeom
     except ImportError as exc:
         raise RuntimeError("USD export requires usd-core") from exc
 
     output_path = Path(path)
-    if output_path.suffix.lower() not in {".usd", ".usda", ".usdc"}:
+    if output_path.suffix.lower() not in {".usd", ".usda", ".usdc", ".usdz"}:
         raise ValueError(f"unsupported USD extension: {output_path.suffix or '<none>'}")
+    if opts.package == "usdz" and output_path.suffix.lower() != ".usdz":
+        raise ValueError("USDZ package export requires a .usdz output path")
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     stage = Usd.Stage.CreateNew(str(output_path))
@@ -36,6 +40,7 @@ def write_usd(asset: Asset, path: str | Path, *, debug: bool = False) -> None:
         scene.GetPrim().SetCustomDataByKey("fascat:debug", True)
     scene.GetPrim().SetCustomDataByKey("fascat:metadata", dict(asset.metadata))
     scene.GetPrim().SetCustomDataByKey("fascat:pmiCount", len(asset.pmi))
+    scene.GetPrim().SetCustomDataByKey("fascat:exportOptions", _custom_data(opts.to_dict()))
 
     material_paths = _write_materials(stage, asset.materials)
     pmi_by_part = _pmi_by_part(asset)
@@ -357,6 +362,10 @@ def _pmi_by_part(asset: Asset) -> dict[str, list[str]]:
         for target in annotation.applies_to:
             result.setdefault(target, []).append(annotation.id)
     return result
+
+
+def _custom_data(values: dict[str, object]) -> dict[str, object]:
+    return {key: value for key, value in values.items() if value is not None}
 
 
 def _usd_custom_data(value: Any) -> Any:

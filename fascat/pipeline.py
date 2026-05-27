@@ -9,7 +9,11 @@ from fascat.asset import Asset
 from fascat.filter import Filter
 from fascat.io.gltf import GLTF_SUFFIXES, validate_gltf
 from fascat.io.gltf import write_gltf as _write_gltf
+from fascat.io.obj import OBJ_SUFFIXES, validate_obj
+from fascat.io.obj import write_obj as _write_obj
 from fascat.io.step import read_step
+from fascat.io.stl import STL_SUFFIXES, validate_stl
+from fascat.io.stl import write_stl as _write_stl
 from fascat.io.usd import validate_usd
 from fascat.io.usd import write_usd as _write_usd
 from fascat.options import (
@@ -18,23 +22,27 @@ from fascat.options import (
     BrepHealOptions,
     ConversionProfile,
     DecimateOptions,
+    GltfExportOptions,
     LODGeneratorOptions,
     LODOptions,
     MergeOptions,
+    ObjExportOptions,
     OptimizeOptions,
     RemoveHolesOptions,
     RemoveOccludedOptions,
     SceneOptimizeOptions,
     StageOptions,
     StepReadOptions,
+    StlExportOptions,
     Tessellation,
     UnwrapOptions,
+    UsdExportOptions,
     UVMode,
 )
 from fascat.report import timed_step
 
-USD_SUFFIXES = {".usd", ".usda", ".usdc"}
-ExportFormat = Literal["usd", "gltf"]
+USD_SUFFIXES = {".usd", ".usda", ".usdc", ".usdz"}
+ExportFormat = Literal["usd", "gltf", "obj", "stl"]
 
 
 def convert(
@@ -58,10 +66,15 @@ def convert(
     progress: Callable[[str, dict[str, int]], None] | None = None,
     validate_output: bool = True,
     debug: bool = False,
+    gltf_options: GltfExportOptions | None = None,
+    usd_options: UsdExportOptions | None = None,
+    obj_options: ObjExportOptions | None = None,
+    stl_options: StlExportOptions | None = None,
     where: Filter | None = None,
 ) -> Asset:
     output_format = _export_format(output_path)
-    if debug and output_format != "usd":
+    output_suffix = Path(output_path).suffix.lower()
+    if debug and (output_format != "usd" or (str(output_path) != "-" and output_suffix not in {".usd", ".usda"})):
         raise ValueError("--debug is only supported for .usd or .usda exports")
     selected = profiles.by_name(profile) if isinstance(profile, str) else profile
     asset = read_step(input_path, options=import_options) if import_options is not None else read_step(input_path)
@@ -121,11 +134,28 @@ def convert(
         if progress is not None:
             progress("lods", asset.stats())
     write_before = _report_stats(asset)
-    write_options: dict[str, object] = _write_options(output_format, debug=debug)
+    write_options: dict[str, object] = _write_options(
+        output_format,
+        debug=debug,
+        gltf_options=gltf_options,
+        usd_options=usd_options,
+        obj_options=obj_options,
+        stl_options=stl_options,
+    )
+    file_size_budget = _file_size_budget(output_format, gltf_options, usd_options, obj_options, stl_options)
     write_timer = timed_step()
     try:
         with write_timer:
-            _write_output(asset, output_path, output_format, debug=debug)
+            _write_output(
+                asset,
+                output_path,
+                output_format,
+                debug=debug,
+                gltf_options=gltf_options,
+                usd_options=usd_options,
+                obj_options=obj_options,
+                stl_options=stl_options,
+            )
     except Exception as exc:
         _record_failed_step(
             asset,
@@ -140,7 +170,7 @@ def convert(
         "write",
         options=write_options,
         before=write_before,
-        after=_report_stats(asset),
+        after=_stats_with_file_size(_report_stats(asset), output_path, file_size_budget, asset),
         duration=write_timer.duration,
     )
     if progress is not None:
@@ -207,12 +237,61 @@ def _report_stats(asset: Asset) -> dict[str, int]:
     return asset.stats(include_lods=any(part.lod_meshes for part in asset.parts.values()))
 
 
-def write_usd(asset: Asset, path: str | Path, *, debug: bool = False) -> None:
-    asset.write_usd(path, debug=debug)
+def _file_size_budget(
+    output_format: ExportFormat,
+    gltf_options: GltfExportOptions | None,
+    usd_options: UsdExportOptions | None,
+    obj_options: ObjExportOptions | None,
+    stl_options: StlExportOptions | None,
+) -> float | None:
+    if output_format == "gltf":
+        return None if gltf_options is None else gltf_options.file_size_budget_mb
+    if output_format == "usd":
+        return None if usd_options is None else usd_options.file_size_budget_mb
+    if output_format == "obj":
+        return None if obj_options is None else obj_options.file_size_budget_mb
+    return None if stl_options is None else stl_options.file_size_budget_mb
 
 
-def write_gltf(asset: Asset, path: str | Path) -> None:
-    asset.write_gltf(path)
+def _stats_with_file_size(
+    stats: dict[str, int],
+    path: str | Path,
+    budget_mb: float | None,
+    asset: Asset,
+) -> dict[str, int]:
+    output_path = Path(path)
+    if str(path) == "-" or not output_path.exists():
+        return stats
+    size = output_path.stat().st_size
+    result = {**stats, "file_size_bytes": size}
+    if budget_mb is not None:
+        budget_bytes = int(budget_mb * 1_000_000)
+        result["file_size_budget_bytes"] = budget_bytes
+        if size > budget_bytes:
+            asset.report.add_warning(f"file size budget exceeded: {size} bytes > {budget_bytes} bytes")
+    return result
+
+
+def write_usd(
+    asset: Asset,
+    path: str | Path,
+    *,
+    debug: bool = False,
+    options: UsdExportOptions | None = None,
+) -> None:
+    asset.write_usd(path, debug=debug, options=options)
+
+
+def write_gltf(asset: Asset, path: str | Path, *, options: GltfExportOptions | None = None) -> None:
+    asset.write_gltf(path, options=options)
+
+
+def write_obj(asset: Asset, path: str | Path, *, options: ObjExportOptions | None = None) -> None:
+    asset.write_obj(path, options=options)
+
+
+def write_stl(asset: Asset, path: str | Path, *, options: StlExportOptions | None = None) -> None:
+    asset.write_stl(path, options=options)
 
 
 def validate_output(path: str | Path) -> dict[str, int]:
@@ -226,32 +305,80 @@ def _export_format(path: str | Path) -> ExportFormat:
         return "usd"
     if suffix in GLTF_SUFFIXES:
         return "gltf"
+    if suffix in OBJ_SUFFIXES:
+        return "obj"
+    if suffix in STL_SUFFIXES:
+        return "stl"
     raise ValueError(f"unsupported export extension: {suffix or '<none>'}")
 
 
-def _write_output(asset: Asset, path: str | Path, output_format: ExportFormat, *, debug: bool) -> None:
+def _write_output(
+    asset: Asset,
+    path: str | Path,
+    output_format: ExportFormat,
+    *,
+    debug: bool,
+    gltf_options: GltfExportOptions | None,
+    usd_options: UsdExportOptions | None,
+    obj_options: ObjExportOptions | None,
+    stl_options: StlExportOptions | None,
+) -> None:
     if output_format == "usd":
-        _write_usd(asset, path, debug=debug)
+        _write_usd(asset, path, debug=debug, options=_usd_options_for_path(path, usd_options))
         return
-    _write_gltf(asset, path)
+    if output_format == "gltf":
+        _write_gltf(asset, path, options=gltf_options)
+        return
+    if output_format == "obj":
+        _write_obj(asset, path, options=obj_options)
+        return
+    _write_stl(asset, path, options=stl_options)
 
 
 def _validate_output(path: str | Path, output_format: ExportFormat) -> dict[str, int]:
     if output_format == "usd":
         return validate_usd(path)
-    return validate_gltf(path)
+    if output_format == "gltf":
+        return validate_gltf(path)
+    if output_format == "obj":
+        return validate_obj(path)
+    return validate_stl(path)
 
 
-def _write_options(output_format: ExportFormat, *, debug: bool) -> dict[str, object]:
+def _usd_options_for_path(path: str | Path, options: UsdExportOptions | None) -> UsdExportOptions | None:
+    if Path(path).suffix.lower() != ".usdz":
+        return options
+    if options is None:
+        return UsdExportOptions(package="usdz")
+    if options.package == "usdz":
+        return options
+    return UsdExportOptions(package="usdz", file_size_budget_mb=options.file_size_budget_mb)
+
+
+def _write_options(
+    output_format: ExportFormat,
+    *,
+    debug: bool,
+    gltf_options: GltfExportOptions | None,
+    usd_options: UsdExportOptions | None,
+    obj_options: ObjExportOptions | None,
+    stl_options: StlExportOptions | None,
+) -> dict[str, object]:
     if output_format == "usd":
-        return {"format": "OpenUSD", "debug": debug}
-    return {"format": "glTF"}
+        return {"format": "OpenUSD", "debug": debug, **(usd_options or UsdExportOptions()).to_dict()}
+    if output_format == "gltf":
+        return {"format": "glTF", **(gltf_options or GltfExportOptions()).to_dict()}
+    if output_format == "obj":
+        return {"format": "OBJ", **(obj_options or ObjExportOptions()).to_dict()}
+    return {"format": "STL", **(stl_options or StlExportOptions()).to_dict()}
 
 
 def _validate_options(output_format: ExportFormat) -> dict[str, object]:
     if output_format == "usd":
         return {"backend": "usd-core"}
-    return {"backend": "fascat-gltf"}
+    if output_format == "gltf":
+        return {"backend": "fascat-gltf"}
+    return {"backend": f"fascat-{output_format}"}
 
 
 def tessellate(
