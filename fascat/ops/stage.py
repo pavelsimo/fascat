@@ -325,22 +325,64 @@ def _tag_uv_layout_quality(asset: Asset, part_id: str, mesh: Mesh, uv_modes: dic
         prefix = f"uv{channel}"
         mode = uv_modes.get(channel, str(mesh.metadata.get(f"{prefix}_mode", mesh.metadata.get(prefix, "existing"))))
         stats = mesh.uv_layout_stats(channel)
+        domain = _uv_domain(channel, mode)
+        validation_problems = _uv_validation_problems(stats, domain=domain)
+        mesh.metadata[f"{prefix}_domain"] = domain
+        mesh.metadata[f"{prefix}_bounds"] = _uv_bounds(mesh.uvs[channel])
+        mesh.metadata[f"{prefix}_unit_domain_status"] = _uv_unit_domain_status(stats["out_of_unit_vertices"])
+        mesh.metadata[f"{prefix}_validation_status"] = (
+            "ok" if not validation_problems else ",".join(validation_problems)
+        )
         mesh.metadata[f"{prefix}_out_of_unit_vertices"] = str(stats["out_of_unit_vertices"])
         mesh.metadata[f"{prefix}_degenerate_faces"] = str(stats["degenerate_faces"])
         mesh.metadata[f"{prefix}_overlap_pairs"] = str(stats["overlapping_face_pairs"])
-        if channel != 1 and mode != "lightmap":
+        if domain != "bake":
             continue
-        problems: list[str] = []
-        if stats["out_of_unit_vertices"]:
-            problems.append(f"{stats['out_of_unit_vertices']} UV vertices outside 0..1")
-        if stats["degenerate_faces"]:
-            problems.append(f"{stats['degenerate_faces']} degenerate UV faces")
-        if stats["overlapping_face_pairs"]:
-            problems.append(f"{stats['overlapping_face_pairs']} overlapping UV face pairs")
+        problems = _uv_bake_warning_problems(stats)
         if problems:
             asset.report.add_warning(
                 f"part {part_id} {prefix} violates lightmap/baking constraints: {', '.join(problems)}"
             )
+
+
+def _uv_domain(channel: int, mode: str) -> str:
+    if channel == 1 or mode == "lightmap":
+        return "bake"
+    return "tileable"
+
+
+def _uv_bounds(uv: np.ndarray) -> str:
+    if uv.shape[0] == 0:
+        return "empty"
+    mins = uv.min(axis=0)
+    maxs = uv.max(axis=0)
+    return ",".join(f"{value:.9g}" for value in (mins[0], mins[1], maxs[0], maxs[1]))
+
+
+def _uv_unit_domain_status(out_of_unit_vertices: int) -> str:
+    return "ok" if out_of_unit_vertices == 0 else "outside_0_1"
+
+
+def _uv_validation_problems(stats: dict[str, int], *, domain: str) -> list[str]:
+    problems: list[str] = []
+    if domain == "bake" and stats["out_of_unit_vertices"]:
+        problems.append("outside_0_1")
+    if stats["degenerate_faces"]:
+        problems.append("degenerate_faces")
+    if domain == "bake" and stats["overlapping_face_pairs"]:
+        problems.append("overlap_pairs")
+    return problems
+
+
+def _uv_bake_warning_problems(stats: dict[str, int]) -> list[str]:
+    problems: list[str] = []
+    if stats["out_of_unit_vertices"]:
+        problems.append(f"{stats['out_of_unit_vertices']} UV vertices outside 0..1")
+    if stats["degenerate_faces"]:
+        problems.append(f"{stats['degenerate_faces']} degenerate UV faces")
+    if stats["overlapping_face_pairs"]:
+        problems.append(f"{stats['overlapping_face_pairs']} overlapping UV face pairs")
+    return problems
 
 
 def _material_key(material: Material) -> tuple[object, ...]:

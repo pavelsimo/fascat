@@ -205,6 +205,10 @@ def test_stage_normalizes_requested_uv_channels() -> None:
     assert np.allclose(staged_mesh.uvs[1], np.array([[0, 0], [1, 0], [0, 1]], dtype=float))
     assert staged_mesh.metadata["uv1_normalize_status"] == "normalized"
     assert staged_mesh.metadata["uv1_normalize_bounds_before"] == "2,-1,4,3"
+    assert staged_mesh.metadata["uv1_domain"] == "bake"
+    assert staged_mesh.metadata["uv1_bounds"] == "0,0,1,1"
+    assert staged_mesh.metadata["uv1_unit_domain_status"] == "ok"
+    assert staged_mesh.metadata["uv1_validation_status"] == "ok"
     assert staged_mesh.metadata["uv1_out_of_unit_vertices"] == "0"
     assert staged.report.steps[-1].warnings == []
 
@@ -254,11 +258,51 @@ def test_stage_records_uv_layout_quality_and_warns_for_uv1_overlap() -> None:
     warnings = staged.report.steps[-1].warnings
 
     assert staged_mesh is not None
+    assert staged_mesh.metadata["uv0_domain"] == "tileable"
+    assert staged_mesh.metadata["uv0_bounds"] == "0,0,1,1"
+    assert staged_mesh.metadata["uv0_unit_domain_status"] == "ok"
+    assert staged_mesh.metadata["uv0_validation_status"] == "ok"
+    assert staged_mesh.metadata["uv1_domain"] == "bake"
+    assert staged_mesh.metadata["uv1_bounds"] == "0,0,1,1"
+    assert staged_mesh.metadata["uv1_unit_domain_status"] == "ok"
+    assert staged_mesh.metadata["uv1_validation_status"] == "overlap_pairs"
     assert staged_mesh.metadata["uv0_overlap_pairs"] == "1"
     assert staged_mesh.metadata["uv1_overlap_pairs"] == "1"
     assert len(warnings) == 1
     assert "part part uv1 violates lightmap/baking constraints" in warnings[0]
     assert "uv0" not in warnings[0]
+
+
+def test_stage_classifies_existing_uv_channels_by_runtime_domain() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+        uvs={
+            0: np.array([[-0.25, 0], [1.5, 0], [0, 1]], dtype=float),
+            1: np.array([[-0.25, 0], [1.5, 0], [0, 1]], dtype=float),
+        },
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    staged = asset.stage(StageOptions(uv0="none", uv1=None))
+    staged_mesh = staged.parts["part"].mesh
+    warnings = staged.report.steps[-1].warnings
+
+    assert staged_mesh is not None
+    assert staged_mesh.metadata["uv0_domain"] == "tileable"
+    assert staged_mesh.metadata["uv0_bounds"] == "-0.25,0,1.5,1"
+    assert staged_mesh.metadata["uv0_unit_domain_status"] == "outside_0_1"
+    assert staged_mesh.metadata["uv0_validation_status"] == "ok"
+    assert staged_mesh.metadata["uv1_domain"] == "bake"
+    assert staged_mesh.metadata["uv1_bounds"] == "-0.25,0,1.5,1"
+    assert staged_mesh.metadata["uv1_unit_domain_status"] == "outside_0_1"
+    assert staged_mesh.metadata["uv1_validation_status"] == "outside_0_1"
+    assert len(warnings) == 1
+    assert "part part uv1 violates lightmap/baking constraints" in warnings[0]
+    assert "2 UV vertices outside 0..1" in warnings[0]
 
 
 def test_stage_respects_normals_false_and_uv0_none() -> None:
