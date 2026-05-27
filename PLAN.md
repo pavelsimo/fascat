@@ -62,6 +62,8 @@ that are currently conservative approximations.
   pressure.
 - Platform budgets now record Unity reference triangle and draw-call ranges in
   profile definitions, conversion reports, and documentation tables.
+- Decimation now records RAM estimates, budget-allocation mode, and
+  iterative-threshold recommendations in metadata and report fields.
 
 ## Unity Asset Transformer Parity
 
@@ -192,7 +194,7 @@ Parity gaps to track:
 
 8. Decimation parity
    - Add global target allocation across a selected assembly while decimating at part level, so sparse parts stay intact and dense parts carry most of the reduction.
-   - Add iterative decimation thresholds, memory-budget warnings, and RAM estimates for large meshes before simplification starts, including a documented rule of thumb for memory per million polygons.
+   - Decimation now records RAM estimates using the Unity 5 GB per million polygons rule of thumb, reports global versus per-part budget allocation, and warns when the selected source triangle count reaches the iterative threshold.
    - Add target-device decimation presets, including XR/HoloLens-style triangle caps, so platform targets can drive simplification before export.
    - Replace quality-criterion heuristics with measured geometric error.
    - Explicit decimation now supports UV importance modes: preserve full UV islands, preserve seam topology only, or ignore UVs by stripping UV/tangent attributes before simplification.
@@ -263,8 +265,9 @@ These need more design and should not be mixed into documentation or diagnostics
    - Decimation now records achieved triangle reduction and measured symmetric nearest-vertex error on parts and asset metadata.
    - Explicit decimation now records `decimate_requested_keep_ratio` when derivable and warns when the requested keep ratio is below 20% for close-view LOD0 assets.
    - Explicit decimation now supports UV importance modes for preserving islands, preserving seams only, or ignoring UV/tangent attributes before simplification.
+   - Explicit decimation now records estimated RAM, budget-allocation mode, and iterative-threshold recommendations.
    - `criterion="quality"` now reports measured error, but still maps tolerances to a target ratio.
-   - Remaining polish: enforce geometric error bounds, preserve selected CAD features, add richer topology protection metrics, iterative processing, and AO/user-weight constraints for very large meshes.
+   - Remaining polish: enforce geometric error bounds, preserve selected CAD features, add richer topology protection metrics, configurable iterative processing, and AO/user-weight constraints for very large meshes.
 
 5. BREP healing depth - first topology-risk reporting pass complete
    - BREP status now records wire, edge, free/unstitched-edge, small-edge, open-shell, and sliver-face counts.

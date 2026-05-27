@@ -27,6 +27,9 @@ FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int64]
 
 _AGGRESSIVE_LOD0_RATIO = 0.2
+_DECIMATION_ITERATIVE_THRESHOLD_TRIANGLES = 1_000_000
+_DECIMATION_MEMORY_BYTES_PER_MILLION_TRIANGLES = 5_000_000_000
+_DECIMATION_MEMORY_GB_PER_MILLION_TRIANGLES = 5.0
 
 
 def bake_materials_asset(
@@ -608,6 +611,7 @@ def _annotate_decimation_result(
             part.metadata["decimate_removed_uv_channels"] = ",".join(str(channel) for channel in removed_uv_channels)
     if source_total == 0:
         return
+    memory_plan = _decimation_memory_plan(source_total)
     reduction = (source_total - output_total) / source_total
     requested_ratio = _requested_decimation_keep_ratio(source_meshes, options)
     if requested_ratio is not None:
@@ -619,6 +623,21 @@ def _annotate_decimation_result(
     asset.metadata["decimate_mean_vertex_error"] = f"{(weighted_error / measured_parts):.9g}"
     asset.metadata["decimate_error_metric"] = "symmetric_vertex_nearest_distance"
     asset.metadata["decimate_uv_importance"] = options.uv_importance
+    asset.metadata["decimate_budget_allocation"] = (
+        "global_selection" if options.budget_scope == "selection" else "per_part"
+    )
+    asset.metadata["decimate_estimated_memory_bytes"] = str(memory_plan.estimated_bytes)
+    asset.metadata["decimate_estimated_memory_gb"] = f"{memory_plan.estimated_gb:.9g}"
+    asset.metadata["decimate_memory_rule_gb_per_million_triangles"] = (
+        f"{_DECIMATION_MEMORY_GB_PER_MILLION_TRIANGLES:.9g}"
+    )
+    asset.metadata["decimate_iterative_threshold_triangles"] = str(_DECIMATION_ITERATIVE_THRESHOLD_TRIANGLES)
+    asset.metadata["decimate_iterative_recommended"] = str(memory_plan.iterative_recommended).lower()
+    if memory_plan.iterative_recommended:
+        asset.report.add_warning(
+            f"decimation estimates {memory_plan.estimated_gb:.3g} GB RAM for {source_total} source triangles; "
+            f"iterative decimation is recommended above {_DECIMATION_ITERATIVE_THRESHOLD_TRIANGLES} triangles"
+        )
     removed_asset_uv_channels: set[int] = set()
     for part_id, source in source_meshes.items():
         output_part = asset.parts.get(part_id)
@@ -629,6 +648,22 @@ def _annotate_decimation_result(
         asset.metadata["decimate_removed_uv_channels"] = ",".join(
             str(channel) for channel in sorted(removed_asset_uv_channels)
         )
+
+
+@dataclass(frozen=True)
+class _DecimationMemoryPlan:
+    estimated_bytes: int
+    estimated_gb: float
+    iterative_recommended: bool
+
+
+def _decimation_memory_plan(source_triangles: int) -> _DecimationMemoryPlan:
+    estimated_bytes = int(np.ceil(source_triangles * _DECIMATION_MEMORY_BYTES_PER_MILLION_TRIANGLES / 1_000_000))
+    return _DecimationMemoryPlan(
+        estimated_bytes=max(estimated_bytes, 0),
+        estimated_gb=source_triangles * _DECIMATION_MEMORY_GB_PER_MILLION_TRIANGLES / 1_000_000,
+        iterative_recommended=source_triangles >= _DECIMATION_ITERATIVE_THRESHOLD_TRIANGLES,
+    )
 
 
 def _decimation_metrics(source: Mesh, output: Mesh) -> _DecimationMetrics:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pytest
 from typer.testing import CliRunner
 
 from fascat.asset import Asset, Node, Part
@@ -184,7 +185,36 @@ def test_decimate_uses_selection_budget() -> None:
     assert decimated.report.steps[-1].options["target_triangles"] == 3
     assert decimated.metadata["decimate_source_triangles"] == "6"
     assert decimated.metadata["decimate_output_triangles"] == "3"
+    assert decimated.metadata["decimate_budget_allocation"] == "global_selection"
+    assert decimated.metadata["decimate_estimated_memory_bytes"] == "30000"
+    assert decimated.metadata["decimate_estimated_memory_gb"] == "3e-05"
+    assert decimated.metadata["decimate_memory_rule_gb_per_million_triangles"] == "5"
+    assert decimated.metadata["decimate_iterative_threshold_triangles"] == "1000000"
+    assert decimated.metadata["decimate_iterative_recommended"] == "false"
+    assert decimated.report.steps[-1].after["decimate_source_triangles"] == 6
+    assert decimated.report.steps[-1].after["decimate_output_triangles"] == 3
+    assert decimated.report.steps[-1].after["decimate_estimated_memory_bytes"] == 30_000
+    assert decimated.report.steps[-1].after["decimate_iterative_threshold_triangles"] == 1_000_000
+    assert decimated.report.steps[-1].after["decimate_iterative_recommended"] == 0
     assert decimated.parts["body"].metadata["decimate_error_metric"] == "symmetric_vertex_nearest_distance"
+
+
+def test_decimate_warns_when_iterative_memory_threshold_is_exceeded(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fascat.ops.actions as actions
+
+    monkeypatch.setattr(actions, "_DECIMATION_ITERATIVE_THRESHOLD_TRIANGLES", 6)
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="body", name="Body", part_id="body")]),
+        parts={"body": Part(id="body", name="Body", mesh=_triangle_strip(6))},
+    )
+
+    decimated = asset.decimate(DecimateOptions(target_triangles=3, target_ratio=None))
+    warnings = decimated.report.steps[-1].warnings
+
+    assert decimated.metadata["decimate_iterative_recommended"] == "true"
+    assert decimated.report.steps[-1].after["decimate_iterative_recommended"] == 1
+    assert decimated.report.steps[-1].after["decimate_iterative_threshold_triangles"] == 6
+    assert any("iterative decimation is recommended above 6 triangles" in warning for warning in warnings)
 
 
 def test_decimate_warns_when_lod0_ratio_is_aggressive() -> None:
@@ -226,6 +256,7 @@ def test_quality_decimate_records_measured_error_metrics() -> None:
     assert part.metadata["decimate_source_triangles"] == "8"
     assert int(part.metadata["decimate_output_triangles"]) < 8
     assert float(part.metadata["decimate_triangle_reduction"]) > 0.0
+    assert decimated.metadata["decimate_budget_allocation"] == "per_part"
     assert "measured vertex error" in decimated.report.steps[-1].warnings[0]
 
 

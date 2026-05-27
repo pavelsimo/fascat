@@ -490,7 +490,7 @@ class Asset:
             "decimate",
             options=_options_with_scope(opts.to_dict(), scope),
             before=before,
-            after=_hierarchy_report_stats(asset),
+            after=_decimation_report_stats(asset),
             duration=timer.duration,
             warnings=step_warnings,
         )
@@ -857,6 +857,21 @@ def _metadata_float(value: object, default: float) -> float:
     return default
 
 
+def _metadata_int(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
+
+
 def _format_metadata_float(value: object) -> str:
     numeric = _metadata_float(value, 0.0)
     return f"{numeric:.9g}"
@@ -864,6 +879,21 @@ def _format_metadata_float(value: object) -> str:
 
 def _hierarchy_report_stats(asset: Asset) -> dict[str, int]:
     return {**asset.stats(include_lods=True), "draw_calls": asset.draw_call_count}
+
+
+def _decimation_report_stats(asset: Asset) -> dict[str, int]:
+    stats = _hierarchy_report_stats(asset)
+    for key in (
+        "decimate_source_triangles",
+        "decimate_output_triangles",
+        "decimate_estimated_memory_bytes",
+        "decimate_iterative_threshold_triangles",
+    ):
+        if key in asset.metadata:
+            stats[key] = _metadata_int(asset.metadata[key], 0)
+    if "decimate_iterative_recommended" in asset.metadata:
+        stats["decimate_iterative_recommended"] = 1 if asset.metadata["decimate_iterative_recommended"] == "true" else 0
+    return stats
 
 
 def _stats_with_file_size(
