@@ -10,6 +10,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from fascat.asset import Asset, Node, Part
+from fascat.filter import Filter
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.options import AnalyzeOptions
@@ -137,6 +138,7 @@ def analyze_output(
     path: str | Path,
     options: AnalyzeOptions | None = None,
     *,
+    where: Filter | None = None,
     validation_stats: dict[str, int] | None = None,
     source_path: str | Path | None = None,
 ) -> AnalysisReport:
@@ -146,9 +148,18 @@ def analyze_output(
     try:
         asset = _asset_from_output(output_path)
     except Exception as exc:
+        if where is not None:
+            raise RuntimeError(f"filtered validation requires readable mesh data: {exc}") from exc
         return _validation_only_report(output_path, opts, stats, source_path=source_path, warning=str(exc))
 
-    report = analyze_asset(asset, opts, source_path=source_path or output_path)
+    selection = asset.select(where) if where is not None else None
+    report = analyze_asset(
+        asset if selection is None else _scoped_asset(asset, selection.part_ids),
+        opts,
+        source_path=source_path or output_path,
+    )
+    if selection is not None:
+        report.summary["selection"] = selection.to_dict()
     report.stats = {
         **report.stats,
         "validated_meshes": stats["meshes"],
@@ -392,7 +403,7 @@ def _asset_from_gltf(path: Path) -> Asset:
     gltf_io._validate_buffers(document, buffers)
     parts: dict[str, Part] = {}
     nodes: list[Node] = []
-    materials = _gltf_materials(document)
+    materials, material_ids_by_index = _gltf_materials(document)
     scenes = gltf_io._array(document.get("scenes"), "scenes")
     scene_index = gltf_io._int(document.get("scene", 0), "default scene")
     scene = gltf_io._object(scenes[scene_index], f"scene {scene_index}")
@@ -403,6 +414,7 @@ def _asset_from_gltf(path: Path) -> Asset:
             gltf_io._int(node_index, "scene node"),
             parts,
             nodes,
+            material_ids_by_index,
             stack=set(),
         )
     return Asset(
@@ -416,6 +428,7 @@ def _append_gltf_node_parts(
     node_index: int,
     parts: dict[str, Part],
     nodes: list[Node],
+    material_ids_by_index: dict[int, str],
     *,
     stack: set[int],
 ) -> None:
@@ -427,14 +440,16 @@ def _append_gltf_node_parts(
     node = gltf_io._object(node_values[node_index], f"node {node_index}")
     mesh_index = node.get("mesh")
     if mesh_index is not None:
-        part_nodes = _gltf_mesh_parts(
+        part_node = _gltf_mesh_part(
             document,
             buffers,
             gltf_io._int(mesh_index, f"node {node_index} mesh"),
             parts,
+            material_ids_by_index,
             node_name=str(node.get("name", f"Node {node_index}")),
+            node_metadata=_fascat_metadata(node),
         )
-        nodes.extend(part_nodes)
+        nodes.append(part_node)
     for child_index in gltf_io._array(node.get("children", []), f"node {node_index} children"):
         _append_gltf_node_parts(
             document,
@@ -442,23 +457,32 @@ def _append_gltf_node_parts(
             gltf_io._int(child_index, f"node {node_index} child"),
             parts,
             nodes,
+            material_ids_by_index,
             stack=stack | {node_index},
         )
 
 
-def _gltf_mesh_parts(
+def _gltf_mesh_part(
     document: dict[str, Any],
     buffers: list[bytes],
     mesh_index: int,
     parts: dict[str, Part],
+    material_ids_by_index: dict[int, str],
     *,
     node_name: str,
-) -> list[Node]:
+    node_metadata: dict[str, object],
+) -> Node:
     from fascat.io import gltf as gltf_io
 
     meshes = gltf_io._array(document.get("meshes"), "meshes")
     mesh = gltf_io._object(meshes[mesh_index], f"mesh {mesh_index}")
-    result: list[Node] = []
+    mesh_metadata = _fascat_metadata(mesh)
+    points_chunks: list[FloatArray] = []
+    face_chunks: list[IntArray] = []
+    face_material_indices: list[int] = []
+    material_ids: list[str] = []
+    material_slots: dict[str, int] = {}
+    offset = 0
     for primitive_index, primitive_value in enumerate(
         gltf_io._array(mesh.get("primitives"), f"mesh {mesh_index} primitives")
     ):
@@ -472,19 +496,34 @@ def _gltf_mesh_parts(
         else:
             index_values = _read_gltf_int_accessor(document, buffers, gltf_io._int(indices, "primitive indices"))
             faces = index_values.reshape((-1, 3))
-        material_ids: list[str] = []
-        material_indices: IntArray | None = None
         material_index = primitive.get("material")
+        material_slot: int | None = None
         if isinstance(material_index, int):
-            material_ids = [f"material_{material_index}"]
-            material_indices = np.zeros(len(faces), dtype=np.int64)
-        part_id = f"mesh_{mesh_index}_primitive_{primitive_index}_{len(parts)}"
-        mesh_value = Mesh(points=points, faces=faces, material_indices=material_indices)
-        parts[part_id] = Part(
-            id=part_id, name=f"{node_name} primitive {primitive_index}", mesh=mesh_value, material_ids=material_ids
-        )
-        result.append(Node(id=f"node_{part_id}", name=node_name, part_id=part_id))
-    return result
+            material_id = material_ids_by_index.get(material_index, f"material_{material_index}")
+            if material_id not in material_slots:
+                material_slots[material_id] = len(material_ids)
+                material_ids.append(material_id)
+            material_slot = material_slots[material_id]
+        points_chunks.append(points)
+        face_chunks.append(faces + offset)
+        if material_slot is not None:
+            face_material_indices.extend([material_slot] * len(faces))
+        offset += points.shape[0]
+    points = np.vstack(points_chunks) if points_chunks else np.empty((0, 3), dtype=np.float64)
+    faces = np.vstack(face_chunks) if face_chunks else np.empty((0, 3), dtype=np.int64)
+    material_indices = (
+        np.asarray(face_material_indices, dtype=np.int64)
+        if face_material_indices and len(face_material_indices) == len(faces)
+        else None
+    )
+    source_part_id = _fascat_string(mesh, "partId")
+    part_id = _unique_part_id(parts, source_part_id or f"mesh_{mesh_index}_{len(parts)}")
+    part_name = _fascat_string(mesh, "originalName") or str(mesh.get("name", node_name))
+    mesh_value = Mesh(points=points, faces=faces, material_indices=material_indices, metadata=dict(mesh_metadata))
+    parts[part_id] = Part(
+        id=part_id, name=part_name, mesh=mesh_value, material_ids=material_ids, metadata=mesh_metadata
+    )
+    return Node(id=f"node_{part_id}", name=node_name, part_id=part_id, metadata=node_metadata)
 
 
 def _read_gltf_float_accessor(document: dict[str, Any], buffers: list[bytes], accessor_index: int) -> FloatArray:
@@ -533,22 +572,76 @@ def _read_gltf_accessor(document: dict[str, Any], buffers: list[bytes], accessor
     return cast(NDArray[Any], values.copy())
 
 
-def _gltf_materials(document: dict[str, Any]) -> dict[str, Material]:
+def _gltf_materials(document: dict[str, Any]) -> tuple[dict[str, Material], dict[int, str]]:
     from fascat.io import gltf as gltf_io
 
     if "materials" not in document:
-        return {}
+        return {}, {}
     result: dict[str, Material] = {}
+    ids_by_index: dict[int, str] = {}
     for index, value in enumerate(gltf_io._array(document.get("materials"), "materials")):
         material = gltf_io._object(value, f"material {index}")
         name = str(material.get("name", f"Material {index}"))
+        fascat = _fascat_extras(material)
+        material_id = str(fascat.get("materialId") or f"material_{index}")
         base_color = (0.8, 0.8, 0.8, 1.0)
         pbr = material.get("pbrMetallicRoughness")
         if isinstance(pbr, dict) and isinstance(pbr.get("baseColorFactor"), list) and len(pbr["baseColorFactor"]) == 4:
             color = [float(item) for item in pbr["baseColorFactor"]]
             base_color = (color[0], color[1], color[2], color[3])
-        result[f"material_{index}"] = Material(id=f"material_{index}", name=name, base_color=base_color)
-    return result
+        metadata = fascat.get("metadata") if isinstance(fascat.get("metadata"), dict) else {}
+        result[material_id] = Material(
+            id=material_id,
+            name=name,
+            base_color=base_color,
+            metadata=cast(dict[str, object], metadata),
+        )
+        ids_by_index[index] = material_id
+    return result, ids_by_index
+
+
+def _scoped_asset(asset: Asset, part_ids: set[str]) -> Asset:
+    scoped = asset.copy(keep_source=True)
+    scoped.parts = {part_id: part for part_id, part in scoped.parts.items() if part_id in part_ids}
+    _prune_unselected_nodes(scoped.root, part_ids)
+    return scoped
+
+
+def _prune_unselected_nodes(node: Node, part_ids: set[str]) -> bool:
+    kept: list[Node] = []
+    for child in node.children:
+        if _prune_unselected_nodes(child, part_ids):
+            kept.append(child)
+    node.children = kept
+    return node.part_id in part_ids if node.part_id is not None else bool(node.children)
+
+
+def _fascat_extras(value: dict[str, Any]) -> dict[str, object]:
+    extras = value.get("extras")
+    if not isinstance(extras, dict):
+        return {}
+    fascat = extras.get("fascat")
+    return dict(fascat) if isinstance(fascat, dict) else {}
+
+
+def _fascat_metadata(value: dict[str, Any]) -> dict[str, object]:
+    fascat = _fascat_extras(value)
+    metadata = fascat.get("metadata")
+    return dict(metadata) if isinstance(metadata, dict) else {}
+
+
+def _fascat_string(value: dict[str, Any], key: str) -> str | None:
+    item = _fascat_extras(value).get(key)
+    return item if isinstance(item, str) and item else None
+
+
+def _unique_part_id(parts: dict[str, Part], candidate: str) -> str:
+    if candidate not in parts:
+        return candidate
+    suffix = 2
+    while f"{candidate}_{suffix}" in parts:
+        suffix += 1
+    return f"{candidate}_{suffix}"
 
 
 def _asset_from_obj(path: Path) -> Asset:

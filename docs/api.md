@@ -543,9 +543,13 @@ The CLI can write a validation-time quality report for exported assets:
 
 ```bash
 fascat validate motor.glb \
+  --filter 'material=Painted*' \
   --geometry-quality \
   --report quality-report.json
 ```
+
+Validation-time geometry reports use the same filter selectors as conversion
+when an exported format can be reconstructed for analysis.
 
 ## Inspecting assets
 

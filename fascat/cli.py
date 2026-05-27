@@ -1310,6 +1310,7 @@ def cmd_convert(
   fascat validate motor.usdc
   fascat validate motor.glb
   fascat validate motor.glb --geometry-quality --report report.json
+  fascat validate motor.glb --filter 'material=painted' --geometry-quality
   fascat --json validate motor.usda
   cat motor.usdc | fascat validate -
 
@@ -1355,6 +1356,14 @@ def cmd_validate(
         bool,
         typer.Option("--visual-risk", help="Report before/after visual risk warnings."),
     ] = False,
+    filters: Annotated[
+        list[str] | None,
+        typer.Option("--filter", help="Scope validation-time analysis with selectors such as path=*/Fasteners/*."),
+    ] = None,
+    exclude_filters: Annotated[
+        list[str] | None,
+        typer.Option("--exclude-filter", help="Exclude selector matches from --filter results."),
+    ] = None,
     report: Annotated[
         Path | None,
         typer.Option("--report", help="Write validation and geometry quality report as JSON."),
@@ -1379,8 +1388,13 @@ def cmd_validate(
         "dry_run": state.dry_run,
         "geometry_quality": geometry_quality,
         "analysis_options": analyze_options.to_dict() if should_analyze else None,
+        "filters": filters or [],
+        "exclude_filters": exclude_filters or [],
         "report": str(report) if report else None,
     }
+    where = _parse_filter_options(filters, exclude_filters, ctx, payload)
+    should_analyze = should_analyze or where is not None
+    payload["analysis_options"] = analyze_options.to_dict() if should_analyze else None
     _validate_export_output(output_path, ctx, payload)
     if state.dry_run:
         _emit(ctx, payload, f"Would validate {output_path}.")
@@ -1391,6 +1405,7 @@ def cmd_validate(
         stats, analysis = _validate_and_analyze_output_for_cli(
             output_path,
             analyze_options if should_analyze else None,
+            where=where,
         )
     except Exception as exc:
         _fail(ctx, payload, str(exc))
@@ -1403,6 +1418,9 @@ def cmd_validate(
     message = f"{output_path}: valid {_export_label(output_path)}, {_format_stats(stats)}."
     if report is not None:
         message = f"{message} Wrote report {report}."
+    if analysis is not None and "selection" in analysis.summary:
+        selection = cast(dict[str, Any], analysis.summary["selection"])
+        message = f"{message} Matched {_format_stats(cast(dict[str, int], selection['stats']))}."
     _emit(
         ctx,
         json_payload,
@@ -1984,6 +2002,8 @@ class _temporary_step_file:
 def _validate_and_analyze_output_for_cli(
     path: Path,
     options: AnalyzeOptions | None,
+    *,
+    where: Filter | None = None,
 ) -> tuple[dict[str, int], AnalysisReport | None]:
     if _is_stdio(path):
         import tempfile
@@ -1996,13 +2016,13 @@ def _validate_and_analyze_output_for_cli(
             handle.flush()
             stats = validate_export(handle.name)
             analysis = (
-                analyze_output(handle.name, options, validation_stats=stats, source_path="-")
+                analyze_output(handle.name, options, where=where, validation_stats=stats, source_path="-")
                 if options is not None
                 else None
             )
             return stats, analysis
     stats = validate_export(path)
-    analysis = analyze_output(path, options, validation_stats=stats) if options is not None else None
+    analysis = analyze_output(path, options, where=where, validation_stats=stats) if options is not None else None
     return stats, analysis
 
 

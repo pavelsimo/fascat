@@ -7,6 +7,7 @@ import numpy as np
 
 from fascat.analysis import analyze_output
 from fascat.asset import Asset, Node, Part
+from fascat.filter import Filter
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.options import AnalyzeOptions
@@ -125,3 +126,23 @@ def test_analyze_output_reconstructs_embedded_gltf_quality(tmp_path: Path) -> No
     assert report.summary["draw_call_estimate"] == 1
     assert report.summary["open_boundaries"] == 1
     assert report.parts[0]["boundary_edges"] == 3
+
+
+def test_analyze_output_can_scope_exported_gltf_with_filter(tmp_path: Path) -> None:
+    asset = _quality_asset()
+    output = tmp_path / "quality.gltf"
+    asset.write_gltf(output)
+
+    report = analyze_output(
+        output,
+        AnalyzeOptions(open_boundaries=True, draw_call_estimate=True),
+        where=Filter.part("main"),
+    )
+
+    selection = report.summary["selection"]
+    assert isinstance(selection, dict)
+    assert selection["stats"]["parts"] == 1
+    assert selection["stats"]["triangles"] == 4
+    assert report.summary["parts"] == 1
+    assert report.summary["material_count"] == 2
+    assert [part["part_id"] for part in report.parts] == ["main"]

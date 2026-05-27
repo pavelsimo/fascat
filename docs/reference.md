@@ -229,12 +229,15 @@ fascat convert motor.step motor.glb --pipeline realtime.toml
 | `--tiny-parts` | `false` | Report tiny part stats |
 | `--draw-call-estimate` | `false` | Report material count and draw-call estimate |
 | `--visual-risk` | `false` | Report before/after visual risk warnings |
+| `--filter` | unset | Scope validation-time geometry analysis with an assembly selector |
+| `--exclude-filter` | unset | Exclude selector matches from validation-time analysis |
 | `--report` | unset | Write validation and geometry quality report as JSON |
 
 Example:
 
 ```bash
 fascat validate motor.glb \
+  --filter 'path=*/Fasteners/*' \
   --geometry-quality \
   --non-manifold-edges \
   --open-boundaries \

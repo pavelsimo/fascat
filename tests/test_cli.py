@@ -12,7 +12,10 @@ import pytest
 from typer.testing import CliRunner
 
 from fascat import __version__
+from fascat.asset import Asset, Node, Part
 from fascat.cli import app, run
+from fascat.material import Material
+from fascat.mesh import Mesh
 from fascat.report import Report
 
 runner = CliRunner()
@@ -815,6 +818,45 @@ def test_validate_rejects_unknown_extension(tmp_path: Path) -> None:
     result = runner.invoke(app, ["validate", str(output_file)])
     assert result.exit_code == 2
     assert "Unsupported export extension" in result.output
+
+
+def test_validate_can_scope_geometry_quality_with_filter(tmp_path: Path) -> None:
+    mesh = Mesh(
+        points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.asarray([[0, 1, 2]], dtype=int),
+    )
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="kept_node", name="Kept", part_id="kept"),
+                Node(id="skipped_node", name="Skipped", part_id="skipped"),
+            ],
+        ),
+        parts={
+            "kept": Part(id="kept", name="Kept", mesh=mesh, material_ids=["red"]),
+            "skipped": Part(id="skipped", name="Skipped", mesh=mesh, material_ids=["blue"]),
+        },
+        materials={
+            "red": Material(id="red", name="Red", base_color=(1.0, 0.0, 0.0, 1.0)),
+            "blue": Material(id="blue", name="Blue", base_color=(0.0, 0.0, 1.0, 1.0)),
+        },
+    )
+    output_file = tmp_path / "filtered.gltf"
+    asset.write_gltf(output_file)
+
+    result = runner.invoke(
+        app,
+        ["--json", "validate", str(output_file), "--geometry-quality", "--filter", "material=Red"],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    selection = payload["analysis"]["summary"]["selection"]
+    assert selection["stats"]["parts"] == 1
+    assert selection["matches"][0]["part_id"] == "kept"
+    assert payload["analysis"]["summary"]["parts"] == 1
 
 
 def test_validate_missing_usd_backend_exits_nonzero(
