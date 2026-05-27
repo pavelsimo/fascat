@@ -130,6 +130,7 @@ def test_convert_help() -> None:
     assert "--index-buffer" in plain(result.output)
     assert "--bake-materials" in plain(result.output)
     assert "--decimate" in plain(result.output)
+    assert "--sag-ratio" in plain(result.output)
     assert "--remove-holes" in plain(result.output)
     assert "--remove-occluded" in plain(result.output)
     assert "--explode" in plain(result.output)
@@ -156,11 +157,15 @@ def test_validate_help() -> None:
 
 
 def test_convert_dry_run_json() -> None:
-    result = runner.invoke(app, ["--json", "--dry-run", "convert", "input.step", "output.usdc"])
+    result = runner.invoke(
+        app,
+        ["--json", "--dry-run", "convert", "input.step", "output.usdc", "--sag-ratio", "0.01"],
+    )
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["command"] == "convert"
     assert payload["dry_run"] is True
+    assert payload["sag_ratio"] == 0.01
     diagnostics = {item["operation"]: item for item in payload["operation_diagnostics"]}
     assert diagnostics["import"]["level"] == "exact"
     assert diagnostics["tessellate"]["level"] == "exact"
@@ -242,6 +247,7 @@ names = ["Bolt*"]
 op = "tessellate"
 where = "fasteners"
 sag = 0.2
+sag-ratio = 0.01
 
 [[steps]]
 op = "optimize"
@@ -264,6 +270,7 @@ target_triangles = 80000
     assert payload["pipeline_export"] == {"mode": "summary", "pmi": "none"}
     assert payload["pipeline_filters"] == ["fasteners"]
     assert [step["op"] for step in payload["pipeline_steps"]] == ["tessellate", "optimize"]
+    assert payload["pipeline_steps"][0]["sag_ratio"] == 0.01
 
 
 def test_convert_rejects_invalid_pipeline_file(tmp_path: Path) -> None:
@@ -760,6 +767,7 @@ def test_convert_writes_tessellation_quality_report(monkeypatch, tmp_path: Path)
     def fake_convert(*_args: object, **kwargs: object) -> fc.Asset:
         tessellation = kwargs["tessellation"]
         assert isinstance(tessellation, fc.Tessellation)
+        assert tessellation.sag_ratio == 0.02
         assert tessellation.min_edge_length == 0.01
         assert tessellation.avoid_skinny_triangles is True
         assert tessellation.quality_report is True
@@ -775,6 +783,8 @@ def test_convert_writes_tessellation_quality_report(monkeypatch, tmp_path: Path)
             str(output_file),
             "--min-edge-length",
             "0.01",
+            "--sag-ratio",
+            "0.02",
             "--avoid-skinny-triangles",
             "--quality-report",
             str(quality_file),
@@ -973,6 +983,12 @@ def test_convert_rejects_invalid_min_edge_length(capsys) -> None:  # type: ignor
     result = invoke_run(["--dry-run", "convert", "input.step", "output.usdc", "--min-edge-length", "0"], capsys)
     assert result.exit_code == 2
     assert "--min-edge-length must be greater than 0" in result.stderr
+
+
+def test_convert_rejects_invalid_sag_ratio(capsys) -> None:  # type: ignore[no-untyped-def]
+    result = invoke_run(["--dry-run", "convert", "input.step", "output.usdc", "--sag-ratio", "0"], capsys)
+    assert result.exit_code == 2
+    assert "--sag-ratio must be greater than 0" in result.stderr
 
 
 def test_convert_rejects_min_edge_above_max_edge(capsys) -> None:  # type: ignore[no-untyped-def]

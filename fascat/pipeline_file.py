@@ -83,6 +83,7 @@ _COMMON_STEP_KEYS = frozenset({"where", "where_not"})
 _TESSELLATION_KEYS = frozenset(
     {
         "sag",
+        "sag_ratio",
         "angle",
         "relative",
         "min_edge_length",
@@ -649,6 +650,7 @@ def _apply_step(asset: Asset, step: PipelineStep, where: Filter | None) -> Asset
 def _tessellation(values: dict[str, object]) -> Tessellation:
     return Tessellation(
         sag=_as_float(values.get("sag", 0.1)),
+        sag_ratio=_as_optional_float(values.get("sag_ratio")),
         angle=_as_float(values.get("angle", 15.0)),
         relative=bool(values.get("relative", True)),
         min_edge_length=_as_optional_float(values.get("min_edge_length")),

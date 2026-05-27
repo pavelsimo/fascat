@@ -74,6 +74,7 @@ def test_functional_api_wraps_tessellation_options() -> None:
     tessellated = fc.tessellate(
         asset,
         sag=0.2,
+        sag_ratio=0.01,
         angle=20.0,
         relative=False,
         min_edge_length=0.25,
@@ -91,6 +92,7 @@ def test_functional_api_wraps_tessellation_options() -> None:
     assert step.name == "tessellate"
     assert step.options == {
         "sag": 0.2,
+        "sag_ratio": 0.01,
         "angle": 20.0,
         "relative": False,
         "min_edge_length": 0.25,

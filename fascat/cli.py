@@ -426,6 +426,10 @@ def cmd_convert(
         typer.Option("--pipeline", help="TOML pipeline file with named filters and ordered steps."),
     ] = None,
     sag: Annotated[float | None, typer.Option("--sag", help="CAD tessellation sag tolerance.")] = None,
+    sag_ratio: Annotated[
+        float | None,
+        typer.Option("--sag-ratio", help="Relative CAD tessellation sag ratio."),
+    ] = None,
     angle: Annotated[
         float | None,
         typer.Option("--angle", help="CAD tessellation angle tolerance in degrees."),
@@ -832,6 +836,7 @@ def cmd_convert(
         "profile": profile.value,
         "pipeline": str(pipeline) if pipeline else None,
         "sag": sag,
+        "sag_ratio": sag_ratio,
         "angle": angle,
         "target_triangles": target_triangles,
         "ratio": ratio,
@@ -967,6 +972,8 @@ def cmd_convert(
         _fail(ctx, payload, "--ratio must be greater than 0 and less than 1.", code=2)
     if sag is not None and sag <= 0.0:
         _fail(ctx, payload, "--sag must be greater than 0.", code=2)
+    if sag_ratio is not None and sag_ratio <= 0.0:
+        _fail(ctx, payload, "--sag-ratio must be greater than 0.", code=2)
     if angle is not None and (angle <= 0.0 or angle > 180.0):
         _fail(ctx, payload, "--angle must be greater than 0 and no more than 180.", code=2)
     if target_triangles is not None and target_triangles <= 0:
@@ -1083,6 +1090,7 @@ def cmd_convert(
         tessellation = dataclass_replace(
             base_tessellation,
             sag=sag if sag is not None else base_tessellation.sag,
+            sag_ratio=sag_ratio if sag_ratio is not None else base_tessellation.sag_ratio,
             angle=angle if angle is not None else base_tessellation.angle,
             min_edge_length=min_edge_length if min_edge_length is not None else base_tessellation.min_edge_length,
             max_edge_length=max_edge_length if max_edge_length is not None else base_tessellation.max_edge_length,

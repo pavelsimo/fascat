@@ -44,6 +44,7 @@ Dry-run JSON for `convert` includes `operation_diagnostics`, a list of planned o
 | `--profile` | `realtime-desktop` | Conversion profile: `inspect-only`, `realtime-desktop`, `realtime-web`, or `virtual-reality` |
 | `--pipeline` | unset | TOML pipeline file with named filters and ordered conversion steps |
 | `--sag` | profile value | CAD tessellation sag tolerance |
+| `--sag-ratio` | unset | Relative CAD tessellation sag ratio; enables explicit relative deflection when set |
 | `--angle` | profile value | CAD tessellation angle tolerance in degrees |
 | `--target-triangles` | profile value | Target triangle count for optimized LOD0 |
 | `--ratio` | unset | Simplification ratio when no triangle target is set |
@@ -219,6 +220,7 @@ min_diagonal = 50.0
 op = "tessellate"
 where = "large_castings"
 sag = 0.03
+sag-ratio = 0.005
 angle = 10.0
 
 [[steps]]
@@ -254,7 +256,7 @@ warnings to distinguish exact work from fallbacks.
 |------------|---------------|----------------------|-----------|
 | STEP import, hierarchy, names, transforms, colors, metadata | Implemented for STEP | `import` report stats and pipeline import options; AP242 PMI markers warn when typed PMI import is unavailable | Add design variants, typed PMI entity extraction, existing mesh preference, and multi-file import |
 | BREP healing | Partial | `heal_brep`; records open shells, free/unstitched edges, small edges, and sliver counts; sliver removal warns that the backend leaves shapes unchanged | Implement sliver-face removal, duplicate-face cleanup, and deeper face/wire repair |
-| Tessellation | Implemented | `tessellate` report options and quality metadata | Add separate sag-ratio option, existing tessellation reuse, CAD UV/tangent extraction, and free-edge diagnostics |
+| Tessellation | Implemented | `tessellate` report options, explicit sag-ratio, and quality metadata | Add existing tessellation reuse, CAD UV/tangent extraction, and free-edge diagnostics |
 | Mesh repair | Implemented for core cleanup | `repair` report step; mesh metadata records before/after duplicate polygon, degenerate triangle, boundary edge, and non-manifold edge counts | Add T-junction sewing, non-manifold cracking, and configurable orientation strategies |
 | Staging, normals, tangents, UV metadata | Partial | `stage` report step; tangents require UV0; mesh metadata records UV bounds, degenerates, and overlap counts, with warnings for UV1/lightmap bake violations | Add seam planning, unwrap method selection, repack, normalize, and deeper per-channel validation |
 | Material baking | Approximate | `bake_materials` emits constant embedded texture maps from material factors and warns that raster baking is not implemented | Generate real atlas textures from source texture/material inputs |

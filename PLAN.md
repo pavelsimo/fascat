@@ -96,7 +96,7 @@ Parity gaps to track:
    - Add before/after repair metrics for T-junctions, boundary gaps, and flipped components.
 
 4. Tessellation controls
-   - Expose a separate sag-ratio option instead of overloading `relative=True`.
+   - Sag-ratio is now a first-class tessellation option across Python, CLI, TOML pipelines, per-part overrides, reports, and OCCT backend parameter mapping. `relative=True` remains for compatibility when `sag_ratio` is unset.
    - Support explicit override/reuse of existing tessellation when imported data already contains meshes.
    - Investigate CAD-parametric UV and tangent generation during tessellation, plus free-edge extraction for diagnostics.
    - Add targeted tessellation profiles by part size, material, metadata, curvature, or filter so shiny/high-detail parts can use finer criteria than bulk structural parts.

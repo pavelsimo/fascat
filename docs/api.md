@@ -15,6 +15,7 @@ asset = fc.read_step("motor.step")
 asset = asset.tessellate(
     fc.Tessellation(
         sag=0.1,
+        sag_ratio=None,
         angle=15.0,
         relative=True,
         min_edge_length=None,
@@ -330,6 +331,7 @@ Tessellation supports global and per-part settings for edge limits, boundary pre
 asset = fc.read_step("motor.step").tessellate(
     fc.Tessellation(
         sag=0.05,
+        sag_ratio=None,
         angle=10.0,
         min_edge_length=0.02,
         max_edge_length=2.0,
@@ -338,7 +340,7 @@ asset = fc.read_step("motor.step").tessellate(
         avoid_skinny_triangles=True,
         quality_report=True,
         part_settings={
-            "housing": {"sag": 0.03, "max_edge_length": 1.0},
+            "housing": {"sag": 0.03, "sag_ratio": 0.005, "max_edge_length": 1.0},
             "Fastener": {"sag": 0.15},
         },
     )
@@ -354,8 +356,9 @@ Tessellation parameters:
 | Parameter | Meaning |
 |-----------|---------|
 | `sag` | Maximum chordal deviation between source surface and tessellated mesh. Lower values produce more triangles. |
+| `sag_ratio` | Relative chordal deviation ratio. When set, it becomes the backend deflection value and enables relative tessellation explicitly. |
 | `angle` | Angular deviation limit in degrees. Lower values preserve curved surfaces with more triangles. |
-| `relative` | Interpret sag relative to part size where the backend supports relative tessellation. |
+| `relative` | Compatibility switch for interpreting `sag` as a relative backend deflection when `sag_ratio` is unset. Prefer `sag_ratio` for new relative-tolerance workflows. |
 | `min_edge_length` | Collapse or avoid edges shorter than this length during post-processing. |
 | `max_edge_length` | Split long triangle edges to keep mesh density bounded. |
 | `preserve_boundaries` | Preserve CAD face and boundary edges during tessellation cleanup. |

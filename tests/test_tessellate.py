@@ -209,6 +209,24 @@ def test_tessellation_keep_brep_controls_source_shape_retention(monkeypatch) -> 
     assert kept.parts["part"].source_shape is source_shape
 
 
+def test_occt_mesh_parameters_use_sag_ratio_as_relative_deflection() -> None:
+    import fascat.ops.tessellate as tessellate_module
+
+    class Parameters:
+        pass
+
+    parameters = tessellate_module._occt_mesh_parameters(
+        Tessellation(sag=0.25, sag_ratio=0.01, angle=20.0, relative=False, curvature_adaptive=True),
+        Parameters,
+    )
+
+    assert parameters.Deflection == 0.01
+    assert parameters.Relative is True
+    assert parameters.DeflectionInterior == 0.005
+    assert parameters.ControlSurfaceDeflection is True
+    assert parameters.ForceFaceDeflection is True
+
+
 def test_tessellate_cache_respects_per_part_settings_and_records_quality(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     import fascat.ops.tessellate as tessellate_module
 
@@ -227,7 +245,7 @@ def test_tessellate_cache_respects_per_part_settings_and_records_quality(monkeyp
             "part_b": Part(id="part_b", name="Part B", source_shape=source_shape),
         },
     )
-    calls: list[float] = []
+    calls: list[tuple[float, float | None]] = []
 
     def fake_tessellate_shape(
         shape: object,
@@ -237,7 +255,7 @@ def test_tessellate_cache_respects_per_part_settings_and_records_quality(monkeyp
     ) -> Mesh:
         assert shape is source_shape
         assert face_material_indices is None
-        calls.append(options.sag)
+        calls.append((options.sag, options.sag_ratio))
         return triangle_mesh()
 
     monkeypatch.setattr(tessellate_module, "tessellate_shape", fake_tessellate_shape)
@@ -246,13 +264,14 @@ def test_tessellate_cache_respects_per_part_settings_and_records_quality(monkeyp
         Tessellation(
             sag=0.1,
             quality_report=True,
-            part_settings={"part_b": {"sag": 0.25, "max_edge_length": 0.75}},
+            part_settings={"part_b": {"sag": 0.25, "sag_ratio": 0.01, "max_edge_length": 0.75}},
         )
     )
 
-    assert calls == [0.1, 0.25]
+    assert calls == [(0.1, None), (0.25, 0.01)]
     report = tessellated.tessellation_quality_report()
     assert report["summary"]["parts"] == 2
     part_b_payload = json.loads(str(tessellated.parts["part_b"].metadata["tessellation_quality"]))
     assert part_b_payload["options"]["sag"] == 0.25
+    assert part_b_payload["options"]["sag_ratio"] == 0.01
     assert part_b_payload["options"]["max_edge_length"] == 0.75

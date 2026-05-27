@@ -148,9 +148,10 @@ def _options_for_part(options: Tessellation, part: Part) -> Tessellation:
 
 
 def _occt_mesh_parameters(options: Tessellation, parameters_factory: Any) -> Any:
+    deflection, relative = _deflection_settings(options)
     parameters = parameters_factory()
-    parameters.Deflection = float(options.sag)
-    parameters.Relative = bool(options.relative)
+    parameters.Deflection = deflection
+    parameters.Relative = relative
     parameters.Angle = math.radians(float(options.angle))
     parameters.InParallel = True
     parameters.InternalVerticesMode = bool(options.preserve_boundaries)
@@ -160,9 +161,15 @@ def _occt_mesh_parameters(options: Tessellation, parameters_factory: Any) -> Any
     if options.curvature_adaptive:
         parameters.ControlSurfaceDeflection = True
         parameters.ForceFaceDeflection = True
-        parameters.DeflectionInterior = float(options.sag) * 0.5
+        parameters.DeflectionInterior = deflection * 0.5
         parameters.AngleInterior = math.radians(max(0.1, float(options.angle) * 0.5))
     return parameters
+
+
+def _deflection_settings(options: Tessellation) -> tuple[float, bool]:
+    if options.sag_ratio is not None:
+        return float(options.sag_ratio), True
+    return float(options.sag), bool(options.relative)
 
 
 def _apply_mesh_tessellation_controls(mesh: Mesh, options: Tessellation) -> Mesh:
@@ -232,6 +239,7 @@ def _tessellation_cache_key(
 def _tessellation_settings_key(options: Tessellation) -> tuple[object, ...]:
     return (
         options.sag,
+        options.sag_ratio,
         options.angle,
         options.relative,
         options.min_edge_length,

@@ -61,6 +61,7 @@ def test_lod_options_normalize_list_ratios() -> None:
     ("factory", "message"),
     [
         (lambda: fc.Tessellation(sag=0), "sag"),
+        (lambda: fc.Tessellation(sag_ratio=0), "sag_ratio"),
         (lambda: fc.Tessellation(angle=0), "angle"),
         (lambda: fc.Tessellation(angle=181), "angle"),
         (lambda: fc.Tessellation(min_edge_length=0), "min_edge_length"),

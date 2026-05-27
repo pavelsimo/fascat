@@ -454,6 +454,7 @@ def tessellate(
     asset: Asset,
     *,
     sag: float = 0.1,
+    sag_ratio: float | None = None,
     angle: float = 15.0,
     relative: bool = True,
     min_edge_length: float | None = None,
@@ -470,6 +471,7 @@ def tessellate(
     return asset.tessellate(
         Tessellation(
             sag=sag,
+            sag_ratio=sag_ratio,
             angle=angle,
             relative=relative,
             min_edge_length=min_edge_length,

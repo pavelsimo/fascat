@@ -96,6 +96,7 @@ asset = fc.read_step("motor.step")
 asset = asset.tessellate(
     fc.Tessellation(
         sag=0.1,
+        sag_ratio=None,
         angle=15.0,
         relative=True,
         max_edge_length=None,

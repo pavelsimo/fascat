@@ -122,6 +122,7 @@ def test_asset_operation_reports_include_options_and_before_after_counts() -> No
     required_options = {
         "tessellate": {
             "sag",
+            "sag_ratio",
             "angle",
             "relative",
             "min_edge_length",

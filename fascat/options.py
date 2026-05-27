@@ -43,6 +43,7 @@ _HOLE_TYPES = {"through", "blind", "surface"}
 
 _TESSELLATION_PART_SETTING_KEYS = {
     "sag",
+    "sag_ratio",
     "angle",
     "relative",
     "min_edge_length",
@@ -71,6 +72,7 @@ def _validate_part_settings(part_settings: dict[str, dict[str, object]]) -> None
 @dataclass(frozen=True)
 class Tessellation:
     sag: float = 0.1
+    sag_ratio: float | None = None
     angle: float = 15.0
     relative: bool = True
     min_edge_length: float | None = None
@@ -86,6 +88,8 @@ class Tessellation:
     def __post_init__(self) -> None:
         if self.sag <= 0.0:
             raise ValueError("tessellation sag must be greater than 0")
+        if self.sag_ratio is not None and self.sag_ratio <= 0.0:
+            raise ValueError("tessellation sag_ratio must be greater than 0 when set")
         if self.angle <= 0.0 or self.angle > 180.0:
             raise ValueError("tessellation angle must be greater than 0 and no more than 180")
         if self.min_edge_length is not None and self.min_edge_length <= 0.0:
