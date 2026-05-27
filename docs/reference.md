@@ -71,7 +71,8 @@ Dry-run JSON for `convert` includes `operation_diagnostics`, a list of planned o
 | `--validate-lods` | `false` | Validate generated LOD monotonicity |
 | `--normals` | `smooth` | Normal generation mode: `none`, `smooth`, `hard-edges`, or `flat` |
 | `--preserve-face-boundaries` | `false` | Treat CAD face-group boundaries as hard normal edges |
-| `--tangents` | `false` | Generate glTF-compatible vertex tangents from UV0 and report generated, regenerated, missing, or dropped tangent states |
+| `--tangents` | `false` | Generate glTF-compatible vertex tangents from the selected UV channel and report generated, regenerated, missing, or dropped tangent states |
+| `--tangent-uv-channel` | `0` | UV channel used for tangent generation |
 | `--validate-normals` | `false` | Validate staged normals and tangents |
 | `--uv0` | `box` | UV0 generation mode: `none`, `box`, `unwrap`, or `lightmap` |
 | `--uv1` | `none` | UV1 generation mode: `none`, `box`, `unwrap`, `lightmap`, or `copy-uv0` |

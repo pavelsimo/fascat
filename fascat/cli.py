@@ -545,8 +545,12 @@ def cmd_convert(
     ] = False,
     tangents: Annotated[
         bool,
-        typer.Option("--tangents", help="Generate glTF-compatible vertex tangents from UV0."),
+        typer.Option("--tangents", help="Generate glTF-compatible vertex tangents from the selected UV channel."),
     ] = False,
+    tangent_uv_channel: Annotated[
+        int,
+        typer.Option("--tangent-uv-channel", help="UV channel used for tangent generation."),
+    ] = 0,
     validate_normals: Annotated[
         bool,
         typer.Option("--validate-normals", help="Validate staged normals and tangents."),
@@ -917,6 +921,7 @@ def cmd_convert(
         "normals": normals.value,
         "preserve_face_boundaries": preserve_face_boundaries,
         "tangents": tangents,
+        "tangent_uv_channel": tangent_uv_channel,
         "validate_normals": validate_normals,
         "uv0": uv0.value,
         "uv1": uv1.value,
@@ -1025,6 +1030,8 @@ def cmd_convert(
     enabled_hole_types = _parse_hole_types(hole_types, ctx, payload)
     lod_coverages = _parse_lod_screen_coverage(lod_screen_coverage, ctx, payload)
     normalized_uv_channels = _parse_uv_channels(normalize_uvs, ctx, payload)
+    if tangent_uv_channel < 0:
+        _fail(ctx, payload, "--tangent-uv-channel must be greater than or equal to 0.", code=2)
     payload["lods"] = lod_values
     payload["bake"] = list(bake_maps)
     payload["hole_types"] = list(enabled_hole_types)
@@ -1204,6 +1211,7 @@ def cmd_convert(
             hard_edge_angle=hard_edge_angle,
             preserve_face_boundaries=preserve_face_boundaries,
             tangents=tangents,
+            tangent_uv_channel=tangent_uv_channel,
             validate_normals=validate_normals,
             unwrap=UnwrapOptions(
                 texel_density=texel_density,

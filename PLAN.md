@@ -118,7 +118,7 @@ Parity gaps to track:
    - Make UV0 tileable and UV1 baking requirements explicit: UV0 may overlap; UV1 must fit in `[0,1]` with padding and no overlaps.
    - Add UV1 bake packing controls for atlas resolution, pixel padding, shared versus per-part UV space, overlap removal, and normalized-space utilization reports.
    - Tangent lifecycle validation now warns when UV0 is missing, invalidates tangents after UV edits, and records generated, regenerated, invalidated, missing, or dropped tangent states on mesh and asset metadata.
-   - Expose tangent generation controls for source UV channel and override/preserve-existing behavior instead of assuming UV0 and automatic replacement.
+   - Tangent generation can now use an explicit source UV channel across Python, CLI, TOML pipelines, metadata, and reports. Remaining work: add override/preserve-existing behavior instead of automatic replacement.
    - Explicit decimation can now strip UV/tangent attributes through `uv_importance="ignore"` or preserve seams and then drop UVs with `uv_importance="preserve_seams"`.
 
 6. Materials and baking

@@ -155,6 +155,7 @@ def test_asset_operation_reports_include_options_and_before_after_counts() -> No
             "hard_edge_angle",
             "preserve_face_boundaries",
             "tangents",
+            "tangent_uv_channel",
             "validate_normals",
             "unwrap",
             "atlas",
@@ -378,6 +379,21 @@ def test_pipeline_advises_unity_style_ordering() -> None:
     ]
     assert [item["step"] for item in advisories] == [1, 2, 3, 4]
     assert all(item["level"] == "warning" for item in advisories)
+
+
+def test_pipeline_advises_missing_tangent_uv_channel() -> None:
+    spec = PipelineSpec.from_dict(
+        {
+            "steps": [
+                {"op": "stage", "tangents": True, "tangent_uv_channel": 1, "uv0": "box", "uv1": "none"},
+            ],
+        }
+    )
+
+    advisories = spec.advisories()
+
+    assert [item["code"] for item in advisories] == ["tangents_without_uv1"]
+    assert advisories[0]["message"] == "tangents are requested before UV1 is available"
 
 
 def test_pipeline_treats_uv1_copy_as_uv1_when_uv0_exists() -> None:

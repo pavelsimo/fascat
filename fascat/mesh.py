@@ -507,14 +507,16 @@ class Mesh:
         mesh.validate_normals()
         return mesh
 
-    def compute_tangents(self) -> Mesh:
-        if 0 not in self.uvs or self.triangle_count == 0:
+    def compute_tangents(self, channel: int = 0) -> Mesh:
+        if channel < 0:
+            raise ValueError("tangent UV channel must be greater than or equal to 0")
+        if channel not in self.uvs or self.triangle_count == 0:
             mesh = self.copy()
             mesh.tangents = None
             return mesh
         mesh = self if self.normals is not None else self.compute_normals()
         assert mesh.normals is not None
-        uv = mesh.uvs[0]
+        uv = mesh.uvs[channel]
         tangents = np.zeros((mesh.vertex_count, 3), dtype=np.float64)
         bitangents = np.zeros((mesh.vertex_count, 3), dtype=np.float64)
         for face in mesh.faces.astype(int).tolist():

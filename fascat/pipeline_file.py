@@ -131,6 +131,7 @@ _STAGE_KEYS = frozenset(
         "hard_edge_angle",
         "preserve_face_boundaries",
         "tangents",
+        "tangent_uv_channel",
         "validate_normals",
         "texel_density",
         "padding",
@@ -396,16 +397,25 @@ def _pipeline_advisories(steps: tuple[PipelineStep, ...]) -> list[dict[str, obje
         if step.op == "stage":
             uv0 = _literal(step.values.get("uv0", "box"))
             uv1 = _literal(step.values.get("uv1", "none"))
-            if bool(step.values.get("tangents", False)) and uv0 == "none" and not saw_uv0:
-                add(
-                    index,
-                    step,
-                    "tangents_without_uv0",
-                    "tangents are requested before UV0 is available",
-                )
             step_has_uv0 = uv0 != "none"
-            saw_uv0 = saw_uv0 or step_has_uv0
             step_has_uv1 = uv1 not in {None, "none"} and (uv1 != "copy_uv0" or saw_uv0 or step_has_uv0)
+            if bool(step.values.get("tangents", False)):
+                tangent_uv_channel = _as_int(step.values.get("tangent_uv_channel", 0))
+                if tangent_uv_channel == 0 and uv0 == "none" and not saw_uv0:
+                    add(
+                        index,
+                        step,
+                        "tangents_without_uv0",
+                        "tangents are requested before UV0 is available",
+                    )
+                elif tangent_uv_channel == 1 and not (saw_uv1 or step_has_uv1):
+                    add(
+                        index,
+                        step,
+                        "tangents_without_uv1",
+                        "tangents are requested before UV1 is available",
+                    )
+            saw_uv0 = saw_uv0 or step_has_uv0
             saw_uv1 = saw_uv1 or step_has_uv1
         if step.op == "bake_materials":
             bake_maps = {_literal(item) for item in _string_list(step.values.get("bake", ["base_color"]))}
@@ -778,6 +788,7 @@ def _stage_options(values: dict[str, object]) -> StageOptions:
         hard_edge_angle=_as_float(values.get("hard_edge_angle", 30.0)),
         preserve_face_boundaries=bool(values.get("preserve_face_boundaries", False)),
         tangents=bool(values.get("tangents", False)),
+        tangent_uv_channel=_as_int(values.get("tangent_uv_channel", 0)),
         validate_normals=bool(values.get("validate_normals", False)),
         unwrap=UnwrapOptions(
             texel_density=_as_optional_float(values.get("texel_density")),

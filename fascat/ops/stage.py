@@ -16,6 +16,7 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
         "dropped": 0,
         "invalidated": 0,
         "missing_uv0": 0,
+        "missing_uv_channel": 0,
     }
     if options.uv1 in {"unwrap", "lightmap"}:
         _require_xatlas()
@@ -269,18 +270,22 @@ def _stage_tangents(
         tangent_summary["invalidated"] += 1
 
     if options.tangents:
-        if 0 not in mesh.uvs:
+        channel = options.tangent_uv_channel
+        if channel not in mesh.uvs:
             mesh = mesh.copy()
             mesh.tangents = None
-            mesh.metadata["tangents_status"] = "missing_uv0"
-            tangent_summary["missing_uv0"] += 1
+            mesh.metadata["tangents_status"] = "missing_uv0" if channel == 0 else "missing_uv_channel"
+            mesh.metadata["tangents_uv_channel"] = str(channel)
+            summary_key = "missing_uv0" if channel == 0 else "missing_uv_channel"
+            tangent_summary[summary_key] += 1
             asset.report.add_warning(
-                f"part {part_id} requested tangents but UV0 is missing; generate or preserve UV0 before tangents"
+                f"part {part_id} requested tangents from UV{channel}, but UV{channel} is missing; "
+                f"generate or preserve UV{channel} before tangents"
             )
             return mesh
-        mesh = mesh.compute_tangents()
+        mesh = mesh.compute_tangents(channel=channel)
         mesh.metadata["tangents_status"] = "regenerated" if invalidated_by_uv_edit else "generated"
-        mesh.metadata["tangents_uv_channel"] = "0"
+        mesh.metadata["tangents_uv_channel"] = str(channel)
         tangent_summary["generated"] += 1
         if invalidated_by_uv_edit:
             tangent_summary["regenerated"] += 1

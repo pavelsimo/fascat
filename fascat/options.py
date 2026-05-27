@@ -222,6 +222,7 @@ class StageOptions:
     hard_edge_angle: float = 30.0
     preserve_face_boundaries: bool = False
     tangents: bool = False
+    tangent_uv_channel: int = 0
     validate_normals: bool = False
     unwrap: UnwrapOptions = field(default_factory=UnwrapOptions)
     atlas: AtlasOptions = field(default_factory=AtlasOptions)
@@ -246,6 +247,8 @@ class StageOptions:
             raise ValueError("normal_mode must be one of: none, smooth, hard_edges, flat")
         if self.hard_edge_angle <= 0.0 or self.hard_edge_angle > 180.0:
             raise ValueError("hard_edge_angle must be greater than 0 and no more than 180")
+        if self.tangent_uv_channel < 0:
+            raise ValueError("tangent_uv_channel must be greater than or equal to 0")
         if self.uv0 not in {"none", "box", "unwrap", "lightmap"}:
             raise ValueError("uv0 must be one of: none, box, unwrap, lightmap")
         if self.uv1 not in {None, "none", "box", "unwrap", "lightmap", "copy_uv0"}:

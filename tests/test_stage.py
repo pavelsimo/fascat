@@ -392,9 +392,55 @@ def test_stage_warns_when_tangents_are_requested_without_uv0() -> None:
     assert staged_mesh is not None
     assert staged_mesh.tangents is None
     assert staged_mesh.metadata["tangents_status"] == "missing_uv0"
+    assert staged_mesh.metadata["tangents_uv_channel"] == "0"
     assert staged.metadata["stage_tangents_missing_uv0_parts"] == "1"
     assert len(warnings) == 1
-    assert "requested tangents but UV0 is missing" in warnings[0]
+    assert "requested tangents from UV0, but UV0 is missing" in warnings[0]
+
+
+def test_stage_generates_tangents_from_requested_uv_channel() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+        uvs={1: np.array([[0, 0], [1, 0], [0, 1]], dtype=float)},
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    staged = asset.stage(StageOptions(tangents=True, tangent_uv_channel=1, uv0="none", uv1=None))
+    staged_mesh = staged.parts["part"].mesh
+
+    assert staged_mesh is not None
+    assert staged_mesh.tangents is not None
+    assert staged_mesh.metadata["tangents_status"] == "generated"
+    assert staged_mesh.metadata["tangents_uv_channel"] == "1"
+    assert staged.metadata["stage_tangents_generated_parts"] == "1"
+    assert staged.report.steps[-1].warnings == []
+
+
+def test_stage_warns_when_requested_tangent_uv_channel_is_missing() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    staged = asset.stage(StageOptions(tangents=True, tangent_uv_channel=1, uv0="none", uv1=None))
+    staged_mesh = staged.parts["part"].mesh
+    warnings = staged.report.steps[-1].warnings
+
+    assert staged_mesh is not None
+    assert staged_mesh.tangents is None
+    assert staged_mesh.metadata["tangents_status"] == "missing_uv_channel"
+    assert staged_mesh.metadata["tangents_uv_channel"] == "1"
+    assert staged.metadata["stage_tangents_missing_uv_channel_parts"] == "1"
+    assert len(warnings) == 1
+    assert "requested tangents from UV1, but UV1 is missing" in warnings[0]
 
 
 def test_stage_reports_tangent_invalidation_after_uv_edits() -> None:
