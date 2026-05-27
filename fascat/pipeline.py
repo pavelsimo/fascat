@@ -332,6 +332,20 @@ def _add_profile_budget_report(asset: Asset, profile: ConversionProfile) -> None
                 f"profile budget exceeded for {profile.name}: {over_count} texture set(s) exceed "
                 f"{budget.max_texture_resolution}px (largest {largest}px)"
             )
+    if budget.max_texture_memory_mb is not None:
+        texture_count, estimated_bytes = _estimated_texture_memory(asset)
+        budget_bytes = budget.max_texture_memory_mb * 1_000_000
+        over = max(0, estimated_bytes - budget_bytes)
+        after["profile_texture_memory_budget_bytes"] = budget_bytes
+        after["profile_texture_memory_texture_count"] = texture_count
+        after["profile_estimated_texture_memory_bytes"] = estimated_bytes
+        after["profile_texture_memory_over_budget_bytes"] = over
+        if over:
+            violations += 1
+            warnings.append(
+                f"profile budget exceeded for {profile.name}: estimated texture memory "
+                f"{estimated_bytes} bytes > {budget_bytes} bytes"
+            )
     if budget.max_draw_calls is not None:
         after["profile_draw_call_budget"] = budget.max_draw_calls
         over = max(0, asset.draw_call_count - budget.max_draw_calls)
@@ -359,14 +373,46 @@ def _mesh_vertex_counts(asset: Asset) -> list[int]:
 
 
 def _material_texture_resolutions(asset: Asset) -> list[int]:
-    resolutions: list[int] = []
+    return [resolution for resolution, _texture_count in _material_texture_summaries(asset)]
+
+
+def _estimated_texture_memory(asset: Asset) -> tuple[int, int]:
+    texture_count = 0
+    estimated_bytes = 0
+    for resolution, count in _material_texture_summaries(asset):
+        texture_count += count
+        estimated_bytes += resolution * resolution * 4 * count
+    return texture_count, estimated_bytes
+
+
+def _material_texture_summaries(asset: Asset) -> list[tuple[int, int]]:
+    summaries: list[tuple[int, int]] = []
     for material in asset.materials.values():
         for key in ("baked_texture_resolution", "maps_resolution"):
             resolution = _metadata_positive_int(material.metadata.get(key))
             if resolution is not None:
-                resolutions.append(resolution)
+                texture_count = max(1, _baked_texture_count(material.metadata.get("baked_maps")))
+                summaries.append((resolution, texture_count))
                 break
-    return resolutions
+    return summaries
+
+
+def _baked_texture_count(value: object) -> int:
+    if not isinstance(value, str):
+        return 0
+    maps = {item.strip() for item in value.split(",") if item.strip()}
+    count = 0
+    if {"base_color", "opacity"} & maps:
+        count += 1
+    if {"metallic", "roughness"} & maps:
+        count += 1
+    if "normal" in maps:
+        count += 1
+    if "ao" in maps:
+        count += 1
+    if "emissive" in maps:
+        count += 1
+    return count
 
 
 def _metadata_positive_int(value: object) -> int | None:

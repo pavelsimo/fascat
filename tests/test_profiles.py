@@ -19,10 +19,11 @@ from fascat.options import ConversionProfile
         "target_fps",
         "max_vertices_per_mesh",
         "max_texture_resolution",
+        "max_texture_memory_mb",
         "max_draw_calls",
     ),
     [
-        (profiles.inspect_only(), "inspect-only", None, None, None, "none", None, None, None, None, None),
+        (profiles.inspect_only(), "inspect-only", None, None, None, "none", None, None, None, None, None, None),
         (
             profiles.realtime_desktop(),
             "realtime-desktop",
@@ -34,6 +35,7 @@ from fascat.options import ConversionProfile
             60,
             65_535,
             4_096,
+            512,
             2_000,
         ),
         (
@@ -47,6 +49,7 @@ from fascat.options import ConversionProfile
             60,
             65_535,
             2_048,
+            128,
             500,
         ),
         (
@@ -60,6 +63,7 @@ from fascat.options import ConversionProfile
             60,
             65_535,
             2_048,
+            128,
             250,
         ),
         (
@@ -73,6 +77,7 @@ from fascat.options import ConversionProfile
             90,
             65_535,
             2_048,
+            256,
             250,
         ),
     ],
@@ -88,6 +93,7 @@ def test_profiles_match_documented_default_table(
     target_fps: int | None,
     max_vertices_per_mesh: int | None,
     max_texture_resolution: int | None,
+    max_texture_memory_mb: int | None,
     max_draw_calls: int | None,
 ) -> None:
     assert profile.to_dict()["name"] == name
@@ -123,6 +129,7 @@ def test_profiles_match_documented_default_table(
         assert profile.budget.max_vertices == target_triangles * 3
         assert profile.budget.max_vertices_per_mesh == max_vertices_per_mesh
         assert profile.budget.max_texture_resolution == max_texture_resolution
+        assert profile.budget.max_texture_memory_mb == max_texture_memory_mb
         assert profile.budget.max_draw_calls == max_draw_calls
 
 
@@ -150,6 +157,7 @@ def test_lod_options_normalize_list_ratios() -> None:
         (lambda: fc.PlatformBudget(max_vertices=0), "max_vertices"),
         (lambda: fc.PlatformBudget(max_vertices_per_mesh=0), "max_vertices_per_mesh"),
         (lambda: fc.PlatformBudget(max_texture_resolution=0), "max_texture_resolution"),
+        (lambda: fc.PlatformBudget(max_texture_memory_mb=0), "max_texture_memory_mb"),
         (lambda: fc.PlatformBudget(max_draw_calls=0), "max_draw_calls"),
         (lambda: fc.RepairOptions(tolerance=-1), "tolerance"),
         (lambda: fc.RepairOptions(area_epsilon=-1), "area_epsilon"),
