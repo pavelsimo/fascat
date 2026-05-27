@@ -241,6 +241,69 @@ def test_stage_generates_hard_edge_normals_and_tangents() -> None:
     assert staged_mesh.normals is not None
     assert staged_mesh.tangents is not None
     assert staged_mesh.tangents.shape == (staged_mesh.vertex_count, 4)
+    assert staged_mesh.metadata["tangents_status"] == "generated"
+    assert staged_mesh.metadata["tangents_uv_channel"] == "0"
+    assert staged.metadata["stage_tangents_generated_parts"] == "1"
+
+
+def test_stage_warns_when_tangents_are_requested_without_uv0() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    staged = asset.stage(StageOptions(tangents=True, uv0="none", uv1=None))
+    staged_mesh = staged.parts["part"].mesh
+    warnings = staged.report.steps[-1].warnings
+
+    assert staged_mesh is not None
+    assert staged_mesh.tangents is None
+    assert staged_mesh.metadata["tangents_status"] == "missing_uv0"
+    assert staged.metadata["stage_tangents_missing_uv0_parts"] == "1"
+    assert len(warnings) == 1
+    assert "requested tangents but UV0 is missing" in warnings[0]
+
+
+def test_stage_reports_tangent_invalidation_after_uv_edits() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+        uvs={0: np.array([[0, 0], [1, 0], [0, 1]], dtype=float)},
+    ).compute_normals()
+    mesh = mesh.compute_tangents()
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    dropped = asset.stage(StageOptions(tangents=False, uv0="box", uv1=None))
+    dropped_mesh = dropped.parts["part"].mesh
+    dropped_warnings = dropped.report.steps[-1].warnings
+
+    assert dropped_mesh is not None
+    assert dropped_mesh.tangents is None
+    assert dropped_mesh.metadata["tangents_status"] == "dropped"
+    assert dropped_mesh.metadata["tangents_drop_reason"] == "uv_edit"
+    assert dropped_mesh.metadata["tangents_invalidated_by_uv_edit"] == "0"
+    assert dropped.metadata["stage_tangents_invalidated_parts"] == "1"
+    assert dropped.metadata["stage_tangents_dropped_parts"] == "1"
+    assert len(dropped_warnings) == 1
+    assert "existing tangents were dropped because UVs were regenerated" in dropped_warnings[0]
+
+    regenerated = asset.stage(StageOptions(tangents=True, uv0="box", uv1=None))
+    regenerated_mesh = regenerated.parts["part"].mesh
+
+    assert regenerated_mesh is not None
+    assert regenerated_mesh.tangents is not None
+    assert regenerated_mesh.metadata["tangents_status"] == "regenerated"
+    assert regenerated_mesh.metadata["tangents_invalidated_by_uv_edit"] == "0"
+    assert regenerated.metadata["stage_tangents_generated_parts"] == "1"
+    assert regenerated.metadata["stage_tangents_regenerated_parts"] == "1"
+    assert regenerated.report.steps[-1].warnings == []
 
 
 @pytest.mark.requires_xatlas

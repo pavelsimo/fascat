@@ -114,7 +114,7 @@ Parity gaps to track:
    - Unwrap iteration and tolerance controls are now accepted across Python, CLI, TOML pipelines, metadata, and reports. Remaining work: add a backend that enforces those controls and reports solver failure or excessive distortion.
    - Add UV copy between channels, UV island merge, alignment, overlap checks, repack, normalize, and per-channel validation.
    - Make UV0 tileable and UV1 baking requirements explicit: UV0 may overlap; UV1 must fit in `[0,1]` with padding and no overlaps.
-   - Add tangent lifecycle validation: require UVs before tangent generation, invalidate tangents after UV edits, and report regenerated or dropped tangents.
+   - Tangent lifecycle validation now warns when UV0 is missing, invalidates tangents after UV edits, and records generated, regenerated, invalidated, missing, or dropped tangent states on mesh and asset metadata.
    - Explicit decimation can now strip UV/tangent attributes through `uv_importance="ignore"` or preserve seams and then drop UVs with `uv_importance="preserve_seams"`.
 
 6. Materials and baking
@@ -222,6 +222,7 @@ These need more design and should not be mixed into documentation or diagnostics
    - Stage now records per-channel UV bounds, degenerate UV face counts, and overlap-pair counts on mesh metadata.
    - UV1 or `lightmap` channels warn on bake-domain violations, while UV0 overlaps remain metadata-only for tileable texture workflows.
    - Unwrap method, iteration, and tolerance controls are now represented as solver intent; non-default values warn when xatlas cannot enforce them directly.
+   - Tangent lifecycle validation now reports generated, regenerated, invalidated, missing-UV0, and dropped tangent states.
    - Remaining polish: add seam segmentation, backend-enforced solver controls, island merging, packing, normalization, and deeper per-channel validation.
 
 10. Instance reconstruction - exact mesh pass complete

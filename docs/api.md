@@ -452,7 +452,7 @@ asset = asset.stage(
 )
 ```
 
-Tangents require UV0. glTF export writes a `TANGENT` vertex attribute when staged meshes contain tangent data.
+Tangents require UV0. If tangents are requested without UV0, staging records `tangents_status="missing_uv0"` metadata and emits a stage warning instead of silently writing no tangent data. When UV generation edits a mesh that already had tangents, staging invalidates the old tangent basis; if `tangents=True`, it regenerates tangents from the new UV0, otherwise it records the dropped tangent state. glTF export writes a `TANGENT` vertex attribute when staged meshes contain tangent data.
 
 Normal and tangent parameters:
 
@@ -462,7 +462,7 @@ Normal and tangent parameters:
 | `normal_mode` | `smooth` averages face normals, `flat` keeps face normals, `hard_edges` splits vertices along hard edges, and `none` omits normals. |
 | `hard_edge_angle` | Edge angle threshold in degrees for `normal_mode="hard_edges"`. |
 | `preserve_face_boundaries` | Treat CAD face-group boundaries as hard normal boundaries. |
-| `tangents` | Generate glTF-ready tangent vectors. Requires UV0. |
+| `tangents` | Generate glTF-ready tangent vectors from UV0. Stage metadata reports generated, regenerated, missing, or dropped tangent states. |
 | `validate_normals` | Check for missing, zero-length, or invalid normals after staging. |
 
 ## UV And Material Pipeline

@@ -8,6 +8,13 @@ from fascat.options import StageOptions
 
 def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[str] | None = None) -> Asset:
     result = asset.copy(keep_source=True)
+    tangent_summary = {
+        "generated": 0,
+        "regenerated": 0,
+        "dropped": 0,
+        "invalidated": 0,
+        "missing_uv0": 0,
+    }
     if options.uv1 in {"unwrap", "lightmap"}:
         _require_xatlas()
     if options.uv0 in {"unwrap", "lightmap"}:
@@ -28,7 +35,9 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
         if part.mesh is None:
             continue
         mesh = part.mesh
+        had_tangents = mesh.tangents is not None
         uv_modes: dict[int, str] = {}
+        edited_uv_channels: set[int] = set()
         if options.normals and options.normal_mode == "hard_edges":
             mesh = mesh.compute_hard_edge_normals(
                 hard_edge_angle=options.hard_edge_angle,
@@ -44,25 +53,37 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
             mesh = mesh.box_uv(0)
             _tag_uv_metadata(mesh, 0, "box", options)
             uv_modes[0] = "box"
+            edited_uv_channels.add(0)
         elif options.uv0 in {"unwrap", "lightmap"}:
             mesh = _unwrap_uv(mesh, 0)
             _tag_uv_metadata(mesh, 0, options.uv0, options)
             uv_modes[0] = options.uv0
+            edited_uv_channels.add(0)
         if options.uv1 == "box":
             mesh = mesh.box_uv(1)
             _tag_uv_metadata(mesh, 1, "box", options)
             uv_modes[1] = "box"
+            edited_uv_channels.add(1)
         elif options.uv1 in {"unwrap", "lightmap"}:
             mesh = _unwrap_uv(mesh, 1)
             _tag_uv_metadata(mesh, 1, options.uv1, options)
             uv_modes[1] = options.uv1
-        if options.tangents:
-            mesh = mesh.compute_tangents()
+            edited_uv_channels.add(1)
+        mesh = _stage_tangents(
+            result,
+            part.id,
+            mesh,
+            options,
+            had_tangents=had_tangents,
+            edited_uv_channels=edited_uv_channels,
+            tangent_summary=tangent_summary,
+        )
         if options.validate_normals:
             mesh.validate_normals(require_tangents=options.tangents)
         _tag_uv_layout_quality(result, part.id, mesh, uv_modes)
         part.mesh = mesh
         part.fingerprint = mesh.fingerprint()
+    _tag_tangent_summary(result, tangent_summary)
     return result
 
 
@@ -176,6 +197,65 @@ def _tag_uv_metadata(mesh: Mesh, channel: int, mode: str, options: StageOptions)
     if options.atlas.enabled:
         mesh.metadata[f"{prefix}_atlas"] = "atlas_0"
         mesh.metadata[f"{prefix}_atlas_size"] = str(options.atlas.max_size)
+
+
+def _stage_tangents(
+    asset: Asset,
+    part_id: str,
+    mesh: Mesh,
+    options: StageOptions,
+    *,
+    had_tangents: bool,
+    edited_uv_channels: set[int],
+    tangent_summary: dict[str, int],
+) -> Mesh:
+    invalidated_by_uv_edit = bool(had_tangents and edited_uv_channels and mesh.tangents is None)
+    if invalidated_by_uv_edit:
+        channels = ",".join(str(channel) for channel in sorted(edited_uv_channels))
+        mesh.metadata["tangents_invalidated_by_uv_edit"] = channels
+        tangent_summary["invalidated"] += 1
+
+    if options.tangents:
+        if 0 not in mesh.uvs:
+            mesh = mesh.copy()
+            mesh.tangents = None
+            mesh.metadata["tangents_status"] = "missing_uv0"
+            tangent_summary["missing_uv0"] += 1
+            asset.report.add_warning(
+                f"part {part_id} requested tangents but UV0 is missing; generate or preserve UV0 before tangents"
+            )
+            return mesh
+        mesh = mesh.compute_tangents()
+        mesh.metadata["tangents_status"] = "regenerated" if invalidated_by_uv_edit else "generated"
+        mesh.metadata["tangents_uv_channel"] = "0"
+        tangent_summary["generated"] += 1
+        if invalidated_by_uv_edit:
+            tangent_summary["regenerated"] += 1
+        return mesh
+
+    if had_tangents and mesh.tangents is None:
+        mesh.metadata["tangents_status"] = "dropped"
+        if edited_uv_channels:
+            mesh.metadata["tangents_drop_reason"] = "uv_edit"
+            channels = ",".join(str(channel) for channel in sorted(edited_uv_channels))
+            asset.report.add_warning(
+                f"part {part_id} existing tangents were dropped because UVs were regenerated on channel(s): {channels}"
+            )
+        elif not options.normals:
+            mesh.metadata["tangents_drop_reason"] = "normals_disabled"
+            asset.report.add_warning(f"part {part_id} existing tangents were dropped because normals are disabled")
+        else:
+            mesh.metadata["tangents_drop_reason"] = "not_requested"
+        tangent_summary["dropped"] += 1
+    elif mesh.tangents is not None:
+        mesh.metadata["tangents_status"] = "preserved"
+    return mesh
+
+
+def _tag_tangent_summary(asset: Asset, tangent_summary: dict[str, int]) -> None:
+    for name, count in tangent_summary.items():
+        if count:
+            asset.metadata[f"stage_tangents_{name}_parts"] = str(count)
 
 
 def _warn_unwrap_solver_limits(asset: Asset, options: StageOptions) -> None:
