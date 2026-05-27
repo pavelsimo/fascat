@@ -495,7 +495,7 @@ asset = asset.stage(
 
 Atlas support currently records atlas and texture-bake metadata on materials and meshes. It does not write atlas images. Dedicated material baking is a separate optimization step; it emits constant embedded texture maps from material factors and glTF can export those maps as material textures.
 
-Staged meshes also record UV layout quality metadata for each channel: `uvN_out_of_unit_vertices`, `uvN_degenerate_faces`, and `uvN_overlap_pairs`. UV0 overlaps are allowed for tileable material workflows and are recorded as metadata only. UV1 or `lightmap` channels add stage warnings when they contain overlaps, degenerate UV faces, or coordinates outside the 0..1 bake domain.
+Staged meshes also record UV layout quality metadata for each channel: `uvN_out_of_unit_vertices`, `uvN_degenerate_faces`, and `uvN_overlap_pairs`. UV0 overlaps are allowed for tileable material workflows and are recorded as metadata only. UV1 or `lightmap` channels add stage warnings when they contain overlaps, degenerate UV faces, or coordinates outside the 0..1 bake domain. Use `uv1="copy_uv0"` when the secondary channel should reuse the generated or existing UV0 layout; staging records `uv1_source_channel="0"` and warns if UV0 is missing.
 
 When `uv0` or `uv1` uses `unwrap` or `lightmap`, fascat currently uses the optional xatlas backend. `method`, `iterations`, and `tolerance` record Unity-style solver intent for conformal or isometric unwrapping and solver stopping criteria. The current xatlas integration does not expose those controls directly, so non-default values are marked with `*_status="intent"` metadata and add a report warning instead of pretending the backend enforced them.
 
@@ -507,7 +507,7 @@ Staging, UV, and material parameters:
 | `StageOptions` | `material_mode` | `cad` keeps source-style materials. `pbr` normalizes simple CAD colors into PBR-friendly material values. |
 | `StageOptions` | `merge_equivalent_materials` | Merge materials with equivalent visual values to reduce material count. |
 | `StageOptions` | `uv0` | Primary UV channel mode: `none`, `box`, `unwrap`, or `lightmap`. |
-| `StageOptions` | `uv1` | Secondary UV channel mode. Commonly `lightmap` for baked lighting. |
+| `StageOptions` | `uv1` | Secondary UV channel mode. Commonly `lightmap` for baked lighting, or `copy_uv0` to duplicate UV0 into UV1. |
 | `StageOptions` | `unwrap` | `UnwrapOptions` used when a UV channel uses `unwrap`. |
 | `StageOptions` | `atlas` | `AtlasOptions` used to record atlas layout and baking intent. |
 | `UnwrapOptions` | `texel_density` | Desired texture density for generated UVs. |

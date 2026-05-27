@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Literal
 
-UVMode = Literal["none", "box", "unwrap", "lightmap"]
+UV0Mode = Literal["none", "box", "unwrap", "lightmap"]
+UV1Mode = Literal["none", "box", "unwrap", "lightmap", "copy_uv0"]
+UVMode = UV0Mode
 UnwrapMethod = Literal["default", "conformal", "isometric"]
 NormalMode = Literal["none", "smooth", "hard_edges", "flat"]
 MaterialMode = Literal["cad", "display", "none"]
@@ -223,8 +225,8 @@ class StageOptions:
     validate_normals: bool = False
     unwrap: UnwrapOptions = field(default_factory=UnwrapOptions)
     atlas: AtlasOptions = field(default_factory=AtlasOptions)
-    uv0: UVMode | None = "box"
-    uv1: UVMode | None = None
+    uv0: UV0Mode | None = "box"
+    uv1: UV1Mode | None = None
 
     def __post_init__(self) -> None:
         if self.uv0 is None:
@@ -241,8 +243,8 @@ class StageOptions:
             raise ValueError("hard_edge_angle must be greater than 0 and no more than 180")
         if self.uv0 not in {"none", "box", "unwrap", "lightmap"}:
             raise ValueError("uv0 must be one of: none, box, unwrap, lightmap")
-        if self.uv1 not in {None, "none", "box", "unwrap", "lightmap"}:
-            raise ValueError("uv1 must be one of: none, box, unwrap, lightmap")
+        if self.uv1 not in {None, "none", "box", "unwrap", "lightmap", "copy_uv0"}:
+            raise ValueError("uv1 must be one of: none, box, unwrap, lightmap, copy_uv0")
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

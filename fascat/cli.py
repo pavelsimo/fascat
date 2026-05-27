@@ -104,11 +104,19 @@ class Profile(str, Enum):
     VIRTUAL_REALITY = "virtual-reality"
 
 
-class UVMode(str, Enum):
+class UV0Mode(str, Enum):
     NONE = "none"
     BOX = "box"
     UNWRAP = "unwrap"
     LIGHTMAP = "lightmap"
+
+
+class UV1Mode(str, Enum):
+    NONE = "none"
+    BOX = "box"
+    UNWRAP = "unwrap"
+    LIGHTMAP = "lightmap"
+    COPY_UV0 = "copy-uv0"
 
 
 class UnwrapMethod(str, Enum):
@@ -543,8 +551,8 @@ def cmd_convert(
         bool,
         typer.Option("--validate-normals", help="Validate staged normals and tangents."),
     ] = False,
-    uv0: Annotated[UVMode, typer.Option("--uv0", help="UV0 generation mode.")] = UVMode.BOX,
-    uv1: Annotated[UVMode, typer.Option("--uv1", help="UV1 generation mode.")] = UVMode.NONE,
+    uv0: Annotated[UV0Mode, typer.Option("--uv0", help="UV0 generation mode.")] = UV0Mode.BOX,
+    uv1: Annotated[UV1Mode, typer.Option("--uv1", help="UV1 generation mode.")] = UV1Mode.NONE,
     materials: Annotated[
         MaterialMode,
         typer.Option("--materials", help="Material staging mode: cad, display, or none."),
@@ -1200,7 +1208,7 @@ def cmd_convert(
             ),
             atlas=AtlasOptions(enabled=atlas, max_size=atlas_size),
             uv0=uv0.value,
-            uv1=uv1.value,
+            uv1=cast(Any, uv1.value.replace("-", "_")),
         )
         import_options = (
             pipeline_spec.import_options

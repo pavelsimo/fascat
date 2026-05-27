@@ -77,6 +77,7 @@ def test_lod_options_normalize_list_ratios() -> None:
         (lambda: fc.StageOptions(hard_edge_angle=0), "hard_edge_angle"),
         (lambda: fc.StageOptions(uv0="bad"), "uv0"),
         (lambda: fc.StageOptions(uv1="bad"), "uv1"),
+        (lambda: fc.StageOptions(uv0="copy_uv0"), "uv0"),
         (lambda: fc.UnwrapOptions(texel_density=0), "texel_density"),
         (lambda: fc.UnwrapOptions(padding=-1), "padding"),
         (lambda: fc.UnwrapOptions(max_stretch=-1), "max_stretch"),

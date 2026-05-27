@@ -69,6 +69,12 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
             _tag_uv_metadata(mesh, 1, options.uv1, options)
             uv_modes[1] = options.uv1
             edited_uv_channels.add(1)
+        elif options.uv1 == "copy_uv0":
+            mesh = _copy_uv_channel(result, part.id, mesh, source=0, target=1)
+            if 1 in mesh.uvs:
+                _tag_uv_metadata(mesh, 1, "copy_uv0", options)
+                uv_modes[1] = "copy_uv0"
+                edited_uv_channels.add(1)
         mesh = _stage_tangents(
             result,
             part.id,
@@ -178,6 +184,9 @@ def _tag_uv_metadata(mesh: Mesh, channel: int, mode: str, options: StageOptions)
     prefix = f"uv{channel}"
     mesh.metadata.setdefault(prefix, mode)
     mesh.metadata[f"{prefix}_mode"] = mode
+    if mode.startswith("copy_uv"):
+        mesh.metadata[f"{prefix}_source_channel"] = mode.removeprefix("copy_uv")
+        mesh.metadata[f"{prefix}_copy_status"] = "copied"
     mesh.metadata[f"{prefix}_padding"] = str(options.unwrap.padding)
     if options.unwrap.texel_density is not None:
         mesh.metadata[f"{prefix}_texel_density"] = str(options.unwrap.texel_density)
@@ -197,6 +206,16 @@ def _tag_uv_metadata(mesh: Mesh, channel: int, mode: str, options: StageOptions)
     if options.atlas.enabled:
         mesh.metadata[f"{prefix}_atlas"] = "atlas_0"
         mesh.metadata[f"{prefix}_atlas_size"] = str(options.atlas.max_size)
+
+
+def _copy_uv_channel(asset: Asset, part_id: str, mesh: Mesh, *, source: int, target: int) -> Mesh:
+    result = mesh.copy()
+    if source not in result.uvs:
+        result.metadata[f"uv{target}_copy_status"] = "missing_source"
+        asset.report.add_warning(f"part {part_id} requested UV{target} copy from UV{source}, but UV{source} is missing")
+        return result
+    result.uvs[target] = result.uvs[source].copy()
+    return result
 
 
 def _stage_tangents(

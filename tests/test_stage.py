@@ -144,6 +144,49 @@ def test_stage_records_uv_and_atlas_workflow_metadata() -> None:
     assert staged.materials["mat"].metadata["texture_bake_hooks"] == "base_color,opacity"
 
 
+def test_stage_can_copy_uv0_to_uv1() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    staged = asset.stage(StageOptions(uv0="box", uv1="copy_uv0"))
+    staged_mesh = staged.parts["part"].mesh
+
+    assert staged_mesh is not None
+    assert sorted(staged_mesh.uvs) == [0, 1]
+    assert np.array_equal(staged_mesh.uvs[1], staged_mesh.uvs[0])
+    assert staged_mesh.metadata["uv1_mode"] == "copy_uv0"
+    assert staged_mesh.metadata["uv1_source_channel"] == "0"
+    assert staged_mesh.metadata["uv1_copy_status"] == "copied"
+    assert staged.report.steps[-1].warnings == []
+
+
+def test_stage_warns_when_uv1_copy_source_is_missing() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    staged = asset.stage(StageOptions(uv0="none", uv1="copy_uv0"))
+    staged_mesh = staged.parts["part"].mesh
+    warnings = staged.report.steps[-1].warnings
+
+    assert staged_mesh is not None
+    assert staged_mesh.uvs == {}
+    assert staged_mesh.metadata["uv1_copy_status"] == "missing_source"
+    assert len(warnings) == 1
+    assert "requested UV1 copy from UV0, but UV0 is missing" in warnings[0]
+
+
 def test_stage_records_uv_layout_quality_and_warns_for_uv1_overlap() -> None:
     mesh = Mesh(
         points=np.array(

@@ -402,8 +402,10 @@ def _pipeline_advisories(steps: tuple[PipelineStep, ...]) -> list[dict[str, obje
                     "tangents_without_uv0",
                     "tangents are requested before UV0 is available",
                 )
-            saw_uv0 = saw_uv0 or uv0 != "none"
-            saw_uv1 = saw_uv1 or uv1 not in {None, "none"}
+            step_has_uv0 = uv0 != "none"
+            saw_uv0 = saw_uv0 or step_has_uv0
+            step_has_uv1 = uv1 not in {None, "none"} and (uv1 != "copy_uv0" or saw_uv0 or step_has_uv0)
+            saw_uv1 = saw_uv1 or step_has_uv1
         if step.op == "bake_materials":
             bake_maps = {_literal(item) for item in _string_list(step.values.get("bake", ["base_color"]))}
             bake_uv_channel = _as_int(step.values.get("uv_channel", 0))
@@ -788,8 +790,8 @@ def _stage_options(values: dict[str, object]) -> StageOptions:
             enabled=bool(values.get("atlas", False)),
             max_size=_as_int(values.get("atlas_size", values.get("max_size", 4096))),
         ),
-        uv0=cast(Any, values.get("uv0", "box")),
-        uv1=cast(Any, values.get("uv1")),
+        uv0=cast(Any, _literal(values.get("uv0", "box"))),
+        uv1=cast(Any, _literal(values.get("uv1"))),
     )
 
 

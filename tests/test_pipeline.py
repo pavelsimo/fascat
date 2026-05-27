@@ -379,6 +379,19 @@ def test_pipeline_advises_unity_style_ordering() -> None:
     assert all(item["level"] == "warning" for item in advisories)
 
 
+def test_pipeline_treats_uv1_copy_as_uv1_when_uv0_exists() -> None:
+    spec = PipelineSpec.from_dict(
+        {
+            "steps": [
+                {"op": "stage", "uv0": "box", "uv1": "copy-uv0"},
+                {"op": "bake_materials", "bake": ["ao"]},
+            ],
+        }
+    )
+
+    assert [item["code"] for item in spec.advisories()] == []
+
+
 def test_pipeline_stage_unwrap_solver_controls_are_parsed() -> None:
     spec = PipelineSpec.from_dict(
         {

@@ -41,7 +41,8 @@ from fascat.options import (
     Tessellation,
     UnwrapOptions,
     UsdExportOptions,
-    UVMode,
+    UV0Mode,
+    UV1Mode,
 )
 from fascat.pipeline_file import PipelineSpec
 from fascat.report import timed_step
@@ -525,8 +526,8 @@ def stage(
     validate_normals: bool = False,
     unwrap: UnwrapOptions | None = None,
     atlas: AtlasOptions | None = None,
-    uv0: UVMode = "box",
-    uv1: UVMode | None = None,
+    uv0: UV0Mode = "box",
+    uv1: UV1Mode | None = None,
     where: Filter | None = None,
 ) -> Asset:
     return asset.stage(

@@ -229,6 +229,13 @@ def test_convert_dry_run_accepts_material_staging_mode() -> None:
     assert '"materials": "display"' in result.output
 
 
+def test_convert_dry_run_accepts_uv1_copy_mode() -> None:
+    result = runner.invoke(app, ["--json", "--dry-run", "convert", "input.step", "--uv1", "copy-uv0"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["uv1"] == "copy-uv0"
+
+
 def test_convert_dry_run_accepts_gltf_output_and_virtual_reality_profile() -> None:
     result = runner.invoke(
         app,
