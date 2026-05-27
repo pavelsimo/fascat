@@ -143,6 +143,7 @@ def test_remove_holes_warns_when_hole_type_filtering_is_metadata_only() -> None:
 
     result = asset.remove_holes(RemoveHolesOptions(through=True, blind=False, surface=False, prefer_brep=False))
 
+    assert any("mesh boundary-fill fallback" in item for item in result.report.steps[-1].warnings)
     assert any("cannot classify through, blind, or surface holes" in item for item in result.report.steps[-1].warnings)
 
 
@@ -167,6 +168,7 @@ def test_remove_occluded_removes_contained_part_nodes() -> None:
     assert visible.occurrence_count == 1
     assert "inner" not in visible.parts
     assert visible.metadata["removed_occluded_nodes"] == "1"
+    assert any("AABB containment fallback" in item for item in visible.report.steps[-1].warnings)
 
 
 def test_remove_occluded_warns_when_using_part_level_aabb_fallback() -> None:
@@ -272,3 +274,9 @@ def test_cli_convert_accepts_optimization_action_options_during_dry_run() -> Non
     assert payload["run_lod_generators"] is True
     assert payload["lod_per_part_budget"] is True
     assert payload["lod_drop_tiny_parts"] is True
+    diagnostics = {item["operation"]: item for item in payload["operation_diagnostics"]}
+    assert diagnostics["bake_materials"]["level"] == "metadata_only"
+    assert diagnostics["remove_holes"]["level"] == "approximate"
+    assert diagnostics["remove_occluded"]["level"] == "approximate"
+    assert diagnostics["decimate"]["level"] == "exact"
+    assert diagnostics["run_lod_generators"]["level"] == "exact"

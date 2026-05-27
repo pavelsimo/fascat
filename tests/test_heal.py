@@ -76,6 +76,27 @@ def test_heal_brep_can_fail_on_remaining_open_shells(monkeypatch) -> None:  # ty
         _asset_with_brep().heal_brep(BrepHealOptions(fail_on_open_shells=True))
 
 
+def test_heal_brep_reports_unsupported_sliver_face_removal(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import fascat.ops.heal as heal
+
+    monkeypatch.setattr(
+        heal,
+        "heal_shape",
+        lambda shape, _options: (
+            shape,
+            BrepStatus(kind="solid", sliver_faces=1),
+            BrepStatus(kind="solid", sliver_faces=1),
+            [],
+        ),
+    )
+
+    healed = _asset_with_brep().heal_brep(BrepHealOptions(remove_sliver_faces=True))
+
+    warning = healed.report.steps[-1].warnings[0]
+    assert "sliver face removal is not supported" in warning
+    assert "left unchanged" in warning
+
+
 def test_convert_runs_heal_brep_before_tessellation(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     import fascat.ops.heal as heal
     import fascat.ops.tessellate as tessellate

@@ -25,6 +25,8 @@ fascat inspect input.step --json
 
 `-h` / `--help` and `-V` / `--version` are invocation-wide controls. They work before or after subcommands and ignore other arguments.
 
+Dry-run JSON for `convert` includes `operation_diagnostics`, a list of planned operations with `level` set to `exact`, `approximate`, or `metadata_only`. Use it to see which requested flags will run as full geometry operations and which ones currently record intent or use fallbacks.
+
 ## Commands
 
 | Command | Description |

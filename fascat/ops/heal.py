@@ -29,6 +29,11 @@ class BrepStatus:
 
 def heal_brep_asset(asset: Asset, options: BrepHealOptions, *, selected_part_ids: set[str] | None = None) -> Asset:
     result = asset.copy(keep_source=True)
+    if options.remove_sliver_faces:
+        result.report.add_warning(
+            "sliver face removal is not supported by the current BREP backend; "
+            "sliver faces are reported but source shapes are left unchanged"
+        )
     for part in result.parts.values():
         if selected_part_ids is not None and part.id not in selected_part_ids:
             continue

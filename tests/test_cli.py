@@ -158,8 +158,48 @@ def test_validate_help() -> None:
 def test_convert_dry_run_json() -> None:
     result = runner.invoke(app, ["--json", "--dry-run", "convert", "input.step", "output.usdc"])
     assert result.exit_code == 0
-    assert '"command": "convert"' in result.output
-    assert '"dry_run": true' in result.output
+    payload = json.loads(result.output)
+    assert payload["command"] == "convert"
+    assert payload["dry_run"] is True
+    diagnostics = {item["operation"]: item for item in payload["operation_diagnostics"]}
+    assert diagnostics["import"]["level"] == "exact"
+    assert diagnostics["tessellate"]["level"] == "exact"
+    assert diagnostics["export"]["level"] == "exact"
+
+
+def test_convert_dry_run_reports_approximate_and_metadata_only_operations() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "--dry-run",
+            "convert",
+            "input.step",
+            "output.glb",
+            "--heal-brep",
+            "--remove-sliver-faces",
+            "--atlas",
+            "--bake-materials",
+            "--decimate",
+            "--decimate-criterion",
+            "quality",
+            "--remove-holes",
+            "--remove-occluded",
+            "--texture-compression",
+            "ktx2",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    diagnostics = {item["operation"]: item for item in payload["operation_diagnostics"]}
+    assert diagnostics["heal_brep"]["level"] == "approximate"
+    assert diagnostics["atlas"]["level"] == "metadata_only"
+    assert diagnostics["bake_materials"]["level"] == "metadata_only"
+    assert diagnostics["decimate"]["level"] == "approximate"
+    assert diagnostics["remove_holes"]["level"] == "approximate"
+    assert diagnostics["remove_occluded"]["level"] == "approximate"
+    assert diagnostics["texture_compression"]["level"] == "metadata_only"
 
 
 def test_convert_dry_run_defaults_output_to_usdc() -> None:

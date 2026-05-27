@@ -164,6 +164,10 @@ def remove_holes_asset(
     result = asset.copy(keep_source=True)
     if options.prefer_brep:
         result.report.add_warning("BREP hole removal is not implemented; using mesh boundary-fill fallback")
+    else:
+        result.report.add_warning(
+            "remove_holes uses mesh boundary-fill fallback; BREP hole classification is not implemented"
+        )
     if not (options.through and options.blind and options.surface):
         result.report.add_warning(
             "mesh hole removal cannot classify through, blind, or surface holes; enabled hole types are recorded only"
@@ -206,6 +210,9 @@ def remove_occluded_asset(
     selected_node_ids: set[str],
 ) -> Asset:
     result = asset.copy(keep_source=True)
+    result.report.add_warning(
+        "remove_occluded uses part-level AABB containment fallback; true visibility sampling is not implemented"
+    )
     if options.level != "parts":
         result.report.add_warning(
             f"occlusion level {options.level} uses part-level AABB containment fallback; "

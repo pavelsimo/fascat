@@ -317,7 +317,7 @@ def cmd_inspect(
     heal_tolerance: Annotated[float, typer.Option("--heal-tolerance", help="BREP healing tolerance.")] = 0.05,
     remove_sliver_faces: Annotated[
         bool,
-        typer.Option("--remove-sliver-faces", help="Detect tiny sliver faces during BREP healing."),
+        typer.Option("--remove-sliver-faces", help="Request tiny sliver-face removal during BREP healing."),
     ] = False,
     max_sliver_area: Annotated[
         float,
@@ -614,15 +614,15 @@ def cmd_convert(
     ] = InstancePolicy.AUTO,
     bake_materials: Annotated[
         bool,
-        typer.Option("--bake-materials", help="Bake selected materials into shared texture material metadata."),
+        typer.Option("--bake-materials", help="Create a shared flat material and bake metadata; no texture files yet."),
     ] = False,
     maps_resolution: Annotated[
         int,
-        typer.Option("--maps-resolution", help="Bake texture resolution in pixels."),
+        typer.Option("--maps-resolution", help="Requested bake texture resolution metadata in pixels."),
     ] = 2048,
     force_uv_generation: Annotated[
         bool,
-        typer.Option("--force-uv-generation", help="Generate UVs before material baking when needed."),
+        typer.Option("--force-uv-generation", help="Generate UVs before recording bake metadata when needed."),
     ] = False,
     bake: Annotated[
         str,
@@ -777,11 +777,11 @@ def cmd_convert(
     ] = False,
     quantize: Annotated[
         bool,
-        typer.Option("--quantize", help="Record glTF quantization intent in export metadata."),
+        typer.Option("--quantize", help="Write glTF KHR_mesh_quantization accessors."),
     ] = False,
     meshopt: Annotated[
         bool,
-        typer.Option("--meshopt", help="Record glTF meshopt compression intent in export metadata."),
+        typer.Option("--meshopt", help="Write glTF EXT_meshopt_compression payloads with fallback data."),
     ] = False,
     draco: Annotated[
         bool,
@@ -789,7 +789,7 @@ def cmd_convert(
     ] = False,
     texture_compression: Annotated[
         str | None,
-        typer.Option("--texture-compression", help="Texture compression intent: ktx2 or basisu."),
+        typer.Option("--texture-compression", help="Texture compression intent: ktx2 or basisu; no files yet."),
     ] = None,
     package: Annotated[
         UsdPackage,
@@ -1059,6 +1059,7 @@ def cmd_convert(
     if quality_report is not None and report is not None and quality_report.resolve() == report.resolve():
         _fail(ctx, payload, "--quality-report must use a different path than --report.", code=2)
 
+    payload["operation_diagnostics"] = _convert_operation_diagnostics(payload)
     if state.dry_run:
         _emit(ctx, payload, f"Would convert {input_path} to {output_path} with profile {profile.value}.")
         return
@@ -1361,7 +1362,7 @@ def cmd_validate(
     ] = False,
     self_intersections: Annotated[
         bool,
-        typer.Option("--self-intersections", help="Report self-intersection risk warnings."),
+        typer.Option("--self-intersections", help="Report detected self-intersections with bounded triangle checks."),
     ] = False,
     sliver_triangles: Annotated[
         bool,
@@ -1549,6 +1550,86 @@ def _parse_lods(value: str | None, ctx: typer.Context, payload: dict[str, Any]) 
     if ratios != sorted(ratios, reverse=True):
         _fail(ctx, payload, "--lods ratios must be sorted from highest to lowest detail.", code=2)
     return ratios
+
+
+def _convert_operation_diagnostics(payload: dict[str, Any]) -> list[dict[str, str]]:
+    diagnostics: list[dict[str, str]] = []
+
+    def add(operation: str, level: str, message: str) -> None:
+        diagnostics.append({"operation": operation, "level": level, "message": message})
+
+    add("import", "exact", "STEP import reads hierarchy, metadata, materials, and BREP handles when available")
+    if payload["heal_brep"]:
+        if payload["remove_sliver_faces"]:
+            add(
+                "heal_brep",
+                "approximate",
+                "BREP healing runs, but sliver-face removal is reported only because backend removal is unavailable",
+            )
+        else:
+            add("heal_brep", "exact", "BREP sewing, edge fixing, and tolerance unification are requested")
+    add("tessellate", "exact", "BREP tessellation uses the selected sag, angle, and edge cleanup settings")
+    add("repair", "exact", "mesh repair applies selected cleanup operations after tessellation")
+    if payload["atlas"]:
+        add("atlas", "metadata_only", "atlas settings are recorded as metadata; atlas images are not written")
+    add("stage", "exact", "material, normal, tangent, and UV staging options are applied before optimization")
+    if payload["merge"]:
+        add("merge", "exact", "selected hierarchy is merged according to the requested merge mode")
+    if payload["explode"] is not None:
+        add("explode", "exact", "selected meshes are split by material or connected components")
+    if payload["replace"] is not None:
+        add("replace", "exact", "selected geometry is replaced with the requested proxy mode")
+    if (
+        payload["batch_by_material"]
+        or payload["merge_compatible_meshes"]
+        or payload["split_large_meshes"]
+        or payload["flatten"] != "safe"
+        or payload["index_buffer"] != "auto"
+        or payload["instance_policy"] != "auto"
+    ):
+        add("optimize_scene", "exact", "scene batching, splitting, flattening, and instance policy options are applied")
+    if payload["bake_materials"]:
+        add(
+            "bake_materials", "metadata_only", "material baking creates a flat material and metadata, not texture files"
+        )
+    if payload["remove_holes"]:
+        add(
+            "remove_holes",
+            "approximate",
+            "hole removal uses mesh boundary filling when BREP feature removal is unavailable",
+        )
+    if payload["remove_occluded"]:
+        add(
+            "remove_occluded",
+            "approximate",
+            "occlusion removal uses part-level AABB containment, not visibility sampling",
+        )
+    if payload["decimate"]:
+        if payload["decimate_criterion"] == "quality":
+            add(
+                "decimate",
+                "approximate",
+                "quality decimation maps tolerances to a target ratio; geometric error bounds are not enforced",
+            )
+        else:
+            add("decimate", "exact", "target decimation applies the requested triangle budget or ratio")
+    add("optimize", "exact", "profile optimization applies triangle reduction and buffer optimization settings")
+    if payload["run_lod_generators"]:
+        add("run_lod_generators", "exact", "preset or explicit LOD levels are generated from optimized meshes")
+    elif payload["lods"] is not None:
+        add("lods", "exact", "ratio-based LOD meshes are generated from optimized meshes")
+    if payload["texture_compression"] is not None:
+        add(
+            "texture_compression",
+            "metadata_only",
+            "texture compression intent is recorded; compressed textures are not written",
+        )
+    add(
+        "export",
+        "exact",
+        "the selected writer produces the requested output format and records file-size budget warnings",
+    )
+    return diagnostics
 
 
 def _parse_bake_maps(value: str, ctx: typer.Context, payload: dict[str, Any]) -> tuple[str, ...]:
