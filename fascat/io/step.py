@@ -196,6 +196,18 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
     asset.report.input_stats = asset.stats()
     metadata_count = _metadata_count(asset)
     unsupported_pmi_count = _unsupported_pmi_count(options, header_info, pmi_count=len(asset.pmi))
+    import_decisions = _import_decisions(
+        options,
+        header_info,
+        pmi_count=len(asset.pmi),
+        unsupported_pmi_count=unsupported_pmi_count,
+        cleanup=cleanup,
+        space=space,
+    )
+    loaded_representations = _loaded_representation_report(asset)
+    if asset.metadata:
+        asset.metadata["import_decisions"] = import_decisions
+        asset.metadata["import_representation_summary"] = loaded_representations["summary"]
     import_warnings = _import_warnings(options, header_info, unsupported_pmi_count)
     for warning in import_warnings:
         asset.report.add_warning(warning)
@@ -212,6 +224,8 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
             "pmi_present": header_info.pmi_present,
             "cleanup": cleanup.to_dict(),
             "space_normalization": space.metadata(),
+            "import_decisions": import_decisions,
+            "loaded_representations": loaded_representations,
         },
         before={"nodes": 0, "parts": 0, "occurrences": 0, "materials": 0, "vertices": 0, "triangles": 0},
         after=asset.stats(),
@@ -468,6 +482,237 @@ def _import_warnings(
     if options.multi_file:
         warnings.append("multi-file STEP assembly import is not implemented; external references are not loaded")
     return warnings
+
+
+def _import_decisions(
+    options: StepReadOptions,
+    header_info: _StepHeaderInfo,
+    *,
+    pmi_count: int,
+    unsupported_pmi_count: int,
+    cleanup: _ImportCleanupStats,
+    space: _SpaceNormalization,
+) -> dict[str, object]:
+    cleanup_counts = cleanup.to_dict()
+    return {
+        "metadata": _import_decision(
+            requested=options.metadata,
+            effective=options.metadata,
+            state="honored" if options.metadata else "disabled",
+        ),
+        "product_metadata": _import_decision(
+            requested=options.product_metadata,
+            effective=options.product_metadata,
+            state="honored" if options.product_metadata else "disabled",
+        ),
+        "properties": _import_decision(
+            requested=options.properties,
+            effective=options.metadata or options.properties,
+            state="honored" if options.properties else "disabled",
+            detail="OCP metadata transfer is enabled when general metadata or properties are requested",
+        ),
+        "layers": _import_decision(
+            requested=options.layers,
+            effective=False,
+            state="unsupported" if options.layers else "disabled",
+            detail="normalized STEP layer records are not exposed by the current importer",
+        ),
+        "validation_properties": _import_decision(
+            requested=options.validation_properties,
+            effective=options.validation_properties,
+            state="approximated" if options.validation_properties else "disabled",
+            detail="source topology counts are derived after transfer; typed STEP validation properties are not extracted",
+        ),
+        "pmi": _pmi_import_decision(options, header_info, pmi_count, unsupported_pmi_count),
+        "design_variants": _import_decision(
+            requested=options.design_variants,
+            effective=False,
+            state="unsupported" if options.design_variants else "disabled",
+            detail="STEP design variant import is not implemented",
+        ),
+        "existing_meshes": _import_decision(
+            requested=options.existing_meshes,
+            effective=options.existing_meshes,
+            state="backend_default" if options.existing_meshes else "disabled",
+            detail="OCP transfer keeps BREP source shapes; reusable source tessellation payloads are not detected separately yet",
+        ),
+        "multi_file": _import_decision(
+            requested=options.multi_file,
+            effective=False,
+            state="unsupported" if options.multi_file else "disabled",
+            detail="multi-file STEP external-reference resolution is not implemented",
+        ),
+        "delete_free_vertices": _import_decision(
+            requested=options.delete_free_vertices,
+            effective=options.delete_free_vertices,
+            state="honored" if options.delete_free_vertices else "disabled",
+            counts={
+                "deleted_parts": cleanup_counts["deleted_free_vertex_parts"],
+                "deleted_vertices": cleanup_counts["deleted_free_vertices"],
+            },
+        ),
+        "delete_lines": _import_decision(
+            requested=options.delete_lines,
+            effective=options.delete_lines,
+            state="honored" if options.delete_lines else "disabled",
+            counts={
+                "deleted_parts": cleanup_counts["deleted_line_parts"],
+                "deleted_edges": cleanup_counts["deleted_line_edges"],
+                "deleted_vertices": cleanup_counts["deleted_line_vertices"],
+            },
+        ),
+        "space_normalization": _import_decision(
+            requested={
+                "source_units": options.source_units,
+                "source_meters_per_unit": options.source_meters_per_unit,
+                "source_up_axis": options.source_up_axis,
+                "source_handedness": options.source_handedness,
+                "target_units": options.target_units,
+                "target_meters_per_unit": options.target_meters_per_unit,
+                "target_up_axis": options.target_up_axis,
+                "target_handedness": options.target_handedness,
+            },
+            effective=space.metadata(),
+            state="honored" if space.changed else "backend_default",
+        ),
+    }
+
+
+def _import_decision(
+    *,
+    requested: object,
+    effective: object,
+    state: str,
+    detail: str | None = None,
+    counts: dict[str, int] | None = None,
+) -> dict[str, object]:
+    decision: dict[str, object] = {
+        "requested": requested,
+        "effective": effective,
+        "state": state,
+    }
+    if detail:
+        decision["detail"] = detail
+    if counts is not None:
+        decision["counts"] = counts
+    return decision
+
+
+def _pmi_import_decision(
+    options: StepReadOptions,
+    header_info: _StepHeaderInfo,
+    pmi_count: int,
+    unsupported_pmi_count: int,
+) -> dict[str, object]:
+    if not options.pmi:
+        return _import_decision(requested=False, effective=False, state="disabled")
+    if unsupported_pmi_count:
+        return _import_decision(
+            requested=True,
+            effective=False,
+            state="unsupported",
+            detail="STEP AP242 PMI markers were detected, but typed PMI entity extraction is not implemented",
+            counts={"imported": pmi_count, "unsupported": unsupported_pmi_count},
+        )
+    if not header_info.pmi_present:
+        return _import_decision(
+            requested=True,
+            effective=False,
+            state="not_present",
+            detail="PMI import was requested, but the STEP header did not advertise PMI content",
+            counts={"imported": pmi_count, "unsupported": unsupported_pmi_count},
+        )
+    return _import_decision(
+        requested=True,
+        effective=True,
+        state="honored",
+        counts={"imported": pmi_count, "unsupported": unsupported_pmi_count},
+    )
+
+
+def _loaded_representation_report(asset: Asset) -> dict[str, object]:
+    parts = [_part_representation_record(part) for part in sorted(asset.parts.values(), key=lambda item: item.id)]
+    deleted_nodes = [
+        _deleted_node_representation_record(node)
+        for node in asset.root.walk()
+        if "import_cleanup" in node.metadata and node.part_id is None
+    ]
+    return {
+        "summary": _representation_summary(parts, deleted_nodes),
+        "parts": parts,
+        "deleted_nodes": deleted_nodes,
+    }
+
+
+def _part_representation_record(part: Part) -> dict[str, object]:
+    return {
+        "part_id": part.id,
+        "name": part.name,
+        "loaded_representation": str(part.metadata.get("loaded_representation", "unknown")),
+        "cleanup_action": str(part.metadata.get("import_cleanup", "preserved")),
+        "source_vertices": _metadata_int(part.metadata.get("source_vertices")),
+        "source_edges": _metadata_int(part.metadata.get("source_edges")),
+        "source_faces": _metadata_int(part.metadata.get("source_faces")),
+        "source_name": str(part.metadata.get("source_name", "")),
+    }
+
+
+def _deleted_node_representation_record(node: Node) -> dict[str, object]:
+    return {
+        "node_id": node.id,
+        "name": node.name,
+        "loaded_representation": str(node.metadata.get("loaded_representation", "unknown")),
+        "cleanup_action": str(node.metadata.get("import_cleanup", "preserved")),
+        "source_vertices": _metadata_int(node.metadata.get("source_vertices")),
+        "source_edges": _metadata_int(node.metadata.get("source_edges")),
+        "source_faces": _metadata_int(node.metadata.get("source_faces")),
+    }
+
+
+def _representation_summary(
+    parts: list[dict[str, object]],
+    deleted_nodes: list[dict[str, object]],
+) -> dict[str, int]:
+    summary = {
+        "brep_parts": 0,
+        "construction_point_parts": 0,
+        "construction_line_parts": 0,
+        "empty_shape_parts": 0,
+        "unknown_parts": 0,
+        "deleted_nodes": len(deleted_nodes),
+        "deleted_free_vertex_nodes": 0,
+        "deleted_line_nodes": 0,
+    }
+    for part in parts:
+        representation = part.get("loaded_representation")
+        if representation == "brep":
+            summary["brep_parts"] += 1
+        elif representation == "construction_points":
+            summary["construction_point_parts"] += 1
+        elif representation == "construction_lines":
+            summary["construction_line_parts"] += 1
+        elif representation == "empty_shape":
+            summary["empty_shape_parts"] += 1
+        else:
+            summary["unknown_parts"] += 1
+    for node in deleted_nodes:
+        cleanup_action = node.get("cleanup_action")
+        if cleanup_action == "delete_free_vertices":
+            summary["deleted_free_vertex_nodes"] += 1
+        elif cleanup_action == "delete_lines":
+            summary["deleted_line_nodes"] += 1
+    return summary
+
+
+def _metadata_int(value: object) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
 
 
 def _loaded_representation(counts: _ShapeTopologyCounts) -> str:

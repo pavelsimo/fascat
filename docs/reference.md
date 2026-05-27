@@ -56,6 +56,13 @@ all listed formats are implemented.
 | CATIA, NX, SolidWorks, Inventor | Not supported | Not supported | Native CAD coverage is deferred |
 | IFC, 3MF, QIF | Not supported | Not supported | Adjacent workflow formats, deferred unless a user need changes priority |
 
+STEP import report steps include `import_decisions`, which separates requested,
+effective, `honored`, `approximated`, `unsupported`, `disabled`, `not_present`,
+and `backend_default` states for Unity-style import toggles such as PMI,
+variants, existing meshes, construction cleanup, and coordinate normalization.
+They also include `loaded_representations`, a per-part BREP/construction-shape
+summary plus deleted construction-only nodes and source topology counts.
+
 ## Convert flags
 
 | Flag | Default | Description |
@@ -354,7 +361,7 @@ fallbacks.
 
 | Capability | Fascat status | Report or diagnostic | Next step |
 |------------|---------------|----------------------|-----------|
-| STEP import, hierarchy, names, transforms, colors, metadata | Implemented for STEP | `import` report stats, cleanup counts, pipeline import options, loaded-representation metadata, space normalization transforms, and AP242 PMI warnings when typed PMI import is unavailable | Add real design variant loading, typed PMI entity extraction, mixed BREP construction-curve cleanup, and true multi-file import |
+| STEP import, hierarchy, names, transforms, colors, metadata | Implemented for STEP | `import` report stats, cleanup counts, import decisions, pipeline import options, per-part loaded-representation reports, space normalization transforms, and AP242 PMI warnings when typed PMI import is unavailable | Add real design variant loading, typed PMI entity extraction, mixed BREP construction-curve cleanup, and true multi-file import |
 | BREP healing | Partial | `heal_brep`; records open shells, free/unstitched edges, small edges, and sliver counts; sliver removal warns that the backend leaves shapes unchanged | Implement sliver-face removal, duplicate-face cleanup, and deeper face/wire repair |
 | Tessellation | Implemented | `tessellate` report options, explicit sag-ratio, existing mesh reuse/retessellation controls, size-adaptive `part_settings` helpers, max-polygon-length diagnostics, free-edge diagnostics, retained-patch/submesh risk warnings, and quality metadata | Add CAD UV/tangent extraction and material/metadata/curvature-targeted profiles |
 | Mesh repair | Implemented for core cleanup | `repair` report step; mesh metadata records before/after duplicate polygon, degenerate triangle, boundary edge, boundary gap, non-manifold edge, T-junction, flipped closed-component, and non-orientable shared-edge counts; standalone `merge_vertices` and `delete_degenerate_polygons` are available through Python, CLI flags, and TOML pipelines with before/after reports | Add T-junction sewing, boundary-gap stitching, non-manifold cracking, topology-only merge connectivity, and configurable orientation strategies |

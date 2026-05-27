@@ -9,8 +9,11 @@ import fascat as fc
 from fascat.io.step import (
     _canonical_part_id,
     _cleanup_action,
+    _import_decisions,
     _import_warnings,
+    _ImportCleanupStats,
     _loaded_representation,
+    _loaded_representation_report,
     _material_binding_plan,
     _shape_fingerprint,
     _ShapeTopologyCounts,
@@ -127,6 +130,114 @@ def test_step_import_cleanup_actions_cover_construction_only_shapes() -> None:
     assert _cleanup_action(point_counts, StepReadOptions(delete_free_vertices=True)) == "delete_free_vertices"
     assert _cleanup_action(line_counts, StepReadOptions(delete_lines=True)) == "delete_lines"
     assert _cleanup_action(brep_counts, StepReadOptions(delete_free_vertices=True, delete_lines=True)) is None
+
+
+def test_step_import_decisions_report_requested_effective_states() -> None:
+    cleanup = _ImportCleanupStats()
+    cleanup.record_deleted("delete_lines", _ShapeTopologyCounts(vertices=4, edges=2))
+    space = _space_normalization(
+        "millimetre",
+        0.001,
+        StepReadOptions(target_units="metre", target_up_axis="Y", target_handedness="right"),
+    )
+
+    decisions = _import_decisions(
+        StepReadOptions(
+            design_variants=True,
+            multi_file=True,
+            delete_free_vertices=True,
+            delete_lines=True,
+        ),
+        _StepHeaderInfo(schema="AP242", pmi_present=True),
+        pmi_count=0,
+        unsupported_pmi_count=1,
+        cleanup=cleanup,
+        space=space,
+    )
+
+    assert decisions["pmi"]["state"] == "unsupported"
+    assert decisions["design_variants"]["state"] == "unsupported"
+    assert decisions["multi_file"]["state"] == "unsupported"
+    assert decisions["delete_free_vertices"]["state"] == "honored"
+    assert decisions["delete_free_vertices"]["counts"] == {"deleted_parts": 0, "deleted_vertices": 0}
+    assert decisions["delete_lines"]["counts"] == {
+        "deleted_parts": 1,
+        "deleted_edges": 2,
+        "deleted_vertices": 4,
+    }
+    assert decisions["space_normalization"]["state"] == "honored"
+
+
+def test_loaded_representation_report_lists_parts_and_deleted_nodes() -> None:
+    asset = fc.Asset(
+        root=fc.Node(
+            id="root",
+            name="root",
+            children=[
+                fc.Node(id="node-a", name="Part A", part_id="part-a"),
+                fc.Node(
+                    id="node-deleted",
+                    name="construction line",
+                    metadata={
+                        "loaded_representation": "construction_lines",
+                        "import_cleanup": "delete_lines",
+                        "source_vertices": "2",
+                        "source_edges": "1",
+                        "source_faces": "0",
+                    },
+                ),
+            ],
+        ),
+        parts={
+            "part-a": fc.Part(
+                id="part-a",
+                name="Part A",
+                metadata={
+                    "loaded_representation": "brep",
+                    "source_vertices": "8",
+                    "source_edges": "12",
+                    "source_faces": "6",
+                    "source_name": "Source Part A",
+                },
+            )
+        },
+    )
+
+    report = _loaded_representation_report(asset)
+
+    assert report["summary"] == {
+        "brep_parts": 1,
+        "construction_point_parts": 0,
+        "construction_line_parts": 0,
+        "empty_shape_parts": 0,
+        "unknown_parts": 0,
+        "deleted_nodes": 1,
+        "deleted_free_vertex_nodes": 0,
+        "deleted_line_nodes": 1,
+    }
+    assert report["parts"] == [
+        {
+            "part_id": "part-a",
+            "name": "Part A",
+            "loaded_representation": "brep",
+            "cleanup_action": "preserved",
+            "source_vertices": 8,
+            "source_edges": 12,
+            "source_faces": 6,
+            "source_name": "Source Part A",
+        }
+    ]
+    assert report["deleted_nodes"] == [
+        {
+            "node_id": "node-deleted",
+            "name": "construction line",
+            "loaded_representation": "construction_lines",
+            "cleanup_action": "delete_lines",
+            "source_vertices": 2,
+            "source_edges": 1,
+            "source_faces": 0,
+        }
+    ]
 
 
 def test_step_space_normalization_builds_reported_root_transform() -> None:

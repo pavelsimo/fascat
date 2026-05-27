@@ -111,6 +111,10 @@ that are currently conservative approximations.
 - Conversion reports now include a resolved conversion manifest with the
   effective profile, import options, direct or pipeline operation settings, and
   export settings needed to reproduce a run.
+- STEP import reports now include Unity-style `import_decisions` for requested,
+  effective, `honored`, `approximated`, `unsupported`, `disabled`,
+  `not_present`, and `backend_default` import choices, plus per-part
+  loaded-representation records and deleted construction-only node records.
 
 ## Unity Asset Transformer Parity
 
@@ -139,7 +143,7 @@ Comparison snapshot:
 
 | Area | Fascat today | Missing for closer Unity parity |
 | --- | --- | --- |
-| Import | STEP-centric import with hierarchy, transforms, metadata, colors, repeated-part handling, PMI presence reporting, existing-mesh reuse intent, construction-only point/line cleanup controls, source-space normalization reporting, and BREP patch cleanup reporting after tessellation. | True multi-file/multi-root import semantics, design-variant import, typed/visual PMI, mixed BREP construction-curve cleanup, native CAD/JT/IFC/Parasolid/IGES coverage, richer per-part loaded-representation reports, and import decision reports that separate requested, honored, approximated, and unsupported load choices. |
+| Import | STEP-centric import with hierarchy, transforms, metadata, colors, repeated-part handling, PMI presence reporting, existing-mesh reuse intent, construction-only point/line cleanup controls, source-space normalization reporting, import-decision reports, per-part loaded-representation reports, and BREP patch cleanup reporting after tessellation. | True multi-file/multi-root import semantics, design-variant import, typed/visual PMI, mixed BREP construction-curve cleanup, native CAD/JT/IFC/Parasolid/IGES coverage, and richer loaded-representation coverage for existing tessellations, typed PMI, variants, and product metadata. |
 | Repair and tessellation | BREP sewing/fix-edge path, mesh duplicate/degenerate/T-junction/boundary-gap/flipped-component diagnostics, unit-aware repair tolerance reporting, sag/sag-ratio/angle/max-length controls, bounding-box-derived tessellation helpers, free-edge diagnostics, reusable existing mesh control, and retained patch / submesh risk warnings. | Open-shell grouping, unstitched-face handling, T-junction sewing, boundary-gap stitching, non-manifold edge cracking, tolerance-based overlapping-surface/z-fighting cleanup, non-orientable strip cracking, topology-only vertex connectivity with split render attributes, selectable face/normal orientation strategies, tessellation-time normal/tangent/UV/free-edge generation controls, CAD-derived UV modes, targeted tessellation by material/metadata/curvature, and optional free-edge geometry output. |
 | Staging | Normal/tangent generation, box/unwrap/lightmap UV modes, UV copy/normalization, UV validation, UV island/distortion/packing diagnostics, material normalization, duplicate-material merge, and metadata-only atlas intent. | Unity-style UV0 tileable versus UV1 bake workflows with segmentation, sharp-edge seam and forbid-overlap UV policies, lines of interest, island merge/alignment, real repack/padding/share-map controls, material-library mapping, real atlas textures, AO/lightmap baking, and texture cleanup. |
 | Optimization | Mesh simplification, measured error reporting, sampled occlusion removal, exact instance reconstruction, scene merge/split utilities, draw-call breakdown reports, and UV-importance modes. | Global assembly target allocation with iterative memory thresholds, real geometric-error bounded simplification, AO/user-weighted decimation, pre-decimation cleanup for unused UV/color/weight streams, standard/advanced occlusion backends, retopology/proxy mesh generation with normal-map transfer, symmetry-aware loose/precise instance reconstruction, duplicate image/material cleanup, and merge reports that quantify culling, memory, and file-size tradeoffs. |
@@ -212,10 +216,12 @@ Second-pass gaps from the Unity references:
   favors preserving instances for file size even when merging can reduce draw
   calls, so Fascat should warn when a merge helps batching but hurts GLB size,
   memory, or culling.
-- Track Unity-style import module-property decisions as first-class manifest
-  data: load variants, load PMI, prefer existing meshes, delete free vertices,
-  delete lines, and delete patches should each report requested, effective,
-  approximated, unsupported, and backend-default state.
+- Unity-style import module-property decisions are now first-class report data:
+  load PMI, load variants, prefer existing meshes, delete free vertices, delete
+  lines, metadata groups, and space normalization each report requested,
+  effective, `honored`, `approximated`, `unsupported`, `disabled`,
+  `not_present`, or `backend_default` state. Remaining work is to connect
+  delete-patch decisions to tessellation-time BREP retention and cleanup.
 - Make tessellation-time attribute generation explicit. Unity can create
   normals, tangents, UVs, free edges, and retained BREP state during
   tessellation; Fascat should report whether each attribute came from
@@ -246,13 +252,13 @@ Parity gaps to track:
 
 2. Import controls
    - Reference docs now include a supported-format parity matrix. Unity's baseline covers many CAD and mesh formats; Fascat currently centers on STEP input and USD/glTF/OBJ/STL output, with IGES, Parasolid, JT, native CAD, IFC, 3MF, and QIF explicitly deferred.
-   - Explicit import toggles now cover product metadata, properties, layers, validation properties, PMI, design variants, existing mesh preference, and multi-file import intent across Python, CLI, and TOML. Unsupported design-variant and multi-file import requests report warnings instead of silently claiming support.
+   - Explicit import toggles now cover product metadata, properties, layers, validation properties, PMI, design variants, existing mesh preference, and multi-file import intent across Python, CLI, and TOML. Unsupported design-variant and multi-file import requests report warnings instead of silently claiming support, and `import_decisions` records requested/effective state for each import choice.
    - Define true multi-file import semantics: multiple input paths should produce deterministic multi-root assemblies, shared material/image namespaces, stable source-file metadata, and warnings for failed members instead of all-or-nothing failure.
    - Import cleanup now exposes `delete_free_vertices` and `delete_lines` for construction-only point and line shapes across Python, CLI, and TOML. Import reports include cleanup counts, and preserved parts record loaded representation plus source topology counts.
    - Tessellated parts now record `brep_patch_cleanup=deleted` or `retained` and `source_shape_retained`, matching `keep_brep` behavior.
    - Remaining work: decide whether mixed BREP construction curves should be deleted, preserved as metadata, or tessellated into renderable tubes.
    - Source unit, source up-axis, source handedness, target unit, target up-axis, and target handedness normalization controls now apply a root transform, update the asset's declared working space, and record the exact transform in import metadata and reports.
-   - Report the loaded representation for each part: BREP, existing tessellation, construction points/lines, PMI, variants, product metadata, and the cleanup action applied.
+   - Import reports now include per-part loaded representation records for BREP, construction points/lines, empty shapes, source topology counts, and deleted construction-only nodes. Remaining work: existing tessellation payloads, typed PMI, variants, and richer product metadata are still limited by importer support.
    - Tessellation now reports when retained BREP patches, CAD face groups, or material splits are likely to increase submesh, draw-call, or export-size pressure.
 
 3. CAD and mesh repair depth

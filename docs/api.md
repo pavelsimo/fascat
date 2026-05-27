@@ -272,6 +272,8 @@ glTF export writes metadata and PMI into `extras.fascat`. USD export writes Fasc
 
 STEP AP242 files can advertise PMI even when the current OCP-backed importer cannot extract typed annotation entities. In that case the import report records `pmi_present=true`, `unsupported_pmi_count=1`, and a warning instead of silently implying that PMI was imported.
 
+STEP import reports also include `import_decisions`, which records each import toggle as requested, effective, and `honored`, `approximated`, `unsupported`, `disabled`, `not_present`, or `backend_default`. The same report step includes `loaded_representations`, a per-part list of BREP, construction-point, construction-line, or empty-shape inputs plus deleted construction-only nodes and source topology counts.
+
 Metadata and PMI parameters:
 
 | Option | Parameter | Meaning |
@@ -279,8 +281,8 @@ Metadata and PMI parameters:
 | `StepReadOptions` | `metadata` | Enables general source metadata import. If `False`, the more specific metadata import groups are disabled by default. |
 | `StepReadOptions` | `product_metadata` | Import product and assembly-level metadata where the STEP backend exposes it. |
 | `StepReadOptions` | `properties` | Import user and product properties. |
-| `StepReadOptions` | `layers` | Import layer assignments as metadata. |
-| `StepReadOptions` | `validation_properties` | Import STEP validation properties such as source counts or checksums when available. |
+| `StepReadOptions` | `layers` | Request layer assignments as metadata. Current normalized layer extraction is reported as unsupported in `import_decisions` when requested. |
+| `StepReadOptions` | `validation_properties` | Request STEP validation properties. Current reports approximate this with source topology counts rather than typed validation-property entities. |
 | `StepReadOptions` | `pmi` | Import typed PMI records when the backend exposes them; AP242 PMI markers are reported when typed import is unavailable. |
 | `StepReadOptions` | `design_variants` | Request STEP design variant import. Current backend support is limited and reports a warning when requested variants cannot be loaded. |
 | `StepReadOptions` | `existing_meshes` | Prefer existing tessellation payloads from the source file when the importer exposes them. Tessellation `reuse_existing_meshes` still controls whether loaded meshes are retessellated later. |
