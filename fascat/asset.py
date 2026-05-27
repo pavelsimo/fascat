@@ -1205,6 +1205,13 @@ def _decimation_report_stats(asset: Asset) -> dict[str, int]:
         "decimate_pre_cleanup_removed_tangent_parts",
         "decimate_uv_constrained_parts",
         "decimate_uv_seam_constraint_vertices",
+        "decimate_protected_feature_parts",
+        "decimate_protect_hard_edge_faces",
+        "decimate_protect_hole_boundary_faces",
+        "decimate_protect_material_boundary_faces",
+        "decimate_protect_uv_seam_faces",
+        "decimate_protect_silhouette_faces",
+        "decimate_protect_total_feature_faces",
     ):
         if key in asset.metadata:
             stats[key] = _metadata_int(asset.metadata[key], 0)

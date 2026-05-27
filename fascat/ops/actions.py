@@ -753,6 +753,15 @@ def _annotate_decimation_result(
     pre_cleanup_removed_tangent_parts = 0
     uv_constrained_parts = 0
     uv_seam_constraint_vertices = 0
+    protected_feature_parts = 0
+    feature_totals = {
+        "hard_edge_faces": 0,
+        "hole_boundary_faces": 0,
+        "material_boundary_faces": 0,
+        "uv_seam_faces": 0,
+        "silhouette_faces": 0,
+        "total_feature_faces": 0,
+    }
     for part in asset.parts.values():
         if selected_part_ids is not None and part.id not in selected_part_ids:
             continue
@@ -760,6 +769,7 @@ def _annotate_decimation_result(
         if source is None or part.mesh is None:
             continue
         pre_cleanup = _decimation_pre_cleanup_plan(source, options)
+        feature_counts = _decimation_feature_counts(source, options)
         metrics = _decimation_metrics(source, part.mesh)
         counts = pass_counts.get(part.id, _DecimationPassCount())
         source_total += metrics.source_triangles
@@ -777,6 +787,12 @@ def _annotate_decimation_result(
             "decimate_uv_importance": options.uv_importance,
             "decimate_pre_cleanup_attributes": ",".join(options.cleanup_attributes) or "none",
             "decimate_uv_constraint_status": pre_cleanup.uv_constraint_status,
+            "decimate_protect_hard_edge_faces": str(feature_counts["hard_edge_faces"]),
+            "decimate_protect_hole_boundary_faces": str(feature_counts["hole_boundary_faces"]),
+            "decimate_protect_material_boundary_faces": str(feature_counts["material_boundary_faces"]),
+            "decimate_protect_uv_seam_faces": str(feature_counts["uv_seam_faces"]),
+            "decimate_protect_silhouette_faces": str(feature_counts["silhouette_faces"]),
+            "decimate_protect_total_feature_faces": str(feature_counts["total_feature_faces"]),
             "decimate_iterative_threshold_triangles": str(options.iterative_threshold),
             "decimate_simplification_passes": str(counts.simplification_passes),
             "decimate_iterative_passes": str(counts.iterative_passes),
@@ -803,6 +819,10 @@ def _annotate_decimation_result(
             uv_constrained_parts += 1
             uv_seam_constraint_vertices += pre_cleanup.uv_seam_vertices
             metadata["decimate_uv_seam_constraint_vertices"] = str(pre_cleanup.uv_seam_vertices)
+        if feature_counts["total_feature_faces"]:
+            protected_feature_parts += 1
+        for key, value in feature_counts.items():
+            feature_totals[key] += value
         part.metadata = metadata
         removed_uv_channels = sorted(set(source.uvs) - set(part.mesh.uvs))
         if removed_uv_channels:
@@ -825,6 +845,13 @@ def _annotate_decimation_result(
     asset.metadata["decimate_pre_cleanup_removed_tangent_parts"] = str(pre_cleanup_removed_tangent_parts)
     asset.metadata["decimate_uv_constrained_parts"] = str(uv_constrained_parts)
     asset.metadata["decimate_uv_seam_constraint_vertices"] = str(uv_seam_constraint_vertices)
+    asset.metadata["decimate_protected_feature_parts"] = str(protected_feature_parts)
+    asset.metadata["decimate_protect_hard_edge_faces"] = str(feature_totals["hard_edge_faces"])
+    asset.metadata["decimate_protect_hole_boundary_faces"] = str(feature_totals["hole_boundary_faces"])
+    asset.metadata["decimate_protect_material_boundary_faces"] = str(feature_totals["material_boundary_faces"])
+    asset.metadata["decimate_protect_uv_seam_faces"] = str(feature_totals["uv_seam_faces"])
+    asset.metadata["decimate_protect_silhouette_faces"] = str(feature_totals["silhouette_faces"])
+    asset.metadata["decimate_protect_total_feature_faces"] = str(feature_totals["total_feature_faces"])
     if pre_cleanup_removed_uv_channels:
         asset.metadata["decimate_pre_cleanup_removed_uv_channels"] = ",".join(
             str(channel) for channel in sorted(pre_cleanup_removed_uv_channels)
@@ -863,6 +890,17 @@ def _annotate_decimation_result(
         asset.metadata["decimate_removed_uv_channels"] = ",".join(
             str(channel) for channel in sorted(removed_asset_uv_channels)
         )
+
+
+def _decimation_feature_counts(mesh: Mesh, options: DecimateOptions) -> dict[str, int]:
+    return mesh.feature_preservation_counts(
+        preserve_hard_edges=True,
+        hard_edge_angle=options.normal_tolerance,
+        preserve_holes=options.protect_topology,
+        preserve_material_boundaries=True,
+        preserve_uv_seams=_preserve_uv_seams(options),
+        preserve_silhouette=options.protect_topology,
+    )
 
 
 @dataclass(frozen=True)

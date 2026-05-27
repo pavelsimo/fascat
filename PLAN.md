@@ -122,6 +122,9 @@ that are currently conservative approximations.
 - Explicit decimation now exposes pre-cleanup for unused UV channels and
   tangents, records removed/preserved attribute metadata, and warns when
   preserved UV seams or islands can reduce simplification efficiency.
+- Explicit decimation now reports topology/material/UV protection pressure with
+  protected hard-edge, hole-boundary, material-boundary, UV-seam, silhouette,
+  and total feature-face counts.
 
 ## Unity Asset Transformer Parity
 
@@ -165,7 +168,7 @@ Function-level parity notes from the linked Unity pages:
 | Repair meshes | Duplicate and degenerate cleanup plus standalone degenerate-polygon deletion, T-junction, boundary-gap, non-manifold, and orientation diagnostics are reported. | Implement true T-junction sewing, boundary stitching, non-manifold edge cracking, tolerance-based overlap/z-fighting cleanup, non-orientable strip cracking, and explicit face/normal orientation strategies. |
 | Merge vertices | Standalone `merge_vertices` is exposed across Python, CLI, and TOML with normals, tangents, UV, and material-boundary protection plus before/after reports. | Add topology-only connectivity merging that can preserve hard-edge, UV, and material seams as split render attributes; also add stronger cross-bucket tolerance merging and richer reports for skipped merges by protection reason. |
 | Delete degenerate polygons | Standalone `delete_degenerate_polygons` is exposed across Python, CLI, and TOML with area-threshold controls, selection support, no-op reports, unit-aware area reporting, and before/after counts. | Extend cleanup beyond zero-area triangles to tolerance-based overlapping or z-fighting polygons. |
-| Decimate to target | Target count, ratio, UV-importance modes, topology intent, RAM estimates, configurable iterative threshold/pass reports, measured-error reports, and pre-cleanup for unused UVs/tangents exist. | Add enforced geometric error bounds, AO/user-weighted decimation, topology-protection metrics, and cleanup for future vertex colors/weights. |
+| Decimate to target | Target count, ratio, UV-importance modes, topology protection counts, RAM estimates, configurable iterative threshold/pass reports, measured-error reports, and pre-cleanup for unused UVs/tangents exist. | Add enforced geometric error bounds, AO/user-weighted decimation, and cleanup for future vertex colors/weights. |
 | Unwrap UV | UV0/UV1 unwrap intent, solver method, iteration, tolerance, sharp-edge seam and forbid-overlap policy intent, distortion, and packing diagnostics are represented. | Add destination-channel control, channel-as-destination behavior when lines of interest define islands, backend-enforced seam policies, create-seams-from-lines-of-interest, seam graph metadata, island merge/alignment, and real repack/padding/share-map controls. |
 
 Second-pass gaps from the Unity references:
@@ -337,7 +340,7 @@ Parity gaps to track:
    - Replace quality-criterion heuristics with measured geometric error.
    - Explicit decimation now supports UV importance modes: preserve full UV islands, preserve seam topology only, or ignore UVs by stripping UV/tangent attributes before simplification.
    - Pre-decimation cleanup now removes unused UV channels and tangents, records removed/preserved attribute metadata, and reports when preserved UVs can make simplification less efficient. Remaining work is vertex-color/weight cleanup and measured efficiency deltas.
-   - Make topology protection explicit and measured, especially for holes, boundary loops, singularities, and material/UV seam preservation.
+   - Topology/material/UV protection metrics now record protected hard-edge, hole-boundary, material-boundary, UV-seam, silhouette, and total feature-face counts. Remaining work is singularity-specific protection and protection-versus-reduction efficiency deltas.
    - Support AO or user-painted vertex weights as simplification constraints.
    - Explicit decimation now records the requested keep ratio when derivable and warns when the request keeps less than 20% of source triangles for close-view LOD0 assets.
    - Keep skinning, bones, and animation preservation out of scope until Fascat supports animated mesh imports.
@@ -409,8 +412,9 @@ These need more design and should not be mixed into documentation or diagnostics
    - Explicit decimation now supports UV importance modes for preserving islands, preserving seams only, or ignoring UV/tangent attributes before simplification.
    - Explicit decimation now records estimated RAM, budget-allocation mode, configurable iterative-threshold controls, and actual simplification pass counts.
    - Explicit decimation now supports pre-cleanup for unused UV channels and tangents, reports removed/preserved attributes, and warns when preserved UV seams or islands can reduce simplification efficiency.
+   - Explicit decimation now reports protected hard-edge, hole-boundary, material-boundary, UV-seam, silhouette, and total feature-face counts.
    - `criterion="quality"` now reports measured error, but still maps tolerances to a target ratio.
-   - Remaining polish: enforce geometric error bounds, preserve selected CAD features, add richer topology protection metrics, add vertex-color/weight cleanup, and add AO/user-weight constraints for very large meshes.
+   - Remaining polish: enforce geometric error bounds, preserve selected CAD features, add singularity-specific protection metrics, add vertex-color/weight cleanup, and add AO/user-weight constraints for very large meshes.
 
 5. BREP healing depth - first topology-risk reporting pass complete
    - BREP status now records wire, edge, free/unstitched-edge, small-edge, open-shell, and sliver-face counts.

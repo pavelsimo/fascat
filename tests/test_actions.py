@@ -342,6 +342,31 @@ def test_decimate_cleanup_attributes_remove_unused_uvs_and_report_constraints(
     assert any("preserved texture coordinates can reduce simplification efficiency" in warning for warning in warnings)
 
 
+def test_decimate_reports_topology_protection_metrics() -> None:
+    mesh = Mesh(
+        points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.asarray([[0, 1, 2], [2, 1, 3]], dtype=int),
+        material_indices=np.asarray([0, 1], dtype=int),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="panel", name="Panel", part_id="panel")]),
+        parts={"panel": Part(id="panel", name="Panel", mesh=mesh, material_ids=["red", "blue"])},
+    )
+
+    decimated = asset.decimate(DecimateOptions(target_ratio=0.5))
+    part = decimated.parts["panel"]
+    step = decimated.report.steps[-1]
+
+    assert part.metadata["decimate_protect_hole_boundary_faces"] == "2"
+    assert part.metadata["decimate_protect_material_boundary_faces"] == "2"
+    assert part.metadata["decimate_protect_silhouette_faces"] == "2"
+    assert part.metadata["decimate_protect_total_feature_faces"] == "2"
+    assert decimated.metadata["decimate_protected_feature_parts"] == "1"
+    assert decimated.metadata["decimate_protect_total_feature_faces"] == "2"
+    assert step.after["decimate_protected_feature_parts"] == 1
+    assert step.after["decimate_protect_total_feature_faces"] == 2
+
+
 def test_remove_holes_fills_small_boundary_loop() -> None:
     mesh = Mesh(
         points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float),
