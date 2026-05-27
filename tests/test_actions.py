@@ -170,6 +170,34 @@ def test_decimate_uses_selection_budget() -> None:
     assert decimated.triangle_count <= 3
     assert decimated.report.steps[-1].name == "decimate"
     assert decimated.report.steps[-1].options["target_triangles"] == 3
+    assert decimated.metadata["decimate_source_triangles"] == "6"
+    assert decimated.metadata["decimate_output_triangles"] == "3"
+    assert decimated.parts["body"].metadata["decimate_error_metric"] == "symmetric_vertex_nearest_distance"
+
+
+def test_quality_decimate_records_measured_error_metrics() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="body", name="Body", part_id="body")]),
+        parts={"body": Part(id="body", name="Body", mesh=_triangle_strip(8))},
+    )
+
+    decimated = asset.decimate(
+        DecimateOptions(
+            criterion="quality",
+            target_ratio=None,
+            surface_tolerance=0.25,
+            line_tolerance=0.1,
+            uv_tolerance=0.05,
+            budget_scope="part",
+        )
+    )
+
+    part = decimated.parts["body"]
+    assert part.metadata["decimate_criterion"] == "quality"
+    assert part.metadata["decimate_source_triangles"] == "8"
+    assert int(part.metadata["decimate_output_triangles"]) < 8
+    assert float(part.metadata["decimate_triangle_reduction"]) > 0.0
+    assert "measured vertex error" in decimated.report.steps[-1].warnings[0]
 
 
 def test_remove_holes_fills_small_boundary_loop() -> None:

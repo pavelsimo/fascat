@@ -1611,7 +1611,7 @@ def _convert_operation_diagnostics(payload: dict[str, Any]) -> list[dict[str, st
             add(
                 "decimate",
                 "approximate",
-                "quality decimation maps tolerances to a target ratio; geometric error bounds are not enforced",
+                "quality decimation maps tolerances to a target ratio and reports measured vertex error; bounds are not enforced",
             )
         else:
             add("decimate", "exact", "target decimation applies the requested triangle budget or ratio")

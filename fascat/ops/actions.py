@@ -93,6 +93,7 @@ def decimate_asset(
     *,
     selected_part_ids: set[str] | None = None,
 ) -> Asset:
+    source_meshes = _source_meshes(asset, selected_part_ids)
     if options.budget_scope == "selection":
         from fascat.ops.optimize import optimize_asset
 
@@ -114,20 +115,15 @@ def decimate_asset(
             selected_part_ids=selected_part_ids,
         )
         if options.criterion == "quality":
-            result.report.add_warning(
-                "decimate quality criterion uses a tolerance-derived target ratio; "
-                "error-bounded simplification is not implemented"
-            )
+            result.report.add_warning(_quality_decimation_warning())
         _enforce_triangle_budget(result, options, selected_part_ids=selected_part_ids)
+        _annotate_decimation_result(result, source_meshes, options, selected_part_ids=selected_part_ids)
         return result
 
     result = asset.copy(keep_source=True)
     ratio = _decimate_ratio(options)
     if options.criterion == "quality":
-        result.report.add_warning(
-            "decimate quality criterion uses a tolerance-derived target ratio; "
-            "error-bounded simplification is not implemented"
-        )
+        result.report.add_warning(_quality_decimation_warning())
     for part in result.parts.values():
         if selected_part_ids is not None and part.id not in selected_part_ids:
             continue
@@ -158,6 +154,7 @@ def decimate_asset(
         mesh.validate()
         part.mesh = mesh
         part.fingerprint = mesh.fingerprint()
+    _annotate_decimation_result(result, source_meshes, options, selected_part_ids=selected_part_ids)
     return result
 
 
@@ -315,6 +312,16 @@ class _HoleFillStats:
 
 
 @dataclass(frozen=True)
+class _DecimationMetrics:
+    source_vertices: int
+    source_triangles: int
+    output_triangles: int
+    triangle_reduction: float
+    max_vertex_error: float
+    mean_vertex_error: float
+
+
+@dataclass(frozen=True)
 class _HoleLoop:
     loop: list[int]
     diameter: float
@@ -442,6 +449,103 @@ def _decimate_ratio(options: DecimateOptions) -> float | None:
         tolerance = max(options.surface_tolerance or 0.0, options.line_tolerance or 0.0, options.uv_tolerance or 0.0)
         return max(0.1, min(0.95, 1.0 - tolerance))
     return 0.5
+
+
+def _quality_decimation_warning() -> str:
+    return (
+        "decimate quality criterion maps tolerances to a target ratio and records measured vertex error; "
+        "tolerance-bounded simplification is not enforced"
+    )
+
+
+def _source_meshes(asset: Asset, selected_part_ids: set[str] | None) -> dict[str, Mesh]:
+    return {
+        part.id: part.mesh.copy()
+        for part in asset.parts.values()
+        if (selected_part_ids is None or part.id in selected_part_ids) and part.mesh is not None
+    }
+
+
+def _annotate_decimation_result(
+    asset: Asset,
+    source_meshes: dict[str, Mesh],
+    options: DecimateOptions,
+    *,
+    selected_part_ids: set[str] | None,
+) -> None:
+    source_total = 0
+    output_total = 0
+    max_error = 0.0
+    weighted_error = 0.0
+    measured_parts = 0
+    for part in asset.parts.values():
+        if selected_part_ids is not None and part.id not in selected_part_ids:
+            continue
+        source = source_meshes.get(part.id)
+        if source is None or part.mesh is None:
+            continue
+        metrics = _decimation_metrics(source, part.mesh)
+        source_total += metrics.source_triangles
+        output_total += metrics.output_triangles
+        max_error = max(max_error, metrics.max_vertex_error)
+        weighted_error += metrics.mean_vertex_error * max(metrics.source_vertices, 1)
+        measured_parts += max(metrics.source_vertices, 1)
+        part.metadata = {
+            **part.metadata,
+            "decimate_criterion": options.criterion,
+            "decimate_budget_scope": options.budget_scope,
+            "decimate_source_triangles": str(metrics.source_triangles),
+            "decimate_output_triangles": str(metrics.output_triangles),
+            "decimate_triangle_reduction": f"{metrics.triangle_reduction:.9g}",
+            "decimate_max_vertex_error": f"{metrics.max_vertex_error:.9g}",
+            "decimate_mean_vertex_error": f"{metrics.mean_vertex_error:.9g}",
+            "decimate_error_metric": "symmetric_vertex_nearest_distance",
+        }
+    if source_total == 0:
+        return
+    reduction = (source_total - output_total) / source_total
+    asset.metadata["decimate_source_triangles"] = str(source_total)
+    asset.metadata["decimate_output_triangles"] = str(output_total)
+    asset.metadata["decimate_triangle_reduction"] = f"{reduction:.9g}"
+    asset.metadata["decimate_max_vertex_error"] = f"{max_error:.9g}"
+    asset.metadata["decimate_mean_vertex_error"] = f"{(weighted_error / measured_parts):.9g}"
+    asset.metadata["decimate_error_metric"] = "symmetric_vertex_nearest_distance"
+
+
+def _decimation_metrics(source: Mesh, output: Mesh) -> _DecimationMetrics:
+    max_error, mean_error = _symmetric_vertex_error(source.points, output.points)
+    reduction = 0.0
+    if source.triangle_count:
+        reduction = (source.triangle_count - output.triangle_count) / source.triangle_count
+    return _DecimationMetrics(
+        source_vertices=source.vertex_count,
+        source_triangles=source.triangle_count,
+        output_triangles=output.triangle_count,
+        triangle_reduction=max(0.0, reduction),
+        max_vertex_error=max_error,
+        mean_vertex_error=mean_error,
+    )
+
+
+def _symmetric_vertex_error(left: FloatArray, right: FloatArray) -> tuple[float, float]:
+    if left.size == 0 or right.size == 0:
+        return 0.0, 0.0
+    left_distances = _nearest_distances(left, right)
+    right_distances = _nearest_distances(right, left)
+    max_error = max(float(left_distances.max(initial=0.0)), float(right_distances.max(initial=0.0)))
+    mean_error = float((left_distances.mean() + right_distances.mean()) * 0.5)
+    return max_error, mean_error
+
+
+def _nearest_distances(points: FloatArray, targets: FloatArray) -> FloatArray:
+    distances = np.empty(points.shape[0], dtype=np.float64)
+    chunk_size = 2048
+    for start in range(0, points.shape[0], chunk_size):
+        end = min(start + chunk_size, points.shape[0])
+        delta = points[start:end, None, :] - targets[None, :, :]
+        squared = np.einsum("ijk,ijk->ij", delta, delta)
+        distances[start:end] = np.sqrt(squared.min(axis=1))
+    return distances
 
 
 def _enforce_triangle_budget(

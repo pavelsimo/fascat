@@ -157,7 +157,7 @@ Units and behavior notes:
 - Angles such as `--angle`, `--normal-tolerance`, and `--hard-edge-angle` are degrees.
 - Ratios such as `--ratio`, `--lods`, and decimation target ratios are fractions between `0` and `1`; LOD ratios must be sorted from highest to lowest detail.
 - Screen coverage values are fractions between `0` and `1`; file-size budgets are megabytes; atlas and bake sizes are pixels.
-- `--decimate-criterion quality` currently maps tolerances to a target ratio and reports a warning because error-bounded simplification is not implemented.
+- `--decimate-criterion quality` maps tolerances to a target ratio, records measured nearest-vertex error and achieved triangle reduction, and reports a warning because tolerance bounds are not enforced.
 - `--remove-holes` uses mesh boundary classification and filling when BREP hole removal is unavailable. `--hole-types` filters inferred through, blind, and surface boundary loops; closed BREP feature holes still require a BREP feature backend.
 - `--remove-occluded` uses deterministic sampled visibility. Strategy changes the direction set, `--hemi-evaluation` restricts rays to upper-hemisphere and side views, and `--occlusion-level` controls whether fully hidden parts, material groups, or triangles are removed.
 - `--draco` is rejected until a Draco encoder backend is integrated.
@@ -260,7 +260,7 @@ warnings to distinguish exact work from fallbacks.
 | Material baking | Approximate | `bake_materials` emits constant embedded texture maps from material factors and warns that raster baking is not implemented | Generate real atlas textures from source texture/material inputs |
 | Hole removal | Approximate | `remove_holes` warns when it falls back to mesh boundary classification and filling | Add BREP feature-level removal for closed cylindrical and pocket holes |
 | Occlusion removal | Approximate | `remove_occluded` warns that sampled visibility may require higher precision for thin occluders | Add acceleration structures, measured confidence, and raster/GPU backends for high-poly production scenes |
-| Decimation | Partial | `decimate`; quality criterion is reported as heuristic in dry-run diagnostics | Add measured geometric error, topology protection metrics, iterative limits, and UV/AO importance modes |
+| Decimation | Partial | `decimate`; quality criterion records measured vertex error but still uses a ratio heuristic | Enforce geometric error bounds and add topology protection metrics, iterative limits, and UV/AO importance modes |
 | LOD generation | Partial | `run_lod_generators` / `lods` report steps | Preserve occurrence-level LOD chains and add far-LOD merge plus validation |
 | Runtime compression | Partial | glTF quantization and meshopt are implemented; texture compression is metadata-only; Draco is rejected | Add real KTX2/Basis output and a Draco path only if a reliable encoder is integrated |
 | Export and budgets | Implemented for USD, USDZ, glTF/GLB, OBJ, STL | `write` report includes file size and optional budget warnings | Add geometry/texture/metadata size breakdowns and export cleanup for unused resources |

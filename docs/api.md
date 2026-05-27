@@ -578,13 +578,13 @@ Optimization action parameters:
 | `BakeMaterialOptions` | `padding` | Texture padding between islands in pixels. |
 | `BakeMaterialOptions` | `bake` | Maps to bake, such as `base_color`, `opacity`, `normal`, `roughness`, `metallic`, `ao`, or `emissive`. |
 | `BakeMaterialOptions` | `merge_output` | Replace selected materials with a shared baked output material. |
-| `DecimateOptions` | `criterion` | `target` prioritizes a triangle budget. `quality` maps tolerances to a target ratio and warns because error-bounded reduction is not implemented. |
+| `DecimateOptions` | `criterion` | `target` prioritizes a triangle budget. `quality` maps tolerances to a target ratio, records measured vertex error, and warns because tolerance bounds are not enforced. |
 | `DecimateOptions` | `target_triangles` | Absolute triangle target for selected geometry. |
 | `DecimateOptions` | `target_ratio` | Fraction of source triangles to keep when no absolute target is set. |
-| `DecimateOptions` | `surface_tolerance` | Tolerance input used by `criterion="quality"` to derive a reduction ratio; it is not an enforced geometric error bound. |
-| `DecimateOptions` | `line_tolerance` | Line-feature tolerance input used by `criterion="quality"` ratio derivation. |
+| `DecimateOptions` | `surface_tolerance` | Tolerance input used by `criterion="quality"` to derive a reduction ratio; post-run metadata records measured vertex error but does not enforce this value. |
+| `DecimateOptions` | `line_tolerance` | Line-feature tolerance input used by `criterion="quality"` ratio derivation and reporting. |
 | `DecimateOptions` | `normal_tolerance` | Maximum normal deviation in degrees. |
-| `DecimateOptions` | `uv_tolerance` | UV tolerance input used by `criterion="quality"` ratio derivation. |
+| `DecimateOptions` | `uv_tolerance` | UV tolerance input used by `criterion="quality"` ratio derivation and reporting. |
 | `DecimateOptions` | `protect_topology` | Avoid topology changes that would remove important boundaries. |
 | `DecimateOptions` | `preserve_painted_areas` | Preserve metadata-marked or painted regions where present. |
 | `DecimateOptions` | `budget_scope` | `part` budgets each part separately. `selection` lets dense selected parts absorb more reduction. |

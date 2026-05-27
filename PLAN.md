@@ -157,11 +157,10 @@ These need more design and should not be mixed into documentation or diagnostics
    - glTF export writes baked base-color/opacity, metallic-roughness, normal, AO, and emissive texture bindings when present.
    - Remaining polish: generate real atlas textures from source texture/material inputs, reuse xatlas UVs where possible, add USD texture bindings, AO baking, and texture resizing/compression prep.
 
-4. Error-bounded simplification
-   - Replace `criterion="quality"` ratio heuristics with measured geometric error.
-   - Preserve hard edges, boundary edges, material seams, UV seams, and selected CAD features.
-   - Report achieved error and triangle reduction.
-   - Add iterative processing and vertex-weight constraints for very large meshes.
+4. Error-bounded simplification - first reporting pass complete
+   - Decimation now records achieved triangle reduction and measured symmetric nearest-vertex error on parts and asset metadata.
+   - `criterion="quality"` now reports measured error, but still maps tolerances to a target ratio.
+   - Remaining polish: enforce geometric error bounds, preserve selected CAD features, add richer topology protection metrics, iterative processing, and vertex-weight constraints for very large meshes.
 
 5. BREP healing depth
    - Implement or delegate sliver-face removal.
