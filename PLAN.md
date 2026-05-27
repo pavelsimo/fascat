@@ -176,9 +176,9 @@ Parity gaps to track:
    - Expose PNG/JPEG fallback texture export settings, including PNG compression and JPEG quality, for formats or environments where KTX2 is not available.
 
 11. Platform budgets
-   - Desktop, WebGL/web, mobile, and VR profiles now include documented target-FPS, triangle, vertex, per-mesh vertex/index-buffer, and draw-call budgets.
-   - Conversion reports now include a `profile_budget` step for selected-profile budget status and warnings when output exceeds profile triangle, vertex, per-mesh vertex/index-buffer, or draw-call budgets.
-   - Remaining work: add texture-memory, texture-resolution, and load-time budget checks.
+   - Desktop, WebGL/web, mobile, and VR profiles now include documented target-FPS, triangle, vertex, per-mesh vertex/index-buffer, texture-resolution, and draw-call budgets.
+   - Conversion reports now include a `profile_budget` step for selected-profile budget status and warnings when output exceeds profile triangle, vertex, per-mesh vertex/index-buffer, texture-resolution, or draw-call budgets.
+   - Remaining work: add texture-memory and load-time budget checks.
 
 ## Near-Term Polish
 

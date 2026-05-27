@@ -318,6 +318,20 @@ def _add_profile_budget_report(asset: Asset, profile: ConversionProfile) -> None
                 f"profile budget exceeded for {profile.name}: {over_count} mesh(es) exceed "
                 f"{budget.max_vertices_per_mesh} vertices (largest {largest})"
             )
+    if budget.max_texture_resolution is not None:
+        texture_resolutions = _material_texture_resolutions(asset)
+        largest = max(texture_resolutions, default=0)
+        over_count = sum(1 for resolution in texture_resolutions if resolution > budget.max_texture_resolution)
+        after["profile_texture_resolution_budget"] = budget.max_texture_resolution
+        after["profile_largest_texture_resolution"] = largest
+        after["profile_texture_sets_with_resolution"] = len(texture_resolutions)
+        after["profile_textures_over_resolution_budget"] = over_count
+        if over_count:
+            violations += 1
+            warnings.append(
+                f"profile budget exceeded for {profile.name}: {over_count} texture set(s) exceed "
+                f"{budget.max_texture_resolution}px (largest {largest}px)"
+            )
     if budget.max_draw_calls is not None:
         after["profile_draw_call_budget"] = budget.max_draw_calls
         over = max(0, asset.draw_call_count - budget.max_draw_calls)
@@ -342,6 +356,31 @@ def _mesh_vertex_counts(asset: Asset) -> list[int]:
         for lod_mesh in part.lod_meshes:
             counts.append(lod_mesh.vertex_count)
     return counts
+
+
+def _material_texture_resolutions(asset: Asset) -> list[int]:
+    resolutions: list[int] = []
+    for material in asset.materials.values():
+        for key in ("baked_texture_resolution", "maps_resolution"):
+            resolution = _metadata_positive_int(material.metadata.get(key))
+            if resolution is not None:
+                resolutions.append(resolution)
+                break
+    return resolutions
+
+
+def _metadata_positive_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str):
+        try:
+            parsed = int(value)
+        except ValueError:
+            return None
+        return parsed if parsed > 0 else None
+    return None
 
 
 def _file_size_budget(

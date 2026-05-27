@@ -42,6 +42,7 @@ def realtime_desktop(
             max_triangles=max_triangles,
             max_vertices=max_triangles * 3,
             max_vertices_per_mesh=65_535,
+            max_texture_resolution=4_096,
             max_draw_calls=2_000,
         ),
     )
@@ -66,6 +67,7 @@ def realtime_web(
             max_triangles=max_triangles,
             max_vertices=max_triangles * 3,
             max_vertices_per_mesh=65_535,
+            max_texture_resolution=2_048,
             max_draw_calls=500,
         ),
     )
@@ -90,6 +92,7 @@ def realtime_mobile(
             max_triangles=max_triangles,
             max_vertices=max_triangles * 3,
             max_vertices_per_mesh=65_535,
+            max_texture_resolution=2_048,
             max_draw_calls=250,
         ),
     )
@@ -114,6 +117,7 @@ def virtual_reality(
             max_triangles=max_triangles,
             max_vertices=max_triangles * 3,
             max_vertices_per_mesh=65_535,
+            max_texture_resolution=2_048,
             max_draw_calls=250,
         ),
     )

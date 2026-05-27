@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from fascat.asset import Asset, Node, Part
+from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.options import (
     BakeMaterialOptions,
@@ -654,10 +655,19 @@ def test_convert_report_checks_profile_budget(monkeypatch, tmp_path: Path) -> No
             max_triangles=1,
             max_vertices=2,
             max_vertices_per_mesh=2,
+            max_texture_resolution=1_024,
             max_draw_calls=1,
         ),
     )
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
+    source = _triangle_asset()
+    source.parts["part"].material_ids = ["mat"]
+    source.materials["mat"] = Material(
+        id="mat",
+        name="Material",
+        base_color=(1.0, 1.0, 1.0, 1.0),
+        metadata={"baked_texture_resolution": "2048"},
+    )
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: source)
     monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False, options=None: None)
 
     converted = convert("input.step", tmp_path / "output.usdc", profile=profile, validate_output=False)
@@ -670,6 +680,7 @@ def test_convert_report_checks_profile_budget(monkeypatch, tmp_path: Path) -> No
         "max_triangles": 1,
         "max_vertices": 2,
         "max_vertices_per_mesh": 2,
+        "max_texture_resolution": 1024,
         "max_draw_calls": 1,
     }
     assert budget_step.before["triangles"] == 1
@@ -681,13 +692,18 @@ def test_convert_report_checks_profile_budget(monkeypatch, tmp_path: Path) -> No
     assert budget_step.after["profile_max_vertices_per_mesh_budget"] == 2
     assert budget_step.after["profile_largest_mesh_vertices"] == 3
     assert budget_step.after["profile_meshes_over_vertex_budget"] == 1
+    assert budget_step.after["profile_texture_resolution_budget"] == 1024
+    assert budget_step.after["profile_largest_texture_resolution"] == 2048
+    assert budget_step.after["profile_texture_sets_with_resolution"] == 1
+    assert budget_step.after["profile_textures_over_resolution_budget"] == 1
     assert budget_step.after["profile_draw_calls_over_budget"] == 0
-    assert budget_step.after["profile_budget_violations"] == 2
+    assert budget_step.after["profile_budget_violations"] == 3
     assert budget_step.warnings == [
         "profile budget exceeded for strict: vertices 3 > 2",
         "profile budget exceeded for strict: 1 mesh(es) exceed 2 vertices (largest 3)",
+        "profile budget exceeded for strict: 1 texture set(s) exceed 1024px (largest 2048px)",
     ]
-    assert converted.report.warnings[-2:] == budget_step.warnings
+    assert converted.report.warnings[-3:] == budget_step.warnings
 
 
 def test_convert_report_finishes_when_validation_is_disabled(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]

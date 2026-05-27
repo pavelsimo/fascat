@@ -835,15 +835,15 @@ asset = fc.convert("motor.step", "motor.glb", profile=profile)
 
 Available profiles:
 
-| Profile | Use | Target FPS | Triangle budget | Per-mesh vertex budget | Draw-call budget |
-|---------|-----|------------|-----------------|------------------------|------------------|
-| `inspect-only` | inspect STEP input without conversion | unset | unset | unset | unset |
-| `realtime-desktop` | higher-detail OpenUSD or glTF output | 60 | 1,000,000 | 65,535 | 2,000 |
-| `realtime-web` | lower triangle budgets for web delivery | 60 | 250,000 | 65,535 | 500 |
-| `realtime-mobile` | tighter mobile runtime budget for app-store builds | 60 | 150,000 | 65,535 | 250 |
-| `virtual-reality` | balanced triangle budgets and LODs for VR runtimes | 90 | 500,000 | 65,535 | 250 |
+| Profile | Use | Target FPS | Triangle budget | Per-mesh vertex budget | Texture resolution budget | Draw-call budget |
+|---------|-----|------------|-----------------|------------------------|---------------------------|------------------|
+| `inspect-only` | inspect STEP input without conversion | unset | unset | unset | unset | unset |
+| `realtime-desktop` | higher-detail OpenUSD or glTF output | 60 | 1,000,000 | 65,535 | 4,096px | 2,000 |
+| `realtime-web` | lower triangle budgets for web delivery | 60 | 250,000 | 65,535 | 2,048px | 500 |
+| `realtime-mobile` | tighter mobile runtime budget for app-store builds | 60 | 150,000 | 65,535 | 2,048px | 250 |
+| `virtual-reality` | balanced triangle budgets and LODs for VR runtimes | 90 | 500,000 | 65,535 | 2,048px | 250 |
 
-You can pass either a profile name or a `ConversionProfile` returned by `fc.profiles`. Conversion reports include a `profile_budget` step when the selected profile has a budget. That step records target FPS, triangle, vertex, per-mesh vertex, and draw-call budgets, plus any amount over budget as report warnings.
+You can pass either a profile name or a `ConversionProfile` returned by `fc.profiles`. Conversion reports include a `profile_budget` step when the selected profile has a budget. That step records target FPS, triangle, vertex, per-mesh vertex, texture-resolution, and draw-call budgets, plus any amount over budget as report warnings.
 
 ## Functional wrappers
 

@@ -739,6 +739,7 @@ class PlatformBudget:
     max_triangles: int | None = None
     max_vertices: int | None = None
     max_vertices_per_mesh: int | None = None
+    max_texture_resolution: int | None = None
     max_draw_calls: int | None = None
 
     def __post_init__(self) -> None:
@@ -750,6 +751,8 @@ class PlatformBudget:
             raise ValueError("max_vertices must be greater than 0 when set")
         if self.max_vertices_per_mesh is not None and self.max_vertices_per_mesh <= 0:
             raise ValueError("max_vertices_per_mesh must be greater than 0 when set")
+        if self.max_texture_resolution is not None and self.max_texture_resolution <= 0:
+            raise ValueError("max_texture_resolution must be greater than 0 when set")
         if self.max_draw_calls is not None and self.max_draw_calls <= 0:
             raise ValueError("max_draw_calls must be greater than 0 when set")
 
