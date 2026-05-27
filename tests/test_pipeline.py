@@ -329,6 +329,59 @@ def test_pipeline_rejects_unknown_operation_during_parse() -> None:
         PipelineSpec.from_dict({"steps": [{"op": "tesselate"}]})
 
 
+def test_pipeline_rejects_unknown_step_keys_with_line(tmp_path: Path) -> None:
+    pipeline_file = tmp_path / "bad-step-key.toml"
+    pipeline_file.write_text('[[steps]]\nop = "repair"\ntolerence = 0.1\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="line 3: unsupported key for repair pipeline step: tolerence"):
+        PipelineSpec.from_file(pipeline_file)
+
+
+def test_pipeline_validates_step_options_during_parse() -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"pipeline step 1 \(tessellate\): tessellation sag must be greater than 0",
+    ):
+        PipelineSpec.from_dict({"steps": [{"op": "tessellate", "sag": 0.0}]})
+
+
+def test_pipeline_rejects_incompatible_step_options_with_line(tmp_path: Path) -> None:
+    pipeline_file = tmp_path / "bad-merge.toml"
+    pipeline_file.write_text('[[steps]]\nop = "merge"\nmode = "regions"\n', encoding="utf-8")
+
+    with pytest.raises(
+        ValueError,
+        match=r"line 3: pipeline step 1 \(merge\): region_size must be greater than 0 for regions merge mode",
+    ):
+        PipelineSpec.from_file(pipeline_file)
+
+
+def test_pipeline_rejects_unknown_filter_keys() -> None:
+    with pytest.raises(ValueError, match="unsupported pipeline filter key: namess"):
+        PipelineSpec.from_dict({"filters": [{"name": "fasteners", "namess": "Bolt*"}], "steps": [{"op": "repair"}]})
+
+
+def test_pipeline_rejects_where_and_where_not_during_parse() -> None:
+    with pytest.raises(ValueError, match="pipeline step cannot set both where and where_not"):
+        PipelineSpec.from_dict(
+            {
+                "filters": [{"name": "fasteners", "path": "*/Fasteners/*"}],
+                "steps": [{"op": "repair", "where": "fasteners", "where_not": "fasteners"}],
+            }
+        )
+
+
+def test_pipeline_rejects_invalid_import_modes_with_line(tmp_path: Path) -> None:
+    pipeline_file = tmp_path / "bad-import.toml"
+    pipeline_file.write_text('[import]\nmetadata = "verbose"\n\n[[steps]]\nop = "repair"\n', encoding="utf-8")
+
+    with pytest.raises(
+        ValueError,
+        match=r"line 2: pipeline import metadata must be a bool or one of: none, summary, full",
+    ):
+        PipelineSpec.from_file(pipeline_file)
+
+
 def test_convert_pipeline_file_can_set_import_and_export_metadata(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

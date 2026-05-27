@@ -277,6 +277,7 @@ def test_convert_rejects_invalid_pipeline_file(tmp_path: Path) -> None:
 
     assert result.exit_code == 2
     assert "Invalid pipeline file" in result.output
+    assert "line 1: pipeline step entries require an op" in result.output
 
 
 def test_inspect_dry_run() -> None:

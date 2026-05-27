@@ -41,6 +41,8 @@ that are currently conservative approximations.
 
 - API parameter documentation was expanded so examples are backed by option descriptions.
 - Docs rendering issues were fixed, including Python highlighting, heading anchors, and sidebar branding.
+- Approximate or metadata-only operations now surface public report warnings, and dry-run diagnostics classify planned operations as exact, approximate, or metadata-only.
+- Pipeline TOML files now validate supported keys, operation options, filter conflicts, and line-number diagnostics before conversion starts.
 - Unsupported Draco compression now raises instead of silently writing uncompressed output.
 - Export file-size budgets are recorded and warn when outputs exceed the budget.
 - glTF LODs now include node-level `MSFT_lod` references in addition to Fascat extras.
@@ -131,32 +133,17 @@ Parity gaps to track:
 These are the next small-to-medium tasks. They should be handled before larger
 algorithmic work because they improve trust in the current tool.
 
-1. Documentation completeness
-   - Audit `docs/api.md` and `docs/reference.md` for every public option class and CLI flag.
-   - Explain parameter units, defaults, warnings, and unsupported behavior.
-   - Add short before/after report examples for destructive operations.
-
-2. Report honesty and CLI diagnostics
-   - Surface BREP sliver-face no-op warnings consistently through public reports.
-   - Ensure `remove_holes`, `remove_occluded`, `bake_materials`, and quality decimation always report their approximation level.
-   - Make dry-run output show which operations are exact, approximate, or metadata-only.
-
-3. Pipeline TOML validation
-   - Validate operation names, unknown keys, and incompatible option combinations at parse time.
-   - Return line-oriented diagnostics where possible.
-   - Add focused tests for malformed pipelines.
-
-4. Tangent and normal correctness
+1. Tangent and normal correctness
    - Compute tangent handedness (`w`) instead of always writing `+1`.
    - Add regression tests for hard-edge normals after repair and material-index changes.
    - Verify glTF and OBJ normal behavior on flat, smooth, and mixed meshes.
 
-5. Analysis polish
+2. Analysis polish
    - Add clearer lower-bound reporting when self-intersection checks hit `max_self_intersection_pairs`.
    - Add tests for coplanar overlap, endpoint contact, and adjacent-triangle exclusions.
    - Keep compatibility keys only where needed and document their migration path.
 
-6. Unity parity matrix
+3. Unity parity matrix
    - Add a compact docs table that maps Unity-inspired capabilities to Fascat status: implemented, approximate, unsupported, deferred.
    - Link each approximate feature to its report warning and next implementation step.
 

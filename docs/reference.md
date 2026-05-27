@@ -238,6 +238,12 @@ metadata = "combine"
 fascat convert motor.step motor.glb --pipeline realtime.toml
 ```
 
+Pipeline files are validated before conversion starts. Unknown top-level,
+filter, import/export, or operation keys are rejected, and option constraints
+such as invalid numeric ranges, missing `external_path`, conflicting `where` /
+`where_not`, or unsupported operation names fail during parse. CLI errors include
+`line N` when the source file location can be identified.
+
 ## Validate flags
 
 | Flag | Default | Description |
