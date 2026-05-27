@@ -390,3 +390,20 @@ def test_tessellation_max_polygon_length_warns_without_quality_report(monkeypatc
     assert tessellated.report.steps[-1].warnings == [
         "part has 3 tessellated edges longer than max_polygon_length: Part"
     ]
+
+
+def test_tessellation_free_edge_report_records_reused_meshes() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Part", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=triangle_mesh())},
+    )
+
+    tessellated = asset.tessellate(Tessellation(free_edge_report=True))
+    part = tessellated.parts["part"]
+
+    assert part.mesh is not None
+    assert part.metadata["tessellation_free_edges"] == "3"
+    assert part.metadata["tessellation_non_manifold_edges"] == "0"
+    assert part.mesh.metadata["tessellation_free_edges"] == "3"
+    assert part.mesh.metadata["tessellation_non_manifold_edges"] == "0"
+    assert tessellated.report.steps[-1].warnings == ["part has 3 free tessellation edges: Part"]

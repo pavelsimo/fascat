@@ -470,6 +470,10 @@ def cmd_convert(
         Path | None,
         typer.Option("--quality-report", help="Write per-part tessellation quality metrics as JSON."),
     ] = None,
+    free_edge_report: Annotated[
+        bool,
+        typer.Option("--free-edge-report", help="Record and warn about free tessellation edges."),
+    ] = False,
     reuse_existing_meshes: Annotated[
         bool,
         typer.Option(
@@ -858,6 +862,7 @@ def cmd_convert(
         "curvature_adaptive": curvature_adaptive,
         "avoid_skinny_triangles": avoid_skinny_triangles,
         "quality_report": str(quality_report) if quality_report else None,
+        "free_edge_report": free_edge_report,
         "reuse_existing_meshes": reuse_existing_meshes,
         "heal_brep": heal_brep,
         "heal_tolerance": heal_tolerance,
@@ -1116,6 +1121,7 @@ def cmd_convert(
             curvature_adaptive=curvature_adaptive,
             avoid_skinny_triangles=avoid_skinny_triangles,
             quality_report=quality_report is not None or base_tessellation.quality_report,
+            free_edge_report=free_edge_report or base_tessellation.free_edge_report,
             reuse_existing_meshes=reuse_existing_meshes,
         )
         optimize_options = profile_options.optimize

@@ -133,6 +133,7 @@ def test_convert_help() -> None:
     assert "--decimate" in plain(result.output)
     assert "--sag-ratio" in plain(result.output)
     assert "--reuse-existing-meshes" in plain(result.output)
+    assert "--free-edge-report" in plain(result.output)
     assert "--remove-holes" in plain(result.output)
     assert "--remove-occluded" in plain(result.output)
     assert "--explode" in plain(result.output)
@@ -169,6 +170,7 @@ def test_convert_dry_run_json() -> None:
     assert payload["dry_run"] is True
     assert payload["sag_ratio"] == 0.01
     assert payload["max_polygon_length"] is None
+    assert payload["free_edge_report"] is False
     assert payload["reuse_existing_meshes"] is True
     diagnostics = {item["operation"]: item for item in payload["operation_diagnostics"]}
     assert diagnostics["import"]["level"] == "exact"
@@ -253,6 +255,7 @@ where = "fasteners"
 sag = 0.2
 sag-ratio = 0.01
 max-polygon-length = 3.0
+free-edge-report = true
 reuse-existing-meshes = false
 
 [[steps]]
@@ -278,6 +281,7 @@ target_triangles = 80000
     assert [step["op"] for step in payload["pipeline_steps"]] == ["tessellate", "optimize"]
     assert payload["pipeline_steps"][0]["sag_ratio"] == 0.01
     assert payload["pipeline_steps"][0]["max_polygon_length"] == 3.0
+    assert payload["pipeline_steps"][0]["free_edge_report"] is True
     assert payload["pipeline_steps"][0]["reuse_existing_meshes"] is False
 
 
@@ -780,6 +784,7 @@ def test_convert_writes_tessellation_quality_report(monkeypatch, tmp_path: Path)
         assert tessellation.max_polygon_length == 3.0
         assert tessellation.avoid_skinny_triangles is True
         assert tessellation.quality_report is True
+        assert tessellation.free_edge_report is True
         assert tessellation.reuse_existing_meshes is False
         return asset
 
@@ -798,6 +803,7 @@ def test_convert_writes_tessellation_quality_report(monkeypatch, tmp_path: Path)
             "--sag-ratio",
             "0.02",
             "--retessellate-existing-meshes",
+            "--free-edge-report",
             "--avoid-skinny-triangles",
             "--quality-report",
             str(quality_file),

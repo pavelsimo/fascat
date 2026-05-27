@@ -53,6 +53,7 @@ _TESSELLATION_PART_SETTING_KEYS = {
     "curvature_adaptive",
     "avoid_skinny_triangles",
     "quality_report",
+    "free_edge_report",
     "create_normals",
     "keep_brep",
     "reuse_existing_meshes",
@@ -84,6 +85,7 @@ class Tessellation:
     curvature_adaptive: bool = False
     avoid_skinny_triangles: bool = False
     quality_report: bool = False
+    free_edge_report: bool = False
     create_normals: bool = True
     keep_brep: bool = False
     reuse_existing_meshes: bool = True

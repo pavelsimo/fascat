@@ -21,6 +21,7 @@ def tessellate_asset(asset: Asset, options: Tessellation, *, selected_part_ids: 
             continue
         part_options = _options_for_part(options, part)
         if part.mesh is not None and part_options.reuse_existing_meshes:
+            _record_tessellation_diagnostics(result, part, part_options)
             continue
         if part.source_shape is None:
             if part.mesh is None:
@@ -51,16 +52,7 @@ def tessellate_asset(asset: Asset, options: Tessellation, *, selected_part_ids: 
         else:
             part.mesh = cached_mesh.copy()
         part.fingerprint = part.mesh.fingerprint()
-        metrics = None
-        if part_options.quality_report:
-            metrics = _store_quality_report(part, part_options)
-        elif part_options.max_polygon_length is not None:
-            metrics = part.mesh.quality_metrics(
-                min_edge_length=part_options.min_edge_length,
-                max_edge_length=part_options.max_polygon_length,
-            )
-        if part_options.max_polygon_length is not None:
-            _warn_long_polygons(result, part, part_options, metrics)
+        _record_tessellation_diagnostics(result, part, part_options)
         if not part_options.keep_brep:
             part.source_shape = None
     if selected_part_ids is not None:
@@ -211,6 +203,23 @@ def _apply_mesh_tessellation_controls(mesh: Mesh, options: Tessellation) -> Mesh
     return result
 
 
+def _record_tessellation_diagnostics(asset: Asset, part: Part, options: Tessellation) -> None:
+    if part.mesh is None:
+        return
+    metrics: dict[str, int | float] | None = None
+    if options.quality_report:
+        metrics = _store_quality_report(part, options)
+    if (options.free_edge_report or options.max_polygon_length is not None) and metrics is None:
+        metrics = part.mesh.quality_metrics(
+            min_edge_length=options.min_edge_length,
+            max_edge_length=_quality_max_edge_length(options),
+        )
+    if options.free_edge_report:
+        _store_free_edge_report(asset, part, metrics)
+    if options.max_polygon_length is not None:
+        _warn_long_polygons(asset, part, options, metrics)
+
+
 def _store_quality_report(part: Part, options: Tessellation) -> dict[str, int | float] | None:
     if part.mesh is None:
         return None
@@ -235,6 +244,26 @@ def _store_quality_report(part: Part, options: Tessellation) -> dict[str, int | 
 
 def _quality_max_edge_length(options: Tessellation) -> float | None:
     return options.max_polygon_length if options.max_polygon_length is not None else options.max_edge_length
+
+
+def _store_free_edge_report(
+    asset: Asset,
+    part: Part,
+    metrics: dict[str, int | float] | None,
+) -> None:
+    if metrics is None:
+        return
+    boundary_edges = int(metrics["boundary_edges"])
+    non_manifold_edges = int(metrics["non_manifold_edges"])
+    part.metadata["tessellation_free_edges"] = str(boundary_edges)
+    part.metadata["tessellation_non_manifold_edges"] = str(non_manifold_edges)
+    if part.mesh is not None:
+        part.mesh.metadata["tessellation_free_edges"] = str(boundary_edges)
+        part.mesh.metadata["tessellation_non_manifold_edges"] = str(non_manifold_edges)
+    if boundary_edges > 0:
+        asset.report.add_warning(f"part has {boundary_edges} free tessellation edges: {part.name}")
+    if non_manifold_edges > 0:
+        asset.report.add_warning(f"part has {non_manifold_edges} non-manifold tessellation edges: {part.name}")
 
 
 def _warn_long_polygons(
@@ -282,6 +311,7 @@ def _tessellation_settings_key(options: Tessellation) -> tuple[object, ...]:
         options.curvature_adaptive,
         options.avoid_skinny_triangles,
         options.create_normals,
+        options.free_edge_report,
         options.reuse_existing_meshes,
     )
 

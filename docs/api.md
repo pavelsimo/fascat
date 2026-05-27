@@ -21,6 +21,7 @@ asset = asset.tessellate(
         min_edge_length=None,
         max_edge_length=None,
         max_polygon_length=None,
+        free_edge_report=False,
         reuse_existing_meshes=True,
         preserve_boundaries=True,
         curvature_adaptive=False,
@@ -342,6 +343,7 @@ asset = fc.read_step("motor.step").tessellate(
         curvature_adaptive=True,
         avoid_skinny_triangles=True,
         quality_report=True,
+        free_edge_report=True,
         reuse_existing_meshes=True,
         part_settings={
             "housing": {"sag": 0.03, "sag_ratio": 0.005, "max_edge_length": 1.0},
@@ -370,6 +372,7 @@ Tessellation parameters:
 | `curvature_adaptive` | Request curvature-aware meshing from the backend when available. |
 | `avoid_skinny_triangles` | Run a cleanup pass that reduces long skinny triangles. |
 | `quality_report` | Record per-part tessellation quality metrics for later reporting. |
+| `free_edge_report` | Record free/boundary edge and non-manifold edge counts on tessellated parts and warn when free edges are present. |
 | `create_normals` | Generate normals during tessellation when the backend can provide them. |
 | `keep_brep` | Keep source BREP handles on parts after tessellation for later BREP-aware operations. |
 | `reuse_existing_meshes` | Reuse meshes already present on imported parts. Set to `False` to retessellate from source BREP where available. |

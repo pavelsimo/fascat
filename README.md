@@ -101,6 +101,7 @@ asset = asset.tessellate(
         relative=True,
         max_edge_length=None,
         max_polygon_length=None,
+        free_edge_report=False,
         reuse_existing_meshes=True,
     )
 )
