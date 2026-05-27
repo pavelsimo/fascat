@@ -516,6 +516,7 @@ mode = "bounding_box"
         "replace",
         "write",
         "validate",
+        "conversion_manifest",
         "workflow_summary",
         "profile_budget",
     ]
@@ -719,9 +720,22 @@ def test_convert_report_includes_workflow_summary(monkeypatch, tmp_path: Path) -
         lods=LODOptions((0.5,)),
         validate_output=False,
     )
+    manifest_step = converted.report.steps[-2]
     summary_step = converted.report.steps[-1]
+    manifest_steps = manifest_step.options["steps"]  # type: ignore[index]
     stages = {item["stage"]: item for item in summary_step.options["stages"]}  # type: ignore[index]
 
+    assert manifest_step.name == "conversion_manifest"
+    assert manifest_step.options["style"] == "resolved_conversion_manifest"
+    assert manifest_step.options["mode"] == "direct"
+    assert manifest_step.options["profile"]["name"] == "test"  # type: ignore[index]
+    assert manifest_step.options["import"]["metadata"] is True  # type: ignore[index]
+    assert manifest_steps["stage"]["uv0"] == "box"  # type: ignore[index]
+    assert manifest_steps["bake_materials"]["force_uv_generation"] is True  # type: ignore[index]
+    assert manifest_steps["lods"]["ratios"] == [0.5]  # type: ignore[index]
+    assert manifest_step.options["export"]["output_format"] == "usd"  # type: ignore[index]
+    assert manifest_step.options["export"]["options"]["format"] == "OpenUSD"  # type: ignore[index]
+    assert manifest_step.after["conversion_manifest_direct_steps"] == 4
     assert summary_step.name == "workflow_summary"
     assert summary_step.options["style"] == "unity_asset_transformer"
     assert summary_step.after["workflow_stages_total"] == 10
@@ -1017,7 +1031,8 @@ def test_convert_report_finishes_when_validation_is_disabled(monkeypatch, tmp_pa
     )
 
     assert converted.report.steps[-1].name == "workflow_summary"
-    assert converted.report.steps[-2].name == "write"
+    assert converted.report.steps[-2].name == "conversion_manifest"
+    assert converted.report.steps[-3].name == "write"
     assert converted.report.finished_at is not None
     assert converted.report.output_stats == converted.stats()
 

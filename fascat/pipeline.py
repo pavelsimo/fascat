@@ -267,6 +267,28 @@ def convert(
         )
         if progress is not None:
             progress("validate", asset.stats())
+    _add_conversion_manifest_report(
+        asset,
+        output_format,
+        selected,
+        import_options=effective_import_options,
+        pipeline=pipeline,
+        tessellation=planned_tessellation,
+        heal_brep=heal_brep,
+        stage=planned_stage,
+        merge=merge,
+        explode=explode,
+        replace=replace,
+        scene=scene,
+        bake_materials=bake_materials,
+        remove_holes=remove_holes,
+        remove_occluded=remove_occluded,
+        decimate=decimate,
+        lod_generator=lod_generator,
+        optimize=planned_optimize,
+        lods=planned_lods,
+        write_options=write_options,
+    )
     _add_workflow_summary_report(asset, output_format, write_options)
     _add_profile_budget_report(asset, selected)
     asset.report.finish(_report_stats(asset))
@@ -830,6 +852,77 @@ def _add_workflow_summary_report(asset: Asset, output_format: ExportFormat, writ
         before=before,
         after=after,
     )
+
+
+def _add_conversion_manifest_report(
+    asset: Asset,
+    output_format: ExportFormat,
+    profile: ConversionProfile,
+    *,
+    import_options: StepReadOptions | None,
+    pipeline: PipelineSpec | None,
+    tessellation: Tessellation | None,
+    heal_brep: BrepHealOptions | None,
+    stage: StageOptions | None,
+    merge: MergeOptions | None,
+    explode: ExplodeOptions | None,
+    replace: ReplaceOptions | None,
+    scene: SceneOptimizeOptions | None,
+    bake_materials: BakeMaterialOptions | None,
+    remove_holes: RemoveHolesOptions | None,
+    remove_occluded: RemoveOccludedOptions | None,
+    decimate: DecimateOptions | None,
+    lod_generator: LODGeneratorOptions | None,
+    optimize: OptimizeOptions | None,
+    lods: LODOptions | None,
+    write_options: dict[str, object],
+) -> None:
+    direct_steps = {
+        "tessellation": _manifest_options(tessellation),
+        "brep_heal": _manifest_options(heal_brep),
+        "repair": profile.repair.to_dict(),
+        "stage": _manifest_options(stage),
+        "merge": _manifest_options(merge),
+        "explode": _manifest_options(explode),
+        "replace": _manifest_options(replace),
+        "scene": _manifest_options(scene),
+        "bake_materials": _manifest_options(bake_materials),
+        "remove_holes": _manifest_options(remove_holes),
+        "remove_occluded": _manifest_options(remove_occluded),
+        "decimate": _manifest_options(decimate),
+        "lod_generator": _manifest_options(lod_generator),
+        "optimize": _manifest_options(optimize),
+        "lods": _manifest_options(lods),
+    }
+    manifest: dict[str, object] = {
+        "style": "resolved_conversion_manifest",
+        "mode": "pipeline" if pipeline is not None else "direct",
+        "profile": profile.to_dict(),
+        "import": (import_options or StepReadOptions()).to_dict(),
+        "pipeline": None if pipeline is None else pipeline.to_dict(),
+        "steps": direct_steps if pipeline is None else {},
+        "export": {"output_format": output_format, "options": write_options},
+    }
+    before = _report_stats(asset)
+    after = dict(before)
+    after["conversion_manifest_sections"] = 5
+    after["conversion_manifest_direct_steps"] = sum(1 for value in direct_steps.values() if value is not None)
+    after["conversion_manifest_pipeline_steps"] = 0 if pipeline is None else len(pipeline.steps)
+    asset.report.add_step(
+        "conversion_manifest",
+        options=manifest,
+        before=before,
+        after=after,
+    )
+
+
+def _manifest_options(options: object | None) -> dict[str, object] | None:
+    if options is None:
+        return None
+    to_dict = getattr(options, "to_dict", None)
+    if callable(to_dict):
+        return cast(dict[str, object], to_dict())
+    return cast(dict[str, object], options)
 
 
 def _workflow_summary_stages(

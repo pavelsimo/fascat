@@ -94,6 +94,9 @@ that are currently conservative approximations.
   dry-run output, and conversion report budget checks.
 - Custom target-device triangle budgets now seed the profile optimization target
   and derive a matching vertex budget when one is not provided.
+- Conversion reports now include a resolved conversion manifest with the
+  effective profile, import options, direct or pipeline operation settings, and
+  export settings needed to reproduce a run.
 
 ## Unity Asset Transformer Parity
 
@@ -149,9 +152,10 @@ Second-pass gaps from the Unity references:
 - Connect target-device budgets to actual pipeline choices, not only reports:
   the selected device should drive decimation targets, LOD ratios, texture
   resize limits, compression choices, and cleanup defaults.
-- Add a resolved conversion manifest that records the effective import,
-  tessellation, staging, optimization, LOD, and export settings so Unity-style
-  module-property choices are reproducible from a report.
+- Conversion reports now include a resolved conversion manifest that records the
+  effective import, tessellation, staging, optimization, LOD, and export
+  settings so Unity-style module-property choices are reproducible from a
+  report.
 - Treat orientation as its own post-repair stage, not just a side effect of mesh
   cleanup or normal generation. Unity separates polygon orientation, normal
   orientation, and open-shell/unstitched-face handling; Fascat should report
@@ -172,6 +176,7 @@ Parity gaps to track:
    - The advisor warns when a pipeline decimates before repair, computes tangents before UV0, bakes AO without UV1, or generates LODs before LOD0 optimization. Compression backend requests are still rejected by the CLI/options layer until real encoders exist.
    - Conversion reports now include a `workflow_summary` step that maps Unity-inspired preparation stages to run/skipped status and exact, approximate, or metadata-only levels, including import cleanup, orientation, UV preparation, material baking, LOD generation, export compression, and export.
    - Conversion reports now include a `preflight` step before pipeline or profile operations run, with checklist warnings for missing patch cleanup, face/normal orientation, UV-before-tangent ordering, AO bake UV1 prerequisites, LOD generation without LOD0 optimization, and glTF texture/compression backend gaps.
+   - Conversion reports now include a `conversion_manifest` step with the resolved profile, import options, direct or pipeline operation settings, and export options needed to reproduce a run.
 
 2. Import controls
    - Reference docs now include a supported-format parity matrix. Unity's baseline covers many CAD and mesh formats; Fascat currently centers on STEP input and USD/glTF/OBJ/STL output, with IGES, Parasolid, JT, native CAD, IFC, 3MF, and QIF explicitly deferred.

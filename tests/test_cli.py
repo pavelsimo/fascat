@@ -722,7 +722,7 @@ def test_convert_json_output_includes_stats_and_report(tmp_path: Path) -> None:
     assert payload["stats"]["triangles"] > 0
     assert payload["report"]["input_stats"]["parts"] == 1
     assert payload["report"]["finished_at"] is not None
-    assert step_names[-4:] == ["write", "validate", "workflow_summary", "profile_budget"]
+    assert step_names[-5:] == ["write", "validate", "conversion_manifest", "workflow_summary", "profile_budget"]
 
 
 @pytest.mark.requires_ocp
