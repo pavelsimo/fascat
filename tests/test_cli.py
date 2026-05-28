@@ -57,6 +57,89 @@ def block_imports(monkeypatch: pytest.MonkeyPatch, *prefixes: str) -> None:
     monkeypatch.setattr(builtins, "__import__", guarded_import)
 
 
+class _FakeContext:
+    def __init__(self, state: Any) -> None:
+        self.obj = state
+
+
+def _make_state(**overrides: bool) -> Any:
+    from fascat.cli import CliState
+
+    defaults = dict(verbose=False, quiet=False, json_output=False, no_color=False, dry_run=False, no_input=False)
+    defaults.update(overrides)
+    return CliState(**defaults)  # type: ignore[arg-type]
+
+
+def _patched_err(monkeypatch: pytest.MonkeyPatch, *, terminal: bool) -> Any:
+    import io
+
+    from rich.console import Console
+
+    import fascat.cli as cli
+
+    buffer = io.StringIO()
+    console = Console(file=buffer, force_terminal=terminal, force_interactive=False, width=120)
+    monkeypatch.setattr(cli, "err", console)
+    return buffer
+
+
+@pytest.mark.parametrize(
+    "overrides, output_path",
+    [
+        ({"quiet": True}, "out.glb"),
+        ({"json_output": True}, "out.glb"),
+        ({}, "-"),
+    ],
+)
+def test_stage_reporter_disabled_yields_no_callback(
+    monkeypatch: pytest.MonkeyPatch, overrides: dict[str, bool], output_path: str
+) -> None:
+    from fascat.cli import _stage_reporter
+
+    _patched_err(monkeypatch, terminal=True)
+    reporter = _stage_reporter(_FakeContext(_make_state(**overrides)), Path("in.step"), Path(output_path))
+    assert reporter.callback is None
+    assert reporter.live is False
+
+
+def test_stage_reporter_plain_mode_matches_legacy_lines(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fascat.cli import _stage_reporter
+
+    buffer = _patched_err(monkeypatch, terminal=False)
+    reporter = _stage_reporter(_FakeContext(_make_state()), Path("in.step"), Path("out.glb"))
+    assert reporter.live is False
+    with reporter:
+        assert reporter.callback is not None
+        reporter.callback("tessellate", {"parts": 1, "vertices": 89273, "triangles": 120884})
+    text = plain(buffer.getvalue())
+    assert "tessellate: 1 parts, 89273 vertices, 120884 triangles" in text
+    assert "Done in" not in text
+    assert "✓" not in text
+
+
+def test_stage_reporter_live_mode_renders_log_and_summary(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fascat.cli import _stage_reporter
+
+    buffer = _patched_err(monkeypatch, terminal=True)
+    reporter = _stage_reporter(_FakeContext(_make_state()), Path("in.step"), Path("out.glb"))
+    assert reporter.live is True
+
+    class _FakeAsset:
+        def stats(self) -> dict[str, int]:
+            return {"vertices": 84010, "triangles": 120884}
+
+    with reporter:
+        assert reporter.callback is not None
+        reporter.callback("tessellate", {"parts": 1, "vertices": 89273, "triangles": 120884})
+    reporter.summary(_FakeAsset())
+
+    text = compact(buffer.getvalue())
+    assert "Converting in.step" in text
+    assert "✓ tessellate 89,273 verts · 120,884 tris" in text
+    assert "Done in" in text
+    assert "84,010 verts · 120,884 tris" in text
+
+
 def test_version_flag() -> None:
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0

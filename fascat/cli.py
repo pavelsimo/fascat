@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from dataclasses import replace as dataclass_replace
@@ -14,6 +15,7 @@ from typing import Annotated, Any, NoReturn, cast
 import typer
 import typer.rich_utils as rich_utils
 from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TaskID, TextColumn, TimeElapsedColumn
 
 from fascat import __version__
 from fascat.analysis import AnalysisReport, analyze_output
@@ -1829,36 +1831,38 @@ def cmd_convert(
             file_size_budget_mb=file_size_budget_mb,
         )
         stl_options = StlExportOptions(binary=stl_binary, merge=stl_merge, file_size_budget_mb=file_size_budget_mb)
-        asset = _convert_for_cli(
-            input_path,
-            output_path,
-            profile=profile_options,
-            pipeline=pipeline_spec,
-            tessellation=tessellation,
-            stage=stage_options,
-            import_options=import_options,
-            heal_brep=heal_options,
-            merge_vertices=merge_vertices_options,
-            delete_degenerate_polygons=delete_degenerate_polygons_options,
-            merge=merge_options,
-            explode=explode_options,
-            replace=replace_options,
-            scene=scene_options,
-            bake_materials=bake_options,
-            remove_holes=remove_holes_options,
-            remove_occluded=remove_occluded_options,
-            decimate=decimate_options,
-            lod_generator=lod_generator_options,
-            optimize=optimize_options,
-            lods=lod_options,
-            where=where,
-            progress=_progress_callback(ctx, output_path),
-            debug=debug,
-            gltf_options=gltf_options,
-            usd_options=usd_options,
-            obj_options=obj_options,
-            stl_options=stl_options,
-        )
+        reporter = _stage_reporter(ctx, input_path, output_path)
+        with reporter:
+            asset = _convert_for_cli(
+                input_path,
+                output_path,
+                profile=profile_options,
+                pipeline=pipeline_spec,
+                tessellation=tessellation,
+                stage=stage_options,
+                import_options=import_options,
+                heal_brep=heal_options,
+                merge_vertices=merge_vertices_options,
+                delete_degenerate_polygons=delete_degenerate_polygons_options,
+                merge=merge_options,
+                explode=explode_options,
+                replace=replace_options,
+                scene=scene_options,
+                bake_materials=bake_options,
+                remove_holes=remove_holes_options,
+                remove_occluded=remove_occluded_options,
+                decimate=decimate_options,
+                lod_generator=lod_generator_options,
+                optimize=optimize_options,
+                lods=lod_options,
+                where=where,
+                progress=reporter.callback,
+                debug=debug,
+                gltf_options=gltf_options,
+                usd_options=usd_options,
+                obj_options=obj_options,
+                stl_options=stl_options,
+            )
     except typer.Exit:
         raise
     except Exception as exc:
@@ -1882,7 +1886,10 @@ def cmd_convert(
         "stats": asset.stats(),
         "report": asset.report.to_dict(),
     }
-    _emit(ctx, result, f"Converted {input_path} to {output_path}: {_format_stats(asset.stats())}.")
+    if reporter.live:
+        reporter.summary(asset)
+    else:
+        _emit(ctx, result, f"Converted {input_path} to {output_path}: {_format_stats(asset.stats())}.")
 
 
 @app.command(
@@ -2748,15 +2755,148 @@ def _convert_output(
     )
 
 
-def _progress_callback(ctx: typer.Context, output_path: Path) -> Callable[[str, dict[str, int]], None] | None:
-    state = _state(ctx)
-    if state.quiet or state.json_output or _is_stdio(output_path):
+# Readable titles for the live step log; falls back to the raw step name.
+_STAGE_TITLES: dict[str, str] = {
+    "source": "source",
+    "heal_brep": "heal brep",
+    "tessellate": "tessellate",
+    "repair": "repair",
+    "stage": "stage attributes",
+    "merge_vertices": "merge vertices",
+    "delete_degenerate_polygons": "delete degenerate polygons",
+    "merge": "merge",
+    "explode": "explode",
+    "replace": "replace",
+    "optimize_scene": "optimize scene",
+    "scene": "optimize scene",
+    "bake_materials": "bake materials",
+    "remove_holes": "remove holes",
+    "remove_occluded": "remove occluded",
+    "decimate": "decimate",
+    "run_lod_generators": "generate LODs",
+    "optimize": "optimize",
+    "lods": "generate LODs",
+    "write": "write",
+    "validate": "validate",
+}
+
+
+def _format_stats_compact(stats: dict[str, int]) -> str:
+    """Condensed stats for the live step log (matches the conversion summary style)."""
+    triangles = stats.get("triangles", 0)
+    vertices = stats.get("vertices", 0)
+    if triangles or vertices:
+        return f"{vertices:,} verts · {triangles:,} tris"
+    parts = stats.get("parts", 0)
+    occurrences = stats.get("occurrences", 0)
+    part_label = "part" if parts == 1 else "parts"
+    return f"{parts} {part_label} · {occurrences} occ"
+
+
+def _human_size(num_bytes: int) -> str:
+    size = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024.0 or unit == "TB":
+            precision = 0 if unit == "B" else 1
+            return f"{size:.{precision}f} {unit}"
+        size /= 1024.0
+    return f"{size:.1f} TB"
+
+
+def _output_size_text(path: Path) -> str | None:
+    try:
+        return _human_size(path.stat().st_size)
+    except OSError:
         return None
 
-    def progress(step: str, stats: dict[str, int]) -> None:
-        err.print(f"{step}: {_format_stats(stats)}")
 
-    return progress
+class _StageReporter:
+    """Renders conversion stage progress on stderr.
+
+    Three modes drive the same ``progress(step, stats)`` callback contract:
+
+    - ``disabled`` — no output (``--quiet``/``--json``/stdio output).
+    - ``plain`` — one line per finished stage, for non-TTY/CI streams. Matches
+      the historical ``step: stats`` format byte-for-byte.
+    - ``live`` — an animated spinner with a running clock while a stage runs,
+      with finished stages dropping into a colorized log, plus a final summary.
+    """
+
+    def __init__(self, mode: str, input_path: Path, output_path: Path) -> None:
+        self._mode = mode
+        self._input_path = input_path
+        self._output_path = output_path
+        self._bar: Progress | None = None
+        self._task: TaskID | None = None
+        self._start = 0.0
+        self._last = 0.0
+
+    @property
+    def live(self) -> bool:
+        return self._mode == "live"
+
+    @property
+    def callback(self) -> Callable[[str, dict[str, int]], None] | None:
+        return None if self._mode == "disabled" else self._on_step
+
+    def __enter__(self) -> _StageReporter:
+        self._start = self._last = time.monotonic()
+        if self._mode == "live":
+            err.print(f"Converting [bold]{self._input_path}[/] → [bold]{self._output_path}[/]\n")
+            self._bar = Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                TimeElapsedColumn(),
+                console=err,
+                transient=True,
+            )
+            self._bar.start()
+            self._task = self._bar.add_task("working…", total=None)
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        if self._bar is not None:
+            self._bar.stop()
+            self._bar = None
+
+    def _on_step(self, step: str, stats: dict[str, int]) -> None:
+        now = time.monotonic()
+        elapsed = now - self._last
+        self._last = now
+        if self._mode == "plain":
+            err.print(f"{step}: {_format_stats(stats)}")
+            return
+        title = _STAGE_TITLES.get(step, step)
+        line = f"  [green]✓[/] {title}  [dim]{_format_stats_compact(stats)} · {elapsed:.1f}s[/]"
+        if self._bar is not None:
+            self._bar.console.print(line)
+            if self._task is not None:
+                self._bar.reset(self._task, description="working…", total=None)
+
+    def summary(self, asset: Any) -> None:
+        if self._mode != "live":
+            return
+        total = time.monotonic() - self._start
+        stats = asset.stats()
+        verts = f"{stats.get('vertices', 0):,}"
+        tris = f"{stats.get('triangles', 0):,}"
+        size = _output_size_text(self._output_path)
+        size_suffix = f" ({size})" if size else ""
+        err.print(
+            f"[green]✓[/] [bold]Done[/] in {total:.1f}s — {verts} verts · {tris} tris — "
+            f"{self._output_path}{size_suffix}"
+        )
+
+
+def _stage_reporter(ctx: typer.Context, input_path: Path, output_path: Path) -> _StageReporter:
+    state = _state(ctx)
+    if state.quiet or state.json_output or _is_stdio(output_path):
+        mode = "disabled"
+    elif err.is_terminal:
+        mode = "live"
+    else:
+        mode = "plain"
+    return _StageReporter(mode, input_path, output_path)
 
 
 class _temporary_step_file:
