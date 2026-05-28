@@ -65,6 +65,9 @@ that are currently conservative approximations.
 - Tessellation profiles now include a size-adaptive helper that generates
   per-part sag, sag-ratio, angle, and max-polygon-length settings from
   bounding-box bands.
+- Tessellation quality advisories now warn when absolute sag is coarse relative
+  to a part's bounding box or polygon-length limits are aggressive for
+  non-elongated parts.
 - Platform budgets now record Unity reference triangle and draw-call ranges in
   profile definitions, conversion reports, and documentation tables.
 - Decimation now records RAM estimates, budget-allocation mode,
@@ -197,6 +200,45 @@ Function-level parity notes from the linked Unity pages:
 | Delete degenerate polygons | Standalone `delete_degenerate_polygons` is exposed across Python, CLI, and TOML with area-threshold controls, selection support, no-op reports, unit-aware area reporting, before/after counts, and duplicate-vertex, collapsed-edge, and near-flat removal reasons. | Extend cleanup beyond zero-area triangles to boundary-overlap, tolerance-based overlapping, and z-fighting cleanup and reason categories. |
 | Decimate to target | Target count, ratio, UV-importance modes, topology protection counts, RAM estimates, configurable iterative threshold/pass reports, measured-error reports, selection-wide target allocation summaries, and pre-cleanup for unused UVs/tangents exist. | Add enforced geometric error bounds, AO/user-weighted decimation, and cleanup for future vertex colors/weights. |
 | Unwrap UV | UV0/UV1 unwrap intent, solver method, iteration, tolerance, sharp-edge seam and forbid-overlap policy intent, distortion, and packing diagnostics are represented. | Add destination-channel control, channel-as-destination behavior when lines of interest define islands, backend-enforced seam policies, create-seams-from-lines-of-interest, seam graph metadata, island merge/alignment, and real repack/padding/share-map controls. |
+
+Fresh gaps from the linked Unity audit:
+
+- Add a construction-wire output path. Unity recommends deleting construction
+  points and lines for normal realtime export, but also notes that preserved
+  line geometry can be tessellated into tubes when users need wireframe or
+  inspection views. Fascat currently exposes delete/preserve intent, not a
+  renderable tube/curve conversion.
+- Extend the tessellation quality advisor with material/metadata/curvature
+  context. Fascat now warns for coarse absolute sag and aggressive max-length
+  settings on non-elongated parts; remaining work is to classify shiny,
+  high-detail, or metadata-tagged parts before tessellation and recommend
+  finer criteria for those regions.
+- Close the AO-to-decimation loop. Unity's staging and decimation guidance use
+  AO both as a baked output and as vertex-color-derived weights that preserve
+  creases during aggressive simplification. Fascat tracks AO baking and
+  weighted decimation as separate gaps; the plan should treat the combined
+  "bake AO -> derive weights -> decimate -> clean weights" workflow as a single
+  production feature.
+- Add region-aware merge planning. Unity warns that mesh merging can flatten
+  hierarchy, break culling, destroy instances, and increase file size, and
+  points users toward region-based merging when batching is still needed.
+  Fascat has merge reports and export advisors; remaining parity is spatial or
+  region merge policies that preserve useful culling cells.
+- Add visual and target-runtime validation artifacts. Unity repeatedly frames
+  decimation, LOD switching, and platform budgets as visually validated,
+  target-device decisions. Fascat reports numeric quality and compatibility,
+  but still lacks optional before/after preview renders, LOD switching checks,
+  and measured engine/runtime load snapshots.
+- Add LOD chain advisors beyond triangle ratios. Unity recommends 3-4 LOD
+  levels, warns that extra levels increase memory/export size, keeps LOD1-LOD2
+  visually conservative, and reserves one-mesh/one-material baking for far LODs.
+  Fascat reports chain cost, but should warn about excessive level counts and
+  drive per-LOD material, texture-resolution, and culling-granularity policy.
+- Add a meshopt-versus-Draco runtime decision matrix. Unity's export guidance is
+  Draco/KTX2 and glTFast oriented; Fascat already supports quantization/meshopt
+  and rejects Draco/KTX2 until real encoders exist. Remaining parity is not only
+  encoder support but a target-runtime policy that explains when meshopt,
+  Draco, quantization, PNG/JPEG, or KTX2 is the right export choice.
 
 Second-pass gaps from the Unity references:
 
@@ -350,6 +392,10 @@ Parity gaps to track:
    - Remaining targeted-profile work: material, metadata, curvature, or filter driven tessellation so shiny/high-detail parts can use finer criteria than bulk structural parts.
    - Expose CAD-derived UV generation modes, including none, intrinsic surface UVs, and conformal/scaled UVs, instead of only post-mesh unwrapping.
    - Max polygon length is now exposed separately from cleanup subdivision. `max_edge_length` still subdivides geometry; `max_polygon_length` drives quality-report `long_edges`, metadata, and warnings for long tessellated edges that may cause lighting artifacts.
+   - Tessellation quality advisories now report coarse absolute sag relative to
+     part bounding-box diagonal and aggressive polygon-length limits on
+     non-elongated parts. Remaining work: use material, metadata, curvature, or
+     filters to recommend finer tessellation before the mesh exists.
 
 5. UV staging
    - Extend existing box UVs into Unity-style AABB projection controls: local versus shared/global AABB, real-world UV scale or `uv3dSize`, destination channel, override policy, and unit reporting.

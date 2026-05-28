@@ -491,6 +491,53 @@ def test_tessellation_max_polygon_length_warns_without_quality_report(monkeypatc
     ]
 
 
+def test_tessellation_quality_advisor_warns_on_coarse_absolute_sag(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import fascat.ops.tessellate as tessellate_module
+
+    source_shape = object()
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Small", part_id="part")]),
+        parts={"part": Part(id="part", name="Small", source_shape=source_shape)},
+    )
+
+    monkeypatch.setattr(tessellate_module, "tessellate_shape", lambda *_args, **_kwargs: triangle_mesh())
+
+    tessellated = asset.tessellate(Tessellation(sag=0.1, relative=False, quality_report=True))
+    part = tessellated.parts["part"]
+    payload = json.loads(str(part.metadata["tessellation_quality"]))
+    advisories = json.loads(str(part.metadata["tessellation_quality_advisories"]))
+
+    assert part.metadata["tessellation_quality_advisory_count"] == "1"
+    assert part.metadata["tessellation_quality_advisory_codes"] == "coarse_absolute_sag"
+    assert advisories[0]["code"] == "coarse_absolute_sag"
+    assert payload["advisories"][0]["code"] == "coarse_absolute_sag"
+    assert tessellated.report.steps[-1].warnings == [
+        "tessellation sag is 7.1% of the part bounding-box diagonal; "
+        "small or high-detail features may be undersampled: Small"
+    ]
+
+
+def test_tessellation_quality_advisor_warns_on_aggressive_max_length(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import fascat.ops.tessellate as tessellate_module
+
+    source_shape = object()
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Panel", part_id="part")]),
+        parts={"part": Part(id="part", name="Panel", source_shape=source_shape)},
+    )
+
+    monkeypatch.setattr(tessellate_module, "tessellate_shape", lambda *_args, **_kwargs: triangle_mesh())
+
+    tessellated = asset.tessellate(Tessellation(max_edge_length=0.01))
+    part = tessellated.parts["part"]
+    advisories = json.loads(str(part.metadata["tessellation_quality_advisories"]))
+
+    assert part.metadata["tessellation_quality_advisory_count"] == "1"
+    assert part.metadata["tessellation_quality_advisory_codes"] == "aggressive_max_length"
+    assert advisories[0]["length_kind"] == "max_edge_length"
+    assert "reserve aggressive polygon-length limits" in tessellated.report.steps[-1].warnings[0]
+
+
 def test_tessellation_free_edge_report_records_reused_meshes() -> None:
     asset = Asset(
         root=Node(id="root", name="root", children=[Node(id="node", name="Part", part_id="part")]),

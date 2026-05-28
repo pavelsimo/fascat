@@ -14,6 +14,9 @@ from fascat.options import Tessellation
 
 _FACE_GROUP_RISK_THRESHOLD = 64
 _DRAW_CALL_RISK_THRESHOLD = 16
+_COARSE_ABSOLUTE_SAG_RATIO = 0.02
+_AGGRESSIVE_MAX_LENGTH_RATIO = 0.02
+_LONG_OBJECT_AXIS_RATIO = 8.0
 
 
 def tessellate_asset(asset: Asset, options: Tessellation, *, selected_part_ids: set[str] | None = None) -> Asset:
@@ -214,13 +217,20 @@ def _record_tessellation_diagnostics(asset: Asset, part: Part, options: Tessella
         return
     _record_submesh_risk(asset, part)
     metrics: dict[str, int | float] | None = None
-    if options.quality_report:
-        metrics = _store_quality_report(part, options)
     if (options.free_edge_report or options.max_polygon_length is not None) and metrics is None:
         metrics = part.mesh.quality_metrics(
             min_edge_length=options.min_edge_length,
             max_edge_length=_quality_max_edge_length(options),
         )
+    advisories = _tessellation_quality_advisories(part, options)
+    if options.quality_report:
+        if metrics is None:
+            metrics = part.mesh.quality_metrics(
+                min_edge_length=options.min_edge_length,
+                max_edge_length=_quality_max_edge_length(options),
+            )
+        _store_quality_report(part, options, metrics, advisories)
+    _store_tessellation_quality_advisories(asset, part, advisories)
     if options.free_edge_report:
         _store_free_edge_report(asset, part, metrics)
     if options.max_polygon_length is not None:
@@ -289,18 +299,20 @@ def _brep_patch_attribute_source(part: Part, options: Tessellation, geometry_sou
     return "retained" if options.keep_brep else "deleted"
 
 
-def _store_quality_report(part: Part, options: Tessellation) -> dict[str, int | float] | None:
+def _store_quality_report(
+    part: Part,
+    options: Tessellation,
+    metrics: dict[str, int | float],
+    advisories: list[dict[str, object]],
+) -> None:
     if part.mesh is None:
-        return None
-    metrics = part.mesh.quality_metrics(
-        min_edge_length=options.min_edge_length,
-        max_edge_length=_quality_max_edge_length(options),
-    )
+        return
     payload = {
         "part_id": part.id,
         "part_name": part.name,
         "options": _tessellation_mesh_options(options),
         "metrics": metrics,
+        "advisories": advisories,
     }
     encoded = json.dumps(payload, sort_keys=True)
     part.metadata["tessellation_quality"] = encoded
@@ -308,11 +320,102 @@ def _store_quality_report(part: Part, options: Tessellation) -> dict[str, int | 
     part.metadata["tessellation_long_edges"] = str(metrics["long_edges"])
     part.metadata["tessellation_skinny_triangles"] = str(metrics["skinny_triangles"])
     part.mesh.metadata["tessellation_quality"] = encoded
-    return metrics
 
 
 def _quality_max_edge_length(options: Tessellation) -> float | None:
     return options.max_polygon_length if options.max_polygon_length is not None else options.max_edge_length
+
+
+def _tessellation_quality_advisories(part: Part, options: Tessellation) -> list[dict[str, object]]:
+    mesh = part.mesh
+    if mesh is None:
+        return []
+    mins, maxs = mesh.bounds()
+    extents = maxs - mins
+    diagonal = float(np.linalg.norm(extents))
+    if diagonal <= 0.0:
+        return []
+
+    advisories: list[dict[str, object]] = []
+    if options.sag_ratio is None and not options.relative:
+        sag_ratio = float(options.sag) / diagonal
+        if sag_ratio >= _COARSE_ABSOLUTE_SAG_RATIO:
+            advisories.append(
+                {
+                    "code": "coarse_absolute_sag",
+                    "severity": "warning",
+                    "part_id": part.id,
+                    "part_name": part.name,
+                    "sag": float(options.sag),
+                    "bbox_diagonal": diagonal,
+                    "ratio": sag_ratio,
+                    "message": (
+                        f"tessellation sag is {sag_ratio:.1%} of the part bounding-box diagonal; "
+                        f"small or high-detail features may be undersampled: {part.name}"
+                    ),
+                }
+            )
+
+    length_limit, length_kind = _active_max_length(options)
+    if length_limit is not None:
+        length_ratio = float(length_limit) / diagonal
+        if length_ratio <= _AGGRESSIVE_MAX_LENGTH_RATIO and not _is_long_object(extents):
+            advisories.append(
+                {
+                    "code": "aggressive_max_length",
+                    "severity": "warning",
+                    "part_id": part.id,
+                    "part_name": part.name,
+                    "length_kind": length_kind,
+                    "length": float(length_limit),
+                    "bbox_diagonal": diagonal,
+                    "ratio": length_ratio,
+                    "message": (
+                        f"{length_kind} is very small relative to the part bounding box; "
+                        "reserve aggressive polygon-length limits for long planar objects with lighting artifacts: "
+                        f"{part.name}"
+                    ),
+                }
+            )
+    return advisories
+
+
+def _active_max_length(options: Tessellation) -> tuple[float | None, str]:
+    if options.max_edge_length is None:
+        return options.max_polygon_length, "max_polygon_length"
+    if options.max_polygon_length is None:
+        return options.max_edge_length, "max_edge_length"
+    if options.max_edge_length <= options.max_polygon_length:
+        return options.max_edge_length, "max_edge_length"
+    return options.max_polygon_length, "max_polygon_length"
+
+
+def _is_long_object(extents: np.ndarray) -> bool:
+    positive = sorted((float(value) for value in extents if value > 0.0), reverse=True)
+    if len(positive) < 2:
+        return False
+    return positive[0] / positive[1] >= _LONG_OBJECT_AXIS_RATIO
+
+
+def _store_tessellation_quality_advisories(
+    asset: Asset,
+    part: Part,
+    advisories: list[dict[str, object]],
+) -> None:
+    if not advisories:
+        return
+    encoded = json.dumps(advisories, sort_keys=True)
+    codes = ",".join(str(item["code"]) for item in advisories)
+    part.metadata["tessellation_quality_advisories"] = encoded
+    part.metadata["tessellation_quality_advisory_count"] = str(len(advisories))
+    part.metadata["tessellation_quality_advisory_codes"] = codes
+    if part.mesh is not None:
+        part.mesh.metadata["tessellation_quality_advisories"] = encoded
+        part.mesh.metadata["tessellation_quality_advisory_count"] = str(len(advisories))
+        part.mesh.metadata["tessellation_quality_advisory_codes"] = codes
+    for advisory in advisories:
+        if advisory.get("severity") == "warning":
+            asset.report.add_warning(str(advisory["message"]))
 
 
 def _store_free_edge_report(

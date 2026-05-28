@@ -414,12 +414,12 @@ Tessellation parameters:
 | `angle` | Angular deviation limit in degrees. Lower values preserve curved surfaces with more triangles. |
 | `relative` | Compatibility switch for interpreting `sag` as a relative backend deflection when `sag_ratio` is unset. Prefer `sag_ratio` for new relative-tolerance workflows. |
 | `min_edge_length` | Collapse or avoid edges shorter than this length during post-processing. |
-| `max_edge_length` | Split long triangle edges to keep mesh density bounded. |
-| `max_polygon_length` | Report tessellated polygon edges longer than this threshold without subdividing geometry. Quality reports count these as `long_edges`; the tessellation step emits warnings when exceeded. |
+| `max_edge_length` | Split long triangle edges to keep mesh density bounded. Very small values on non-elongated parts emit a quality advisory because this control is most useful for long objects with lighting artifacts. |
+| `max_polygon_length` | Report tessellated polygon edges longer than this threshold without subdividing geometry. Quality reports count these as `long_edges`; the tessellation step emits warnings when exceeded and advises when the limit is aggressive for ordinary parts. |
 | `preserve_boundaries` | Preserve CAD face and boundary edges during tessellation cleanup. |
 | `curvature_adaptive` | Request curvature-aware meshing from the backend when available. |
 | `avoid_skinny_triangles` | Run a cleanup pass that reduces long skinny triangles. |
-| `quality_report` | Record per-part tessellation quality metrics for later reporting. |
+| `quality_report` | Record per-part tessellation quality metrics and advisories for later reporting. Coarse absolute sag relative to part size is flagged when `relative=False` and no `sag_ratio` is set. |
 | `free_edge_report` | Record free/boundary edge and non-manifold edge counts on tessellated parts and warn when free edges are present. |
 | `create_normals` | Generate normals during tessellation when the backend can provide them. Attribute provenance records `tessellation`, `disabled`, or `missing` for normals. |
 | `keep_brep` | Keep source BREP handles on parts after tessellation for later BREP-aware operations. Tessellated parts record `brep_patch_cleanup=retained` or `deleted` and warn when many retained patches could increase runtime/export risk. |
