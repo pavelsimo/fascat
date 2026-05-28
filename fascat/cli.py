@@ -23,6 +23,7 @@ from fascat.io.obj import OBJ_SUFFIXES
 from fascat.io.step import read_step, read_step_bytes
 from fascat.io.stl import STL_SUFFIXES
 from fascat.options import (
+    AabbProjectionOptions,
     AnalyzeOptions,
     AtlasOptions,
     BakeMaterialOptions,
@@ -140,6 +141,11 @@ class UnwrapMethod(str, Enum):
     DEFAULT = "default"
     CONFORMAL = "conformal"
     ISOMETRIC = "isometric"
+
+
+class AabbProjectionScope(str, Enum):
+    LOCAL = "local"
+    SHARED = "shared"
 
 
 class MaterialMode(str, Enum):
@@ -695,6 +701,21 @@ def cmd_convert(
     ] = False,
     uv0: Annotated[UV0Mode, typer.Option("--uv0", help="UV0 generation mode.")] = UV0Mode.BOX,
     uv1: Annotated[UV1Mode, typer.Option("--uv1", help="UV1 generation mode.")] = UV1Mode.NONE,
+    uv_aabb_scope: Annotated[
+        AabbProjectionScope,
+        typer.Option("--uv-aabb-scope", help="AABB projection scope for box UV generation: local or shared."),
+    ] = AabbProjectionScope.LOCAL,
+    uv3d_size: Annotated[
+        float | None,
+        typer.Option("--uv3d-size", help="World-space size per UV tile for box/AABB projection."),
+    ] = None,
+    uv_override_existing: Annotated[
+        bool,
+        typer.Option(
+            "--uv-override-existing/--uv-preserve-existing",
+            help="Override existing UV channels when box/AABB projection is requested.",
+        ),
+    ] = True,
     normalize_uvs: Annotated[
         str | None,
         typer.Option("--normalize-uvs", help="Comma-separated UV channels to normalize into 0..1, for example 1."),
@@ -1227,6 +1248,9 @@ def cmd_convert(
         "validate_normals": validate_normals,
         "uv0": uv0.value,
         "uv1": uv1.value,
+        "uv_aabb_scope": uv_aabb_scope.value,
+        "uv3d_size": uv3d_size,
+        "uv_override_existing": uv_override_existing,
         "normalize_uvs": normalize_uvs,
         "materials": materials.value,
         "material_mode": material_mode.value,
@@ -1421,6 +1445,8 @@ def cmd_convert(
         _fail(ctx, payload, "--uv-padding must be greater than or equal to 0.", code=2)
     if max_stretch is not None and max_stretch < 0.0:
         _fail(ctx, payload, "--max-stretch must be greater than or equal to 0.", code=2)
+    if uv3d_size is not None and uv3d_size <= 0.0:
+        _fail(ctx, payload, "--uv3d-size must be greater than 0.", code=2)
     if merge_vertex_tolerance < 0.0:
         _fail(ctx, payload, "--merge-vertex-tolerance must be greater than or equal to 0.", code=2)
     if merge_vertex_area_epsilon < 0.0:
@@ -1593,6 +1619,11 @@ def cmd_convert(
                 forbid_overlapping=uv_forbid_overlapping,
             ),
             atlas=AtlasOptions(enabled=atlas, max_size=atlas_size),
+            aabb_projection=AabbProjectionOptions(
+                scope=uv_aabb_scope.value,
+                uv3d_size=uv3d_size,
+                override_existing=uv_override_existing,
+            ),
             uv0=uv0.value,
             uv1=cast(Any, uv1.value.replace("-", "_")),
             normalize_uvs=normalized_uv_channels,

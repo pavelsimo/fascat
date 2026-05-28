@@ -1267,6 +1267,16 @@ def _delete_degenerate_polygons_report_stats(asset: Asset) -> dict[str, int]:
 
 def _stage_report_stats(asset: Asset) -> dict[str, int]:
     stats = asset.stats()
+    if "stage_aabb_projection_channels" in asset.metadata:
+        stats["stage_aabb_projection_channels"] = _metadata_int(
+            asset.metadata["stage_aabb_projection_channels"],
+            0,
+        )
+    if "stage_aabb_preserved_existing_channels" in asset.metadata:
+        stats["stage_aabb_preserved_existing_channels"] = _metadata_int(
+            asset.metadata["stage_aabb_preserved_existing_channels"],
+            0,
+        )
     if "stage_bake_uv_channels_missing_repack" in asset.metadata:
         stats["stage_bake_uv_channels_missing_repack"] = _metadata_int(
             asset.metadata["stage_bake_uv_channels_missing_repack"],

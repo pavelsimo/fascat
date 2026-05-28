@@ -141,6 +141,10 @@ that are currently conservative approximations.
   are now exposed through Python, CLI flags, and TOML pipelines, with
   per-channel requested/enforced metadata and warnings when the xatlas backend
   can only record policy intent.
+- Box UV staging now uses an explicit AABB projection model across Python, CLI
+  flags, TOML pipelines, metadata, and reports, with local versus shared bounds,
+  `uv3dSize` scale, destination-channel, preserve-versus-override, and unit
+  policy fields.
 - Conversion reports now include a resolved conversion manifest with the
   effective profile, import options, direct or pipeline operation settings, and
   export settings needed to reproduce a run.
@@ -319,9 +323,11 @@ Second-pass gaps from the Unity references:
     workflow stays distinct from current quality-driven simplification. Remaining
     parity is wiring future backend-specific edge-collapse or error-bounded modes
     into the same report field.
-  - Model AABB UV projection as its own staging operation with local/global
+  - AABB UV projection is now its own staging operation with local/shared
     bounds, `uv3dSize`, destination channel, override policy, and unit metadata,
     because Unity uses simple projection separately from unwrap/repack flows.
+    Remaining parity: add richer projection presets only if real user cases need
+    more than AABB/box projection.
 - Distinguish UV unwrapping from bake-ready UV packing everywhere. Unity's
   unwrap function only flattens islands; bake/lightmap UVs still require repack,
   padding, overlap checks, and normalization. Fascat should warn when UV1 is
@@ -459,7 +465,7 @@ Parity gaps to track:
      metadata, curvature, or filter advisories into automatic profile settings.
 
 5. UV staging
-   - Extend existing box UVs into Unity-style AABB projection controls: local versus shared/global AABB, real-world UV scale or `uv3dSize`, destination channel, override policy, and unit reporting.
+   - Existing box UVs are now modeled as Unity-style AABB projection with local versus shared AABB scope, real-world UV scale or `uv3dSize`, destination channel, override policy, workflow-step metadata, and unit reporting.
    - Add UV segmentation and seam planning, including sharp-edge seams, material-boundary seams, user-supplied seam curves, and lines of interest.
    - Automatic UV mapping policy controls equivalent to Unity's `sharpToSeam` and `forbidOverlapping` are now exposed across Python, CLI, TOML pipelines, metadata, and reports. The current xatlas backend records them as intent and validates overlaps after generation; remaining work is backend-enforced seam and overlap prevention.
    - Add a complete UV workflow model: segment, unwrap, optionally merge islands, align tileable UV0 islands, repack UV1, normalize, validate overlaps, and record which steps ran per channel.
@@ -469,7 +475,7 @@ Parity gaps to track:
    - Unwrap solver intent is now accepted across Python, CLI, TOML pipelines, metadata, and reports with `default`, `conformal`, and `isometric` values. The current xatlas backend records non-default solver methods as intent and warns that it cannot enforce them directly.
    - Unwrap iteration and tolerance controls are now accepted across Python, CLI, TOML pipelines, metadata, and reports. Remaining work: add a backend that enforces those controls and reports solver failure or excessive distortion.
    - UV layout diagnostics now record island count, pack efficiency, normalized-space utilization, conformal angle distortion, and isometric edge-length distortion per channel.
-   - UV0-to-UV1 copy is now supported through `uv1="copy_uv0"` / `--uv1 copy-uv0`, with copied/missing-source metadata and warnings. UV normalization is now explicit through `normalize_uvs=(...)` / `--normalize-uvs`, with original-bounds metadata and missing-channel warnings. UV validation now records per-channel domains, bounds, unit-domain status, validation status, distortion metrics, and packing efficiency. Remaining work: UV island merge, alignment, repack, padding/resolution/share-map controls, overlap removal, uniform versus non-uniform normalization, shared versus per-part UV space, destination-channel controls, and null-island handling.
+   - UV0-to-UV1 copy is now supported through `uv1="copy_uv0"` / `--uv1 copy-uv0`, with copied/missing-source metadata and warnings. UV normalization is now explicit through `normalize_uvs=(...)` / `--normalize-uvs`, with original-bounds metadata and missing-channel warnings. UV validation now records per-channel domains, bounds, unit-domain status, validation status, distortion metrics, and packing efficiency. Remaining work: UV island merge, alignment, repack, padding/resolution/share-map controls, overlap removal, uniform versus non-uniform normalization, shared versus per-part UV space for unwrap/repack, destination-channel controls beyond box projection, and null-island handling.
    - Make UV0 tileable and UV1 baking requirements explicit: UV0 may overlap; UV1 must fit in `[0,1]` with padding and no overlaps.
    - Add UV1 bake packing controls for atlas resolution, pixel padding, share-map behavior, uniform versus non-uniform scaling, shared versus per-part UV space, overlap removal, destination channel, null-island handling, and normalized-space utilization reports.
    - Tangent lifecycle validation now warns when UV0 is missing, invalidates tangents after UV edits, and records generated, regenerated, preserved, invalidated, missing, or dropped tangent states on mesh and asset metadata.

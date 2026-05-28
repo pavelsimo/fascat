@@ -11,6 +11,7 @@ from fascat.material import Material
 from fascat.mesh import Mesh, MeshValidationError
 from fascat.metadata import Metadata, PmiAnnotation, Tolerance
 from fascat.options import (
+    AabbProjectionOptions,
     AnalyzeOptions,
     AtlasOptions,
     BakeMaterialOptions,
@@ -72,6 +73,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "Asset",
+    "AabbProjectionOptions",
     "AnalysisReport",
     "AnalyzeOptions",
     "AtlasOptions",

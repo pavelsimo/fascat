@@ -11,6 +11,8 @@ from fascat.options import StageOptions
 def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[str] | None = None) -> Asset:
     result = asset.copy(keep_source=True)
     uv_summary = {
+        "aabb_projection": 0,
+        "aabb_preserved_existing": 0,
         "bake_missing_repack": 0,
         "policy_intent": 0,
         "forbid_overlapping_violations": 0,
@@ -44,6 +46,7 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
     if options.atlas.enabled:
         _tag_material_atlas(result, options)
     _stage_materials(result, options, selected_part_ids=selected_part_ids)
+    shared_aabb_bounds = _shared_aabb_projection_bounds(result, options, selected_part_ids)
 
     for part in result.parts.values():
         if selected_part_ids is not None and part.id not in selected_part_ids:
@@ -57,20 +60,36 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
         edited_uv_channels: set[int] = set()
         mesh = _stage_normals(result, part.id, mesh, options, normal_summary)
         if options.uv0 == "box":
-            mesh = mesh.box_uv(0)
-            _tag_uv_metadata(mesh, 0, "box", options)
-            uv_modes[0] = "box"
-            edited_uv_channels.add(0)
+            mesh, edited = _apply_aabb_projection(
+                result,
+                part.id,
+                mesh,
+                0,
+                options,
+                shared_bounds=shared_aabb_bounds,
+                uv_summary=uv_summary,
+            )
+            uv_modes[0] = "box" if edited else "existing"
+            if edited:
+                edited_uv_channels.add(0)
         elif options.uv0 in {"unwrap", "lightmap"}:
             mesh = _unwrap_uv(mesh, 0)
             _tag_uv_metadata(mesh, 0, options.uv0, options)
             uv_modes[0] = options.uv0
             edited_uv_channels.add(0)
         if options.uv1 == "box":
-            mesh = mesh.box_uv(1)
-            _tag_uv_metadata(mesh, 1, "box", options)
-            uv_modes[1] = "box"
-            edited_uv_channels.add(1)
+            mesh, edited = _apply_aabb_projection(
+                result,
+                part.id,
+                mesh,
+                1,
+                options,
+                shared_bounds=shared_aabb_bounds,
+                uv_summary=uv_summary,
+            )
+            uv_modes[1] = "box" if edited else "existing"
+            if edited:
+                edited_uv_channels.add(1)
         elif options.uv1 in {"unwrap", "lightmap"}:
             mesh = _unwrap_uv(mesh, 1)
             _tag_uv_metadata(mesh, 1, options.uv1, options)
@@ -270,6 +289,95 @@ def _tag_uv_metadata(mesh: Mesh, channel: int, mode: str, options: StageOptions)
     if options.atlas.enabled:
         mesh.metadata[f"{prefix}_atlas"] = "atlas_0"
         mesh.metadata[f"{prefix}_atlas_size"] = str(options.atlas.max_size)
+
+
+def _shared_aabb_projection_bounds(
+    asset: Asset,
+    options: StageOptions,
+    selected_part_ids: set[str] | None,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    if options.aabb_projection.scope != "shared" or not _uses_aabb_projection(options):
+        return None
+    point_sets = [
+        part.mesh.points
+        for part in asset.parts.values()
+        if (selected_part_ids is None or part.id in selected_part_ids)
+        and part.mesh is not None
+        and part.mesh.vertex_count > 0
+    ]
+    if not point_sets:
+        return None
+    points = np.vstack(point_sets)
+    return points.min(axis=0), points.max(axis=0)
+
+
+def _uses_aabb_projection(options: StageOptions) -> bool:
+    return options.uv0 == "box" or options.uv1 == "box"
+
+
+def _apply_aabb_projection(
+    asset: Asset,
+    part_id: str,
+    mesh: Mesh,
+    channel: int,
+    options: StageOptions,
+    *,
+    shared_bounds: tuple[np.ndarray, np.ndarray] | None,
+    uv_summary: dict[str, int],
+) -> tuple[Mesh, bool]:
+    result = mesh.copy()
+    prefix = f"uv{channel}"
+    projection = options.aabb_projection
+    result.metadata[f"{prefix}_projection"] = "aabb"
+    result.metadata[f"{prefix}_projection_scope"] = projection.scope
+    result.metadata[f"{prefix}_projection_destination_channel"] = str(channel)
+    result.metadata[f"{prefix}_projection_override_existing"] = str(projection.override_existing).lower()
+    result.metadata[f"{prefix}_projection_units"] = asset.units
+    result.metadata[f"{prefix}_projection_meters_per_unit"] = _format_uv_metric(asset.meters_per_unit)
+    result.metadata[f"{prefix}_projection_uv3d_size"] = (
+        _format_uv_metric(projection.uv3d_size) if projection.uv3d_size is not None else "normalized_to_aabb"
+    )
+    if channel in result.uvs and not projection.override_existing:
+        result.metadata.setdefault(prefix, "existing")
+        result.metadata[f"{prefix}_mode"] = "existing"
+        result.metadata[f"{prefix}_projection_status"] = "preserved_existing"
+        uv_summary["aabb_preserved_existing"] += 1
+        return result, False
+    _tag_uv_metadata(result, channel, "box", options)
+    if result.vertex_count == 0:
+        result.uvs[channel] = np.empty((0, 2), dtype=np.float64)
+        result.tangents = None
+        result.metadata[f"{prefix}_projection_status"] = "projected"
+        result.metadata[f"{prefix}_projection_bounds"] = "empty"
+        uv_summary["aabb_projection"] += 1
+        return result, True
+
+    bounds = shared_bounds if projection.scope == "shared" and shared_bounds is not None else result.bounds()
+    mins, maxs = bounds
+    size = maxs - mins
+    axes = np.argsort(size)[-2:]
+    if projection.uv3d_size is None:
+        denom = size[axes].copy()
+        denom[denom == 0.0] = 1.0
+    else:
+        denom = np.asarray([projection.uv3d_size, projection.uv3d_size], dtype=np.float64)
+    uv = (result.points[:, axes] - mins[axes]) / denom
+    result.uvs[channel] = uv.astype(np.float64)
+    result.tangents = None
+    result.metadata[f"{prefix}_projection_status"] = "projected"
+    result.metadata[f"{prefix}_projection_axes"] = ",".join(_axis_name(int(axis)) for axis in axes)
+    result.metadata[f"{prefix}_projection_bounds"] = _format_bounds(mins, maxs)
+    result.metadata[f"{prefix}_projection_bounds_scope"] = "shared" if bounds is shared_bounds else "local"
+    uv_summary["aabb_projection"] += 1
+    return result, True
+
+
+def _axis_name(axis: int) -> str:
+    return ("x", "y", "z")[axis]
+
+
+def _format_bounds(mins: np.ndarray, maxs: np.ndarray) -> str:
+    return ",".join(_format_uv_metric(value) for value in (*mins, *maxs))
 
 
 def _copy_uv_channel(asset: Asset, part_id: str, mesh: Mesh, *, source: int, target: int) -> Mesh:
@@ -532,6 +640,12 @@ def _tag_uv_policy_metadata(
 
 
 def _tag_uv_summary(asset: Asset, uv_summary: dict[str, int]) -> None:
+    aabb_projection = uv_summary["aabb_projection"]
+    if aabb_projection:
+        asset.metadata["stage_aabb_projection_channels"] = str(aabb_projection)
+    aabb_preserved = uv_summary["aabb_preserved_existing"]
+    if aabb_preserved:
+        asset.metadata["stage_aabb_preserved_existing_channels"] = str(aabb_preserved)
     missing = uv_summary["bake_missing_repack"]
     if missing:
         asset.metadata["stage_bake_uv_channels_missing_repack"] = str(missing)
@@ -545,7 +659,7 @@ def _tag_uv_summary(asset: Asset, uv_summary: dict[str, int]) -> None:
 
 def _uv_workflow_steps(mesh: Mesh, prefix: str, mode: str) -> str:
     if mode == "box":
-        steps = ["project"]
+        steps = ["aabb_project" if mesh.metadata.get(f"{prefix}_projection") == "aabb" else "project"]
     elif mode in {"unwrap", "lightmap"}:
         steps = ["unwrap"]
     elif mode == "copy_uv0":

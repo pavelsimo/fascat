@@ -19,6 +19,7 @@ from fascat.io.stl import write_stl as _write_stl
 from fascat.io.usd import validate_usd
 from fascat.io.usd import write_usd as _write_usd
 from fascat.options import (
+    AabbProjectionOptions,
     AnalyzeOptions,
     AtlasOptions,
     BakeMaterialOptions,
@@ -1748,6 +1749,7 @@ def stage(
     validate_normals: bool = False,
     unwrap: UnwrapOptions | None = None,
     atlas: AtlasOptions | None = None,
+    aabb_projection: AabbProjectionOptions | None = None,
     uv0: UV0Mode = "box",
     uv1: UV1Mode | None = None,
     normalize_uvs: tuple[int, ...] = (),
@@ -1770,6 +1772,7 @@ def stage(
             validate_normals=validate_normals,
             unwrap=unwrap or UnwrapOptions(),
             atlas=atlas or AtlasOptions(),
+            aabb_projection=aabb_projection or AabbProjectionOptions(),
             uv0=uv0,
             uv1=uv1,
             normalize_uvs=normalize_uvs,

@@ -10,6 +10,7 @@ import tomli
 from fascat.asset import Asset
 from fascat.filter import Filter
 from fascat.options import (
+    AabbProjectionOptions,
     AtlasOptions,
     BakeMaterialOptions,
     BrepHealOptions,
@@ -186,6 +187,9 @@ _STAGE_KEYS = frozenset(
         "atlas",
         "atlas_size",
         "max_size",
+        "uv_aabb_scope",
+        "uv3d_size",
+        "uv_override_existing",
         "uv0",
         "uv1",
         "normalize_uvs",
@@ -894,6 +898,11 @@ def _stage_options(values: dict[str, object]) -> StageOptions:
         atlas=AtlasOptions(
             enabled=bool(values.get("atlas", False)),
             max_size=_as_int(values.get("atlas_size", values.get("max_size", 4096))),
+        ),
+        aabb_projection=AabbProjectionOptions(
+            scope=cast(Any, _literal(values.get("uv_aabb_scope", "local"))),
+            uv3d_size=_as_optional_float(values.get("uv3d_size")),
+            override_existing=bool(values.get("uv_override_existing", True)),
         ),
         uv0=cast(Any, _literal(values.get("uv0", "box"))),
         uv1=cast(Any, _literal(values.get("uv1"))),

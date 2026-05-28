@@ -301,6 +301,28 @@ def test_convert_dry_run_accepts_uv_normalization_channels() -> None:
     assert payload["normalize_uvs"] == [1, 0]
 
 
+def test_convert_dry_run_accepts_aabb_uv_projection_controls() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "--dry-run",
+            "convert",
+            "input.step",
+            "--uv-aabb-scope",
+            "shared",
+            "--uv3d-size",
+            "2.5",
+            "--uv-preserve-existing",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["uv_aabb_scope"] == "shared"
+    assert payload["uv3d_size"] == 2.5
+    assert payload["uv_override_existing"] is False
+
+
 def test_convert_dry_run_accepts_tangent_uv_channel() -> None:
     result = runner.invoke(
         app,
@@ -1065,6 +1087,9 @@ def test_convert_writes_tessellation_quality_report(monkeypatch, tmp_path: Path)
         assert stage.unwrap.tolerance == 0.001
         assert stage.unwrap.sharp_to_seam is True
         assert stage.unwrap.forbid_overlapping is True
+        assert stage.aabb_projection.scope == "shared"
+        assert stage.aabb_projection.uv3d_size == 2.5
+        assert stage.aabb_projection.override_existing is False
         return asset
 
     monkeypatch.setattr(cli, "_convert_for_cli", fake_convert)
@@ -1092,6 +1117,11 @@ def test_convert_writes_tessellation_quality_report(monkeypatch, tmp_path: Path)
             "0.001",
             "--uv-sharp-to-seam",
             "--uv-forbid-overlapping",
+            "--uv-aabb-scope",
+            "shared",
+            "--uv3d-size",
+            "2.5",
+            "--uv-preserve-existing",
             "--quality-report",
             str(quality_file),
         ],
@@ -1362,6 +1392,10 @@ def test_convert_rejects_invalid_uv_pipeline_values(capsys) -> None:  # type: ig
     result = invoke_run(["--dry-run", "convert", "input.step", "output.usdc", "--unwrap-tolerance", "-1"], capsys)
     assert result.exit_code == 2
     assert "--unwrap-tolerance must be greater than or equal to 0" in result.stderr
+
+    result = invoke_run(["--dry-run", "convert", "input.step", "output.usdc", "--uv3d-size", "0"], capsys)
+    assert result.exit_code == 2
+    assert "--uv3d-size must be greater than 0" in result.stderr
 
 
 def test_convert_rejects_invalid_lods_as_json(capsys) -> None:  # type: ignore[no-untyped-def]

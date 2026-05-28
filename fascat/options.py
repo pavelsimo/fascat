@@ -7,6 +7,7 @@ UV0Mode = Literal["none", "box", "unwrap", "lightmap"]
 UV1Mode = Literal["none", "box", "unwrap", "lightmap", "copy_uv0"]
 UVMode = UV0Mode
 UnwrapMethod = Literal["default", "conformal", "isometric"]
+AabbProjectionScope = Literal["local", "shared"]
 NormalMode = Literal["none", "smooth", "hard_edges", "flat"]
 NormalWeighting = Literal["angle", "area"]
 MaterialMode = Literal["cad", "display", "none"]
@@ -292,6 +293,22 @@ class AtlasOptions:
 
 
 @dataclass(frozen=True)
+class AabbProjectionOptions:
+    scope: AabbProjectionScope = "local"
+    uv3d_size: float | None = None
+    override_existing: bool = True
+
+    def __post_init__(self) -> None:
+        if self.scope not in {"local", "shared"}:
+            raise ValueError("aabb projection scope must be one of: local, shared")
+        if self.uv3d_size is not None and self.uv3d_size <= 0.0:
+            raise ValueError("uv3d_size must be greater than 0 when set")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class StageOptions:
     materials: MaterialMode = "cad"
     material_mode: MaterialPipelineMode = "cad"
@@ -308,6 +325,7 @@ class StageOptions:
     validate_normals: bool = False
     unwrap: UnwrapOptions = field(default_factory=UnwrapOptions)
     atlas: AtlasOptions = field(default_factory=AtlasOptions)
+    aabb_projection: AabbProjectionOptions = field(default_factory=AabbProjectionOptions)
     uv0: UV0Mode | None = "box"
     uv1: UV1Mode | None = None
     normalize_uvs: tuple[int, ...] = ()

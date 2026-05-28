@@ -859,6 +859,9 @@ def test_pipeline_stage_unwrap_solver_controls_are_parsed() -> None:
                     "unwrap_tolerance": 0.001,
                     "sharp_to_seam": True,
                     "forbid_overlapping": True,
+                    "uv_aabb_scope": "shared",
+                    "uv3d_size": 3.0,
+                    "uv_override_existing": False,
                 }
             ]
         }
@@ -877,6 +880,11 @@ def test_pipeline_stage_unwrap_solver_controls_are_parsed() -> None:
         "tolerance": 0.001,
         "sharp_to_seam": True,
         "forbid_overlapping": True,
+    }
+    assert step.options["aabb_projection"] == {
+        "scope": "shared",
+        "uv3d_size": 3.0,
+        "override_existing": False,
     }
 
 

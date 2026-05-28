@@ -6,7 +6,7 @@ import pytest
 from fascat.asset import Asset, Node, Part
 from fascat.material import Material
 from fascat.mesh import Mesh
-from fascat.options import AtlasOptions, StageOptions, UnwrapOptions
+from fascat.options import AabbProjectionOptions, AtlasOptions, StageOptions, UnwrapOptions
 
 
 def test_stage_material_modes_control_bindings_and_display_color() -> None:
@@ -140,8 +140,94 @@ def test_stage_records_uv_and_atlas_workflow_metadata() -> None:
     assert staged_mesh.metadata["uv0_texel_density"] == "256.0"
     assert staged_mesh.metadata["uv1_padding"] == "4"
     assert staged_mesh.metadata["uv0_atlas_size"] == "2048"
+    assert staged_mesh.metadata["uv0_projection"] == "aabb"
+    assert staged_mesh.metadata["uv0_projection_status"] == "projected"
+    assert staged_mesh.metadata["uv0_projection_scope"] == "local"
+    assert staged_mesh.metadata["uv0_projection_destination_channel"] == "0"
+    assert staged_mesh.metadata["uv0_workflow_steps"] == "aabb_project,validate"
+    assert staged.metadata["stage_aabb_projection_channels"] == "2"
+    assert staged.report.steps[-1].after["stage_aabb_projection_channels"] == 2
     assert staged.materials["mat"].metadata["atlas"] == "atlas_0"
     assert staged.materials["mat"].metadata["texture_bake_hooks"] == "base_color,opacity"
+
+
+def test_stage_aabb_projection_records_shared_uv3d_size_policy() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [4, 0, 0], [0, 2, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    far_mesh = Mesh(
+        points=np.array([[12, 0, 0], [12, 1, 0], [10, 0, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="node-a", name="A", part_id="part-a"),
+                Node(id="node-b", name="B", part_id="part-b"),
+            ],
+        ),
+        parts={
+            "part-a": Part(id="part-a", name="Part A", mesh=mesh),
+            "part-b": Part(id="part-b", name="Part B", mesh=far_mesh),
+        },
+        units="metre",
+        meters_per_unit=1.0,
+    )
+
+    staged = asset.stage(
+        StageOptions(
+            uv0="box",
+            uv1=None,
+            aabb_projection=AabbProjectionOptions(scope="shared", uv3d_size=2.0),
+        )
+    )
+    staged_mesh = staged.parts["part-a"].mesh
+
+    assert staged_mesh is not None
+    assert np.allclose(staged_mesh.uvs[0], np.array([[0.0, 0.0], [0.0, 2.0], [1.0, 0.0]]))
+    assert staged_mesh.metadata["uv0_projection_scope"] == "shared"
+    assert staged_mesh.metadata["uv0_projection_bounds_scope"] == "shared"
+    assert staged_mesh.metadata["uv0_projection_axes"] == "y,x"
+    assert staged_mesh.metadata["uv0_projection_bounds"] == "0,0,0,12,2,0"
+    assert staged_mesh.metadata["uv0_projection_units"] == "metre"
+    assert staged_mesh.metadata["uv0_projection_meters_per_unit"] == "1"
+    assert staged_mesh.metadata["uv0_projection_uv3d_size"] == "2"
+    assert staged_mesh.metadata["uv0_workflow_steps"] == "aabb_project,validate"
+
+
+def test_stage_aabb_projection_can_preserve_existing_uvs() -> None:
+    existing_uv = np.array([[0.2, 0.3], [0.8, 0.3], [0.2, 0.9]], dtype=float)
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [4, 0, 0], [0, 2, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+        uvs={0: existing_uv},
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    staged = asset.stage(
+        StageOptions(
+            uv0="box",
+            uv1=None,
+            aabb_projection=AabbProjectionOptions(override_existing=False),
+        )
+    )
+    staged_mesh = staged.parts["part"].mesh
+
+    assert staged_mesh is not None
+    assert np.array_equal(staged_mesh.uvs[0], existing_uv)
+    assert staged_mesh.metadata["uv0_mode"] == "existing"
+    assert staged_mesh.metadata["uv0_projection_status"] == "preserved_existing"
+    assert staged_mesh.metadata["uv0_projection_override_existing"] == "false"
+    assert staged_mesh.metadata["uv0_workflow_steps"] == "preserve,validate"
+    assert staged.metadata["stage_aabb_preserved_existing_channels"] == "1"
+    assert "stage_aabb_projection_channels" not in staged.metadata
+    assert staged.report.steps[-1].warnings == []
 
 
 def test_stage_can_copy_uv0_to_uv1() -> None:
