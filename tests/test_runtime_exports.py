@@ -77,8 +77,37 @@ def test_gltf_export_options_write_meshopt_extension_and_file_budget(tmp_path) -
     assert "fallback buffer data" in web_extensions["EXT_meshopt_compression"]["fallback"]
     assert web_extensions["KHR_texture_basisu"]["state"] == "not_written"
     assert asset.report.steps[-1].after["file_size_bytes"] > 0
+    assert asset.report.steps[-1].after["export_estimated_geometry_bytes"] == 96
+    assert asset.report.steps[-1].after["export_estimated_texture_bytes"] == 0
+    assert asset.report.steps[-1].after["export_estimated_metadata_bytes"] == 0
+    assert asset.report.steps[-1].after["export_estimated_payload_bytes"] == 96
     assert asset.report.steps[-1].after["file_size_budget_bytes"] == 1
     assert "file size budget exceeded" in asset.report.warnings[-1]
+
+
+def test_write_report_estimates_geometry_texture_and_metadata_payloads(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    asset = _asset()
+    asset.metadata["asset_note"] = "qa"
+    asset.parts["tri"].metadata["part_note"] = "runtime"
+    asset.materials["mat"].metadata.update(
+        {
+            "material_note": "paint",
+            "baked_texture_base_color_uri": "data:image/png;base64,QUJD",
+        }
+    )
+    output = tmp_path / "payloads.gltf"
+
+    asset.write_gltf(output)
+    after = asset.report.steps[-1].after
+
+    assert after["export_estimated_geometry_bytes"] == 96
+    assert after["export_estimated_texture_bytes"] == 3
+    assert after["export_estimated_metadata_bytes"] > 0
+    assert after["export_estimated_payload_bytes"] == (
+        after["export_estimated_geometry_bytes"]
+        + after["export_estimated_texture_bytes"]
+        + after["export_estimated_metadata_bytes"]
+    )
 
 
 def test_gltf_write_reports_lod_and_metadata_runtime_dependencies(tmp_path) -> None:  # type: ignore[no-untyped-def]

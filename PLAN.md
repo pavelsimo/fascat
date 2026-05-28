@@ -47,7 +47,9 @@ that are currently conservative approximations.
 - Analysis reports now mark truncated self-intersection checks as lower bounds and cover coplanar overlap, endpoint contact, and adjacent-triangle exclusions.
 - Reference docs now include a Unity-inspired capability matrix with implemented, partial, approximate, and metadata-only behavior plus the next parity step.
 - Unsupported Draco compression now raises instead of silently writing uncompressed output.
-- Export file-size budgets are recorded and warn when outputs exceed the budget.
+- Export file-size budgets are recorded and warn when outputs exceed the budget,
+  and write reports include estimated geometry, texture, and metadata payload
+  bytes.
 - glTF LODs now include node-level `MSFT_lod` references in addition to Fascat extras.
 - OBJ export writes normals, `f v//vn` faces, and smoothing directives.
 - Self-intersection analysis now performs bounded triangle-triangle checks instead of counting AABB candidates.
@@ -183,7 +185,7 @@ Comparison snapshot:
 | Staging | Normal/tangent generation, box/unwrap/lightmap UV modes, UV copy/normalization, UV validation, UV island/distortion/packing diagnostics, material normalization, duplicate-material merge, and metadata-only atlas intent. | Unity-style UV0 tileable versus UV1 bake workflows with segmentation, sharp-edge seam and forbid-overlap UV policies, lines of interest, island merge/alignment, real repack/padding/share-map controls, material-library mapping, real atlas textures, AO/lightmap baking, and texture cleanup. |
 | Optimization | Mesh simplification, measured error reporting, sampled occlusion removal, exact and position-tolerant instance reconstruction, scene merge/split utilities, draw-call breakdown reports, UV-importance modes, and pre-decimation cleanup for unused UVs/tangents. | Global assembly target allocation with iterative memory thresholds, real geometric-error bounded simplification, AO/user-weighted decimation, cleanup for vertex colors/weights, standard/advanced occlusion backends, proxy, dual-contouring, or field-aligned retopology with normal-map transfer, symmetry/mirror-aware instance reconstruction, duplicate image/material cleanup, and merge reports that quantify culling, memory, and file-size tradeoffs. |
 | LODs | LOD ratios, screen-coverage metadata, validation, skipped-part reporting, per-level mesh-payload and policy reports, and glTF `MSFT_lod` metadata. | Occurrence-level LOD group authoring with preserved instance relationships, optimized LOD0 as master asset, explicit conservative LOD0 versus destructive distant-LOD policy, far-LOD one-mesh/one-material baking, switching-distance validation, and engine-specific runtime export profiles. |
-| Export | USD/USDZ, glTF/GLB, OBJ, STL, glTF quantization, meshopt, extension reporting, file-size budgets, and rejection of unsupported Draco/KTX2 requests. | Real Draco compression settings, KTX2/Basis texture output, a first-class image graph for texture cleanup and resizing, PNG/JPEG fallback controls, unused texture cleanup, baseline-versus-optimized size comparisons, expected-versus-measured export size ladders, Unity/glTFast-oriented profiles, and web/mobile/VR/XR budget presets backed by runtime measurements. |
+| Export | USD/USDZ, glTF/GLB, OBJ, STL, glTF quantization, meshopt, extension reporting, file-size budgets, estimated geometry/texture/metadata payload bytes, and rejection of unsupported Draco/KTX2 requests. | Real Draco compression settings, KTX2/Basis texture output, a first-class image graph for texture cleanup and resizing, PNG/JPEG fallback controls, unused texture cleanup, baseline-versus-optimized size comparisons, expected-versus-measured export size ladders, Unity/glTFast-oriented profiles, and web/mobile/VR/XR budget presets backed by runtime measurements. |
 
 Function-level parity notes from the linked Unity pages:
 
@@ -411,7 +413,7 @@ Parity gaps to track:
 10. Export parity
    - Add a real Draco encoder path with compression level and quantization settings, or keep `draco=True` rejected.
    - Add real KTX2/Basis texture output with quality, compression level, and max-resolution controls.
-   - Add export cleanup for unused images/materials and file-size reports broken down by geometry, textures, and metadata.
+   - Write reports now include estimated geometry, texture, metadata, and total payload bytes. Remaining export cleanup work: unused image/material removal and format-specific resource pruning.
    - Add texture-resize preprocessing with before/after dimensions, byte estimates, and per-profile maximums before KTX2/PNG/JPEG export decisions.
    - glTF write reports now list emitted runtime extensions, required extensions, `extras.fascat` metadata, unsupported Draco/KTX2 outputs, expected runtime support, and target compatibility notes with fallback behavior.
    - Add Unity/glTFast-oriented GLB export profiles that combine extension support notes, Draco/KTX2 settings, fallback choices, and runtime compatibility warnings.

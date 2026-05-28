@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import numpy as np
 from numpy.typing import NDArray
 
+from fascat.export_report import stats_with_file_size as _stats_with_file_size
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.metadata import Metadata, PmiAnnotation
@@ -1318,25 +1319,6 @@ def _decimation_report_stats(asset: Asset) -> dict[str, int]:
     if "decimate_iterative_recommended" in asset.metadata:
         stats["decimate_iterative_recommended"] = 1 if asset.metadata["decimate_iterative_recommended"] == "true" else 0
     return stats
-
-
-def _stats_with_file_size(
-    stats: dict[str, int],
-    path: str | Path,
-    budget_mb: float | None,
-    asset: Asset,
-) -> dict[str, int]:
-    output_path = Path(path)
-    if str(path) == "-" or not output_path.exists():
-        return stats
-    size = output_path.stat().st_size
-    result = {**stats, "file_size_bytes": size}
-    if budget_mb is not None:
-        budget_bytes = int(budget_mb * 1_000_000)
-        result["file_size_budget_bytes"] = budget_bytes
-        if size > budget_bytes:
-            asset.report.add_warning(f"file size budget exceeded: {size} bytes > {budget_bytes} bytes")
-    return result
 
 
 def _unique_part_id(parts: dict[str, Part], base: str) -> str:

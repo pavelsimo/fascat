@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from fascat import profiles
 from fascat.asset import Asset
+from fascat.export_report import stats_with_file_size as _stats_with_file_size
 from fascat.filter import Filter
 from fascat.io.gltf import GLTF_SUFFIXES, runtime_dependency_report, validate_gltf
 from fascat.io.gltf import write_gltf as _write_gltf
@@ -1347,25 +1348,6 @@ def _with_usd_metadata(
         file_size_budget_mb=options.file_size_budget_mb,
         metadata=metadata,
     )
-
-
-def _stats_with_file_size(
-    stats: dict[str, int],
-    path: str | Path,
-    budget_mb: float | None,
-    asset: Asset,
-) -> dict[str, int]:
-    output_path = Path(path)
-    if str(path) == "-" or not output_path.exists():
-        return stats
-    size = output_path.stat().st_size
-    result = {**stats, "file_size_bytes": size}
-    if budget_mb is not None:
-        budget_bytes = int(budget_mb * 1_000_000)
-        result["file_size_budget_bytes"] = budget_bytes
-        if size > budget_bytes:
-            asset.report.add_warning(f"file size budget exceeded: {size} bytes > {budget_bytes} bytes")
-    return result
 
 
 def write_usd(
