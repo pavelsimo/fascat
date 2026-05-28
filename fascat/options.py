@@ -512,6 +512,7 @@ class SceneOptimizeOptions:
     flatten: FlattenMode = "safe"
     remove_empty_nodes: bool = True
     instance_policy: InstancePolicy = "auto"
+    instance_similarity_tolerance: float = 0.0
 
     def __post_init__(self) -> None:
         if self.max_vertices_per_mesh is not None and self.max_vertices_per_mesh <= 0:
@@ -524,6 +525,8 @@ class SceneOptimizeOptions:
             raise ValueError("flatten must be one of: none, safe, all")
         if self.instance_policy not in {"auto", "preserve", "expand"}:
             raise ValueError("instance_policy must be one of: auto, preserve, expand")
+        if self.instance_similarity_tolerance < 0.0:
+            raise ValueError("instance_similarity_tolerance must be greater than or equal to 0")
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

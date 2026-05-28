@@ -925,6 +925,13 @@ def cmd_convert(
         InstancePolicy,
         typer.Option("--instance-policy", help="Instance policy: auto, preserve, or expand."),
     ] = InstancePolicy.AUTO,
+    instance_similarity_tolerance: Annotated[
+        float,
+        typer.Option(
+            "--instance-similarity-tolerance",
+            help="Position tolerance for reconstructing similar mesh instances.",
+        ),
+    ] = 0.0,
     bake_materials: Annotated[
         bool,
         typer.Option("--bake-materials", help="Create a shared baked material with constant embedded textures."),
@@ -1252,6 +1259,7 @@ def cmd_convert(
         "index_buffer": index_buffer.value,
         "flatten": flatten.value,
         "instance_policy": instance_policy.value,
+        "instance_similarity_tolerance": instance_similarity_tolerance,
         "bake_materials": bake_materials,
         "maps_resolution": maps_resolution,
         "force_uv_generation": force_uv_generation,
@@ -1375,6 +1383,8 @@ def cmd_convert(
         _fail(ctx, payload, "--merge-mode regions requires --region-size.", code=2)
     if replace == ReplaceMode.EXTERNAL_ASSET and not external_asset:
         _fail(ctx, payload, "--replace external-asset requires --external-asset.", code=2)
+    if instance_similarity_tolerance < 0.0:
+        _fail(ctx, payload, "--instance-similarity-tolerance must be greater than or equal to 0.", code=2)
     if hard_edge_angle <= 0.0 or hard_edge_angle > 180.0:
         _fail(ctx, payload, "--hard-edge-angle must be greater than 0 and no more than 180.", code=2)
     if small_part_triangle_threshold < 0:
@@ -1644,6 +1654,7 @@ def cmd_convert(
                 flatten=flatten.value,
                 remove_empty_nodes=True,
                 instance_policy=instance_policy.value,
+                instance_similarity_tolerance=instance_similarity_tolerance,
             )
             if (
                 batch_by_material
@@ -1652,6 +1663,7 @@ def cmd_convert(
                 or flatten != FlattenMode.SAFE
                 or index_buffer != IndexBufferMode.AUTO
                 or instance_policy != InstancePolicy.AUTO
+                or instance_similarity_tolerance > 0.0
             )
             else None
         )
@@ -2072,6 +2084,7 @@ def _convert_operation_diagnostics(payload: dict[str, Any]) -> list[dict[str, st
         or payload["flatten"] != "safe"
         or payload["index_buffer"] != "auto"
         or payload["instance_policy"] != "auto"
+        or payload["instance_similarity_tolerance"] > 0.0
     ):
         add("optimize_scene", "exact", "scene batching, splitting, flattening, and instance policy options are applied")
     if payload["bake_materials"]:

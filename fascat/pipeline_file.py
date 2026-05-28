@@ -216,6 +216,7 @@ _SCENE_KEYS = frozenset(
         "flatten",
         "remove_empty_nodes",
         "instance_policy",
+        "instance_similarity_tolerance",
     }
 )
 _BAKE_MATERIAL_KEYS = frozenset(
@@ -938,6 +939,7 @@ def _scene_options(values: dict[str, object]) -> SceneOptimizeOptions:
         flatten=cast(Any, values.get("flatten", "safe")),
         remove_empty_nodes=bool(values.get("remove_empty_nodes", True)),
         instance_policy=cast(Any, values.get("instance_policy", "auto")),
+        instance_similarity_tolerance=_as_float(values.get("instance_similarity_tolerance", 0.0)),
     )
 
 

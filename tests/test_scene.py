@@ -157,6 +157,80 @@ def test_optimize_scene_reconstructs_matching_separate_parts() -> None:
     assert optimized.metadata["scene_instanced_part_count"] == "1"
 
 
+def test_optimize_scene_reconstructs_position_tolerant_instances() -> None:
+    mesh_a = _triangle()
+    mesh_b = Mesh(
+        points=mesh_a.points + np.array([[0.001, 0, 0], [0.001, 0, 0], [0.001, 0, 0]], dtype=float),
+        faces=mesh_a.faces,
+        material_indices=mesh_a.material_indices,
+    )
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="node_a", name="Bolt A", part_id="bolt_a"),
+                Node(id="node_b", name="Bolt B", part_id="bolt_b"),
+            ],
+        ),
+        parts={
+            "bolt_a": Part(id="bolt_a", name="Bolt A", mesh=mesh_a, material_ids=["steel"]),
+            "bolt_b": Part(id="bolt_b", name="Bolt B", mesh=mesh_b, material_ids=["steel"]),
+        },
+        materials={"steel": Material(id="steel", name="Steel", base_color=(0.7, 0.7, 0.7, 1.0))},
+    )
+
+    exact = asset.optimize_scene(SceneOptimizeOptions(instance_policy="auto"))
+    tolerant = asset.optimize_scene(SceneOptimizeOptions(instance_policy="auto", instance_similarity_tolerance=0.002))
+    occurrence_part_ids = [node.part_id for node in tolerant.root.walk() if node.part_id is not None]
+
+    assert exact.part_count == 2
+    assert exact.metadata["scene_reconstructed_part_count"] == "0"
+    assert tolerant.part_count == 1
+    assert occurrence_part_ids == ["bolt_a", "bolt_a"]
+    assert tolerant.metadata["scene_reconstructed_part_count"] == "1"
+    assert tolerant.metadata["scene_similarity_tolerance"] == "0.002"
+    assert tolerant.metadata["scene_similarity_candidate_group_count"] == "1"
+    assert tolerant.metadata["scene_similarity_reconstructed_part_count"] == "1"
+    assert tolerant.metadata["scene_reconstructed_vertex_savings"] == "3"
+    assert tolerant.metadata["scene_instanced_part_count"] == "1"
+
+
+def test_optimize_scene_similarity_keeps_attribute_differences_separate() -> None:
+    mesh_a = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+        uvs={0: np.array([[0, 0], [1, 0], [0, 1]], dtype=float)},
+    )
+    mesh_b = Mesh(
+        points=mesh_a.points + np.array([[0.001, 0, 0], [0.001, 0, 0], [0.001, 0, 0]], dtype=float),
+        faces=mesh_a.faces,
+        uvs={0: np.array([[0, 0], [0, 1], [1, 0]], dtype=float)},
+    )
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="node_a", name="Panel A", part_id="panel_a"),
+                Node(id="node_b", name="Panel B", part_id="panel_b"),
+            ],
+        ),
+        parts={
+            "panel_a": Part(id="panel_a", name="Panel A", mesh=mesh_a, material_ids=["paint"]),
+            "panel_b": Part(id="panel_b", name="Panel B", mesh=mesh_b, material_ids=["paint"]),
+        },
+        materials={"paint": Material(id="paint", name="Paint", base_color=(0.0, 0.0, 1.0, 1.0))},
+    )
+
+    optimized = asset.optimize_scene(SceneOptimizeOptions(instance_policy="auto", instance_similarity_tolerance=0.002))
+
+    assert optimized.part_count == 2
+    assert optimized.metadata["scene_reconstructed_part_count"] == "0"
+    assert optimized.metadata["scene_similarity_candidate_group_count"] == "0"
+    assert optimized.metadata["scene_similarity_reconstructed_part_count"] == "0"
+
+
 def test_optimize_scene_reports_instance_reconstruction_blockers() -> None:
     mesh = _triangle()
     asset = Asset(
@@ -248,6 +322,8 @@ def test_cli_convert_accepts_scene_optimization_options_during_dry_run() -> None
             "safe",
             "--instance-policy",
             "auto",
+            "--instance-similarity-tolerance",
+            "0.002",
         ],
     )
 
@@ -256,3 +332,4 @@ def test_cli_convert_accepts_scene_optimization_options_during_dry_run() -> None
     assert payload["batch_by_material"] is True
     assert payload["merge_compatible_meshes"] is True
     assert payload["split_large_meshes"] is True
+    assert payload["instance_similarity_tolerance"] == 0.002

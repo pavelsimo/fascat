@@ -409,6 +409,7 @@ def test_size_adaptive_tessellation_requires_bands() -> None:
         (lambda: fc.DeleteDegeneratePolygonsOptions(area_epsilon=-1), "area_epsilon"),
         (lambda: fc.RepairOptions(tolerance=-1), "tolerance"),
         (lambda: fc.RepairOptions(area_epsilon=-1), "area_epsilon"),
+        (lambda: fc.SceneOptimizeOptions(instance_similarity_tolerance=-1), "instance_similarity_tolerance"),
         (lambda: fc.StageOptions(materials="bad"), "materials"),
         (lambda: fc.StageOptions(material_mode="bad"), "material_mode"),
         (lambda: fc.StageOptions(normal_mode="bad"), "normal_mode"),

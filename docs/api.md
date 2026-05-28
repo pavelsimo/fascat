@@ -593,7 +593,7 @@ Staging, UV, and material parameters:
 
 ## Scene Optimization
 
-Use scene optimization to reduce draw calls after staging and optional hierarchy merging. It batches compatible meshes, can batch by material, reconstructs exact repeated mesh instances when vertex attributes, materials, and metadata match, reports duplicate mesh payload savings, splits large merged meshes, simplifies empty hierarchy, annotates the intended index-buffer width, and records how mesh count, material count, submesh/material slots, instances, and merged batches contributed to the draw-call estimate. When batching removes reusable instances, the report includes the same export advisor used by explicit merge operations.
+Use scene optimization to reduce draw calls after staging and optional hierarchy merging. It batches compatible meshes, can batch by material, reconstructs exact repeated mesh instances when vertex attributes, materials, and metadata match, can reconstruct near-identical instances within a configured position tolerance, reports duplicate mesh payload savings, splits large merged meshes, simplifies empty hierarchy, annotates the intended index-buffer width, and records how mesh count, material count, submesh/material slots, instances, and merged batches contributed to the draw-call estimate. When batching removes reusable instances, the report includes the same export advisor used by explicit merge operations.
 
 ```python
 asset = asset.optimize_scene(
@@ -606,6 +606,7 @@ asset = asset.optimize_scene(
         flatten="safe",
         remove_empty_nodes=True,
         instance_policy="auto",
+        instance_similarity_tolerance=0.0,
     )
 )
 ```
@@ -622,6 +623,7 @@ Scene optimization parameters:
 | `flatten` | `none` preserves hierarchy, `safe` removes only safe empty structure, and `all` aggressively flattens. |
 | `remove_empty_nodes` | Remove hierarchy nodes with no part and no children. |
 | `instance_policy` | `auto` and `preserve` reconstruct exact repeated mesh instances when vertex attributes, material assignments, and metadata match. `expand` duplicates instances per occurrence. |
+| `instance_similarity_tolerance` | Position tolerance for reconstructing near-identical repeated meshes with matching topology, vertex attributes, material assignments, and metadata. `0.0` keeps exact fingerprint matching only. |
 
 ## Optimization Actions
 

@@ -50,7 +50,11 @@ def optimize_scene_asset(
 
 def _apply_instance_policy(asset: Asset, options: SceneOptimizeOptions, selected_node_ids: set[str]) -> None:
     if options.instance_policy in {"auto", "preserve"}:
-        _reconstruct_instances(asset, selected_node_ids)
+        _reconstruct_instances(
+            asset,
+            selected_node_ids,
+            similarity_tolerance=options.instance_similarity_tolerance,
+        )
         return
     if options.instance_policy != "expand":
         return
@@ -76,7 +80,7 @@ def _apply_instance_policy(asset: Asset, options: SceneOptimizeOptions, selected
         node.part_id = part.id
 
 
-def _reconstruct_instances(asset: Asset, selected_node_ids: set[str]) -> None:
+def _reconstruct_instances(asset: Asset, selected_node_ids: set[str], *, similarity_tolerance: float) -> None:
     selected_part_ids = _selected_part_ids(asset, selected_node_ids)
     part_ids_by_fingerprint: dict[str, list[str]] = {}
     for part_id in sorted(selected_part_ids):
@@ -117,6 +121,14 @@ def _reconstruct_instances(asset: Asset, selected_node_ids: set[str]) -> None:
                 continue
             replacements[part_id] = canonical_id
 
+    similarity_replacements, similarity_candidate_groups = _similar_instance_replacements(
+        asset,
+        selected_part_ids=selected_part_ids,
+        replacements=replacements,
+        tolerance=similarity_tolerance,
+    )
+    replacements.update(similarity_replacements)
+
     vertex_savings = 0
     triangle_savings = 0
     for part_id in replacements:
@@ -138,6 +150,9 @@ def _reconstruct_instances(asset: Asset, selected_node_ids: set[str]) -> None:
     asset.metadata["scene_reconstructed_occurrence_count"] = str(remapped_occurrences)
     asset.metadata["scene_reconstructed_vertex_savings"] = str(vertex_savings)
     asset.metadata["scene_reconstructed_triangle_savings"] = str(triangle_savings)
+    asset.metadata["scene_similarity_tolerance"] = f"{similarity_tolerance:g}"
+    asset.metadata["scene_similarity_candidate_group_count"] = str(similarity_candidate_groups)
+    asset.metadata["scene_similarity_reconstructed_part_count"] = str(len(similarity_replacements))
     if material_blocked_groups:
         asset.report.add_warning(
             "instance reconstruction found "
@@ -154,6 +169,71 @@ def _reconstruct_instances(asset: Asset, selected_node_ids: set[str]) -> None:
             "instance reconstruction found "
             f"{metadata_blocked_groups} matching mesh group(s) with metadata differences that prevented full instancing"
         )
+
+
+def _similar_instance_replacements(
+    asset: Asset,
+    *,
+    selected_part_ids: set[str],
+    replacements: dict[str, str],
+    tolerance: float,
+) -> tuple[dict[str, str], int]:
+    if tolerance <= 0.0:
+        return {}, 0
+    unresolved_part_ids = sorted(part_id for part_id in selected_part_ids if part_id not in replacements)
+    part_ids_by_key: dict[tuple[object, ...], list[str]] = {}
+    for part_id in unresolved_part_ids:
+        part = asset.parts.get(part_id)
+        if part is None or part.mesh is None:
+            continue
+        key = _part_similarity_key(part)
+        if key is None:
+            continue
+        part_ids_by_key.setdefault(key, []).append(part_id)
+
+    similar_replacements: dict[str, str] = {}
+    candidate_groups = 0
+    for part_ids in part_ids_by_key.values():
+        if len(part_ids) <= 1:
+            continue
+        candidate_groups += 1
+        clusters: list[str] = []
+        for part_id in part_ids:
+            mesh = asset.parts[part_id].mesh
+            assert mesh is not None
+            canonical_id = next(
+                (
+                    cluster_id
+                    for cluster_id in clusters
+                    if _mesh_positions_within_tolerance(asset.parts[cluster_id].mesh, mesh, tolerance)
+                ),
+                None,
+            )
+            if canonical_id is None:
+                clusters.append(part_id)
+            else:
+                similar_replacements[part_id] = canonical_id
+    return similar_replacements, candidate_groups
+
+
+def _part_similarity_key(part: Part) -> tuple[object, ...] | None:
+    mesh = part.mesh
+    if mesh is None:
+        return None
+    return (
+        _part_material_key(part),
+        _part_mesh_attribute_key(mesh),
+        _part_metadata_key(part),
+        mesh.points.shape,
+        _array_digest_required(mesh.faces),
+    )
+
+
+def _mesh_positions_within_tolerance(left: Mesh | None, right: Mesh | None, tolerance: float) -> bool:
+    if left is None or right is None or left.points.shape != right.points.shape:
+        return False
+    distances = np.linalg.norm(left.points - right.points, axis=1)
+    return bool(distances.size == 0 or float(distances.max()) <= tolerance)
 
 
 def _part_material_key(part: Part) -> tuple[tuple[str, ...], tuple[int, ...] | None]:
