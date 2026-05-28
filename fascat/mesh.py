@@ -2100,12 +2100,32 @@ class Mesh:
             return None
         source_centroids = self.points[self.faces].mean(axis=1)
         target_centroids = points[faces].mean(axis=1)
-        nearest = np.empty(target_centroids.shape[0], dtype=np.int64)
-        chunk_size = 4096
-        for start in range(0, target_centroids.shape[0], chunk_size):
-            end = min(start + chunk_size, target_centroids.shape[0])
-            delta = target_centroids[start:end, None, :] - source_centroids[None, :, :]
-            nearest[start:end] = np.argmin(np.einsum("ijk,ijk->ij", delta, delta), axis=1)
+        n_target = target_centroids.shape[0]
+        n_source = source_centroids.shape[0]
+        nearest = np.zeros(n_target, dtype=np.int64)
+        # Chunk both dimensions so the (target_block x source_block x 3) working
+        # array stays bounded (~tens of MB) regardless of mesh size; otherwise a
+        # full-resolution source mesh would allocate tens of GB and exhaust RAM.
+        max_block_elems = 4_000_000
+        target_block = max(1, min(n_target, max_block_elems // max(1, n_source)))
+        if target_block * n_source > max_block_elems:
+            target_block = max(1, min(n_target, 2048))
+        source_block = max(1, min(n_source, max_block_elems // target_block))
+        for t0 in range(0, n_target, target_block):
+            t1 = min(t0 + target_block, n_target)
+            tgt = target_centroids[t0:t1]
+            best_dist = np.full(t1 - t0, np.inf)
+            best_idx = np.zeros(t1 - t0, dtype=np.int64)
+            for s0 in range(0, n_source, source_block):
+                s1 = min(s0 + source_block, n_source)
+                delta = tgt[:, None, :] - source_centroids[None, s0:s1, :]
+                dist = np.einsum("ijk,ijk->ij", delta, delta)
+                local_idx = np.argmin(dist, axis=1)
+                local_dist = dist[np.arange(t1 - t0), local_idx]
+                improved = local_dist < best_dist
+                best_dist[improved] = local_dist[improved]
+                best_idx[improved] = local_idx[improved] + s0
+            nearest[t0:t1] = best_idx
         return cast(IntArray, np.asarray(self.material_indices[nearest], dtype=np.int64).copy())
 
     def fill_holes(self) -> Mesh:

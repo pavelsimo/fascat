@@ -1043,3 +1043,56 @@ def test_unwrap_uv_uses_xatlas_backend() -> None:
     assert unwrapped.metadata["uv0"] == "xatlas"
     assert unwrapped.uvs[0].shape == (unwrapped.vertex_count, 2)
     assert np.isfinite(unwrapped.uvs[0]).all()
+
+
+def _brute_force_nearest_materials(source: Mesh, points: np.ndarray, faces: np.ndarray) -> list[int]:
+    assert source.material_indices is not None
+    source_centroids = source.points[source.faces].mean(axis=1)
+    target_centroids = points[faces].mean(axis=1)
+    result: list[int] = []
+    for centroid in target_centroids:
+        distances = np.einsum("ij,ij->i", source_centroids - centroid, source_centroids - centroid)
+        result.append(int(source.material_indices[int(np.argmin(distances))]))
+    return result
+
+
+def test_assign_materials_by_nearest_centroid_matches_brute_force() -> None:
+    rng = np.random.default_rng(1234)
+    source_points = rng.random((300, 3))
+    source_faces = rng.integers(0, 300, size=(120, 3))
+    material_indices = rng.integers(0, 5, size=120)
+    source = Mesh(
+        points=source_points,
+        faces=source_faces,
+        material_indices=material_indices.astype(int),
+    )
+
+    target_points = rng.random((50, 3))
+    target_faces = rng.integers(0, 50, size=(30, 3))
+
+    assigned = source._assign_materials_by_nearest_centroid(target_points, target_faces)
+
+    assert assigned is not None
+    expected = _brute_force_nearest_materials(source, target_points, target_faces)
+    assert assigned.tolist() == expected
+
+
+def test_assign_materials_by_nearest_centroid_is_memory_bounded() -> None:
+    # A large source mesh used to allocate a (target_chunk x n_source x 3) array,
+    # which exhausted RAM and froze the terminal. The chunked implementation must
+    # complete quickly with a tiny working set regardless of source size.
+    rng = np.random.default_rng(7)
+    n_source = 200_000
+    source = Mesh(
+        points=rng.random((n_source, 3)),
+        faces=np.arange(n_source * 3).reshape((n_source, 3)) % n_source,
+        material_indices=rng.integers(0, 8, size=n_source).astype(int),
+    )
+    target_points = rng.random((100, 3))
+    target_faces = (np.arange(300).reshape((100, 3)) % 100).astype(int)
+
+    assigned = source._assign_materials_by_nearest_centroid(target_points, target_faces)
+
+    assert assigned is not None
+    assert assigned.shape == (100,)
+    assert assigned.min() >= 0 and assigned.max() < 8
