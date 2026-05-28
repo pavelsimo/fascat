@@ -100,8 +100,9 @@ def decimate_asset(
     source_meshes = _source_meshes(asset, selected_part_ids)
     working_asset = _prepare_decimation_asset(asset, options, selected_part_ids)
     pass_counts: dict[str, _DecimationPassCount] = {}
+    part_targets: dict[str, int] = {}
     if options.budget_scope == "selection":
-        result, pass_counts = _decimate_selection_budget(
+        result, pass_counts, part_targets = _decimate_selection_budget(
             working_asset,
             options,
             selected_part_ids=selected_part_ids,
@@ -117,6 +118,7 @@ def decimate_asset(
             options,
             selected_part_ids=selected_part_ids,
             pass_counts=pass_counts,
+            part_targets=part_targets,
         )
         return result
 
@@ -133,6 +135,9 @@ def decimate_asset(
         target = options.target_triangles
         if target is not None:
             target = min(target, part.mesh.triangle_count)
+        target_budget = target if target is not None else _ratio_target(part.mesh, ratio)
+        if target_budget is not None:
+            part_targets[part.id] = target_budget
         mesh, counts = _simplify_mesh_for_decimation(
             part.mesh,
             options,
@@ -141,7 +146,6 @@ def decimate_asset(
         )
         pass_counts[part.id] = counts
         mesh = mesh.optimize_buffers().repair()
-        target_budget = target if target is not None else _ratio_target(part.mesh, ratio)
         if target_budget is not None and mesh.triangle_count > target_budget:
             mesh = _sample_mesh_faces(mesh, target_budget).compute_normals()
         mesh = _finalize_decimated_mesh_uvs(mesh, options)
@@ -160,6 +164,7 @@ def decimate_asset(
         options,
         selected_part_ids=selected_part_ids,
         pass_counts=pass_counts,
+        part_targets=part_targets,
     )
     return result
 
@@ -505,7 +510,7 @@ def _decimate_selection_budget(
     options: DecimateOptions,
     *,
     selected_part_ids: set[str] | None,
-) -> tuple[Asset, dict[str, _DecimationPassCount]]:
+) -> tuple[Asset, dict[str, _DecimationPassCount], dict[str, int]]:
     from fascat.ops.optimize import _selected_triangle_count, _targets_for_parts
 
     result = asset.copy(keep_source=True)
@@ -523,12 +528,16 @@ def _decimate_selection_budget(
 
     ratio = _decimate_ratio(options)
     pass_counts: dict[str, _DecimationPassCount] = {}
+    part_targets: dict[str, int] = {}
     for part in result.parts.values():
         if selected_part_ids is not None and part.id not in selected_part_ids:
             continue
         if part.mesh is None:
             continue
         target = targets.get(part.id) if targets is not None else None
+        target_budget = target if target is not None else _ratio_target(part.mesh, ratio)
+        if target_budget is not None:
+            part_targets[part.id] = target_budget
         mesh, counts = _simplify_mesh_for_decimation(
             part.mesh,
             options,
@@ -542,7 +551,7 @@ def _decimate_selection_budget(
         mesh = mesh.repair()
         part.mesh = mesh
         part.fingerprint = mesh.fingerprint()
-    return result, pass_counts
+    return result, pass_counts, part_targets
 
 
 def _simplify_mesh_for_decimation(
@@ -745,6 +754,7 @@ def _annotate_decimation_result(
     *,
     selected_part_ids: set[str] | None,
     pass_counts: dict[str, _DecimationPassCount],
+    part_targets: dict[str, int],
 ) -> None:
     source_total = 0
     output_total = 0
@@ -759,6 +769,11 @@ def _annotate_decimation_result(
     uv_constrained_parts = 0
     uv_seam_constraint_vertices = 0
     protected_feature_parts = 0
+    allocated_target_total = 0
+    allocation_part_count = 0
+    allocation_preserved_parts = 0
+    allocation_reduced_parts = 0
+    allocation_targets: list[int] = []
     feature_totals = {
         "hard_edge_faces": 0,
         "hole_boundary_faces": 0,
@@ -808,6 +823,19 @@ def _annotate_decimation_result(
             "decimate_mean_vertex_error": f"{metrics.mean_vertex_error:.9g}",
             "decimate_error_metric": "symmetric_vertex_nearest_distance",
         }
+        allocated_target = part_targets.get(part.id)
+        if allocated_target is not None:
+            allocation_part_count += 1
+            allocated_target_total += allocated_target
+            allocation_targets.append(allocated_target)
+            if allocated_target >= metrics.source_triangles:
+                allocation_preserved_parts += 1
+            else:
+                allocation_reduced_parts += 1
+            metadata["decimate_allocated_target_triangles"] = str(allocated_target)
+            metadata["decimate_allocation_target_reduction"] = (
+                f"{((metrics.source_triangles - allocated_target) / metrics.source_triangles):.9g}"
+            )
         if pre_cleanup.removed_uv_channels:
             metadata["decimate_pre_cleanup_removed_uv_channels"] = ",".join(
                 str(channel) for channel in pre_cleanup.removed_uv_channels
@@ -864,6 +892,16 @@ def _annotate_decimation_result(
     asset.metadata["decimate_budget_allocation"] = (
         "global_selection" if options.budget_scope == "selection" else "per_part"
     )
+    if allocation_targets:
+        asset.metadata["decimate_allocation_targets"] = ",".join(
+            f"{part_id}:{part_targets[part_id]}" for part_id in sorted(part_targets)
+        )
+        asset.metadata["decimate_allocated_target_triangles"] = str(allocated_target_total)
+        asset.metadata["decimate_allocation_part_count"] = str(allocation_part_count)
+        asset.metadata["decimate_allocation_preserved_parts"] = str(allocation_preserved_parts)
+        asset.metadata["decimate_allocation_reduced_parts"] = str(allocation_reduced_parts)
+        asset.metadata["decimate_allocation_min_target_triangles"] = str(min(allocation_targets))
+        asset.metadata["decimate_allocation_max_target_triangles"] = str(max(allocation_targets))
     asset.metadata["decimate_estimated_memory_bytes"] = str(memory_plan.estimated_bytes)
     asset.metadata["decimate_estimated_memory_gb"] = f"{memory_plan.estimated_gb:.9g}"
     asset.metadata["decimate_memory_rule_gb_per_million_triangles"] = (

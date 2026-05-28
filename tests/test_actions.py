@@ -186,6 +186,12 @@ def test_decimate_uses_selection_budget() -> None:
     assert decimated.metadata["decimate_source_triangles"] == "6"
     assert decimated.metadata["decimate_output_triangles"] == "3"
     assert decimated.metadata["decimate_budget_allocation"] == "global_selection"
+    assert decimated.metadata["decimate_allocation_targets"] == "body:3"
+    assert decimated.metadata["decimate_allocated_target_triangles"] == "3"
+    assert decimated.metadata["decimate_allocation_part_count"] == "1"
+    assert decimated.metadata["decimate_allocation_reduced_parts"] == "1"
+    assert decimated.parts["body"].metadata["decimate_allocated_target_triangles"] == "3"
+    assert decimated.parts["body"].metadata["decimate_allocation_target_reduction"] == "0.5"
     assert decimated.metadata["decimate_estimated_memory_bytes"] == "30000"
     assert decimated.metadata["decimate_estimated_memory_gb"] == "3e-05"
     assert decimated.metadata["decimate_memory_rule_gb_per_million_triangles"] == "5"
@@ -201,7 +207,44 @@ def test_decimate_uses_selection_budget() -> None:
     assert decimated.report.steps[-1].after["decimate_iterative_recommended"] == 0
     assert decimated.report.steps[-1].after["decimate_simplification_passes"] == 1
     assert decimated.report.steps[-1].after["decimate_iterative_passes"] == 0
+    assert decimated.report.steps[-1].after["decimate_allocated_target_triangles"] == 3
+    assert decimated.report.steps[-1].after["decimate_allocation_reduced_parts"] == 1
     assert decimated.parts["body"].metadata["decimate_error_metric"] == "symmetric_vertex_nearest_distance"
+
+
+def test_decimate_reports_selection_target_allocation_by_part() -> None:
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="small_node", name="Small", part_id="small"),
+                Node(id="dense_node", name="Dense", part_id="dense"),
+            ],
+        ),
+        parts={
+            "small": Part(id="small", name="Small", mesh=_triangle_strip(2)),
+            "dense": Part(id="dense", name="Dense", mesh=_triangle_strip(8)),
+        },
+    )
+
+    decimated = asset.decimate(DecimateOptions(target_triangles=8, target_ratio=None))
+    step = decimated.report.steps[-1]
+
+    assert decimated.metadata["decimate_allocation_targets"] == "dense:6,small:2"
+    assert decimated.metadata["decimate_allocated_target_triangles"] == "8"
+    assert decimated.metadata["decimate_allocation_part_count"] == "2"
+    assert decimated.metadata["decimate_allocation_preserved_parts"] == "1"
+    assert decimated.metadata["decimate_allocation_reduced_parts"] == "1"
+    assert decimated.metadata["decimate_allocation_min_target_triangles"] == "2"
+    assert decimated.metadata["decimate_allocation_max_target_triangles"] == "6"
+    assert decimated.parts["small"].metadata["decimate_allocated_target_triangles"] == "2"
+    assert decimated.parts["small"].metadata["decimate_allocation_target_reduction"] == "0"
+    assert decimated.parts["dense"].metadata["decimate_allocated_target_triangles"] == "6"
+    assert decimated.parts["dense"].metadata["decimate_allocation_target_reduction"] == "0.25"
+    assert step.after["decimate_allocated_target_triangles"] == 8
+    assert step.after["decimate_allocation_preserved_parts"] == 1
+    assert step.after["decimate_allocation_reduced_parts"] == 1
 
 
 def test_decimate_iterative_threshold_controls_runtime_passes(monkeypatch: pytest.MonkeyPatch) -> None:

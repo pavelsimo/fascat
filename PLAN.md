@@ -193,7 +193,7 @@ Function-level parity notes from the linked Unity pages:
 | Repair meshes | Duplicate and degenerate cleanup plus standalone degenerate-polygon deletion, T-junction, boundary-gap, non-manifold, and orientation diagnostics are reported. | Implement true T-junction sewing, boundary stitching, non-manifold edge cracking, tolerance-based overlap/z-fighting cleanup, non-orientable strip cracking, and explicit face/normal orientation strategies. |
 | Merge vertices | Standalone `merge_vertices` is exposed across Python, CLI, and TOML with normals, tangents, UV, and material-boundary protection plus before/after reports, Euclidean cross-bucket tolerance matching, same-position candidate counts, exact-duplicate, boundary, non-manifold, hard-edge, T-junction, boundary-gap, and near-duplicate candidate classifications, skipped merge reasons by protected attribute, high-risk tolerance warnings, and too-small tolerance advisories. | Add topology-only connectivity merging that can preserve hard-edge, UV, and material seams as split render attributes. |
 | Delete degenerate polygons | Standalone `delete_degenerate_polygons` is exposed across Python, CLI, and TOML with area-threshold controls, selection support, no-op reports, unit-aware area reporting, before/after counts, and duplicate-vertex, collapsed-edge, and near-flat removal reasons. | Extend cleanup beyond zero-area triangles to boundary-overlap, tolerance-based overlapping, and z-fighting cleanup and reason categories. |
-| Decimate to target | Target count, ratio, UV-importance modes, topology protection counts, RAM estimates, configurable iterative threshold/pass reports, measured-error reports, and pre-cleanup for unused UVs/tangents exist. | Add enforced geometric error bounds, selection-wide target allocation reports, AO/user-weighted decimation, and cleanup for future vertex colors/weights. |
+| Decimate to target | Target count, ratio, UV-importance modes, topology protection counts, RAM estimates, configurable iterative threshold/pass reports, measured-error reports, selection-wide target allocation summaries, and pre-cleanup for unused UVs/tangents exist. | Add enforced geometric error bounds, AO/user-weighted decimation, and cleanup for future vertex colors/weights. |
 | Unwrap UV | UV0/UV1 unwrap intent, solver method, iteration, tolerance, sharp-edge seam and forbid-overlap policy intent, distortion, and packing diagnostics are represented. | Add destination-channel control, channel-as-destination behavior when lines of interest define islands, backend-enforced seam policies, create-seams-from-lines-of-interest, seam graph metadata, island merge/alignment, and real repack/padding/share-map controls. |
 
 Second-pass gaps from the Unity references:
@@ -387,7 +387,7 @@ Parity gaps to track:
    - Add dedicated cleanup for unused texture coordinates, duplicate materials, and duplicate images before draw-call and file-size optimization.
 
 8. Decimation parity
-   - Add Unity-style global target allocation across a selected assembly while decimating at part level, so sparse/simple parts stay intact and dense parts carry most of the reduction, with before/after allocation reports.
+   - Unity-style global target allocation across a selected assembly now records per-part assigned targets, reduced-versus-preserved part counts, and min/max target summaries while decimating at part level.
    - Decimation now records RAM estimates using the Unity 5 GB per million polygons rule of thumb, reports global versus per-part budget allocation, exposes a configurable iterative threshold, and records actual simplification and iterative pass counts.
    - Target-device/profile triangle budgets now seed explicit decimation targets when `--decimate` has no manual target or ratio. Remaining work: named XR/HoloLens-style decimation presets and more device-specific simplification policy.
    - Replace quality-criterion heuristics with measured geometric error.
@@ -463,7 +463,7 @@ These need more design and should not be mixed into documentation or diagnostics
    - Decimation now records achieved triangle reduction and measured symmetric nearest-vertex error on parts and asset metadata.
    - Explicit decimation now records `decimate_requested_keep_ratio` when derivable and warns when the requested keep ratio is below 20% for close-view LOD0 assets.
    - Explicit decimation now supports UV importance modes for preserving islands, preserving seams only, or ignoring UV/tangent attributes before simplification.
-   - Explicit decimation now records estimated RAM, budget-allocation mode, configurable iterative-threshold controls, and actual simplification pass counts.
+   - Explicit decimation now records estimated RAM, budget-allocation mode, per-part target allocation summaries, configurable iterative-threshold controls, and actual simplification pass counts.
    - Explicit decimation now supports pre-cleanup for unused UV channels and tangents, reports removed/preserved attributes, and warns when preserved UV seams or islands can reduce simplification efficiency.
    - Explicit decimation now reports protected hard-edge, hole-boundary, material-boundary, UV-seam, silhouette, and total feature-face counts.
    - `criterion="quality"` now reports measured error, but still maps tolerances to a target ratio.
