@@ -1,18 +1,26 @@
-# 🐱 fascat
+<p align="center">
+  <img src="fascat.png" alt="fascat" width="100%">
+</p>
 
-Fascat is a Python library and CLI for converting CAD STEP data into realtime-ready OpenUSD and glTF assets.
+<p align="center">
+  <a href="https://github.com/pavelsimo/fascat/releases"><img src="https://img.shields.io/github/v/release/pavelsimo/fascat?style=flat-square&color=4d9e4d&logoColor=white" alt="release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-ffd60a?style=flat-square&logoColor=white" alt="license MIT"></a>
+  <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.10+-3776ab?style=flat-square&logoColor=white" alt="Python"></a>
+  <a href="https://pypi.org/project/fascat"><img src="https://img.shields.io/pypi/v/fascat?style=flat-square&label=PyPI&color=3775a9&cacheSeconds=300&logoColor=white" alt="PyPI"></a>
+  <a href="https://github.com/pavelsimo/homebrew-tap"><img src="https://img.shields.io/badge/Homebrew-b28f62?style=flat-square&logoColor=white" alt="Homebrew"></a>
+  <a href="https://deepwiki.com/pavelsimo/fascat"><img src="https://img.shields.io/badge/DeepWiki-0088cc?style=flat-square&logoColor=white" alt="DeepWiki"></a>
+</p>
 
-[![release](https://img.shields.io/github/v/release/pavelsimo/fascat?style=flat-square&color=4d9e4d&logoColor=white)](https://github.com/pavelsimo/fascat/releases)
-[![license MIT](https://img.shields.io/badge/license-MIT-ffd60a?style=flat-square&logoColor=white)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.10+-3776ab?style=flat-square&logoColor=white)](https://python.org)
-[![PyPI](https://img.shields.io/pypi/v/fascat?style=flat-square&label=PyPI&color=3775a9&cacheSeconds=300&logoColor=white)](https://pypi.org/project/fascat)
-[![Homebrew](https://img.shields.io/badge/Homebrew-b28f62?style=flat-square&logoColor=white)](https://github.com/pavelsimo/homebrew-tap)
-[![DeepWiki](https://img.shields.io/badge/DeepWiki-0088cc?style=flat-square&logoColor=white)](https://deepwiki.com/pavelsimo/fascat)
+Fascat is a Python library and CLI for converting CAD data into realtime-ready OpenUSD and glTF assets.
 
-The V1 pipeline is intentionally narrow:
-
-```text
-STEP CAD -> imported assembly -> tessellated meshes -> repaired meshes -> staged materials and UVs -> optimized LODs -> OpenUSD/glTF
+```mermaid
+flowchart LR
+    A["STEP CAD"] --> B["Imported assembly"]
+    B --> C["Tessellated meshes"]
+    C --> D["Repaired meshes"]
+    D --> E["Staged materials & UVs"]
+    E --> F["Optimized LODs"]
+    F --> G["OpenUSD / glTF"]
 ```
 
 ## Installation
