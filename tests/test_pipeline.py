@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from fascat import profiles
 from fascat.asset import Asset, Node, Part
 from fascat.material import Material
 from fascat.mesh import Mesh
@@ -719,6 +720,7 @@ mode = "bounding_box"
         "replace",
         "write",
         "validate",
+        "workflow_recipe",
         "conversion_manifest",
         "workflow_summary",
         "profile_budget",
@@ -1518,6 +1520,33 @@ def test_convert_report_checks_profile_runtime_caps(monkeypatch, tmp_path: Path)
         "profile budget exceeded for web-cap: runtime compression uses unsupported method(s): meshopt",
         "profile budget exceeded for web-cap: runtime extensions exceed target cap: EXT_meshopt_compression",
     ]
+
+
+def test_convert_report_records_workflow_recipe(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.pipeline as pipeline
+
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False, options=None: None)
+
+    converted = convert(
+        "input.step",
+        tmp_path / "output.usdc",
+        profile=profiles.realtime_web(lod_ratios=()),
+        validate_output=False,
+    )
+    recipe_step = next(step for step in converted.report.steps if step.name == "workflow_recipe")
+
+    assert recipe_step.options["profile"] == "realtime-web"
+    assert recipe_step.options["recipe"]["name"] == "web-glb"
+    assert recipe_step.options["recipe"]["target"] == "web GLB"
+    assert recipe_step.after["workflow_recipe_choices_total"] == 14
+    assert recipe_step.after["workflow_recipe_choices_honored"] == 8
+    assert recipe_step.after["workflow_recipe_choices_disabled"] == 4
+    assert recipe_step.after["workflow_recipe_choices_metadata_only"] == 1
+    assert recipe_step.after["workflow_recipe_choices_unsupported"] == 1
+    choices = {choice["setting"]: choice for choice in recipe_step.options["recipe"]["choices"]}
+    assert choices["texture_compression"]["status"] == "unsupported"
+    assert choices["gltf_geometry_compression"]["status"] == "metadata_only"
 
 
 def test_convert_report_finishes_when_validation_is_disabled(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]

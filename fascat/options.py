@@ -56,10 +56,12 @@ MetadataExportMode = Literal["none", "summary", "full"]
 PmiExportMode = Literal["none", "summary", "metadata", "metadata_and_visuals", "full"]
 Axis = Literal["Y", "Z"]
 Handedness = Literal["right", "left"]
+WorkflowRecipeStatus = Literal["honored", "approximated", "unsupported", "disabled", "metadata_only"]
 
 _BAKE_MAPS = {"base_color", "opacity", "normal", "roughness", "metallic", "ao", "emissive"}
 _HOLE_TYPES = {"through", "blind", "surface"}
 _DECIMATE_CLEANUP_ATTRIBUTES = {"unused_uvs", "tangents"}
+_WORKFLOW_RECIPE_STATUSES = {"honored", "approximated", "unsupported", "disabled", "metadata_only"}
 
 _TESSELLATION_PART_SETTING_KEYS = {
     "sag",
@@ -978,6 +980,62 @@ class PlatformBudget:
 
 
 @dataclass(frozen=True)
+class WorkflowRecipeChoice:
+    stage: str
+    setting: str
+    value: object
+    status: WorkflowRecipeStatus = "honored"
+    note: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.stage:
+            raise ValueError("workflow recipe choice stage must not be empty")
+        if not self.setting:
+            raise ValueError("workflow recipe choice setting must not be empty")
+        if self.status not in _WORKFLOW_RECIPE_STATUSES:
+            raise ValueError(
+                "workflow recipe choice status must be one of: honored, approximated, unsupported, "
+                "disabled, metadata_only"
+            )
+
+    def to_dict(self) -> dict[str, object]:
+        data = {
+            "stage": self.stage,
+            "setting": self.setting,
+            "value": _recipe_value(self.value),
+            "status": self.status,
+        }
+        if self.note is not None:
+            data["note"] = self.note
+        return data
+
+
+@dataclass(frozen=True)
+class WorkflowRecipe:
+    name: str
+    target: str
+    description: str
+    choices: tuple[WorkflowRecipeChoice, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("workflow recipe name must not be empty")
+        if not self.target:
+            raise ValueError("workflow recipe target must not be empty")
+        if not self.description:
+            raise ValueError("workflow recipe description must not be empty")
+        object.__setattr__(self, "choices", tuple(self.choices))
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "target": self.target,
+            "description": self.description,
+            "choices": [choice.to_dict() for choice in self.choices],
+        }
+
+
+@dataclass(frozen=True)
 class ConversionProfile:
     name: str
     tessellation: Tessellation | None
@@ -986,6 +1044,7 @@ class ConversionProfile:
     optimize: OptimizeOptions | None
     lods: LODOptions | None
     budget: PlatformBudget | None = None
+    recipe: WorkflowRecipe | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -996,4 +1055,15 @@ class ConversionProfile:
             "optimize": self.optimize.to_dict() if self.optimize else None,
             "lods": self.lods.to_dict() if self.lods else None,
             "budget": self.budget.to_dict() if self.budget else None,
+            "recipe": self.recipe.to_dict() if self.recipe else None,
         }
+
+
+def _recipe_value(value: object) -> object:
+    if isinstance(value, tuple):
+        return [_recipe_value(item) for item in value]
+    if isinstance(value, list):
+        return [_recipe_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _recipe_value(item) for key, item in value.items()}
+    return value

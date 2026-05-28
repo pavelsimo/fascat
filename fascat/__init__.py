@@ -40,6 +40,8 @@ from fascat.options import (
     Tessellation,
     UnwrapOptions,
     UsdExportOptions,
+    WorkflowRecipe,
+    WorkflowRecipeChoice,
 )
 from fascat.pipeline import (
     analyze,
@@ -117,6 +119,8 @@ __all__ = [
     "Tolerance",
     "UnwrapOptions",
     "UsdExportOptions",
+    "WorkflowRecipe",
+    "WorkflowRecipeChoice",
     "__version__",
     "analyze",
     "bake_materials",

@@ -291,6 +291,7 @@ def convert(
         )
         if progress is not None:
             progress("validate", asset.stats())
+    _add_workflow_recipe_report(asset, selected)
     _add_conversion_manifest_report(
         asset,
         output_format,
@@ -990,6 +991,28 @@ def _add_profile_budget_report(asset: Asset, profile: ConversionProfile) -> None
     for warning in warnings:
         asset.report.add_warning(warning)
     asset.report.add_step("profile_budget", options=options, before=before, after=after, warnings=warnings)
+
+
+def _add_workflow_recipe_report(asset: Asset, profile: ConversionProfile) -> None:
+    recipe = profile.recipe
+    if recipe is None:
+        return
+    choices = [choice.to_dict() for choice in recipe.choices]
+    before = _report_stats(asset)
+    after = dict(before)
+    after["workflow_recipe_choices_total"] = len(choices)
+    for status in ("honored", "approximated", "unsupported", "disabled", "metadata_only"):
+        after[f"workflow_recipe_choices_{status}"] = sum(1 for choice in choices if choice["status"] == status)
+    asset.report.add_step(
+        "workflow_recipe",
+        options={
+            "style": "unity_asset_transformer",
+            "profile": profile.name,
+            "recipe": recipe.to_dict(),
+        },
+        before=before,
+        after=after,
+    )
 
 
 def _runtime_dependencies_from_report(asset: Asset) -> Mapping[str, object] | None:

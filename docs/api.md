@@ -832,7 +832,7 @@ Conversion parameters:
 |-----------|---------|
 | `input_path` | STEP input path or `-` for stdin. |
 | `output_path` | Output path. Suffix selects USD, glTF, OBJ, or STL. |
-| `profile` | Profile name or `ConversionProfile` that supplies default tessellation, repair, stage, optimize, and LOD options. |
+| `profile` | Profile name or `ConversionProfile` that supplies default tessellation, repair, stage, optimize, LOD, budget, and workflow-recipe metadata. |
 | `import_options` | `StepReadOptions` for STEP metadata and PMI import. |
 | `tessellation` | Overrides the profile tessellation step. |
 | `heal_brep` | Optional BREP healing step before tessellation. |
@@ -964,7 +964,9 @@ Available profiles:
 | `augmented-reality` | stricter phone and tablet AR runtime budget | 60 | 100,000 | 65,535 | 1,024px | 64 MB | 1,500 ms | 150 | 50K-250K triangles, under 500 draw calls |
 | `mixed-reality` | stricter headset budget for mixed-reality runtimes | 60 | 75,000 | 65,535 | 1,024px | 64 MB | 1,200 ms | 100 | 50K-200K triangles, under 500 draw calls |
 
-You can pass either a profile name or a `ConversionProfile` returned by `fc.profiles`. Conversion reports include a `profile_budget` step when the selected profile has a budget. That step records target FPS, triangle, vertex, per-mesh vertex, texture-resolution, texture-memory, estimated load-time, draw-call budgets, draw-call breakdown fields, supported compression/runtime-extension caps, and Unity reference triangle/draw-call ranges when the profile has them. Fascat's defaults are intentionally stricter than Unity's broad reference ranges for repeatable export checks. Load time is a deterministic estimate based on output file size, geometry bytes, baked texture bytes, and draw-call overhead; it is not a measured engine runtime.
+You can pass either a profile name or a `ConversionProfile` returned by `fc.profiles`. Built-in profiles also carry a `WorkflowRecipe` that names the Unity-inspired target, such as `web-glb`, `mobile-glb`, `vr-glb`, or `high-fidelity-desktop`. Conversion reports include a `workflow_recipe` step for those profiles, with each import, repair, tessellation, staging, optimization, LOD, texture, and export choice marked as `honored`, `disabled`, `metadata_only`, or `unsupported`.
+
+Conversion reports include a `profile_budget` step when the selected profile has a budget. That step records target FPS, triangle, vertex, per-mesh vertex, texture-resolution, texture-memory, estimated load-time, draw-call budgets, draw-call breakdown fields, supported compression/runtime-extension caps, and Unity reference triangle/draw-call ranges when the profile has them. Fascat's defaults are intentionally stricter than Unity's broad reference ranges for repeatable export checks. Load time is a deterministic estimate based on output file size, geometry bytes, baked texture bytes, and draw-call overhead; it is not a measured engine runtime.
 
 When referenced baked textures are present, conversion reports also include a pre-write `texture_export_policy` step. It records source, referenced, and unused texture-set counts, map counts, largest source and referenced resolution, estimated referenced texture bytes, selected profile texture-resolution and texture-memory caps, resize candidate counts, estimated resized bytes, estimated savings, and glTF fallback state. glTF reports KTX2/Basis as unsupported until a real encoder exists and records PNG/JPEG-compatible fallback policy for current embedded image payloads, including fallback format, PNG compression, JPEG quality, alpha-bearing set counts, and transparency-loss warnings for explicit JPEG fallback.
 
@@ -1027,7 +1029,7 @@ for step in asset.report.steps:
 asset.report.write_json("report.json")
 ```
 
-The report records options, before/after counts, warnings, errors, and timings for each pipeline step. Approximate operations put the limitation on the step that produced it, so callers can distinguish exact geometry changes from fallbacks or metadata-only intent. Conversion reports include a `preflight` step before expensive operations start, with checklist warnings for missing patch cleanup, orientation preparation, UV/tangent ordering, AO bake UV1 prerequisites, LOD0 optimization, and unavailable glTF texture/compression backends. They also include a `conversion_manifest` step with the resolved profile, import options, direct or pipeline operation settings, and export options, followed by a `workflow_summary` step that maps Unity-inspired preparation stages such as import cleanup, UV preparation, material baking, LOD generation, export compression, and export to run or skipped status.
+The report records options, before/after counts, warnings, errors, and timings for each pipeline step. Approximate operations put the limitation on the step that produced it, so callers can distinguish exact geometry changes from fallbacks or metadata-only intent. Conversion reports include a `preflight` step before expensive operations start, with checklist warnings for missing patch cleanup, orientation preparation, UV/tangent ordering, AO bake UV1 prerequisites, LOD0 optimization, and unavailable glTF texture/compression backends. They also include a `workflow_recipe` step for built-in profiles, a `conversion_manifest` step with the resolved profile, import options, direct or pipeline operation settings, and export options, followed by a `workflow_summary` step that maps Unity-inspired preparation stages such as import cleanup, UV preparation, material baking, LOD generation, export compression, and export to run or skipped status.
 
 Use `Asset.analyze()` when you need geometry quality risks beyond raw part and triangle totals.
 

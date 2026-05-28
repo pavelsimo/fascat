@@ -237,6 +237,32 @@ def test_lod_options_normalize_list_ratios() -> None:
     assert options.to_dict()["ratios"] == [0.5, 0.25, 0.1]
 
 
+def test_builtin_profiles_expose_unity_workflow_recipes() -> None:
+    recipes = {
+        "inspect-only": "inspectable-cad",
+        "realtime-desktop": "high-fidelity-desktop",
+        "realtime-web": "web-glb",
+        "realtime-mobile": "mobile-glb",
+        "virtual-reality": "vr-glb",
+        "augmented-reality": "ar-glb",
+        "mixed-reality": "mixed-reality-glb",
+    }
+
+    for profile_name, recipe_name in recipes.items():
+        profile = profiles.by_name(profile_name)
+        assert profile.recipe is not None
+        assert profile.recipe.name == recipe_name
+        assert profile.to_dict()["recipe"]["name"] == recipe_name
+        assert profile.to_dict()["recipe"]["choices"]
+
+    web_recipe = profiles.realtime_web().recipe
+    assert web_recipe is not None
+    choices = {choice.setting: choice for choice in web_recipe.choices}
+    assert choices["sag_and_angle"].value == {"sag": 0.2, "angle": 20.0}
+    assert choices["texture_compression"].status == "unsupported"
+    assert choices["gltf_geometry_compression"].status == "metadata_only"
+
+
 def test_target_device_profile_from_toml_overlays_base_budget(tmp_path: Path) -> None:
     profile_file = tmp_path / "factory-tablet.toml"
     profile_file.write_text(
@@ -404,6 +430,10 @@ def test_size_adaptive_tessellation_requires_bands() -> None:
             lambda: fc.PlatformBudget(supported_runtime_extensions=("KHR_mesh_quantization", "")),
             "supported_runtime_extensions",
         ),
+        (lambda: fc.WorkflowRecipeChoice(stage="", setting="uv0", value="box"), "stage"),
+        (lambda: fc.WorkflowRecipeChoice(stage="stage", setting="", value="box"), "setting"),
+        (lambda: fc.WorkflowRecipeChoice(stage="stage", setting="uv0", value="box", status="bad"), "status"),
+        (lambda: fc.WorkflowRecipe(name="", target="web", description="web recipe"), "name"),
         (lambda: fc.MergeVerticesOptions(tolerance=-1), "merge vertices tolerance"),
         (lambda: fc.MergeVerticesOptions(area_epsilon=-1), "area_epsilon"),
         (lambda: fc.DeleteDegeneratePolygonsOptions(area_epsilon=-1), "area_epsilon"),

@@ -152,6 +152,10 @@ that are currently conservative approximations.
 - Conversion reports now include a resolved conversion manifest with the
   effective profile, import options, direct or pipeline operation settings, and
   export settings needed to reproduce a run.
+- Built-in profiles now carry named Unity-style workflow recipes for
+  inspectable CAD, high-fidelity desktop, web GLB, mobile GLB, VR, AR, and
+  mixed-reality targets. Conversion reports record each recipe choice with
+  honored, disabled, metadata-only, or unsupported status before the manifest.
 - STEP import reports now include Unity-style `import_decisions` for requested,
   effective, `honored`, `approximated`, `unsupported`, `disabled`,
   `not_present`, and `backend_default` import choices, plus per-part
@@ -320,10 +324,11 @@ Second-pass gaps from the Unity references:
   - Add measured runtime validation for Unity glTFast, web, mobile, VR, and
     AR/XR targets so broad Unity guideline budgets can become profile-specific
     measured load-time, memory, and FPS reports.
-  - Add named Unity-style workflow recipes that apply the documented import,
-    repair, tessellation, staging, optimization, LOD, and export decisions in
-    one reproducible preset instead of only reporting the resolved settings
-    after a custom pipeline has run.
+  - Built-in profiles now expose named Unity-style workflow recipes that record
+    import, repair, tessellation, staging, optimization, LOD, texture, and
+    export choices with honored, disabled, metadata-only, or unsupported status.
+    Remaining work is letting future encoders and image assets turn the current
+    metadata-only export-compression choices into fully applied defaults.
   - Decimation target strategy is now explicit as target-count, target-ratio, or
     quality/error approximation so Unity's "target polygon count or ratio"
     workflow stays distinct from current quality-driven simplification. Remaining
@@ -423,11 +428,11 @@ Parity gaps to track:
    - Conversion reports now include a `workflow_summary` step that maps Unity-inspired preparation stages to run/skipped status and exact, approximate, or metadata-only levels, including import cleanup, orientation, UV preparation, material baking, LOD generation, export compression, and export.
    - Conversion reports now include a `preflight` step before pipeline or profile operations run, with checklist warnings for missing patch cleanup, face/normal orientation, UV-before-tangent ordering, AO bake UV1 prerequisites, LOD generation without LOD0 optimization, and glTF texture/compression backend gaps.
    - Conversion reports now include a `conversion_manifest` step with the resolved profile, import options, direct or pipeline operation settings, and export options needed to reproduce a run.
-   - Add named Unity-inspired workflow recipes for common targets such as
-     inspectable CAD, web GLB, mobile GLB, VR/XR, and high-fidelity desktop.
-     Recipes should set import toggles, tessellation tolerances, UV/AO choices,
-     decimation/LOD policy, texture limits, and export compression defaults and
-     then record which choices were honored, approximated, or unsupported.
+   - Named Unity-inspired workflow recipes now cover inspectable CAD,
+     high-fidelity desktop, web GLB, mobile GLB, VR, AR, and mixed-reality
+     targets. Reports record import, repair, tessellation, UV/AO,
+     decimation/LOD, texture-limit, and export-compression choices with
+     honored, disabled, metadata-only, or unsupported status.
 
 2. Import controls
    - Reference docs now include a supported-format parity matrix. Unity's baseline covers many CAD and mesh formats; Fascat currently centers on STEP input and USD/glTF/OBJ/STL output, with IGES, Parasolid, JT, native CAD, IFC, 3MF, and QIF explicitly deferred.
