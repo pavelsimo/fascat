@@ -1178,6 +1178,7 @@ def _merge_vertices_report_stats(asset: Asset) -> dict[str, int]:
         "merge_vertices_candidate_hard_edge_buckets",
         "merge_vertices_candidate_t_junctions",
         "merge_vertices_candidate_boundary_gaps",
+        "merge_vertices_near_duplicate_pairs",
         "merge_vertices_skipped_by_protection",
         "merge_vertices_skipped_by_normals",
         "merge_vertices_skipped_by_tangents",
@@ -1201,6 +1202,13 @@ def _merge_vertices_report_stats(asset: Asset) -> dict[str, int]:
         }:
             high_risk_parts += 1
     stats["merge_vertices_tolerance_high_risk_parts"] = high_risk_parts
+    too_small_parts = 0
+    for part in asset.parts.values():
+        if part.mesh is None:
+            continue
+        if str(part.mesh.metadata.get("merge_vertices_tolerance_advisory", "")) == "near_duplicates_unmerged":
+            too_small_parts += 1
+    stats["merge_vertices_tolerance_too_small_parts"] = too_small_parts
     return stats
 
 
@@ -1218,6 +1226,13 @@ def _merge_vertices_tolerance_warnings(part: Part) -> list[str]:
         return [
             f"part {part.id} merge_vertices tolerance is high relative to its bounding-box diagonal; "
             "verify broad tolerance merging is intended"
+        ]
+    if str(mesh.metadata.get("merge_vertices_tolerance_advisory", "")) == "near_duplicates_unmerged":
+        near_pairs = _metadata_int(mesh.metadata.get("merge_vertices_near_duplicate_pairs"), 0)
+        nearest = str(mesh.metadata.get("merge_vertices_nearest_near_duplicate_distance", "0"))
+        return [
+            f"part {part.id} merge_vertices tolerance is below {near_pairs} near-duplicate vertex pair(s); "
+            f"closest remaining spacing is {nearest}"
         ]
     return []
 

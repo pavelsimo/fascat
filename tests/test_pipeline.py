@@ -335,12 +335,14 @@ def test_merge_vertices_asset_operation_reports_counts() -> None:
     assert step.after["merge_vertices_candidate_hard_edge_buckets"] == 0
     assert step.after["merge_vertices_candidate_t_junctions"] == 0
     assert step.after["merge_vertices_candidate_boundary_gaps"] == 0
+    assert step.after["merge_vertices_near_duplicate_pairs"] == 0
     assert step.after["merge_vertices_skipped_by_protection"] == 0
     assert step.after["merge_vertices_skipped_by_normals"] == 0
     assert step.after["merge_vertices_skipped_by_tangents"] == 0
     assert step.after["merge_vertices_skipped_by_uvs"] == 0
     assert step.after["merge_vertices_skipped_by_material_boundaries"] == 0
     assert step.after["merge_vertices_tolerance_high_risk_parts"] == 0
+    assert step.after["merge_vertices_tolerance_too_small_parts"] == 0
 
 
 def test_merge_vertices_asset_operation_warns_on_large_tolerance() -> None:
@@ -360,9 +362,41 @@ def test_merge_vertices_asset_operation_warns_on_large_tolerance() -> None:
     assert part.mesh is not None
     assert part.mesh.metadata["merge_vertices_tolerance_risk"] == "high_relative_to_min_edge"
     assert step.after["merge_vertices_tolerance_high_risk_parts"] == 1
+    assert step.after["merge_vertices_tolerance_too_small_parts"] == 0
     assert any(
         "merge_vertices tolerance is high relative to its shortest mesh edge" in warning for warning in step.warnings
     )
+
+
+def test_merge_vertices_asset_operation_warns_on_small_tolerance() -> None:
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [0.001, 0, 0],
+                [1.001, 2, 0],
+                [0.001, 2, 0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=int),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    merged = asset.merge_vertices(MergeVerticesOptions(tolerance=0.0001))
+    part = merged.parts["part"]
+    step = merged.report.steps[-1]
+
+    assert part.mesh is not None
+    assert part.mesh.metadata["merge_vertices_tolerance_advisory"] == "near_duplicates_unmerged"
+    assert step.after["merge_vertices_near_duplicate_pairs"] == 1
+    assert step.after["merge_vertices_tolerance_too_small_parts"] == 1
+    assert any("merge_vertices tolerance is below 1 near-duplicate vertex pair" in warning for warning in step.warnings)
 
 
 def test_delete_degenerate_polygons_asset_operation_reports_counts() -> None:

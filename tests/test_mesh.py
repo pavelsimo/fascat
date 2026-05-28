@@ -246,6 +246,34 @@ def test_merge_vertices_reports_tolerance_scale_risk() -> None:
     assert merged.metadata["merge_vertices_tolerance_bbox_ratio"] == "0.212132034"
     assert merged.metadata["merge_vertices_tolerance_min_edge_ratio"] == "0.3"
     assert merged.metadata["merge_vertices_tolerance_risk"] == "high_relative_to_min_edge"
+    assert merged.metadata["merge_vertices_near_duplicate_pairs"] == "0"
+    assert merged.metadata["merge_vertices_nearest_near_duplicate_distance"] == "0"
+    assert merged.metadata["merge_vertices_tolerance_advisory"] == "none"
+
+
+def test_merge_vertices_reports_tolerance_too_small_for_near_duplicates() -> None:
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [0.001, 0, 0],
+                [1.001, 2, 0],
+                [0.001, 2, 0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=int),
+    )
+
+    merged = mesh.merge_vertices(MergeVerticesOptions(tolerance=0.0001))
+
+    assert merged.vertex_count == 6
+    assert merged.metadata["merge_vertices_removed"] == "0"
+    assert merged.metadata["merge_vertices_near_duplicate_pairs"] == "1"
+    assert merged.metadata["merge_vertices_nearest_near_duplicate_distance"] == "0.001"
+    assert merged.metadata["merge_vertices_tolerance_advisory"] == "near_duplicates_unmerged"
 
 
 def test_merge_vertices_can_ignore_attributes_and_remove_degenerates() -> None:

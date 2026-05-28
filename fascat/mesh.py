@@ -379,6 +379,11 @@ class Mesh:
         edge_lengths = self._triangle_edge_lengths().reshape(-1)
         positive_edges = edge_lengths[edge_lengths > 0.0]
         min_edge = float(positive_edges.min()) if positive_edges.size else 0.0
+        near_duplicate_pairs, nearest_near_duplicate = self._near_duplicate_unmerged_stats(
+            tolerance=tolerance,
+            diagonal=diagonal,
+            min_edge=min_edge,
+        )
         bbox_ratio = tolerance / diagonal if tolerance > 0.0 and diagonal > 0.0 else 0.0
         min_edge_ratio = tolerance / min_edge if tolerance > 0.0 and min_edge > 0.0 else 0.0
         risk = "exact_only"
@@ -395,7 +400,64 @@ class Mesh:
             "merge_vertices_tolerance_bbox_ratio": f"{bbox_ratio:.9g}",
             "merge_vertices_tolerance_min_edge_ratio": f"{min_edge_ratio:.9g}",
             "merge_vertices_tolerance_risk": risk,
+            "merge_vertices_near_duplicate_pairs": str(near_duplicate_pairs),
+            "merge_vertices_nearest_near_duplicate_distance": f"{nearest_near_duplicate:.9g}",
+            "merge_vertices_tolerance_advisory": "near_duplicates_unmerged" if near_duplicate_pairs else "none",
         }
+
+    def _near_duplicate_unmerged_stats(
+        self,
+        *,
+        tolerance: float,
+        diagonal: float,
+        min_edge: float,
+    ) -> tuple[int, float]:
+        if self.vertex_count < 2:
+            return 0, 0.0
+        lower = max(float(tolerance), 0.0)
+        upper = self._near_duplicate_advisory_limit(tolerance=tolerance, diagonal=diagonal, min_edge=min_edge)
+        if upper <= lower or upper <= 0.0:
+            return 0, 0.0
+        connected_edges = self._connected_edge_pairs()
+        buckets: dict[tuple[int, int, int], list[int]] = defaultdict(list)
+        near_pairs = 0
+        nearest = math.inf
+        for vertex, point in enumerate(self.points):
+            key = self._spatial_bucket_key(point, upper)
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for dz in (-1, 0, 1):
+                        neighbor_key = (key[0] + dx, key[1] + dy, key[2] + dz)
+                        for other in buckets.get(neighbor_key, []):
+                            pair = (min(vertex, other), max(vertex, other))
+                            if pair in connected_edges:
+                                continue
+                            distance = float(np.linalg.norm(point - self.points[other]))
+                            if lower < distance <= upper:
+                                near_pairs += 1
+                                nearest = min(nearest, distance)
+            buckets[key].append(vertex)
+        return near_pairs, 0.0 if math.isinf(nearest) else nearest
+
+    def _near_duplicate_advisory_limit(self, *, tolerance: float, diagonal: float, min_edge: float) -> float:
+        scale_limit = 0.0
+        if min_edge > 0.0:
+            scale_limit = min_edge * 0.05
+        elif diagonal > 0.0:
+            scale_limit = diagonal * 1e-6
+        tolerance_limit = tolerance * 10.0 if tolerance > 0.0 else 0.0
+        upper = max(scale_limit, tolerance_limit)
+        if diagonal > 0.0:
+            upper = min(upper, diagonal * 0.01)
+        return upper
+
+    def _connected_edge_pairs(self) -> set[tuple[int, int]]:
+        edges, _counts = self._undirected_edges_and_counts()
+        return {(int(edge[0]), int(edge[1])) for edge in edges.astype(int).tolist()}
+
+    def _spatial_bucket_key(self, point: FloatArray, cell_size: float) -> tuple[int, int, int]:
+        key = np.floor(point / cell_size).astype(np.int64)
+        return (int(key[0]), int(key[1]), int(key[2]))
 
     def _merge_vertex_skip_diagnostics(
         self,
