@@ -395,6 +395,81 @@ def test_occt_mesh_parameters_use_sag_ratio_as_relative_deflection() -> None:
     assert parameters.ForceFaceDeflection is True
 
 
+def test_tessellation_report_includes_unit_aware_tolerance_policy() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1_000_000, 0, 0], [0, 1_000_000, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Panel", part_id="part")]),
+        parts={"part": Part(id="part", name="Panel", mesh=mesh, source_shape=object())},
+        units="metre",
+        meters_per_unit=1.0,
+        metadata={"source_units": "millimetre", "source_meters_per_unit": "0.001"},
+    )
+
+    tessellated = asset.tessellate(
+        Tessellation(
+            sag=5000.0,
+            relative=False,
+            max_polygon_length=2_000_000.0,
+        )
+    )
+
+    step_policy = tessellated.report.steps[-1].options["tolerance_policy"]
+    assert step_policy["coordinate_space"] == "source_local"
+    assert step_policy["effective_units"] == "millimetre"
+    assert step_policy["target_units"] == "metre"
+    assert step_policy["active_deflection_kind"] == "absolute_sag"
+    assert step_policy["sag_meters"] == 5.0
+    assert step_policy["sag_target_units"] == 5.0
+    assert step_policy["max_polygon_length_meters"] == 2000.0
+    assert step_policy["max_polygon_length_target_units"] == 2000.0
+
+    part = tessellated.parts["part"]
+    assert part.mesh is not None
+    policy = json.loads(str(part.metadata["tessellation_tolerance_policy"]))
+    assert [advisory["code"] for advisory in policy["advisories"]] == [
+        "coarse_normalized_sag",
+        "coarse_normalized_max_polygon_length",
+    ]
+    assert part.metadata["tessellation_effective_units"] == "millimetre"
+    assert part.metadata["tessellation_target_units"] == "metre"
+    assert part.metadata["tessellation_sag_meters"] == "5"
+    assert part.metadata["tessellation_sag_target_units"] == "5"
+    assert part.metadata["tessellation_max_polygon_length_meters"] == "2000"
+    assert part.metadata["tessellation_tolerance_advisory_codes"] == (
+        "coarse_normalized_sag,coarse_normalized_max_polygon_length"
+    )
+    assert part.mesh.metadata["tessellation_tolerance_policy"] == part.metadata["tessellation_tolerance_policy"]
+    assert part.mesh.metadata["tessellation_max_polygon_length_target_units"] == "2000"
+    assert tessellated.report.steps[-1].warnings == [
+        "tessellation sag converts to a very large target-space tolerance after unit normalization; "
+        "verify sag is specified in source/local units: Panel",
+        "tessellation max_polygon_length converts to a very large target-space length after unit normalization; "
+        "verify it is specified in source/local units: Panel",
+    ]
+
+
+def test_relative_tessellation_policy_keeps_sag_unitless() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Part", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=triangle_mesh(), source_shape=object())},
+        units="metre",
+        meters_per_unit=1.0,
+        metadata={"source_units": "millimetre", "source_meters_per_unit": "0.001"},
+    )
+
+    tessellated = asset.tessellate(Tessellation(sag=0.05, relative=True))
+
+    policy = json.loads(str(tessellated.parts["part"].metadata["tessellation_tolerance_policy"]))
+    assert policy["active_deflection_kind"] == "relative_sag"
+    assert policy["active_deflection_relative"] is True
+    assert "sag_meters" not in policy
+    assert "tessellation_sag_meters" not in tessellated.parts["part"].metadata
+    assert tessellated.report.steps[-1].warnings == []
+
+
 def test_tessellate_cache_respects_per_part_settings_and_records_quality(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     import fascat.ops.tessellate as tessellate_module
 

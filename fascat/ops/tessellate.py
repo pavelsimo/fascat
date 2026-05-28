@@ -16,6 +16,9 @@ _FACE_GROUP_RISK_THRESHOLD = 64
 _DRAW_CALL_RISK_THRESHOLD = 16
 _COARSE_ABSOLUTE_SAG_RATIO = 0.02
 _AGGRESSIVE_MAX_LENGTH_RATIO = 0.02
+_SUSPICIOUS_COARSE_SAG_METERS = 0.1
+_SUSPICIOUS_FINE_TOLERANCE_METERS = 1e-9
+_SUSPICIOUS_COARSE_MAX_LENGTH_METERS = 100.0
 _LONG_OBJECT_AXIS_RATIO = 8.0
 _SHINY_ROUGHNESS_THRESHOLD = 0.25
 _METALLIC_DETAIL_ROUGHNESS_THRESHOLD = 0.5
@@ -234,6 +237,7 @@ def _apply_mesh_tessellation_controls(mesh: Mesh, options: Tessellation) -> Mesh
 def _record_tessellation_diagnostics(asset: Asset, part: Part, options: Tessellation) -> None:
     if part.mesh is None:
         return
+    _record_tessellation_tolerance_policy(asset, part, options)
     _record_submesh_risk(asset, part)
     metrics: dict[str, int | float] | None = None
     if (options.free_edge_report or options.max_polygon_length is not None) and metrics is None:
@@ -254,6 +258,220 @@ def _record_tessellation_diagnostics(asset: Asset, part: Part, options: Tessella
         _store_free_edge_report(asset, part, metrics)
     if options.max_polygon_length is not None:
         _warn_long_polygons(asset, part, options, metrics)
+
+
+def tessellation_tolerance_policy(asset: Asset, options: Tessellation) -> dict[str, object]:
+    source_units = _metadata_str(asset.metadata.get("source_units"), asset.units)
+    source_meters_per_unit = _metadata_float(asset.metadata.get("source_meters_per_unit"), asset.meters_per_unit)
+    target_meters_per_unit = asset.meters_per_unit
+    coordinate_space = (
+        "source_local"
+        if source_units != asset.units or not np.isclose(source_meters_per_unit, asset.meters_per_unit)
+        else "asset"
+    )
+    active_deflection, active_relative = _deflection_settings(options)
+    active_kind = _active_deflection_kind(options)
+    policy: dict[str, object] = {
+        "coordinate_space": coordinate_space,
+        "effective_units": source_units,
+        "effective_meters_per_unit": source_meters_per_unit,
+        "source_units": source_units,
+        "source_meters_per_unit": source_meters_per_unit,
+        "target_units": asset.units,
+        "target_meters_per_unit": target_meters_per_unit,
+        "angle_degrees": float(options.angle),
+        "active_deflection": active_deflection,
+        "active_deflection_relative": active_relative,
+        "active_deflection_kind": active_kind,
+        "relative": bool(options.relative),
+        "sag": float(options.sag),
+        "sag_ratio": options.sag_ratio,
+        "curvature_adaptive": bool(options.curvature_adaptive),
+        "preserve_boundaries": bool(options.preserve_boundaries),
+    }
+    if active_kind == "absolute_sag":
+        _add_length_policy_fields(policy, "sag", float(options.sag), source_meters_per_unit, target_meters_per_unit)
+    for key, value in (
+        ("min_edge_length", options.min_edge_length),
+        ("max_edge_length", options.max_edge_length),
+        ("max_polygon_length", options.max_polygon_length),
+    ):
+        if value is not None:
+            _add_length_policy_fields(policy, key, float(value), source_meters_per_unit, target_meters_per_unit)
+    return policy
+
+
+def _record_tessellation_tolerance_policy(asset: Asset, part: Part, options: Tessellation) -> None:
+    policy = tessellation_tolerance_policy(asset, options)
+    advisories = _tessellation_tolerance_policy_advisories(part, policy)
+    if advisories:
+        policy["advisories"] = advisories
+        part.metadata["tessellation_tolerance_advisory_count"] = str(len(advisories))
+        part.metadata["tessellation_tolerance_advisory_codes"] = ",".join(
+            str(advisory["code"]) for advisory in advisories
+        )
+        if part.mesh is not None:
+            part.mesh.metadata["tessellation_tolerance_advisory_count"] = str(len(advisories))
+            part.mesh.metadata["tessellation_tolerance_advisory_codes"] = part.metadata[
+                "tessellation_tolerance_advisory_codes"
+            ]
+        for advisory in advisories:
+            asset.report.add_warning(str(advisory["message"]))
+    encoded = json.dumps(policy, sort_keys=True)
+    metadata = _tessellation_tolerance_policy_metadata(policy)
+    part.metadata["tessellation_tolerance_policy"] = encoded
+    part.metadata.update(metadata)
+    if part.mesh is not None:
+        part.mesh.metadata["tessellation_tolerance_policy"] = encoded
+        part.mesh.metadata.update(metadata)
+
+
+def _add_length_policy_fields(
+    policy: dict[str, object],
+    key: str,
+    value: float,
+    source_meters_per_unit: float,
+    target_meters_per_unit: float,
+) -> None:
+    value_meters = value * source_meters_per_unit
+    policy[key] = value
+    policy[f"{key}_meters"] = value_meters
+    policy[f"{key}_target_units"] = value_meters / target_meters_per_unit if target_meters_per_unit > 0.0 else value
+
+
+def _active_deflection_kind(options: Tessellation) -> str:
+    if options.sag_ratio is not None:
+        return "sag_ratio"
+    return "relative_sag" if options.relative else "absolute_sag"
+
+
+def _tessellation_tolerance_policy_advisories(part: Part, policy: dict[str, object]) -> list[dict[str, object]]:
+    if policy.get("coordinate_space") != "source_local":
+        return []
+    advisories: list[dict[str, object]] = []
+    if policy.get("active_deflection_kind") == "absolute_sag":
+        sag_meters = _policy_float(policy.get("sag_meters"))
+        if sag_meters is not None:
+            if sag_meters >= _SUSPICIOUS_COARSE_SAG_METERS:
+                advisories.append(
+                    _tessellation_tolerance_advisory(
+                        part,
+                        policy,
+                        code="coarse_normalized_sag",
+                        key="sag",
+                        message=(
+                            "tessellation sag converts to a very large target-space tolerance after unit "
+                            f"normalization; verify sag is specified in source/local units: {part.name}"
+                        ),
+                    )
+                )
+            elif 0.0 < sag_meters <= _SUSPICIOUS_FINE_TOLERANCE_METERS:
+                advisories.append(
+                    _tessellation_tolerance_advisory(
+                        part,
+                        policy,
+                        code="fine_normalized_sag",
+                        key="sag",
+                        message=(
+                            "tessellation sag converts to a sub-nanometer target-space tolerance after unit "
+                            f"normalization; verify sag is not accidentally specified in target units: {part.name}"
+                        ),
+                    )
+                )
+    for key in ("min_edge_length", "max_edge_length", "max_polygon_length"):
+        value_meters = _policy_float(policy.get(f"{key}_meters"))
+        if value_meters is None or value_meters <= 0.0:
+            continue
+        if value_meters <= _SUSPICIOUS_FINE_TOLERANCE_METERS:
+            advisories.append(
+                _tessellation_tolerance_advisory(
+                    part,
+                    policy,
+                    code=f"fine_normalized_{key}",
+                    key=key,
+                    message=(
+                        f"tessellation {key} converts to a sub-nanometer target-space length after unit "
+                        f"normalization; verify it is specified in source/local units: {part.name}"
+                    ),
+                )
+            )
+        elif key in {"max_edge_length", "max_polygon_length"} and value_meters >= _SUSPICIOUS_COARSE_MAX_LENGTH_METERS:
+            advisories.append(
+                _tessellation_tolerance_advisory(
+                    part,
+                    policy,
+                    code=f"coarse_normalized_{key}",
+                    key=key,
+                    message=(
+                        f"tessellation {key} converts to a very large target-space length after unit "
+                        f"normalization; verify it is specified in source/local units: {part.name}"
+                    ),
+                )
+            )
+    return advisories
+
+
+def _tessellation_tolerance_advisory(
+    part: Part,
+    policy: dict[str, object],
+    *,
+    code: str,
+    key: str,
+    message: str,
+) -> dict[str, object]:
+    return {
+        "code": code,
+        "severity": "warning",
+        "part_id": part.id,
+        "part_name": part.name,
+        "parameter": key,
+        "value": policy.get(key),
+        "value_meters": policy.get(f"{key}_meters"),
+        "value_target_units": policy.get(f"{key}_target_units"),
+        "source_units": policy["source_units"],
+        "target_units": policy["target_units"],
+        "message": message,
+    }
+
+
+def _tessellation_tolerance_policy_metadata(policy: dict[str, object]) -> dict[str, str]:
+    keys = (
+        "coordinate_space",
+        "effective_units",
+        "effective_meters_per_unit",
+        "source_units",
+        "source_meters_per_unit",
+        "target_units",
+        "target_meters_per_unit",
+        "active_deflection_kind",
+        "active_deflection",
+        "active_deflection_relative",
+        "sag",
+        "sag_ratio",
+        "angle_degrees",
+        "min_edge_length",
+        "max_edge_length",
+        "max_polygon_length",
+        "sag_meters",
+        "sag_target_units",
+        "min_edge_length_meters",
+        "min_edge_length_target_units",
+        "max_edge_length_meters",
+        "max_edge_length_target_units",
+        "max_polygon_length_meters",
+        "max_polygon_length_target_units",
+    )
+    metadata: dict[str, str] = {}
+    for key in keys:
+        value = policy.get(key)
+        if value is None:
+            continue
+        metadata[f"tessellation_{key}"] = _format_metadata_value(value)
+    return metadata
+
+
+def _policy_float(value: object) -> float | None:
+    return value if isinstance(value, float) else None
 
 
 def _record_tessellation_attribute_sources(
@@ -621,6 +839,34 @@ def _metadata_int(value: object) -> int | None:
         except ValueError:
             return None
     return None
+
+
+def _metadata_str(value: object, default: str) -> str:
+    if value is None:
+        return default
+    text = str(value).strip()
+    return text or default
+
+
+def _metadata_float(value: object, default: float) -> float:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _format_metadata_value(value: object) -> str:
+    if isinstance(value, bool):
+        return str(value).lower()
+    if isinstance(value, float):
+        return f"{value:.9g}"
+    return str(value)
 
 
 def _tessellation_mesh_options(options: Tessellation) -> dict[str, object]:

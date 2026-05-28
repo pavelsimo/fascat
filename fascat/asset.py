@@ -272,18 +272,19 @@ class Asset:
         return self.stats(include_lods=any(part.lod_meshes for part in self.parts.values()))
 
     def tessellate(self, options: Tessellation | None = None, *, where: Any | None = None) -> Asset:
-        from fascat.ops.tessellate import tessellate_asset
+        from fascat.ops.tessellate import tessellate_asset, tessellation_tolerance_policy
 
         opts = options or Tessellation()
         scope = self._operation_scope(where)
         before = self.stats()
         warning_count = len(self.report.warnings)
+        tolerance_policy = tessellation_tolerance_policy(scope.asset, opts)
         with timed_step() as timer:
             asset = tessellate_asset(scope.asset, opts, selected_part_ids=scope.selected_part_ids)
         step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
             "tessellate",
-            options=_options_with_scope(opts.to_dict(), scope),
+            options=_options_with_scope({**opts.to_dict(), "tolerance_policy": tolerance_policy}, scope),
             before=before,
             after=asset.stats(),
             duration=timer.duration,

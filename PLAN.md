@@ -74,6 +74,10 @@ that are currently conservative approximations.
 - BREP healing and mesh repair reports now include unit-aware tolerance policies
   with effective source/local units, declared target units, meter conversions,
   and implemented versus missing repair backend operations.
+- Tessellation reports now include unit-aware tolerance policies with active
+  deflection kind, source/local units, declared target units, converted absolute
+  sag and min/max length values, and warnings when source-to-target unit
+  normalization makes tolerances suspiciously coarse or fine.
 - Tessellation now warns when retained BREP patches, CAD face groups, or
   material splits are likely to increase submesh, draw-call, or export-size
   pressure.
@@ -232,12 +236,11 @@ Fresh gaps from the linked Unity audit:
   line geometry can be tessellated into tubes when users need wireframe or
   inspection views. Fascat currently exposes delete/preserve intent, not a
   renderable tube/curve conversion.
-- Add unit-aware tessellation tolerance policy reports. Unity documents sag,
-  sag-ratio, angle, and max-length criteria in millimeter-style CAD terms and
-  recommends adapting them to part size, material, and metadata. Fascat exposes
-  the criteria, but reports should show requested and effective sag/max-length
-  values in source, local, and target units and warn when unit normalization
-  makes the tolerances suspiciously coarse or fine.
+- Tessellation tolerance policies now report requested and effective
+  sag/max-length values in source, local, and target units and warn when unit
+  normalization makes the tolerances suspiciously coarse or fine. Remaining
+  parity is applying those criteria automatically from part size, material, and
+  metadata instead of only reporting and advising.
 - Tessellation quality advisories now classify shiny, high-detail, or
   metadata-tagged parts and recommend finer per-part `sag_ratio` or
   curvature-adaptive criteria when bulk settings are still in use. Remaining
@@ -304,6 +307,17 @@ Second-pass gaps from the Unity references:
   - Add measured runtime validation for Unity glTFast, web, mobile, VR, and
     AR/XR targets so broad Unity guideline budgets can become profile-specific
     measured load-time, memory, and FPS reports.
+  - Add named Unity-style workflow recipes that apply the documented import,
+    repair, tessellation, staging, optimization, LOD, and export decisions in
+    one reproducible preset instead of only reporting the resolved settings
+    after a custom pipeline has run.
+  - Report decimation target strategy explicitly as target-count, ratio,
+    quality/error, or backend-specific edge-collapse mode so Unity's
+    "target polygon count or ratio" workflow stays distinct from future
+    quality-driven simplification.
+  - Model AABB UV projection as its own staging operation with local/global
+    bounds, `uv3dSize`, destination channel, override policy, and unit metadata,
+    because Unity uses simple projection separately from unwrap/repack flows.
 - Distinguish UV unwrapping from bake-ready UV packing everywhere. Unity's
   unwrap function only flattens islands; bake/lightmap UVs still require repack,
   padding, overlap checks, and normalization. Fascat should warn when UV1 is
@@ -392,6 +406,11 @@ Parity gaps to track:
    - Conversion reports now include a `workflow_summary` step that maps Unity-inspired preparation stages to run/skipped status and exact, approximate, or metadata-only levels, including import cleanup, orientation, UV preparation, material baking, LOD generation, export compression, and export.
    - Conversion reports now include a `preflight` step before pipeline or profile operations run, with checklist warnings for missing patch cleanup, face/normal orientation, UV-before-tangent ordering, AO bake UV1 prerequisites, LOD generation without LOD0 optimization, and glTF texture/compression backend gaps.
    - Conversion reports now include a `conversion_manifest` step with the resolved profile, import options, direct or pipeline operation settings, and export options needed to reproduce a run.
+   - Add named Unity-inspired workflow recipes for common targets such as
+     inspectable CAD, web GLB, mobile GLB, VR/XR, and high-fidelity desktop.
+     Recipes should set import toggles, tessellation tolerances, UV/AO choices,
+     decimation/LOD policy, texture limits, and export compression defaults and
+     then record which choices were honored, approximated, or unsupported.
 
 2. Import controls
    - Reference docs now include a supported-format parity matrix. Unity's baseline covers many CAD and mesh formats; Fascat currently centers on STEP input and USD/glTF/OBJ/STL output, with IGES, Parasolid, JT, native CAD, IFC, 3MF, and QIF explicitly deferred.
@@ -420,7 +439,7 @@ Parity gaps to track:
 
 4. Tessellation controls
    - Sag-ratio is now a first-class tessellation option across Python, CLI, TOML pipelines, per-part overrides, reports, and OCCT backend parameter mapping. `relative=True` remains for compatibility when `sag_ratio` is unset.
-   - Add unit-aware tessellation tolerance reporting so sag and max-polygon-length choices are recorded in source, local, and target units, with warnings for values that become unreasonable after unit normalization.
+   - Tessellation now records unit-aware tolerance reporting so sag and max-polygon-length choices are recorded in source, local, and target units, with warnings for values that become unreasonable after unit normalization.
    - Existing imported meshes now have an explicit `reuse_existing_meshes` control across Python, CLI, TOML pipelines, per-part overrides, and reports. The default preserves imported meshes; disabling it retessellates from source BREP where available.
    - Free-edge tessellation diagnostics are now available through `free_edge_report` across Python, CLI, TOML pipelines, per-part overrides, metadata, and report warnings. Tessellation attribute provenance now records whether positions, triangles, normals, tangents, UVs, face groups, free-edge diagnostics, and BREP patches came from tessellation or imported meshes. Remaining work: investigate CAD-parametric UV and tangent generation during tessellation.
    - Add optional free-edge geometry output or retention, separate from diagnostics, for wire overlays, boundary inspection, and import cleanup validation.
@@ -476,6 +495,10 @@ Parity gaps to track:
    - Unity-style global target allocation across a selected assembly now records per-part assigned targets, reduced-versus-preserved part counts, and min/max target summaries while decimating at part level.
    - Decimation now records RAM estimates using the Unity 5 GB per million polygons rule of thumb, reports global versus per-part budget allocation, exposes a configurable iterative threshold, and records actual simplification and iterative pass counts.
    - Target-device/profile triangle budgets now seed explicit decimation targets when `--decimate` has no manual target or ratio. Remaining work: named XR/HoloLens-style decimation presets and more device-specific simplification policy.
+   - Add explicit target-strategy reporting for target polygon count, ratio,
+     quality/error criterion, and future backend-specific decimation modes so
+     reports show whether the operation followed Unity's target-count workflow
+     or a Fascat quality approximation.
    - Replace quality-criterion heuristics with measured geometric error.
    - Explicit decimation now supports UV importance modes: preserve full UV islands, preserve seam topology only, or ignore UVs by stripping UV/tangent attributes before simplification.
    - Pre-decimation cleanup now removes unused UV channels and tangents, records removed/preserved attribute metadata, and reports when preserved UVs can make simplification less efficient. Remaining work is vertex-color/weight cleanup and measured efficiency deltas.

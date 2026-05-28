@@ -95,7 +95,9 @@ def test_functional_api_wraps_tessellation_options() -> None:
     step = tessellated.report.steps[-1]
 
     assert step.name == "tessellate"
-    assert step.options == {
+    options = dict(step.options)
+    tolerance_policy = options.pop("tolerance_policy")
+    assert options == {
         "sag": 0.2,
         "sag_ratio": 0.01,
         "angle": 20.0,
@@ -113,6 +115,13 @@ def test_functional_api_wraps_tessellation_options() -> None:
         "reuse_existing_meshes": False,
         "part_settings": {"Part": {"sag": 0.3}},
     }
+    assert tolerance_policy["coordinate_space"] == "asset"
+    assert tolerance_policy["active_deflection"] == 0.01
+    assert tolerance_policy["active_deflection_kind"] == "sag_ratio"
+    assert tolerance_policy["active_deflection_relative"] is True
+    assert tolerance_policy["min_edge_length_meters"] == 0.00025
+    assert tolerance_policy["max_edge_length_meters"] == 0.005
+    assert tolerance_policy["max_polygon_length_meters"] == 0.004
     assert step.warnings == ["part has no source shape and cannot be tessellated: Part"]
 
 
