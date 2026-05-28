@@ -139,10 +139,10 @@ that are currently conservative approximations.
   disabled normal status in mesh and asset metadata.
 - Standalone vertex merging now reports same-position merge candidates and
   classifies exact-duplicate, boundary, non-manifold, and hard-edge candidate
-  buckets, plus skipped merge reasons for normal, tangent, UV, and
-  material-boundary protection. It also reports tolerance scale ratios and
-  warns when the merge tolerance is high relative to shortest mesh edges or
-  part bounding-box size.
+  buckets plus T-junction and boundary-gap candidates. It also reports skipped
+  merge reasons for normal, tangent, UV, and material-boundary protection,
+  tolerance scale ratios, and warnings when the merge tolerance is high relative
+  to shortest mesh edges or part bounding-box size.
 - Standalone degenerate-polygon cleanup now reports duplicate-vertex,
   collapsed-edge, and near-flat removal reasons in mesh metadata and asset
   report totals.
@@ -187,7 +187,7 @@ Function-level parity notes from the linked Unity pages:
 | --- | --- | --- |
 | Tessellate models | Sag, sag-ratio, angle, max-polygon-length, per-part overrides, size-adaptive helpers, and attribute-provenance metadata are represented. | Add real tessellation-time tangent/UV/free-edge geometry generation controls, CAD-derived UV modes, optional free-edge geometry output, and material/metadata/curvature-driven tessellation profiles. |
 | Repair meshes | Duplicate and degenerate cleanup plus standalone degenerate-polygon deletion, T-junction, boundary-gap, non-manifold, and orientation diagnostics are reported. | Implement true T-junction sewing, boundary stitching, non-manifold edge cracking, tolerance-based overlap/z-fighting cleanup, non-orientable strip cracking, and explicit face/normal orientation strategies. |
-| Merge vertices | Standalone `merge_vertices` is exposed across Python, CLI, and TOML with normals, tangents, UV, and material-boundary protection plus before/after reports, same-position candidate counts, exact-duplicate, boundary, non-manifold, and hard-edge candidate classifications, skipped merge reasons by protected attribute, and tolerance-risk warnings. | Add topology-only connectivity merging that can preserve hard-edge, UV, and material seams as split render attributes; also add stronger cross-bucket tolerance merging, T-junction/boundary-gap candidate tags, and advisories for tolerances too small to merge near-duplicates. |
+| Merge vertices | Standalone `merge_vertices` is exposed across Python, CLI, and TOML with normals, tangents, UV, and material-boundary protection plus before/after reports, same-position candidate counts, exact-duplicate, boundary, non-manifold, hard-edge, T-junction, and boundary-gap candidate classifications, skipped merge reasons by protected attribute, and tolerance-risk warnings. | Add topology-only connectivity merging that can preserve hard-edge, UV, and material seams as split render attributes; also add stronger cross-bucket tolerance merging and advisories for tolerances too small to merge near-duplicates. |
 | Delete degenerate polygons | Standalone `delete_degenerate_polygons` is exposed across Python, CLI, and TOML with area-threshold controls, selection support, no-op reports, unit-aware area reporting, before/after counts, and duplicate-vertex, collapsed-edge, and near-flat removal reasons. | Extend cleanup beyond zero-area triangles to boundary-overlap, tolerance-based overlapping, and z-fighting cleanup and reason categories. |
 | Decimate to target | Target count, ratio, UV-importance modes, topology protection counts, RAM estimates, configurable iterative threshold/pass reports, measured-error reports, and pre-cleanup for unused UVs/tangents exist. | Add enforced geometric error bounds, selection-wide target allocation reports, AO/user-weighted decimation, and cleanup for future vertex colors/weights. |
 | Unwrap UV | UV0/UV1 unwrap intent, solver method, iteration, tolerance, sharp-edge seam and forbid-overlap policy intent, distortion, and packing diagnostics are represented. | Add destination-channel control, channel-as-destination behavior when lines of interest define islands, backend-enforced seam policies, create-seams-from-lines-of-interest, seam graph metadata, island merge/alignment, and real repack/padding/share-map controls. |
@@ -200,10 +200,10 @@ Second-pass gaps from the Unity references:
     subjective and recommends disabling it when source winding is already known
     to be correct.
   - Vertex-merge reports now classify exact-duplicate, boundary, non-manifold,
-    and hard-edge candidate buckets, and warn when requested merge tolerance is
-    large relative to local edge length or bounding-box scale. Remaining work is
-    T-junction and boundary-gap candidate tags plus too-small tolerance
-    advisories for near-duplicate vertices that remain unmerged.
+    hard-edge, T-junction, and boundary-gap candidates, and warn when requested
+    merge tolerance is large relative to local edge length or bounding-box
+    scale. Remaining work is too-small tolerance advisories for near-duplicate
+    vertices that remain unmerged.
   - Degenerate-polygon cleanup reports now classify duplicate-vertex,
     collapsed-edge, and near-flat removed triangles. Remaining work is boundary
     overlap, exact duplicate polygon, tolerance-overlap, and likely z-fighting
@@ -331,7 +331,7 @@ Parity gaps to track:
    - Add optional cracking of non-orientable/Mobius-like strips before face orientation when a backend can split them safely.
    - Add explicit face-orientation and normal-orientation report steps with selectable strategies for exterior solids, single-sided open shells, unstitched-face groups, and preserved two-sided surfaces.
    - Missing-normal generation now supports sharp-edge angle, angle or area weighting, and preserve-versus-override behavior with report metadata.
-   - Standalone vertex merging now rebuilds connectivity without collapsing intentional material, normal, tangent, or UV seams by default, reports skipped merge reasons by protected attribute, classifies candidate topology pressure, and warns on high-risk tolerance scale. Remaining work: support topology-only connectivity merging with split render attributes and improve cross-bucket tolerance matching.
+   - Standalone vertex merging now rebuilds connectivity without collapsing intentional material, normal, tangent, or UV seams by default, reports skipped merge reasons by protected attribute, classifies candidate topology pressure including T-junctions and boundary gaps, and warns on high-risk tolerance scale. Remaining work: support topology-only connectivity merging with split render attributes and improve cross-bucket tolerance matching.
    - Mesh repair now records before/after T-junction, nearby boundary-gap, and flipped closed-component counts. It warns that sewing/stitching remains unavailable and warns when outward orientation is still not produced.
    - BREP healing and mesh repair now report unit-aware tolerance policy: effective source/local units, declared target units, meters-per-unit conversions, vertex-merge and degenerate-polygon cleanup status, and missing T-junction/non-manifold backend operations.
 

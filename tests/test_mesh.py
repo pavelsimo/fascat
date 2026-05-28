@@ -151,6 +151,8 @@ def test_merge_vertices_preserves_attribute_seams_by_default() -> None:
     assert merged.metadata["merge_vertices_candidate_boundary_buckets"] == "1"
     assert merged.metadata["merge_vertices_candidate_non_manifold_buckets"] == "0"
     assert merged.metadata["merge_vertices_candidate_hard_edge_buckets"] == "1"
+    assert merged.metadata["merge_vertices_candidate_t_junctions"] == "0"
+    assert merged.metadata["merge_vertices_candidate_boundary_gaps"] == "1"
     assert merged.metadata["merge_vertices_skipped_by_protection"] == "1"
     assert merged.metadata["merge_vertices_skipped_by_normals"] == "1"
     assert merged.metadata["merge_vertices_skipped_by_tangents"] == "0"
@@ -178,6 +180,8 @@ def test_merge_vertices_reports_tangent_and_material_boundary_protection() -> No
     assert merged.metadata["merge_vertices_candidate_boundary_buckets"] == "1"
     assert merged.metadata["merge_vertices_candidate_non_manifold_buckets"] == "0"
     assert merged.metadata["merge_vertices_candidate_hard_edge_buckets"] == "0"
+    assert merged.metadata["merge_vertices_candidate_t_junctions"] == "0"
+    assert merged.metadata["merge_vertices_candidate_boundary_gaps"] == "1"
     assert merged.metadata["merge_vertices_skipped_by_protection"] == "1"
     assert merged.metadata["merge_vertices_skipped_by_normals"] == "0"
     assert merged.metadata["merge_vertices_skipped_by_tangents"] == "1"
@@ -202,7 +206,31 @@ def test_merge_vertices_classifies_non_manifold_candidate_buckets() -> None:
     assert merged.metadata["merge_vertices_candidate_boundary_buckets"] == "1"
     assert merged.metadata["merge_vertices_candidate_non_manifold_buckets"] == "1"
     assert merged.metadata["merge_vertices_candidate_hard_edge_buckets"] == "0"
+    assert merged.metadata["merge_vertices_candidate_t_junctions"] == "2"
+    assert merged.metadata["merge_vertices_candidate_boundary_gaps"] == "1"
     assert merged.metadata["merge_vertices_tolerance_risk"] == "exact_only"
+
+
+def test_merge_vertices_reports_t_junction_and_boundary_gap_candidates() -> None:
+    t_junction = Mesh(
+        points=np.array(
+            [[0, 0, 0], [2, 0, 0], [0, 1, 0], [1, 0, 0], [1, -1, 0]],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [0, 3, 4]], dtype=int),
+    ).merge_vertices(MergeVerticesOptions())
+    boundary_gap = Mesh(
+        points=np.array(
+            [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1.005, 0, 0], [2, 0, 0], [1.005, 1, 0]],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=int),
+    ).merge_vertices(MergeVerticesOptions(tolerance=0.01))
+
+    assert t_junction.metadata["merge_vertices_candidate_t_junctions"] == "1"
+    assert t_junction.metadata["merge_vertices_candidate_boundary_gaps"] == "0"
+    assert boundary_gap.metadata["merge_vertices_candidate_t_junctions"] == "0"
+    assert boundary_gap.metadata["merge_vertices_candidate_boundary_gaps"] == "1"
 
 
 def test_merge_vertices_reports_tolerance_scale_risk() -> None:

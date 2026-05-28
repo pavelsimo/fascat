@@ -413,6 +413,8 @@ class Mesh:
             "merge_vertices_candidate_boundary_buckets": 0,
             "merge_vertices_candidate_non_manifold_buckets": 0,
             "merge_vertices_candidate_hard_edge_buckets": 0,
+            "merge_vertices_candidate_t_junctions": self.t_junction_count(tolerance=max(options.tolerance, 1e-9)),
+            "merge_vertices_candidate_boundary_gaps": self.boundary_gap_count(tolerance=max(options.tolerance, 1e-9)),
             "merge_vertices_skipped_by_protection": 0,
             "merge_vertices_skipped_by_normals": 0,
             "merge_vertices_skipped_by_tangents": 0,

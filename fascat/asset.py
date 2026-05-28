@@ -1176,6 +1176,8 @@ def _merge_vertices_report_stats(asset: Asset) -> dict[str, int]:
         "merge_vertices_candidate_boundary_buckets",
         "merge_vertices_candidate_non_manifold_buckets",
         "merge_vertices_candidate_hard_edge_buckets",
+        "merge_vertices_candidate_t_junctions",
+        "merge_vertices_candidate_boundary_gaps",
         "merge_vertices_skipped_by_protection",
         "merge_vertices_skipped_by_normals",
         "merge_vertices_skipped_by_tangents",
