@@ -139,6 +139,9 @@ that are currently conservative approximations.
 - LOD generation now reports per-level instance reuse, material merge, texture
   bake, and culling-granularity policy so users can see what each level changed
   before far-LOD baking or merge workflows exist.
+- LOD generation now reports chain advisories for excessive level counts,
+  aggressive close-view LOD ratios, and geometry-only far LODs that should
+  eventually use one-mesh/one-material baking.
 - Staging normal generation now exposes angle versus area weighting and
   preserve-versus-override controls, with generated, regenerated, preserved, or
   disabled normal status in mesh and asset metadata.
@@ -229,11 +232,10 @@ Fresh gaps from the linked Unity audit:
   target-device decisions. Fascat reports numeric quality and compatibility,
   but still lacks optional before/after preview renders, LOD switching checks,
   and measured engine/runtime load snapshots.
-- Add LOD chain advisors beyond triangle ratios. Unity recommends 3-4 LOD
-  levels, warns that extra levels increase memory/export size, keeps LOD1-LOD2
-  visually conservative, and reserves one-mesh/one-material baking for far LODs.
-  Fascat reports chain cost, but should warn about excessive level counts and
-  drive per-LOD material, texture-resolution, and culling-granularity policy.
+- Extend LOD chain advisors beyond warnings. Fascat now warns about excessive
+  level counts, aggressive close-view ratios, and geometry-only far LODs; the
+  remaining parity gap is driving per-LOD material, texture-resolution, and
+  culling-granularity policy from those advisories.
 - Add a meshopt-versus-Draco runtime decision matrix. Unity's export guidance is
   Draco/KTX2 and glTFast oriented; Fascat already supports quantization/meshopt
   and rejects Draco/KTX2 until real encoders exist. Remaining parity is not only
@@ -452,7 +454,11 @@ Parity gaps to track:
    - Add far-LOD generation that can merge to one mesh and one baked material for one-draw-call distant rendering.
    - Add LOD validation for screen coverage, monotonic triangle reduction, material simplification, switching distances, and export runtime behavior.
    - LOD generation now reports source, added-LOD, and full-chain vertex/triangle counts plus estimated mesh payload bytes so users can choose useful levels instead of generating wasteful chains.
-   - LOD generation now reports whether each level reused instances, merged materials, baked textures, or changed culling granularity.
+   - LOD generation now reports whether each level reused instances, merged materials, baked textures, or changed culling granularity, and records per-level policy advisories for conservative, aggressive, progressive, or far-proxy levels.
+   - LOD chain advisories now warn on excessive generated levels, aggressive
+     LOD1/LOD2 ratios, and geometry-only far LODs. Remaining work: turn those
+     advisories into actual material merge, texture bake, texture-resolution,
+     culling, and engine-specific switching-distance policy.
    - Non-mesh or untessellated selections are now skipped with part metadata, generated/skipped counts, and report warnings instead of quietly producing partial chains.
    - Add engine-specific LOD export metadata or profiles for Unity, Unreal, and standards-based glTF runtimes, including switching-distance validation.
 

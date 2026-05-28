@@ -1118,6 +1118,7 @@ def _lod_report_stats(asset: Asset) -> dict[str, int]:
         "lod_material_merged_levels",
         "lod_texture_baked_levels",
         "lod_culling_changed_levels",
+        "lod_advisory_count",
     ):
         if key in asset.metadata:
             stats[key] = _metadata_int(asset.metadata[key], 0)

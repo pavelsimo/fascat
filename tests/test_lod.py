@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import numpy as np
 
 from fascat.asset import Asset, Node, Part
@@ -47,7 +49,7 @@ def test_lods_are_monotonic() -> None:
     with_lods = asset.lods(
         LODOptions(
             (0.75, 0.5, 0.25),
-            screen_coverage=(0.6, 0.3, 0.1),
+            screen_coverage=(0.6, 0.3, 0.12),
             per_part_budget=True,
             validate=True,
         )
@@ -57,7 +59,7 @@ def test_lods_are_monotonic() -> None:
     step = with_lods.report.steps[-1]
 
     assert counts == sorted(counts, reverse=True)
-    assert part.metadata["lod_screen_coverage"] == "0.6,0.3,0.1"
+    assert part.metadata["lod_screen_coverage"] == "0.6,0.3,0.12"
     assert part.metadata["lod_per_part_budget"] == "true"
     assert part.lod_meshes[0].metadata["lod_screen_coverage"] == "0.6"
     assert step.before["lod_meshes"] == 0
@@ -77,6 +79,9 @@ def test_lods_are_monotonic() -> None:
     assert part.metadata["lod_level_material_merge"] == "not_run,not_run,not_run"
     assert part.metadata["lod_level_texture_bake"] == "not_run,not_run,not_run"
     assert part.metadata["lod_level_culling_granularity"] == "part,part,part"
+    assert part.metadata["lod_level_policy_advisory"] == (
+        "conservative_geometry,conservative_geometry,progressive_geometry"
+    )
     assert with_lods.metadata["lod_source_triangles"] == str(mesh.triangle_count)
     assert with_lods.metadata["lod_added_triangles"] == str(sum(counts[1:]))
     assert with_lods.metadata["lod_chain_triangles"] == str(sum(counts))
@@ -84,11 +89,15 @@ def test_lods_are_monotonic() -> None:
     assert with_lods.metadata["lod_material_merged_levels"] == "0"
     assert with_lods.metadata["lod_texture_baked_levels"] == "0"
     assert with_lods.metadata["lod_culling_changed_levels"] == "0"
+    assert with_lods.metadata["lod_level_policy_advisory"] == (
+        "conservative_geometry,conservative_geometry,progressive_geometry"
+    )
     assert step.after["lod_source_triangles"] == mesh.triangle_count
     assert step.after["lod_added_triangles"] == sum(counts[1:])
     assert step.after["lod_chain_triangles"] == sum(counts)
     assert step.after["lod_added_mesh_bytes"] == int(with_lods.metadata["lod_added_mesh_bytes"])
     assert step.after["lod_reused_instance_levels"] == 0
+    assert step.after["lod_advisory_count"] == 0
 
 
 def test_lods_report_level_policy_for_reused_instances() -> None:
@@ -181,6 +190,75 @@ def test_lods_can_omit_tiny_parts_at_lower_screen_coverage() -> None:
     assert with_lods.parts["cube"].metadata["lod_culling_changed_levels"] == "1"
     assert with_lods.metadata["lod_omitted_tiny_part_meshes"] == "1"
     assert with_lods.metadata["lod_culling_changed_levels"] == "1"
+
+
+def test_lods_report_chain_advisories_for_risky_levels() -> None:
+    mesh = Mesh(
+        points=np.array(
+            [
+                [-1, -1, -1],
+                [1, -1, -1],
+                [1, 1, -1],
+                [-1, 1, -1],
+                [-1, -1, 1],
+                [1, -1, 1],
+                [1, 1, 1],
+                [-1, 1, 1],
+            ],
+            dtype=float,
+        ),
+        faces=np.array(
+            [
+                [0, 1, 2],
+                [0, 2, 3],
+                [4, 6, 5],
+                [4, 7, 6],
+                [0, 4, 5],
+                [0, 5, 1],
+                [1, 5, 6],
+                [1, 6, 2],
+                [2, 6, 7],
+                [2, 7, 3],
+                [3, 7, 4],
+                [3, 4, 0],
+            ],
+            dtype=int,
+        ),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="cube")]),
+        parts={"cube": Part(id="cube", name="Cube", mesh=mesh)},
+    )
+
+    with_lods = asset.lods(
+        LODOptions(
+            ratios=(0.3, 0.15, 0.1, 0.05, 0.025),
+            screen_coverage=(0.7, 0.4, 0.2, 0.1, 0.05),
+        )
+    )
+    part = with_lods.parts["cube"]
+    advisories = json.loads(str(with_lods.metadata["lod_advisories"]))
+    step = with_lods.report.steps[-1]
+
+    assert with_lods.metadata["lod_advisory_count"] == "3"
+    assert with_lods.metadata["lod_advisory_codes"] == (
+        "excessive_lod_levels,aggressive_close_view_lods,far_lod_proxy_recommended"
+    )
+    assert [item["code"] for item in advisories] == [
+        "excessive_lod_levels",
+        "aggressive_close_view_lods",
+        "far_lod_proxy_recommended",
+    ]
+    assert part.metadata["lod_level_policy_advisory"] == (
+        "close_view_too_aggressive,mid_view_too_aggressive,"
+        "progressive_geometry,progressive_geometry,far_proxy_recommended"
+    )
+    assert part.lod_meshes[-1].metadata["lod_policy_advisory"] == "far_proxy_recommended"
+    assert step.after["lod_advisory_count"] == 3
+    assert len(step.warnings) == 3
+    assert "3-4 levels are usually enough" in step.warnings[0]
+    assert "keep LOD1 and LOD2 visually conservative" in step.warnings[1]
+    assert "one-mesh and one-material baking" in step.warnings[2]
 
 
 def test_lods_warn_when_selected_parts_have_no_mesh() -> None:

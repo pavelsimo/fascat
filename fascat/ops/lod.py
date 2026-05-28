@@ -1,15 +1,24 @@
 from __future__ import annotations
 
+import json
+
 import numpy as np
 
 from fascat.asset import Asset
 from fascat.mesh import Mesh
 from fascat.options import LODOptions
 
+_RECOMMENDED_MAX_LOD_LEVELS = 4
+_CLOSE_VIEW_LOD1_MIN_RATIO = 0.4
+_CLOSE_VIEW_LOD2_MIN_RATIO = 0.2
+_FAR_LOD_RATIO_THRESHOLD = 0.15
+_FAR_LOD_SCREEN_COVERAGE_THRESHOLD = 0.1
+
 
 def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str] | None = None) -> Asset:
     result = asset.copy(keep_source=True)
     screen_coverage = _screen_coverage(options)
+    level_policy_advisories = _level_policy_advisories(options, screen_coverage)
     occurrence_counts = _occurrence_counts_by_part(result)
     generated_parts = 0
     skipped_parts = 0
@@ -52,6 +61,7 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
         level_material_merge: list[str] = []
         level_texture_bake: list[str] = []
         level_culling_granularity: list[str] = []
+        level_policy_advisory_values: list[str] = []
         for index, ratio in enumerate(options.ratios):
             coverage = screen_coverage[index]
             policy_metadata = _level_policy_metadata(
@@ -59,11 +69,13 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
                 culling_granularity="omitted_tiny_part"
                 if options.drop_tiny_parts and diagonal * coverage < options.tiny_part_screen_size
                 else "part",
+                policy_advisory=level_policy_advisories[index],
             )
             level_instance_reuse.append(policy_metadata["lod_instance_reuse"])
             level_material_merge.append(policy_metadata["lod_material_merge"])
             level_texture_bake.append(policy_metadata["lod_texture_bake"])
             level_culling_granularity.append(policy_metadata["lod_culling_granularity"])
+            level_policy_advisory_values.append(policy_metadata["lod_policy_advisory"])
             if policy_metadata["lod_instance_reuse"] == "preserved":
                 part_reused_instance_levels += 1
             if policy_metadata["lod_material_merge"] == "merged":
@@ -142,6 +154,7 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
             "lod_level_material_merge": ",".join(level_material_merge),
             "lod_level_texture_bake": ",".join(level_texture_bake),
             "lod_level_culling_granularity": ",".join(level_culling_granularity),
+            "lod_level_policy_advisory": ",".join(level_policy_advisory_values),
             "lod_reused_instance_levels": str(part_reused_instance_levels),
             "lod_material_merged_levels": str(part_material_merged_levels),
             "lod_texture_baked_levels": str(part_texture_baked_levels),
@@ -167,6 +180,12 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
     result.metadata["lod_material_merged_levels"] = str(material_merged_levels)
     result.metadata["lod_texture_baked_levels"] = str(texture_baked_levels)
     result.metadata["lod_culling_changed_levels"] = str(culling_changed_levels)
+    result.metadata["lod_level_policy_advisory"] = ",".join(level_policy_advisories)
+    if generated_parts:
+        _record_lod_chain_advisories(result, options, screen_coverage)
+    else:
+        result.metadata["lod_advisory_count"] = "0"
+        result.metadata["lod_advisory_codes"] = ""
     if generated_parts == 0 and skipped_parts:
         result.report.add_warning("LOD generation matched no tessellated mesh-bearing parts")
     if options.validate:
@@ -183,7 +202,12 @@ def _occurrence_counts_by_part(asset: Asset) -> dict[str, int]:
     return counts
 
 
-def _level_policy_metadata(*, part_occurrences: int, culling_granularity: str) -> dict[str, str]:
+def _level_policy_metadata(
+    *,
+    part_occurrences: int,
+    culling_granularity: str,
+    policy_advisory: str,
+) -> dict[str, str]:
     if culling_granularity == "omitted_tiny_part":
         instance_reuse = "omitted"
     else:
@@ -193,13 +217,116 @@ def _level_policy_metadata(*, part_occurrences: int, culling_granularity: str) -
         "lod_material_merge": "not_run",
         "lod_texture_bake": "not_run",
         "lod_culling_granularity": culling_granularity,
+        "lod_policy_advisory": policy_advisory,
     }
+
+
+def _level_policy_advisories(options: LODOptions, screen_coverage: tuple[float, ...]) -> tuple[str, ...]:
+    values: list[str] = []
+    last_index = len(options.ratios) - 1
+    for index, ratio in enumerate(options.ratios):
+        coverage = screen_coverage[index]
+        if index == 0 and ratio < _CLOSE_VIEW_LOD1_MIN_RATIO:
+            values.append("close_view_too_aggressive")
+        elif index == 1 and ratio < _CLOSE_VIEW_LOD2_MIN_RATIO:
+            values.append("mid_view_too_aggressive")
+        elif index == last_index and _is_far_lod(ratio, coverage):
+            values.append("far_proxy_recommended")
+        elif index <= 1:
+            values.append("conservative_geometry")
+        else:
+            values.append("progressive_geometry")
+    return tuple(values)
 
 
 def _screen_coverage(options: LODOptions) -> tuple[float, ...]:
     if options.screen_coverage is not None:
         return tuple(options.screen_coverage)
     return tuple(0.5 / (index + 1) for index, _ratio in enumerate(options.ratios))
+
+
+def _record_lod_chain_advisories(
+    asset: Asset,
+    options: LODOptions,
+    screen_coverage: tuple[float, ...],
+) -> None:
+    advisories = _lod_chain_advisories(options, screen_coverage)
+    if not advisories:
+        asset.metadata["lod_advisory_count"] = "0"
+        asset.metadata["lod_advisory_codes"] = ""
+        return
+    encoded = json.dumps(advisories, sort_keys=True)
+    codes = ",".join(str(item["code"]) for item in advisories)
+    asset.metadata["lod_advisories"] = encoded
+    asset.metadata["lod_advisory_count"] = str(len(advisories))
+    asset.metadata["lod_advisory_codes"] = codes
+    for advisory in advisories:
+        if advisory.get("severity") == "warning":
+            asset.report.add_warning(str(advisory["message"]))
+
+
+def _lod_chain_advisories(options: LODOptions, screen_coverage: tuple[float, ...]) -> list[dict[str, object]]:
+    advisories: list[dict[str, object]] = []
+    if len(options.ratios) > _RECOMMENDED_MAX_LOD_LEVELS:
+        advisories.append(
+            {
+                "code": "excessive_lod_levels",
+                "severity": "warning",
+                "levels": len(options.ratios),
+                "recommended_max": _RECOMMENDED_MAX_LOD_LEVELS,
+                "message": (
+                    f"LOD chain has {len(options.ratios)} generated levels; "
+                    "3-4 levels are usually enough, and extra meshes increase memory and export size"
+                ),
+            }
+        )
+
+    close_view_warnings: list[dict[str, object]] = []
+    for index, ratio in enumerate(options.ratios[:2]):
+        threshold = _CLOSE_VIEW_LOD1_MIN_RATIO if index == 0 else _CLOSE_VIEW_LOD2_MIN_RATIO
+        if ratio < threshold:
+            close_view_warnings.append(
+                {
+                    "level": index + 1,
+                    "ratio": ratio,
+                    "minimum_recommended_ratio": threshold,
+                    "screen_coverage": screen_coverage[index],
+                }
+            )
+    if close_view_warnings:
+        levels = ",".join(f"LOD{item['level']}" for item in close_view_warnings)
+        advisories.append(
+            {
+                "code": "aggressive_close_view_lods",
+                "severity": "warning",
+                "levels": close_view_warnings,
+                "message": (
+                    f"{levels} use aggressive reduction for close or mid-view LODs; "
+                    "keep LOD1 and LOD2 visually conservative and reserve destructive ratios for distant levels"
+                ),
+            }
+        )
+
+    far_index = len(options.ratios) - 1
+    if far_index >= 0 and _is_far_lod(options.ratios[far_index], screen_coverage[far_index]):
+        advisories.append(
+            {
+                "code": "far_lod_proxy_recommended",
+                "severity": "warning",
+                "level": far_index + 1,
+                "ratio": options.ratios[far_index],
+                "screen_coverage": screen_coverage[far_index],
+                "message": (
+                    f"LOD{far_index + 1} is a far-distance geometry-only LOD; "
+                    "consider one-mesh and one-material baking when a future far-LOD backend is available"
+                ),
+            }
+        )
+    return advisories
+
+
+def _is_far_lod(ratio: float, screen_coverage: float) -> bool:
+    return ratio <= _FAR_LOD_RATIO_THRESHOLD or screen_coverage <= _FAR_LOD_SCREEN_COVERAGE_THRESHOLD
 
 
 def _mesh_diagonal(mesh: Mesh) -> float:
