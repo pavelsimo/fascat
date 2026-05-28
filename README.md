@@ -14,7 +14,7 @@
 Fascat is a Python library and CLI for converting CAD data into realtime-ready OpenUSD and glTF assets.
 
 ```mermaid
-flowchart LR
+flowchart TD
     A["STEP CAD"] --> B["Imported assembly"]
     B --> C["Tessellated meshes"]
     C --> D["Repaired meshes"]
