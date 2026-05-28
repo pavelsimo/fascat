@@ -929,6 +929,8 @@ Available profiles:
 
 You can pass either a profile name or a `ConversionProfile` returned by `fc.profiles`. Conversion reports include a `profile_budget` step when the selected profile has a budget. That step records target FPS, triangle, vertex, per-mesh vertex, texture-resolution, texture-memory, estimated load-time, draw-call budgets, draw-call breakdown fields, supported compression/runtime-extension caps, and Unity reference triangle/draw-call ranges when the profile has them. Fascat's defaults are intentionally stricter than Unity's broad reference ranges for repeatable export checks. Load time is a deterministic estimate based on output file size, geometry bytes, baked texture bytes, and draw-call overhead; it is not a measured engine runtime.
 
+When referenced baked textures are present, conversion reports also include a pre-write `texture_export_policy` step. It records source, referenced, and unused texture-set counts, map counts, largest source and referenced resolution, estimated referenced texture bytes, selected profile texture-resolution and texture-memory caps, resize candidate counts, estimated resized bytes, estimated savings, and glTF fallback state. glTF reports KTX2/Basis as unsupported until a real encoder exists and records PNG/JPEG-compatible fallback policy for current embedded image payloads.
+
 Custom target-device profiles can overlay a budget on any built-in base profile:
 
 ```toml

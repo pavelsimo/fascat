@@ -1267,6 +1267,76 @@ def test_convert_report_checks_profile_budget(monkeypatch, tmp_path: Path) -> No
     assert converted.report.warnings[-5:] == budget_step.warnings
 
 
+def test_convert_reports_texture_export_policy_before_write(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.pipeline as pipeline
+
+    profile = ConversionProfile(
+        name="texture-cap",
+        tessellation=None,
+        repair=RepairOptions(),
+        stage=StageOptions(uv0="none", uv1=None),
+        optimize=None,
+        lods=None,
+        budget=PlatformBudget(max_texture_resolution=1_024, max_texture_memory_mb=64),
+    )
+    source = _triangle_asset()
+    source.parts["part"].material_ids = ["paint"]
+    source.materials["paint"] = Material(
+        id="paint",
+        name="Paint",
+        base_color=(1.0, 1.0, 1.0, 1.0),
+        metadata={"baked_texture_resolution": "2048", "baked_maps": "base_color,normal"},
+    )
+    source.materials["unused"] = Material(
+        id="unused",
+        name="Unused",
+        base_color=(1.0, 0.0, 0.0, 1.0),
+        metadata={"baked_texture_resolution": "4096", "baked_maps": "base_color"},
+    )
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: source)
+    monkeypatch.setattr(pipeline, "_write_gltf", lambda _asset, _path, *, options=None: None)
+
+    converted = convert(
+        "input.step",
+        tmp_path / "output.glb",
+        profile=profile,
+        validate_output=False,
+    )
+    step_names = [step.name for step in converted.report.steps]
+    policy_step = next(step for step in converted.report.steps if step.name == "texture_export_policy")
+
+    assert step_names.index("texture_export_policy") < step_names.index("write")
+    assert policy_step.options == {
+        "profile": "texture-cap",
+        "output_format": "gltf",
+        "texture_compression": "unsupported",
+        "preferred_compressed_format": "KTX2/Basis",
+        "fallback_texture_format": "PNG/JPEG",
+    }
+    assert policy_step.after["texture_policy_source_sets"] == 2
+    assert policy_step.after["texture_policy_source_maps"] == 3
+    assert policy_step.after["texture_policy_referenced_sets"] == 1
+    assert policy_step.after["texture_policy_referenced_maps"] == 2
+    assert policy_step.after["texture_policy_unused_sets"] == 1
+    assert policy_step.after["texture_policy_largest_source_resolution"] == 4096
+    assert policy_step.after["texture_policy_largest_referenced_resolution"] == 2048
+    assert policy_step.after["texture_policy_referenced_estimated_bytes"] == 33_554_432
+    assert policy_step.after["texture_policy_resize_budget_resolution"] == 1024
+    assert policy_step.after["texture_policy_resize_candidate_sets"] == 1
+    assert policy_step.after["texture_policy_resize_target_largest_resolution"] == 1024
+    assert policy_step.after["texture_policy_resized_estimated_bytes"] == 8_388_608
+    assert policy_step.after["texture_policy_resize_estimated_savings_bytes"] == 25_165_824
+    assert policy_step.after["texture_policy_memory_budget_bytes"] == 64_000_000
+    assert policy_step.after["texture_policy_memory_over_budget_bytes"] == 0
+    assert policy_step.after["texture_policy_ktx2_basisu_supported"] == 0
+    assert policy_step.after["texture_policy_png_jpeg_fallback_required"] == 1
+    assert policy_step.warnings == [
+        "texture export policy for texture-cap: 1 referenced texture set(s) exceed 1024px; "
+        "resize preprocessing is recommended before compressed or fallback texture export"
+    ]
+    assert policy_step.warnings[0] in converted.report.warnings
+
+
 def test_convert_report_checks_profile_runtime_caps(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     import fascat.pipeline as pipeline
 

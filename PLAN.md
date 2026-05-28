@@ -53,6 +53,10 @@ that are currently conservative approximations.
 - glTF export now reuses repeated embedded texture URIs as one image/texture
   resource and write reports include source, referenced, unused, duplicate, and
   written image counts.
+- Conversion reports now include a pre-write `texture_export_policy` step for
+  referenced baked textures, with profile texture caps, resize candidates,
+  before/after byte estimates, KTX2/Basis unsupported state, and PNG/JPEG
+  fallback policy for glTF.
 - glTF LODs now include node-level `MSFT_lod` references in addition to Fascat extras.
 - OBJ export writes normals, `f v//vn` faces, and smoothing directives.
 - Self-intersection analysis now performs bounded triangle-triangle checks instead of counting AABB candidates.
@@ -197,7 +201,7 @@ Comparison snapshot:
 | Staging | Normal/tangent generation, box/unwrap/lightmap UV modes, UV copy/normalization, UV validation, UV island/distortion/packing diagnostics, material normalization, duplicate-material merge, and metadata-only atlas intent. | Unity-style UV0 tileable versus UV1 bake workflows with segmentation, sharp-edge seam and forbid-overlap UV policies, lines of interest, island merge/alignment, real repack/padding/share-map controls, material-library mapping, real atlas textures, AO/lightmap baking, and texture cleanup. |
 | Optimization | Mesh simplification, measured error reporting, sampled occlusion removal, exact and position-tolerant instance reconstruction, scene merge/split utilities, draw-call breakdown reports, UV-importance modes, and pre-decimation cleanup for unused UVs/tangents. | Global assembly target allocation with iterative memory thresholds, real geometric-error bounded simplification, AO/user-weighted decimation, cleanup for vertex colors/weights, standard/advanced occlusion backends, proxy, dual-contouring, or field-aligned retopology with normal-map transfer, symmetry/mirror-aware instance reconstruction, duplicate image/material cleanup, and merge reports that quantify culling, memory, and file-size tradeoffs. |
 | LODs | LOD ratios, screen-coverage metadata, validation, skipped-part reporting, per-level mesh-payload and policy reports, and glTF `MSFT_lod` metadata. | Occurrence-level LOD group authoring with preserved instance relationships, optimized LOD0 as master asset, explicit conservative LOD0 versus destructive distant-LOD policy, far-LOD one-mesh/one-material baking, switching-distance validation, and engine-specific runtime export profiles. |
-| Export | USD/USDZ, glTF/GLB, OBJ, STL, glTF quantization, meshopt, extension reporting, file-size budgets, estimated geometry/texture/metadata payload bytes, unused material pruning, glTF embedded image dedupe/reporting, and rejection of unsupported Draco/KTX2 requests. | Real Draco compression settings, KTX2/Basis texture output, a first-class image graph for broader texture cleanup and resizing, PNG/JPEG fallback controls, baseline-versus-optimized size comparisons, expected-versus-measured export size ladders, Unity/glTFast-oriented profiles, and web/mobile/VR/XR budget presets backed by runtime measurements. |
+| Export | USD/USDZ, glTF/GLB, OBJ, STL, glTF quantization, meshopt, extension reporting, file-size budgets, estimated geometry/texture/metadata payload bytes, unused material pruning, glTF embedded image dedupe/reporting, pre-write texture export policy reports, and rejection of unsupported Draco/KTX2 requests. | Real Draco compression settings, KTX2/Basis texture output, a first-class image graph for broader texture cleanup and actual resizing, PNG/JPEG fallback controls, baseline-versus-optimized size comparisons, expected-versus-measured export size ladders, Unity/glTFast-oriented profiles, and web/mobile/VR/XR budget presets backed by runtime measurements. |
 
 Function-level parity notes from the linked Unity pages:
 
@@ -473,12 +477,12 @@ Parity gaps to track:
    - Add real KTX2/Basis texture output with quality, compression level, and max-resolution controls.
    - Write reports now include estimated geometry, texture, metadata, and total payload bytes plus referenced, unused, and written material counts. They also report source, referenced, unused, duplicate-reference, and written image counts.
    - glTF, USD, and OBJ exports now prune unused materials from written artifacts without mutating the in-memory asset. glTF exports also omit images referenced only by unused materials and reuse duplicate embedded texture URIs. Remaining export cleanup work: format-specific resource pruning for first-class image files.
-   - Add texture-resize preprocessing with before/after dimensions, byte estimates, and per-profile maximums before KTX2/PNG/JPEG export decisions.
+   - Conversion reports now add a pre-write `texture_export_policy` step for referenced baked textures, including source/referenced/unused texture-set counts, per-profile maximum resolution, resize candidate counts, estimated before/after bytes, estimated savings, KTX2/Basis unsupported state, and PNG/JPEG fallback policy for glTF. Remaining work: perform real image resizing and compression on first-class image assets.
    - glTF write reports now list emitted runtime extensions, required extensions, `extras.fascat` metadata, unsupported Draco/KTX2 outputs, expected runtime support, target compatibility notes with fallback behavior, and a runtime decision matrix for quantization, meshopt, future Draco, future KTX2/Basis, and PNG/JPEG fallbacks.
    - Add Unity/glTFast-oriented GLB export profiles that combine extension support notes, Draco/KTX2 settings, fallback choices, and runtime compatibility warnings.
    - Runtime extension compatibility reports now cover Unity glTFast, web, mobile, and XR targets for `MSFT_lod`, `EXT_meshopt_compression`, `KHR_draco_mesh_compression`, `KHR_texture_basisu`, quantization, and fallback behavior.
    - Add baseline-versus-optimized export comparisons so reports show how much each preparation step changed file size, and warn when draw-call merging increases export size by breaking instancing.
-   - Add format-aware texture export policy and reporting: prefer KTX2/Basis for glTF/GLB, use PNG/JPEG fallbacks for texture-capable non-glTF exports, remove unused images before export, and warn when users compare source CAD file size directly against runtime mesh exports.
+   - Format-aware texture export policy reports now prefer future KTX2/Basis for glTF/GLB, record PNG/JPEG fallback policy while texture compression is unavailable, and count only referenced texture sets for resize estimates. Remaining work: texture-capable non-glTF bindings and warnings when users compare source CAD file size directly against runtime mesh exports.
    - Add named web, mobile, desktop, VR, AR/XR, and custom-device export presets that combine geometry compression, texture compression, texture resizing, and cleanup choices.
    - Keep GLB as the preferred web/mobile runtime target while preserving USD/USDZ for OpenUSD workflows.
    - Expose Draco quantization bits for positions, normals, UVs, and vertex colors once a real encoder is available.
@@ -490,7 +494,7 @@ Parity gaps to track:
    - Profile budgets now include explicit Unity reference ranges for each broad profile so users can see how Fascat's stricter defaults compare with Unity's desktop, mobile, VR, and WebGL guideline ranges.
    - Augmented-reality and mixed-reality profiles now model stricter AR/XR device caps, and custom target-device overrides are supported through profile files.
    - Custom target-device profiles can now be loaded from TOML/JSON as budget overlays and surfaced in reports with resolved FPS, triangle, vertex, draw-call, texture, load-time, compression-support, and runtime-extension caps.
-   - Custom target-device triangle budgets now seed profile optimization targets and explicit decimation targets instead of only warning after conversion. Remaining work: use selected platform budgets to seed LOD choices, texture-resize choices, and export-compression defaults.
+   - Custom target-device triangle budgets now seed profile optimization targets and explicit decimation targets instead of only warning after conversion. Texture-resolution budgets now seed pre-write resize estimates in `texture_export_policy`. Remaining work: use selected platform budgets to seed LOD choices, actual texture resizing, and export-compression defaults.
    - The platform-budget checklist is complete at diagnostic-report level; future work is measured engine/runtime load profiling.
 
 ## Near-Term Polish

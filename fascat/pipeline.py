@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from fascat import profiles
 from fascat.asset import Asset
+from fascat.export_report import referenced_materials
 from fascat.export_report import stats_with_file_size as _stats_with_file_size
 from fascat.filter import Filter
 from fascat.io.gltf import GLTF_SUFFIXES, runtime_dependency_report, validate_gltf
@@ -221,6 +222,7 @@ def convert(
     )
     if output_format == "gltf":
         write_options["runtime_dependencies"] = runtime_dependency_report(asset, gltf_options)
+    _add_texture_export_policy_report(asset, selected, output_format)
     file_size_budget = _file_size_budget(output_format, gltf_options, usd_options, obj_options, stl_options)
     write_timer = timed_step()
     try:
@@ -742,6 +744,76 @@ def _report_stats(asset: Asset) -> dict[str, int]:
     return asset.stats(include_lods=any(part.lod_meshes for part in asset.parts.values()))
 
 
+def _add_texture_export_policy_report(asset: Asset, profile: ConversionProfile, output_format: ExportFormat) -> None:
+    source_summaries = _material_texture_summaries(asset)
+    referenced_summaries = _material_texture_summaries_from_materials(referenced_materials(asset).values())
+    if not referenced_summaries:
+        return
+    budget = profile.budget
+    if budget is None and output_format != "gltf":
+        return
+
+    before = _report_stats(asset)
+    after = dict(before)
+    source_map_count, source_bytes = _texture_summary_totals(source_summaries)
+    referenced_map_count, referenced_bytes = _texture_summary_totals(referenced_summaries)
+    after.update(
+        {
+            "texture_policy_source_sets": len(source_summaries),
+            "texture_policy_source_maps": source_map_count,
+            "texture_policy_referenced_sets": len(referenced_summaries),
+            "texture_policy_referenced_maps": referenced_map_count,
+            "texture_policy_unused_sets": max(0, len(source_summaries) - len(referenced_summaries)),
+            "texture_policy_largest_source_resolution": _largest_texture_resolution(source_summaries),
+            "texture_policy_largest_referenced_resolution": _largest_texture_resolution(referenced_summaries),
+            "texture_policy_source_estimated_bytes": source_bytes,
+            "texture_policy_referenced_estimated_bytes": referenced_bytes,
+        }
+    )
+
+    options: dict[str, object] = {
+        "profile": profile.name,
+        "output_format": output_format,
+        "texture_compression": "unsupported",
+        "preferred_compressed_format": "KTX2/Basis" if output_format == "gltf" else None,
+        "fallback_texture_format": "PNG/JPEG" if output_format == "gltf" else "format-specific",
+    }
+    warnings: list[str] = []
+    if output_format == "gltf":
+        after["texture_policy_ktx2_basisu_supported"] = 0
+        after["texture_policy_png_jpeg_fallback_required"] = 1
+
+    max_resolution = None if budget is None else budget.max_texture_resolution
+    if max_resolution is not None:
+        resized_summaries = _resize_texture_summaries(referenced_summaries, max_resolution)
+        _resized_map_count, resized_bytes = _texture_summary_totals(resized_summaries)
+        resize_candidates = sum(1 for resolution, _count in referenced_summaries if resolution > max_resolution)
+        after.update(
+            {
+                "texture_policy_resize_budget_resolution": max_resolution,
+                "texture_policy_resize_candidate_sets": resize_candidates,
+                "texture_policy_resize_target_largest_resolution": _largest_texture_resolution(resized_summaries),
+                "texture_policy_resized_estimated_bytes": resized_bytes,
+                "texture_policy_resize_estimated_savings_bytes": max(0, referenced_bytes - resized_bytes),
+            }
+        )
+        if resize_candidates:
+            warnings.append(
+                f"texture export policy for {profile.name}: {resize_candidates} referenced texture set(s) exceed "
+                f"{max_resolution}px; resize preprocessing is recommended before compressed or fallback texture export"
+            )
+
+    max_texture_memory_mb = None if budget is None else budget.max_texture_memory_mb
+    if max_texture_memory_mb is not None:
+        budget_bytes = max_texture_memory_mb * 1_000_000
+        after["texture_policy_memory_budget_bytes"] = budget_bytes
+        after["texture_policy_memory_over_budget_bytes"] = max(0, referenced_bytes - budget_bytes)
+
+    for warning in warnings:
+        asset.report.add_warning(warning)
+    asset.report.add_step("texture_export_policy", options=options, before=before, after=after, warnings=warnings)
+
+
 def _add_profile_budget_report(asset: Asset, profile: ConversionProfile) -> None:
     budget = profile.budget
     if budget is None:
@@ -1214,12 +1286,7 @@ def _material_texture_resolutions(asset: Asset) -> list[int]:
 
 
 def _estimated_texture_memory(asset: Asset) -> tuple[int, int]:
-    texture_count = 0
-    estimated_bytes = 0
-    for resolution, count in _material_texture_summaries(asset):
-        texture_count += count
-        estimated_bytes += resolution * resolution * 4 * count
-    return texture_count, estimated_bytes
+    return _texture_summary_totals(_material_texture_summaries(asset))
 
 
 def _estimated_load_time(asset: Asset) -> dict[str, int]:
@@ -1262,8 +1329,12 @@ def _ceil_div(value: int, divisor: int) -> int:
 
 
 def _material_texture_summaries(asset: Asset) -> list[tuple[int, int]]:
+    return _material_texture_summaries_from_materials(asset.materials.values())
+
+
+def _material_texture_summaries_from_materials(materials: Iterable[Any]) -> list[tuple[int, int]]:
     summaries: list[tuple[int, int]] = []
-    for material in asset.materials.values():
+    for material in materials:
         for key in ("baked_texture_resolution", "maps_resolution"):
             resolution = _metadata_positive_int(material.metadata.get(key))
             if resolution is not None:
@@ -1271,6 +1342,23 @@ def _material_texture_summaries(asset: Asset) -> list[tuple[int, int]]:
                 summaries.append((resolution, texture_count))
                 break
     return summaries
+
+
+def _texture_summary_totals(summaries: list[tuple[int, int]]) -> tuple[int, int]:
+    texture_count = 0
+    estimated_bytes = 0
+    for resolution, count in summaries:
+        texture_count += count
+        estimated_bytes += resolution * resolution * 4 * count
+    return texture_count, estimated_bytes
+
+
+def _largest_texture_resolution(summaries: list[tuple[int, int]]) -> int:
+    return max((resolution for resolution, _count in summaries), default=0)
+
+
+def _resize_texture_summaries(summaries: list[tuple[int, int]], max_resolution: int) -> list[tuple[int, int]]:
+    return [(min(resolution, max_resolution), count) for resolution, count in summaries]
 
 
 def _baked_texture_count(value: object) -> int:
