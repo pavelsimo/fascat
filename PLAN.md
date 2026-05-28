@@ -78,6 +78,9 @@ that are currently conservative approximations.
 - Tessellation quality advisories now warn when absolute sag is coarse relative
   to a part's bounding box or polygon-length limits are aggressive for
   non-elongated parts.
+- Tessellation quality advisories now flag shiny or high-detail
+  material/metadata contexts when parts use bulk tessellation criteria without
+  per-part `sag_ratio` or curvature-adaptive tuning.
 - Platform budgets now record Unity reference triangle and draw-call ranges in
   profile definitions, conversion reports, and documentation tables.
 - Decimation now records RAM estimates, budget-allocation mode,
@@ -210,7 +213,7 @@ Function-level parity notes from the linked Unity pages:
 
 | Unity reference | Fascat today | Gap to track |
 | --- | --- | --- |
-| Tessellate models | Sag, sag-ratio, angle, max-polygon-length, per-part overrides, size-adaptive helpers, and attribute-provenance metadata are represented. | Add real tessellation-time tangent/UV/free-edge geometry generation controls, CAD-derived UV modes, optional free-edge geometry output, and material/metadata/curvature-driven tessellation profiles. |
+| Tessellate models | Sag, sag-ratio, angle, max-polygon-length, per-part overrides, size-adaptive helpers, attribute-provenance metadata, and material/metadata-sensitive quality advisories are represented. | Add real tessellation-time tangent/UV/free-edge geometry generation controls, CAD-derived UV modes, optional free-edge geometry output, and backend-driven material/metadata/curvature tessellation profiles. |
 | Repair meshes | Duplicate and degenerate cleanup plus standalone degenerate-polygon deletion, T-junction, boundary-gap, non-manifold, and orientation diagnostics are reported. | Implement true T-junction sewing, boundary stitching, non-manifold edge cracking, tolerance-based overlap/z-fighting cleanup, non-orientable strip cracking, and explicit face/normal orientation strategies. |
 | Merge vertices | Standalone `merge_vertices` is exposed across Python, CLI, and TOML with normals, tangents, UV, and material-boundary protection plus before/after reports, Euclidean cross-bucket tolerance matching, same-position candidate counts, exact-duplicate, boundary, non-manifold, hard-edge, T-junction, boundary-gap, and near-duplicate candidate classifications, skipped merge reasons by protected attribute, high-risk tolerance warnings, and too-small tolerance advisories. | Add topology-only connectivity merging that can preserve hard-edge, UV, and material seams as split render attributes. |
 | Delete degenerate polygons | Standalone `delete_degenerate_polygons` is exposed across Python, CLI, and TOML with area-threshold controls, optional exact duplicate-polygon cleanup, selection support, no-op reports, unit-aware area reporting, before/after counts, and duplicate-polygon, duplicate-vertex, collapsed-edge, and near-flat removal reasons. | Extend cleanup beyond zero-area and exact-duplicate triangles to boundary-overlap, tolerance-based overlapping, and z-fighting cleanup and reason categories. |
@@ -224,11 +227,11 @@ Fresh gaps from the linked Unity audit:
   line geometry can be tessellated into tubes when users need wireframe or
   inspection views. Fascat currently exposes delete/preserve intent, not a
   renderable tube/curve conversion.
-- Extend the tessellation quality advisor with material/metadata/curvature
-  context. Fascat now warns for coarse absolute sag and aggressive max-length
-  settings on non-elongated parts; remaining work is to classify shiny,
-  high-detail, or metadata-tagged parts before tessellation and recommend
-  finer criteria for those regions.
+- Tessellation quality advisories now classify shiny, high-detail, or
+  metadata-tagged parts and recommend finer per-part `sag_ratio` or
+  curvature-adaptive criteria when bulk settings are still in use. Remaining
+  targeted-profile work is applying those recommendations automatically through
+  backend-driven material/metadata/curvature profiles.
 - Close the AO-to-decimation loop. Unity's staging and decimation guidance use
   AO both as a baked output and as vertex-color-derived weights that preserve
   creases during aggressive simplification. Fascat tracks AO baking and
@@ -405,13 +408,15 @@ Parity gaps to track:
    - Free-edge tessellation diagnostics are now available through `free_edge_report` across Python, CLI, TOML pipelines, per-part overrides, metadata, and report warnings. Tessellation attribute provenance now records whether positions, triangles, normals, tangents, UVs, face groups, free-edge diagnostics, and BREP patches came from tessellation or imported meshes. Remaining work: investigate CAD-parametric UV and tangent generation during tessellation.
    - Add optional free-edge geometry output or retention, separate from diagnostics, for wire overlays, boundary inspection, and import cleanup validation.
    - Size-adaptive tessellation helpers now generate per-part `part_settings` from bounding-box diagonal bands, so sag, sag-ratio, angle, and polygon-length defaults can vary by part size.
-   - Remaining targeted-profile work: material, metadata, curvature, or filter driven tessellation so shiny/high-detail parts can use finer criteria than bulk structural parts.
+   - Tessellation quality advisories now classify shiny/high-detail material or metadata contexts and recommend per-part `sag_ratio` or curvature-adaptive tuning when bulk criteria are still in use.
+   - Remaining targeted-profile work: automatically apply material, metadata, curvature, or filter driven tessellation settings so shiny/high-detail parts use finer criteria than bulk structural parts.
    - Expose CAD-derived UV generation modes, including none, intrinsic surface UVs, and conformal/scaled UVs, instead of only post-mesh unwrapping.
    - Max polygon length is now exposed separately from cleanup subdivision. `max_edge_length` still subdivides geometry; `max_polygon_length` drives quality-report `long_edges`, metadata, and warnings for long tessellated edges that may cause lighting artifacts.
    - Tessellation quality advisories now report coarse absolute sag relative to
-     part bounding-box diagonal and aggressive polygon-length limits on
-     non-elongated parts. Remaining work: use material, metadata, curvature, or
-     filters to recommend finer tessellation before the mesh exists.
+     part bounding-box diagonal, aggressive polygon-length limits on
+     non-elongated parts, and shiny/high-detail parts that need per-part
+     `sag_ratio` or curvature-adaptive tuning. Remaining work: turn material,
+     metadata, curvature, or filter advisories into automatic profile settings.
 
 5. UV staging
    - Extend existing box UVs into Unity-style AABB projection controls: local versus shared/global AABB, real-world UV scale or `uv3dSize`, destination channel, override policy, and unit reporting.

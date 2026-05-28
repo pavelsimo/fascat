@@ -5,6 +5,7 @@ import json
 import numpy as np
 
 from fascat.asset import Asset, Node, Part
+from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.options import Tessellation
 
@@ -536,6 +537,74 @@ def test_tessellation_quality_advisor_warns_on_aggressive_max_length(monkeypatch
     assert part.metadata["tessellation_quality_advisory_codes"] == "aggressive_max_length"
     assert advisories[0]["length_kind"] == "max_edge_length"
     assert "reserve aggressive polygon-length limits" in tessellated.report.steps[-1].warnings[0]
+
+
+def test_tessellation_quality_advisor_flags_shiny_high_detail_parts() -> None:
+    material = Material(
+        id="chrome",
+        name="Polished chrome",
+        base_color=(0.8, 0.8, 0.8, 1.0),
+        metallic=1.0,
+        roughness=0.2,
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Inspection", part_id="part")]),
+        parts={
+            "part": Part(
+                id="part",
+                name="Inspection",
+                mesh=triangle_mesh(),
+                material_ids=[material.id],
+                metadata={"surface_detail": "high"},
+            )
+        },
+        materials={material.id: material},
+    )
+
+    tessellated = asset.tessellate(Tessellation(quality_report=True))
+    part = tessellated.parts["part"]
+    advisories = json.loads(str(part.metadata["tessellation_quality_advisories"]))
+    payload = json.loads(str(part.metadata["tessellation_quality"]))
+
+    assert part.metadata["tessellation_quality_advisory_count"] == "1"
+    assert part.metadata["tessellation_quality_advisory_codes"] == "detail_sensitive_tessellation"
+    assert advisories[0]["detail_contexts"] == ["high_detail_metadata", "shiny_material"]
+    assert advisories[0]["recommendation"] == "set per-part sag_ratio or enable curvature_adaptive for this part"
+    assert payload["advisories"][0]["code"] == "detail_sensitive_tessellation"
+    assert tessellated.report.steps[-1].warnings == [
+        "part has shiny or high-detail material/metadata but tessellation uses bulk criteria "
+        "without sag_ratio or curvature_adaptive; consider finer per-part tessellation: Inspection"
+    ]
+
+
+def test_tessellation_quality_advisor_accepts_detail_tuned_settings() -> None:
+    material = Material(
+        id="chrome",
+        name="Polished chrome",
+        base_color=(0.8, 0.8, 0.8, 1.0),
+        metallic=1.0,
+        roughness=0.2,
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Inspection", part_id="part")]),
+        parts={
+            "part": Part(
+                id="part",
+                name="Inspection",
+                mesh=triangle_mesh(),
+                material_ids=[material.id],
+                metadata={"surface_detail": "high"},
+            )
+        },
+        materials={material.id: material},
+    )
+
+    tessellated = asset.tessellate(Tessellation(sag_ratio=0.01, quality_report=True))
+    payload = json.loads(str(tessellated.parts["part"].metadata["tessellation_quality"]))
+
+    assert "tessellation_quality_advisories" not in tessellated.parts["part"].metadata
+    assert payload["advisories"] == []
+    assert tessellated.report.steps[-1].warnings == []
 
 
 def test_tessellation_free_edge_report_records_reused_meshes() -> None:

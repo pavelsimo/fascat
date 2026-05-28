@@ -17,6 +17,25 @@ _DRAW_CALL_RISK_THRESHOLD = 16
 _COARSE_ABSOLUTE_SAG_RATIO = 0.02
 _AGGRESSIVE_MAX_LENGTH_RATIO = 0.02
 _LONG_OBJECT_AXIS_RATIO = 8.0
+_SHINY_ROUGHNESS_THRESHOLD = 0.25
+_METALLIC_DETAIL_ROUGHNESS_THRESHOLD = 0.5
+_METALLIC_DETAIL_THRESHOLD = 0.5
+_DETAIL_METADATA_KEYS = frozenset(
+    {
+        "critical_detail",
+        "detail_level",
+        "high_detail",
+        "inspection_surface",
+        "surface_detail",
+        "tessellation_detail",
+        "tessellation_priority",
+        "visual_priority",
+    }
+)
+_DETAIL_METADATA_VALUES = frozenset(
+    {"1", "critical", "detailed", "fine", "high", "high_detail", "inspection", "true", "yes"}
+)
+_SHINY_MATERIAL_VALUES = frozenset({"chrome", "gloss", "glossy", "mirror", "polished", "shiny"})
 
 
 def tessellate_asset(asset: Asset, options: Tessellation, *, selected_part_ids: set[str] | None = None) -> Asset:
@@ -222,7 +241,7 @@ def _record_tessellation_diagnostics(asset: Asset, part: Part, options: Tessella
             min_edge_length=options.min_edge_length,
             max_edge_length=_quality_max_edge_length(options),
         )
-    advisories = _tessellation_quality_advisories(part, options)
+    advisories = _tessellation_quality_advisories(asset, part, options)
     if options.quality_report:
         if metrics is None:
             metrics = part.mesh.quality_metrics(
@@ -326,7 +345,7 @@ def _quality_max_edge_length(options: Tessellation) -> float | None:
     return options.max_polygon_length if options.max_polygon_length is not None else options.max_edge_length
 
 
-def _tessellation_quality_advisories(part: Part, options: Tessellation) -> list[dict[str, object]]:
+def _tessellation_quality_advisories(asset: Asset, part: Part, options: Tessellation) -> list[dict[str, object]]:
     mesh = part.mesh
     if mesh is None:
         return []
@@ -337,6 +356,23 @@ def _tessellation_quality_advisories(part: Part, options: Tessellation) -> list[
         return []
 
     advisories: list[dict[str, object]] = []
+    detail_contexts = _detail_sensitive_contexts(asset, part)
+    if detail_contexts and options.sag_ratio is None and not options.curvature_adaptive:
+        advisories.append(
+            {
+                "code": "detail_sensitive_tessellation",
+                "severity": "warning",
+                "part_id": part.id,
+                "part_name": part.name,
+                "detail_contexts": detail_contexts,
+                "recommendation": "set per-part sag_ratio or enable curvature_adaptive for this part",
+                "message": (
+                    "part has shiny or high-detail material/metadata but tessellation uses bulk criteria "
+                    f"without sag_ratio or curvature_adaptive; consider finer per-part tessellation: {part.name}"
+                ),
+            }
+        )
+
     if options.sag_ratio is None and not options.relative:
         sag_ratio = float(options.sag) / diagonal
         if sag_ratio >= _COARSE_ABSOLUTE_SAG_RATIO:
@@ -378,6 +414,56 @@ def _tessellation_quality_advisories(part: Part, options: Tessellation) -> list[
                 }
             )
     return advisories
+
+
+def _detail_sensitive_contexts(asset: Asset, part: Part) -> list[str]:
+    contexts: set[str] = set()
+    if _has_high_detail_metadata(part.metadata):
+        contexts.add("high_detail_metadata")
+    for material_id in part.material_ids:
+        material = asset.materials.get(material_id)
+        if material is None:
+            continue
+        if (
+            material.roughness <= _SHINY_ROUGHNESS_THRESHOLD
+            or (
+                material.metallic >= _METALLIC_DETAIL_THRESHOLD
+                and material.roughness <= _METALLIC_DETAIL_ROUGHNESS_THRESHOLD
+            )
+            or _has_shiny_material_metadata(material.metadata)
+        ):
+            contexts.add("shiny_material")
+        if _has_high_detail_metadata(material.metadata):
+            contexts.add("high_detail_material_metadata")
+    return sorted(contexts)
+
+
+def _has_high_detail_metadata(metadata: Metadata) -> bool:
+    for key, value in metadata.items():
+        normalized_key = str(key).strip().lower().replace("-", "_")
+        if normalized_key in _DETAIL_METADATA_KEYS and _metadata_truthy(value):
+            return True
+    return False
+
+
+def _has_shiny_material_metadata(metadata: Metadata) -> bool:
+    for key, value in metadata.items():
+        normalized_key = str(key).strip().lower()
+        if normalized_key in {"finish", "material_finish", "surface_finish"} and (
+            _normalized_metadata_value(value) in _SHINY_MATERIAL_VALUES
+        ):
+            return True
+    return False
+
+
+def _metadata_truthy(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return _normalized_metadata_value(value) in _DETAIL_METADATA_VALUES
+
+
+def _normalized_metadata_value(value: object) -> str:
+    return str(value).strip().lower().replace("-", "_")
 
 
 def _active_max_length(options: Tessellation) -> tuple[float | None, str]:
