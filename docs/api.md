@@ -593,7 +593,7 @@ Staging, UV, and material parameters:
 
 ## Scene Optimization
 
-Use scene optimization to reduce draw calls after staging and optional hierarchy merging. It batches compatible meshes, can batch by material, reconstructs exact repeated mesh instances when vertex attributes, materials, and metadata match, can reconstruct near-identical instances within a configured position tolerance, reports duplicate mesh payload savings, splits large merged meshes, simplifies empty hierarchy, annotates the intended index-buffer width, and records how mesh count, material count, submesh/material slots, instances, and merged batches contributed to the draw-call estimate. When batching removes reusable instances, the report includes the same export advisor used by explicit merge operations.
+Use scene optimization to reduce draw calls after staging and optional hierarchy merging. It batches compatible meshes, can batch by material, reconstructs exact repeated mesh instances when vertex attributes, materials, and metadata match, can reconstruct near-identical instances within a configured position tolerance, reports duplicate vertex/triangle counts and estimated mesh-payload byte savings, splits large merged meshes, simplifies empty hierarchy, annotates the intended index-buffer width, and records how mesh count, material count, submesh/material slots, instances, and merged batches contributed to the draw-call estimate. When batching removes reusable instances, the report includes the same export advisor used by explicit merge operations.
 
 ```python
 asset = asset.optimize_scene(

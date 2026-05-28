@@ -509,9 +509,9 @@ These need more design and should not be mixed into documentation or diagnostics
 10. Instance reconstruction - exact and tolerant mesh pass complete
    - `optimize_scene(instance_policy="auto"|"preserve")` now reconstructs shared instances for separately modeled parts with matching mesh fingerprints, vertex attributes, material assignments, and metadata.
    - `instance_similarity_tolerance` now reconstructs near-identical meshes when topology, vertex attributes, material assignments, and metadata match and per-vertex position deltas stay within the requested tolerance.
-   - Scene metadata records reconstructed part/occurrence counts plus duplicate vertex/triangle payload savings.
+   - Scene metadata records reconstructed part/occurrence counts plus duplicate vertex/triangle counts and estimated mesh-payload byte savings.
    - Vertex attribute, material, or metadata differences now emit warnings when they prevent full reconstruction.
-   - Remaining polish: add transform-aware and symmetry/mirror-aware matching, topology-permutation matching, and richer file-size savings estimates.
+   - Remaining polish: add transform-aware and symmetry/mirror-aware matching, topology-permutation matching, and export-format-specific compressed size estimates.
 
 ## Correct Deferrals
 

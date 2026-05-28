@@ -154,7 +154,40 @@ def test_optimize_scene_reconstructs_matching_separate_parts() -> None:
     assert optimized.metadata["scene_reconstructed_occurrence_count"] == "1"
     assert optimized.metadata["scene_reconstructed_vertex_savings"] == "3"
     assert optimized.metadata["scene_reconstructed_triangle_savings"] == "1"
+    assert optimized.metadata["scene_reconstructed_mesh_payload_savings_bytes"] == "104"
     assert optimized.metadata["scene_instanced_part_count"] == "1"
+
+
+def test_optimize_scene_reconstructed_payload_savings_include_vertex_streams() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+        normals=np.array([[0, 0, 1], [0, 0, 1], [0, 0, 1]], dtype=float),
+        tangents=np.array([[1, 0, 0, 1], [1, 0, 0, 1], [1, 0, 0, 1]], dtype=float),
+        uvs={0: np.array([[0, 0], [1, 0], [0, 1]], dtype=float)},
+        material_indices=np.array([0], dtype=int),
+        face_groups={"front": np.array([0], dtype=int)},
+    )
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="node_a", name="Panel A", part_id="panel_a"),
+                Node(id="node_b", name="Panel B", part_id="panel_b"),
+            ],
+        ),
+        parts={
+            "panel_a": Part(id="panel_a", name="Panel A", mesh=mesh.copy(), material_ids=["paint"]),
+            "panel_b": Part(id="panel_b", name="Panel B", mesh=mesh.copy(), material_ids=["paint"]),
+        },
+        materials={"paint": Material(id="paint", name="Paint", base_color=(0.0, 0.0, 1.0, 1.0))},
+    )
+
+    optimized = asset.optimize_scene(SceneOptimizeOptions(instance_policy="auto"))
+
+    assert optimized.part_count == 1
+    assert optimized.metadata["scene_reconstructed_mesh_payload_savings_bytes"] == "328"
 
 
 def test_optimize_scene_reconstructs_position_tolerant_instances() -> None:
@@ -193,6 +226,7 @@ def test_optimize_scene_reconstructs_position_tolerant_instances() -> None:
     assert tolerant.metadata["scene_similarity_candidate_group_count"] == "1"
     assert tolerant.metadata["scene_similarity_reconstructed_part_count"] == "1"
     assert tolerant.metadata["scene_reconstructed_vertex_savings"] == "3"
+    assert tolerant.metadata["scene_reconstructed_mesh_payload_savings_bytes"] == "104"
     assert tolerant.metadata["scene_instanced_part_count"] == "1"
 
 

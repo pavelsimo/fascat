@@ -131,12 +131,14 @@ def _reconstruct_instances(asset: Asset, selected_node_ids: set[str], *, similar
 
     vertex_savings = 0
     triangle_savings = 0
+    mesh_payload_savings = 0
     for part_id in replacements:
         mesh = asset.parts[part_id].mesh
         if mesh is None:
             continue
         vertex_savings += mesh.vertex_count
         triangle_savings += mesh.triangle_count
+        mesh_payload_savings += _mesh_payload_bytes(mesh)
 
     remapped_occurrences = 0
     for node in asset.root.walk():
@@ -150,6 +152,7 @@ def _reconstruct_instances(asset: Asset, selected_node_ids: set[str], *, similar
     asset.metadata["scene_reconstructed_occurrence_count"] = str(remapped_occurrences)
     asset.metadata["scene_reconstructed_vertex_savings"] = str(vertex_savings)
     asset.metadata["scene_reconstructed_triangle_savings"] = str(triangle_savings)
+    asset.metadata["scene_reconstructed_mesh_payload_savings_bytes"] = str(mesh_payload_savings)
     asset.metadata["scene_similarity_tolerance"] = f"{similarity_tolerance:g}"
     asset.metadata["scene_similarity_candidate_group_count"] = str(similarity_candidate_groups)
     asset.metadata["scene_similarity_reconstructed_part_count"] = str(len(similarity_replacements))
@@ -234,6 +237,19 @@ def _mesh_positions_within_tolerance(left: Mesh | None, right: Mesh | None, tole
         return False
     distances = np.linalg.norm(left.points - right.points, axis=1)
     return bool(distances.size == 0 or float(distances.max()) <= tolerance)
+
+
+def _mesh_payload_bytes(mesh: Mesh) -> int:
+    total = int(mesh.points.nbytes + mesh.faces.nbytes)
+    if mesh.normals is not None:
+        total += int(mesh.normals.nbytes)
+    if mesh.tangents is not None:
+        total += int(mesh.tangents.nbytes)
+    total += sum(int(values.nbytes) for values in mesh.uvs.values())
+    if mesh.material_indices is not None:
+        total += int(mesh.material_indices.nbytes)
+    total += sum(int(values.nbytes) for values in mesh.face_groups.values())
+    return total
 
 
 def _part_material_key(part: Part) -> tuple[tuple[str, ...], tuple[int, ...] | None]:
