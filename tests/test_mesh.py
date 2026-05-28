@@ -276,6 +276,61 @@ def test_merge_vertices_reports_tolerance_too_small_for_near_duplicates() -> Non
     assert merged.metadata["merge_vertices_tolerance_advisory"] == "near_duplicates_unmerged"
 
 
+def test_merge_vertices_uses_distance_tolerance_across_position_buckets() -> None:
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0.048, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [0.147, 0, 0],
+                [2, 0, 0],
+                [0, 2, 0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=int),
+    )
+
+    merged = mesh.merge_vertices(MergeVerticesOptions(tolerance=0.1))
+
+    assert merged.vertex_count == 5
+    assert merged.metadata["merge_vertices_removed"] == "1"
+    assert merged.metadata["merge_vertices_candidate_position_buckets"] == "1"
+    assert merged.metadata["merge_vertices_candidate_vertices"] == "1"
+    assert merged.metadata["merge_vertices_skipped_by_protection"] == "0"
+
+
+def test_merge_vertices_preserves_cross_bucket_attribute_seams() -> None:
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0.048, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [0.147, 0, 0],
+                [2, 0, 0],
+                [0, 2, 0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=int),
+        normals=np.array(
+            [[0, 0, 1], [0, 0, 1], [0, 0, 1], [0, 1, 0], [0, 1, 0], [0, 1, 0]],
+            dtype=float,
+        ),
+    )
+
+    merged = mesh.merge_vertices(MergeVerticesOptions(tolerance=0.1))
+
+    assert merged.vertex_count == 6
+    assert merged.metadata["merge_vertices_removed"] == "0"
+    assert merged.metadata["merge_vertices_candidate_position_buckets"] == "1"
+    assert merged.metadata["merge_vertices_candidate_hard_edge_buckets"] == "1"
+    assert merged.metadata["merge_vertices_skipped_by_protection"] == "1"
+    assert merged.metadata["merge_vertices_skipped_by_normals"] == "1"
+
+
 def test_merge_vertices_can_ignore_attributes_and_remove_degenerates() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 0]], dtype=float),

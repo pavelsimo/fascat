@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import math
 from collections import defaultdict, deque
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -104,12 +104,6 @@ def _triangle_overlap_area_2d(left: FloatArray, right: FloatArray, *, tolerance:
         return 0.0
     intersection = _clip_polygon_to_triangle(subject, clip, tolerance=tolerance)
     return abs(_polygon_area_2d(intersection))
-
-
-def _position_key(point: FloatArray, tolerance: float) -> tuple[float, ...] | tuple[int, ...]:
-    if tolerance <= 0.0:
-        return tuple(float(value) for value in point)
-    return tuple(int(value) for value in np.round(point / tolerance).astype(np.int64))
 
 
 @dataclass
@@ -299,16 +293,16 @@ class Mesh:
     def merge_close_vertices(self, tolerance: float) -> Mesh:
         if tolerance <= 0.0 or self.vertex_count == 0:
             return self.copy()
-        quantized = np.round(self.points / tolerance).astype(np.int64)
-        _, first_indices, inverse = np.unique(quantized, axis=0, return_index=True, return_inverse=True)
-        order = np.argsort(first_indices)
-        old_to_new_cluster = np.empty_like(order)
-        old_to_new_cluster[order] = np.arange(order.shape[0], dtype=np.int64)
-        new_points = self.points[np.sort(first_indices)]
-        new_faces = old_to_new_cluster[inverse][self.faces]
+        components = self._distance_connected_components(tolerance=tolerance)
+        old_to_new = np.empty(self.vertex_count, dtype=np.int64)
+        representative_indices: list[int] = []
+        for new_index, vertices in enumerate(components):
+            representative_indices.append(vertices[0])
+            for vertex in vertices:
+                old_to_new[vertex] = new_index
         mesh = self.copy()
-        mesh.points = new_points
-        mesh.faces = new_faces
+        mesh.points = self.points[np.asarray(representative_indices, dtype=np.int64)].copy()
+        mesh.faces = old_to_new[self.faces]
         mesh.normals = None
         mesh.tangents = None
         mesh.uvs = {}
@@ -323,17 +317,13 @@ class Mesh:
         material_signatures = self._vertex_material_signatures() if opts.preserve_material_boundaries else None
         skip_diagnostics = self._merge_vertex_skip_diagnostics(opts, material_signatures)
         tolerance_diagnostics = self._merge_vertex_tolerance_diagnostics(opts.tolerance)
+        components = self._merge_vertex_components(opts, material_signatures)
         old_to_new = np.empty(self.vertex_count, dtype=np.int64)
         representative_indices: list[int] = []
-        key_to_new: dict[tuple[object, ...], int] = {}
-        for vertex_index in range(self.vertex_count):
-            key = self._merge_vertex_key(vertex_index, opts, material_signatures)
-            new_index = key_to_new.get(key)
-            if new_index is None:
-                new_index = len(representative_indices)
-                key_to_new[key] = new_index
-                representative_indices.append(vertex_index)
-            old_to_new[vertex_index] = new_index
+        for new_index, vertices in enumerate(components):
+            representative_indices.append(vertices[0])
+            for vertex_index in vertices:
+                old_to_new[vertex_index] = new_index
 
         representatives = np.asarray(representative_indices, dtype=np.int64)
         mesh = self.copy()
@@ -459,14 +449,82 @@ class Mesh:
         key = np.floor(point / cell_size).astype(np.int64)
         return (int(key[0]), int(key[1]), int(key[2]))
 
+    def _distance_connected_components(
+        self,
+        *,
+        tolerance: float,
+        component_keys: Sequence[tuple[object, ...]] | None = None,
+    ) -> list[list[int]]:
+        if self.vertex_count == 0:
+            return []
+        if tolerance <= 0.0:
+            exact_groups: dict[tuple[object, ...], list[int]] = {}
+            for vertex, point in enumerate(self.points):
+                key: tuple[object, ...] = (("position", tuple(float(value) for value in point)),)
+                if component_keys is not None:
+                    key = key + component_keys[vertex]
+                exact_groups.setdefault(key, []).append(vertex)
+            return sorted(exact_groups.values(), key=lambda vertices: vertices[0])
+
+        parent = list(range(self.vertex_count))
+        rank = [0] * self.vertex_count
+
+        def find(vertex: int) -> int:
+            while parent[vertex] != vertex:
+                parent[vertex] = parent[parent[vertex]]
+                vertex = parent[vertex]
+            return vertex
+
+        def union(left: int, right: int) -> None:
+            left_root = find(left)
+            right_root = find(right)
+            if left_root == right_root:
+                return
+            if rank[left_root] < rank[right_root]:
+                parent[left_root] = right_root
+            elif rank[left_root] > rank[right_root]:
+                parent[right_root] = left_root
+            else:
+                parent[right_root] = left_root
+                rank[left_root] += 1
+
+        buckets: dict[tuple[int, int, int], list[int]] = defaultdict(list)
+        for vertex, point in enumerate(self.points):
+            key = self._spatial_bucket_key(point, tolerance)
+            component_key = None if component_keys is None else component_keys[vertex]
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for dz in (-1, 0, 1):
+                        neighbor_key = (key[0] + dx, key[1] + dy, key[2] + dz)
+                        for other in buckets.get(neighbor_key, []):
+                            if component_keys is not None and component_keys[other] != component_key:
+                                continue
+                            if float(np.linalg.norm(point - self.points[other])) <= tolerance:
+                                union(vertex, other)
+            buckets[key].append(vertex)
+
+        components: dict[int, list[int]] = {}
+        for vertex in range(self.vertex_count):
+            components.setdefault(find(vertex), []).append(vertex)
+        return sorted(components.values(), key=lambda vertices: vertices[0])
+
+    def _merge_vertex_components(
+        self,
+        options: MergeVerticesOptions,
+        material_signatures: tuple[tuple[int, ...], ...] | None,
+    ) -> list[list[int]]:
+        attribute_keys = [
+            self._merge_vertex_attribute_key(vertex_index, options, material_signatures)
+            for vertex_index in range(self.vertex_count)
+        ]
+        return self._distance_connected_components(tolerance=options.tolerance, component_keys=attribute_keys)
+
     def _merge_vertex_skip_diagnostics(
         self,
         options: MergeVerticesOptions,
         material_signatures: tuple[tuple[int, ...], ...] | None,
     ) -> dict[str, int]:
-        buckets: dict[tuple[float, ...] | tuple[int, ...], list[int]] = {}
-        for vertex_index, point in enumerate(self.points):
-            buckets.setdefault(_position_key(point, options.tolerance), []).append(vertex_index)
+        candidate_components = self._distance_connected_components(tolerance=options.tolerance)
 
         diagnostics = {
             "merge_vertices_candidate_position_buckets": 0,
@@ -484,13 +542,15 @@ class Mesh:
             "merge_vertices_skipped_by_material_boundaries": 0,
         }
         boundary_vertices, non_manifold_vertices = self._merge_vertex_topology_vertices()
-        for vertices in buckets.values():
+        for vertices in candidate_components:
             if len(vertices) <= 1:
                 continue
             diagnostics["merge_vertices_candidate_position_buckets"] += 1
             diagnostics["merge_vertices_candidate_vertices"] += len(vertices) - 1
-            full_keys = {self._merge_vertex_key(vertex, options, material_signatures) for vertex in vertices}
-            if len(full_keys) < len(vertices):
+            exact_keys = {
+                self._merge_vertex_exact_identity_key(vertex, options, material_signatures) for vertex in vertices
+            }
+            if len(exact_keys) < len(vertices):
                 diagnostics["merge_vertices_candidate_exact_duplicate_buckets"] += 1
             if any(vertex in boundary_vertices for vertex in vertices):
                 diagnostics["merge_vertices_candidate_boundary_buckets"] += 1
@@ -498,7 +558,10 @@ class Mesh:
                 diagnostics["merge_vertices_candidate_non_manifold_buckets"] += 1
             if self.normals is not None and self._has_distinct_normals(vertices):
                 diagnostics["merge_vertices_candidate_hard_edge_buckets"] += 1
-            skipped = len(full_keys) - 1
+            attribute_keys = {
+                self._merge_vertex_attribute_key(vertex, options, material_signatures) for vertex in vertices
+            }
+            skipped = len(attribute_keys) - 1
             if skipped <= 0:
                 continue
             diagnostics["merge_vertices_skipped_by_protection"] += skipped
@@ -545,13 +608,24 @@ class Mesh:
     ) -> bool:
         return len({material_signatures[vertex] for vertex in vertices}) > 1
 
-    def _merge_vertex_key(
+    def _merge_vertex_exact_identity_key(
         self,
         vertex_index: int,
         options: MergeVerticesOptions,
         material_signatures: tuple[tuple[int, ...], ...] | None,
     ) -> tuple[object, ...]:
-        key: list[object] = [_position_key(self.points[vertex_index], options.tolerance)]
+        return (
+            ("position", tuple(float(value) for value in self.points[vertex_index])),
+            *self._merge_vertex_attribute_key(vertex_index, options, material_signatures),
+        )
+
+    def _merge_vertex_attribute_key(
+        self,
+        vertex_index: int,
+        options: MergeVerticesOptions,
+        material_signatures: tuple[tuple[int, ...], ...] | None,
+    ) -> tuple[object, ...]:
+        key: list[object] = []
         if options.preserve_normals and self.normals is not None:
             key.append(tuple(float(value) for value in self.normals[vertex_index]))
         if options.preserve_tangents and self.tangents is not None:
