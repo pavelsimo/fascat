@@ -57,6 +57,9 @@ that are currently conservative approximations.
   referenced baked textures, with profile texture caps, resize candidates,
   before/after byte estimates, KTX2/Basis unsupported state, and PNG/JPEG
   fallback policy for glTF.
+- USD export now authors `UsdUVTexture` shader networks for baked base-color,
+  metallic-roughness, normal, occlusion, and emissive texture metadata when
+  present.
 - glTF LODs now include node-level `MSFT_lod` references in addition to Fascat extras.
 - OBJ export writes normals, `f v//vn` faces, and smoothing directives.
 - Self-intersection analysis now performs bounded triangle-triangle checks instead of counting AABB candidates.
@@ -434,7 +437,7 @@ Parity gaps to track:
    - Replace constant embedded factor maps with real atlas/raster texture output for base color, opacity, roughness, metallic, normal, AO, and emissive maps.
    - Add high-poly-to-proxy normal map baking for retopology or aggressive far-LOD workflows.
    - Add real ambient occlusion baking to textures and optionally to vertex colors for downstream decimation weights, with explicit resolution, padding, sample-count, target-channel, bent-normal, and denoise/filter controls.
-   - Export now prunes unused materials from glTF, USD, and OBJ artifacts. glTF also reuses repeated embedded texture URIs as one image/texture resource and reports source, referenced, unused, duplicate-reference, and written image counts. Remaining material/image cleanup: promote real image assets into the pipeline, resize textures to platform budgets, and keep PNG/JPEG fallbacks when KTX2 is unavailable.
+   - Export now prunes unused materials from glTF, USD, and OBJ artifacts. glTF also reuses repeated embedded texture URIs as one image/texture resource and reports source, referenced, unused, duplicate-reference, and written image counts. USD now authors baked texture shader bindings for current embedded texture metadata. Remaining material/image cleanup: promote real image assets into the pipeline, resize textures to platform budgets, and keep PNG/JPEG fallbacks when KTX2 is unavailable.
 
 7. Optimization and draw-call reduction
    - Add acceleration structures, confidence metrics, and optional raster/GPU backends to the new sampled occlusion removal.
@@ -521,8 +524,8 @@ These need more design and should not be mixed into documentation or diagnostics
 
 3. Material baking - first embedded-texture pass complete
    - `bake_materials` now emits constant embedded texture maps from material factors.
-   - glTF export writes baked base-color/opacity, metallic-roughness, normal, AO, and emissive texture bindings when present.
-   - Remaining polish: generate real atlas textures from source texture/material inputs, reuse xatlas UVs where possible, add USD texture bindings, AO baking, and texture resizing/compression prep.
+   - glTF and USD export write baked base-color/opacity, metallic-roughness, normal, AO, and emissive texture bindings when present.
+   - Remaining polish: generate real atlas textures from source texture/material inputs, reuse xatlas UVs where possible, add AO baking, and texture resizing/compression prep.
 
 4. Error-bounded simplification - first reporting pass complete
    - Decimation now records achieved triangle reduction and measured symmetric nearest-vertex error on parts and asset metadata.

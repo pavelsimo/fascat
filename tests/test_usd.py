@@ -332,6 +332,66 @@ def test_usd_export_authors_preview_surface_material_inputs(tmp_path: Path) -> N
     assert bound_material.GetPath().pathString == "/Materials/pbr"
 
 
+def test_usd_export_authors_baked_texture_shader_bindings(tmp_path: Path) -> None:
+    mesh = cube_mesh()
+    uris = {
+        "baked_texture_base_color_uri": "data:image/png;base64,BASE",
+        "baked_texture_metallic_roughness_uri": "data:image/png;base64,MR",
+        "baked_texture_normal_uri": "data:image/png;base64,NORMAL",
+        "baked_texture_occlusion_uri": "data:image/png;base64,OCC",
+        "baked_texture_emissive_uri": "data:image/png;base64,EMISSIVE",
+    }
+    material = Material(
+        id="baked",
+        name="Baked",
+        base_color=(0.2, 0.4, 0.6, 0.8),
+        metadata=uris,
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Cube", part_id="cube")]),
+        parts={"cube": Part(id="cube", name="Cube", mesh=mesh, material_ids=[material.id])},
+        materials={material.id: material},
+    )
+    output = tmp_path / "baked-textures.usda"
+
+    write_usd(asset, output)
+
+    stage = Usd.Stage.Open(str(output))
+    assert stage is not None
+    preview = UsdShade.Shader(stage.GetPrimAtPath("/Materials/baked/PreviewSurface"))
+    base_texture = UsdShade.Shader(stage.GetPrimAtPath("/Materials/baked/BaseColorTexture"))
+    mr_texture = UsdShade.Shader(stage.GetPrimAtPath("/Materials/baked/MetallicRoughnessTexture"))
+    normal_texture = UsdShade.Shader(stage.GetPrimAtPath("/Materials/baked/NormalTexture"))
+    occlusion_texture = UsdShade.Shader(stage.GetPrimAtPath("/Materials/baked/OcclusionTexture"))
+    emissive_texture = UsdShade.Shader(stage.GetPrimAtPath("/Materials/baked/EmissiveTexture"))
+    st_reader = UsdShade.Shader(stage.GetPrimAtPath("/Materials/baked/StReader"))
+
+    assert st_reader.GetIdAttr().Get() == "UsdPrimvarReader_float2"
+    assert st_reader.GetInput("varname").Get() == "st"
+    assert base_texture.GetIdAttr().Get() == "UsdUVTexture"
+    assert base_texture.GetInput("file").Get().path == uris["baked_texture_base_color_uri"]
+    assert base_texture.GetInput("sourceColorSpace").Get() == "sRGB"
+    assert mr_texture.GetInput("file").Get().path == uris["baked_texture_metallic_roughness_uri"]
+    assert mr_texture.GetInput("sourceColorSpace").Get() == "raw"
+    assert normal_texture.GetInput("file").Get().path == uris["baked_texture_normal_uri"]
+    assert occlusion_texture.GetInput("file").Get().path == uris["baked_texture_occlusion_uri"]
+    assert emissive_texture.GetInput("file").Get().path == uris["baked_texture_emissive_uri"]
+    assert emissive_texture.GetInput("sourceColorSpace").Get() == "sRGB"
+    assert _connected_source(preview, "diffuseColor") == ("/Materials/baked/BaseColorTexture", "rgb")
+    assert _connected_source(preview, "opacity") == ("/Materials/baked/BaseColorTexture", "a")
+    assert _connected_source(preview, "roughness") == ("/Materials/baked/MetallicRoughnessTexture", "g")
+    assert _connected_source(preview, "metallic") == ("/Materials/baked/MetallicRoughnessTexture", "b")
+    assert _connected_source(preview, "normal") == ("/Materials/baked/NormalTexture", "rgb")
+    assert _connected_source(preview, "occlusion") == ("/Materials/baked/OcclusionTexture", "r")
+    assert _connected_source(preview, "emissiveColor") == ("/Materials/baked/EmissiveTexture", "rgb")
+    assert _connected_source(base_texture, "st") == ("/Materials/baked/StReader", "result")
+
+
+def _connected_source(shader: object, input_name: str) -> tuple[str, str]:
+    source, source_name, _source_type = shader.GetInput(input_name).GetConnectedSource()
+    return source.GetPath().pathString, source_name
+
+
 def test_usd_export_authors_uv0_normals_and_original_names(tmp_path: Path) -> None:
     mesh = cube_mesh()
     transform = np.eye(4, dtype=float)

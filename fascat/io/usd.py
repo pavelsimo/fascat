@@ -14,6 +14,24 @@ from fascat.material import Material
 from fascat.metadata import pmi_ids_by_part
 from fascat.options import MetadataExportOptions, UsdExportOptions
 
+_BAKED_TEXTURE_BINDINGS = (
+    (
+        "baked_texture_base_color_uri",
+        "BaseColorTexture",
+        (("diffuseColor", "rgb"), ("opacity", "a")),
+        "sRGB",
+    ),
+    (
+        "baked_texture_metallic_roughness_uri",
+        "MetallicRoughnessTexture",
+        (("roughness", "g"), ("metallic", "b")),
+        "raw",
+    ),
+    ("baked_texture_normal_uri", "NormalTexture", (("normal", "rgb"),), "raw"),
+    ("baked_texture_occlusion_uri", "OcclusionTexture", (("occlusion", "r"),), "raw"),
+    ("baked_texture_emissive_uri", "EmissiveTexture", (("emissiveColor", "rgb"),), "sRGB"),
+)
+
 
 def write_usd(asset: Asset, path: str | Path, *, debug: bool = False, options: UsdExportOptions | None = None) -> None:
     opts = options or UsdExportOptions()
@@ -218,9 +236,70 @@ def _write_materials(
         shader.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(float(material.opacity))
         shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(float(material.metallic))
         shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(float(material.roughness))
+        _add_baked_texture_bindings(stage, material_path, material, shader, Sdf, UsdShade)
         usd_material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
         paths[material.id] = material_path
     return paths
+
+
+def _add_baked_texture_bindings(
+    stage: Any,
+    material_path: str,
+    material: Material,
+    surface_shader: Any,
+    Sdf: Any,
+    UsdShade: Any,
+) -> None:
+    st_reader = None
+    for metadata_key, shader_name, connections, color_space in _BAKED_TEXTURE_BINDINGS:
+        uri = _metadata_image_uri(material, metadata_key)
+        if uri is None:
+            continue
+        if st_reader is None:
+            st_reader = _define_st_reader(stage, material_path, Sdf, UsdShade)
+        texture = UsdShade.Shader.Define(stage, f"{material_path}/{shader_name}")
+        texture.CreateIdAttr("UsdUVTexture")
+        texture.CreateInput("file", Sdf.ValueTypeNames.Asset).Set(Sdf.AssetPath(uri))
+        texture.CreateInput("st", Sdf.ValueTypeNames.Float2).ConnectToSource(st_reader.ConnectableAPI(), "result")
+        texture.CreateInput("sourceColorSpace", Sdf.ValueTypeNames.Token).Set(color_space)
+        _create_texture_outputs(texture, Sdf)
+        for preview_input, texture_output in connections:
+            _surface_input(surface_shader, preview_input, Sdf).ConnectToSource(texture.ConnectableAPI(), texture_output)
+
+
+def _define_st_reader(stage: Any, material_path: str, Sdf: Any, UsdShade: Any) -> Any:
+    reader = UsdShade.Shader.Define(stage, f"{material_path}/StReader")
+    reader.CreateIdAttr("UsdPrimvarReader_float2")
+    reader.CreateInput("varname", Sdf.ValueTypeNames.Token).Set("st")
+    reader.CreateOutput("result", Sdf.ValueTypeNames.Float2)
+    return reader
+
+
+def _create_texture_outputs(texture: Any, Sdf: Any) -> None:
+    texture.CreateOutput("rgb", Sdf.ValueTypeNames.Float3)
+    for channel in ("r", "g", "b", "a"):
+        texture.CreateOutput(channel, Sdf.ValueTypeNames.Float)
+
+
+def _surface_input(surface_shader: Any, name: str, Sdf: Any) -> Any:
+    existing = surface_shader.GetInput(name)
+    if existing:
+        return existing
+    value_type = {
+        "diffuseColor": Sdf.ValueTypeNames.Color3f,
+        "emissiveColor": Sdf.ValueTypeNames.Color3f,
+        "normal": Sdf.ValueTypeNames.Normal3f,
+        "opacity": Sdf.ValueTypeNames.Float,
+        "metallic": Sdf.ValueTypeNames.Float,
+        "roughness": Sdf.ValueTypeNames.Float,
+        "occlusion": Sdf.ValueTypeNames.Float,
+    }[name]
+    return surface_shader.CreateInput(name, value_type)
+
+
+def _metadata_image_uri(material: Material, key: str) -> str | None:
+    value = material.metadata.get(key)
+    return value if isinstance(value, str) and value.startswith("data:image/") else None
 
 
 def _write_prototypes(
