@@ -364,7 +364,7 @@ def test_size_adaptive_tessellation_builds_part_settings_from_bounds() -> None:
 
     adaptive = profiles.size_adaptive_tessellation(
         asset,
-        base=fc.Tessellation(sag=0.5, angle=30.0, part_settings={"Large": {"angle": 12.0}}),
+        base=fc.TessellationOptions(sag=0.5, angle=30.0, part_settings={"Large": {"angle": 12.0}}),
         bands=(
             profiles.TessellationSizeBand(max_diagonal=2.0, sag=0.02, angle=8.0, max_polygon_length=0.5),
             profiles.TessellationSizeBand(max_diagonal=None, sag=0.2, sag_ratio=0.01, angle=18.0),
@@ -398,15 +398,15 @@ def test_size_adaptive_tessellation_requires_bands() -> None:
 @pytest.mark.parametrize(
     ("factory", "message"),
     [
-        (lambda: fc.Tessellation(sag=0), "sag"),
-        (lambda: fc.Tessellation(sag_ratio=0), "sag_ratio"),
-        (lambda: fc.Tessellation(angle=0), "angle"),
-        (lambda: fc.Tessellation(angle=181), "angle"),
-        (lambda: fc.Tessellation(min_edge_length=0), "min_edge_length"),
-        (lambda: fc.Tessellation(max_edge_length=0), "max_edge_length"),
-        (lambda: fc.Tessellation(max_polygon_length=0), "max_polygon_length"),
-        (lambda: fc.Tessellation(min_edge_length=2, max_edge_length=1), "min_edge_length"),
-        (lambda: fc.Tessellation(part_settings={"part": {"bad": True}}), "unsupported part_settings"),
+        (lambda: fc.TessellationOptions(sag=0), "sag"),
+        (lambda: fc.TessellationOptions(sag_ratio=0), "sag_ratio"),
+        (lambda: fc.TessellationOptions(angle=0), "angle"),
+        (lambda: fc.TessellationOptions(angle=181), "angle"),
+        (lambda: fc.TessellationOptions(min_edge_length=0), "min_edge_length"),
+        (lambda: fc.TessellationOptions(max_edge_length=0), "max_edge_length"),
+        (lambda: fc.TessellationOptions(max_polygon_length=0), "max_polygon_length"),
+        (lambda: fc.TessellationOptions(min_edge_length=2, max_edge_length=1), "min_edge_length"),
+        (lambda: fc.TessellationOptions(part_settings={"part": {"bad": True}}), "unsupported part_settings"),
         (lambda: fc.PlatformBudget(target_fps=0), "target_fps"),
         (lambda: fc.PlatformBudget(max_triangles=0), "max_triangles"),
         (lambda: fc.PlatformBudget(max_vertices=0), "max_vertices"),

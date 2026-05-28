@@ -12,7 +12,7 @@ from fascat.asset import Asset, Node, Part
 from fascat.io.step import read_step
 from fascat.io.usd import validate_usd, write_usd
 from fascat.mesh import Mesh
-from fascat.options import StageOptions, Tessellation
+from fascat.options import StageOptions, TessellationOptions
 
 
 def _block_imports(monkeypatch: pytest.MonkeyPatch, *prefixes: str) -> None:
@@ -52,7 +52,7 @@ def test_step_tessellation_reports_missing_ocp_backend(monkeypatch: pytest.Monke
     _block_imports(monkeypatch, "OCP")
 
     with pytest.raises(RuntimeError, match="STEP tessellation requires cadquery-ocp"):
-        tessellate_shape(object(), Tessellation())
+        tessellate_shape(object(), TessellationOptions())
 
 
 def test_usd_export_reports_missing_usd_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

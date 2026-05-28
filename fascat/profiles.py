@@ -16,7 +16,7 @@ from fascat.options import (
     PlatformBudget,
     RepairOptions,
     StageOptions,
-    Tessellation,
+    TessellationOptions,
     WorkflowRecipe,
     WorkflowRecipeChoice,
 )
@@ -166,13 +166,13 @@ def _realtime_recipe(
 def size_adaptive_tessellation(
     asset: Any,
     *,
-    base: Tessellation | None = None,
+    base: TessellationOptions | None = None,
     bands: Sequence[TessellationSizeBand],
-) -> Tessellation:
+) -> TessellationOptions:
     if not bands:
         raise ValueError("at least one tessellation size band is required")
 
-    options = base or Tessellation()
+    options = base or TessellationOptions()
     part_settings = {part_id: dict(settings) for part_id, settings in options.part_settings.items()}
     for part in getattr(asset, "parts", {}).values():
         if part.id in part_settings or part.name in part_settings:
@@ -189,7 +189,7 @@ def size_adaptive_tessellation(
 
     values = options.to_dict()
     values["part_settings"] = part_settings
-    return Tessellation(**cast(Any, values))
+    return TessellationOptions(**cast(Any, values))
 
 
 def from_mapping(
@@ -269,7 +269,7 @@ def realtime_desktop(
     lod_tuple = tuple(lod_ratios)
     return ConversionProfile(
         name="realtime-desktop",
-        tessellation=Tessellation(sag=tessellation_sag, angle=angle),
+        tessellation=TessellationOptions(sag=tessellation_sag, angle=angle),
         repair=RepairOptions(tolerance=1e-7),
         stage=StageOptions(uv0="box", uv1=None),
         optimize=OptimizeOptions(target_triangles=max_triangles, simplify=True, optimize_buffers=True),
@@ -308,7 +308,7 @@ def realtime_web(
     lod_tuple = tuple(lod_ratios)
     return ConversionProfile(
         name="realtime-web",
-        tessellation=Tessellation(sag=tessellation_sag, angle=angle),
+        tessellation=TessellationOptions(sag=tessellation_sag, angle=angle),
         repair=RepairOptions(tolerance=1e-7),
         stage=StageOptions(uv0="box", uv1=None),
         optimize=OptimizeOptions(target_triangles=max_triangles, simplify=True, optimize_buffers=True),
@@ -347,7 +347,7 @@ def realtime_mobile(
     lod_tuple = tuple(lod_ratios)
     return ConversionProfile(
         name="realtime-mobile",
-        tessellation=Tessellation(sag=tessellation_sag, angle=angle),
+        tessellation=TessellationOptions(sag=tessellation_sag, angle=angle),
         repair=RepairOptions(tolerance=1e-7),
         stage=StageOptions(uv0="box", uv1=None),
         optimize=OptimizeOptions(target_triangles=max_triangles, simplify=True, optimize_buffers=True),
@@ -386,7 +386,7 @@ def virtual_reality(
     lod_tuple = tuple(lod_ratios)
     return ConversionProfile(
         name="virtual-reality",
-        tessellation=Tessellation(sag=tessellation_sag, angle=angle),
+        tessellation=TessellationOptions(sag=tessellation_sag, angle=angle),
         repair=RepairOptions(tolerance=1e-7),
         stage=StageOptions(uv0="box", uv1=None),
         optimize=OptimizeOptions(target_triangles=max_triangles, simplify=True, optimize_buffers=True),
@@ -426,7 +426,7 @@ def augmented_reality(
     lod_tuple = tuple(lod_ratios)
     return ConversionProfile(
         name="augmented-reality",
-        tessellation=Tessellation(sag=tessellation_sag, angle=angle),
+        tessellation=TessellationOptions(sag=tessellation_sag, angle=angle),
         repair=RepairOptions(tolerance=1e-7),
         stage=StageOptions(uv0="box", uv1=None),
         optimize=OptimizeOptions(target_triangles=max_triangles, simplify=True, optimize_buffers=True),
@@ -466,7 +466,7 @@ def mixed_reality(
     lod_tuple = tuple(lod_ratios)
     return ConversionProfile(
         name="mixed-reality",
-        tessellation=Tessellation(sag=tessellation_sag, angle=angle),
+        tessellation=TessellationOptions(sag=tessellation_sag, angle=angle),
         repair=RepairOptions(tolerance=1e-7),
         stage=StageOptions(uv0="box", uv1=None),
         optimize=OptimizeOptions(target_triangles=max_triangles, simplify=True, optimize_buffers=True),

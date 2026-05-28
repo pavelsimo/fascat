@@ -253,7 +253,7 @@ def test_convert_runs_heal_brep_before_tessellation(monkeypatch, tmp_path: Path)
         "input.step",
         tmp_path / "output.glb",
         profile=profile,
-        tessellation=__import__("fascat").Tessellation(),
+        tessellation=__import__("fascat").TessellationOptions(),
         heal_brep=BrepHealOptions(),
         validate_output=False,
     )

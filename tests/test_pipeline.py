@@ -28,7 +28,7 @@ from fascat.options import (
     ReplaceOptions,
     StageOptions,
     StepReadOptions,
-    Tessellation,
+    TessellationOptions,
 )
 from fascat.pipeline import convert
 from fascat.pipeline_file import PipelineSpec
@@ -1024,7 +1024,7 @@ def test_convert_report_includes_preflight_checklist(monkeypatch, tmp_path: Path
         "input.step",
         tmp_path / "output.glb",
         profile=_test_profile(),
-        tessellation=Tessellation(keep_brep=True),
+        tessellation=TessellationOptions(keep_brep=True),
         stage=StageOptions(normal_mode="none", tangents=True, uv0="none", uv1=None),
         bake_materials=BakeMaterialOptions(bake=("ao",)),
         gltf_options=GltfExportOptions(),

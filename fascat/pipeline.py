@@ -45,7 +45,7 @@ from fascat.options import (
     StageOptions,
     StepReadOptions,
     StlExportOptions,
-    Tessellation,
+    TessellationOptions,
     UnwrapOptions,
     UsdExportOptions,
     UV0Mode,
@@ -76,7 +76,7 @@ def convert(
     *,
     profile: str | ConversionProfile = "realtime-desktop",
     import_options: StepReadOptions | None = None,
-    tessellation: Tessellation | None = None,
+    tessellation: TessellationOptions | None = None,
     heal_brep: BrepHealOptions | None = None,
     merge_vertices: MergeVerticesOptions | None = None,
     delete_degenerate_polygons: DeleteDegeneratePolygonsOptions | None = None,
@@ -117,7 +117,7 @@ def convert(
     )
     if progress is not None:
         progress("source", asset.stats())
-    planned_tessellation: Tessellation | None = None
+    planned_tessellation: TessellationOptions | None = None
     planned_stage: StageOptions | None = None
     planned_optimize: OptimizeOptions | None = None
     planned_lods: LODOptions | None = None
@@ -327,7 +327,7 @@ def _add_preflight_report(
     output_format: ExportFormat,
     *,
     pipeline: PipelineSpec | None,
-    tessellation: Tessellation | None,
+    tessellation: TessellationOptions | None,
     stage: StageOptions | None,
     bake_materials: BakeMaterialOptions | None,
     decimate: DecimateOptions | None,
@@ -369,7 +369,7 @@ def _preflight_checks(
     output_format: ExportFormat,
     *,
     pipeline: PipelineSpec | None,
-    tessellation: Tessellation | None,
+    tessellation: TessellationOptions | None,
     stage: StageOptions | None,
     bake_materials: BakeMaterialOptions | None,
     decimate: DecimateOptions | None,
@@ -476,7 +476,7 @@ def _pipeline_preflight_checks(pipeline: PipelineSpec) -> list[dict[str, object]
 
 def _direct_preflight_checks(
     *,
-    tessellation: Tessellation | None,
+    tessellation: TessellationOptions | None,
     stage: StageOptions | None,
     bake_materials: BakeMaterialOptions | None,
     decimate: DecimateOptions | None,
@@ -1072,7 +1072,7 @@ def _add_conversion_manifest_report(
     *,
     import_options: StepReadOptions | None,
     pipeline: PipelineSpec | None,
-    tessellation: Tessellation | None,
+    tessellation: TessellationOptions | None,
     heal_brep: BrepHealOptions | None,
     merge_vertices: MergeVerticesOptions | None,
     delete_degenerate_polygons: DeleteDegeneratePolygonsOptions | None,
@@ -1688,7 +1688,7 @@ def tessellate(
     where: Filter | None = None,
 ) -> Asset:
     return asset.tessellate(
-        Tessellation(
+        TessellationOptions(
             sag=sag,
             sag_ratio=sag_ratio,
             angle=angle,

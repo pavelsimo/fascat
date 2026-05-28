@@ -7,7 +7,7 @@ import numpy as np
 from fascat.asset import Asset, Node, Part
 from fascat.material import Material
 from fascat.mesh import Mesh
-from fascat.options import Tessellation
+from fascat.options import TessellationOptions
 
 
 def triangle_mesh() -> Mesh:
@@ -36,7 +36,7 @@ def test_tessellate_deduplicates_parts_by_mesh_fingerprint() -> None:
         },
     )
 
-    tessellated = asset.tessellate(Tessellation())
+    tessellated = asset.tessellate(TessellationOptions())
     part_ids = [node.part_id for node in tessellated.root.walk() if node.part_id is not None]
 
     assert tessellated.part_count == 1
@@ -84,7 +84,7 @@ def test_tessellate_keeps_distinct_per_face_material_assignments() -> None:
         },
     )
 
-    tessellated = asset.tessellate(Tessellation())
+    tessellated = asset.tessellate(TessellationOptions())
     part_ids = [node.part_id for node in tessellated.root.walk() if node.part_id is not None]
 
     assert tessellated.part_count == 2
@@ -114,7 +114,7 @@ def test_tessellate_reuses_source_shape_mesh_for_matching_parts(monkeypatch) -> 
 
     def fake_tessellate_shape(
         shape: object,
-        _options: Tessellation,
+        _options: TessellationOptions,
         *,
         face_material_indices: list[int] | None = None,
     ) -> Mesh:
@@ -124,7 +124,7 @@ def test_tessellate_reuses_source_shape_mesh_for_matching_parts(monkeypatch) -> 
 
     monkeypatch.setattr(tessellate_module, "tessellate_shape", fake_tessellate_shape)
 
-    tessellated = asset.tessellate(Tessellation())
+    tessellated = asset.tessellate(TessellationOptions())
     part_ids = [node.part_id for node in tessellated.root.walk() if node.part_id is not None]
 
     assert calls == [source_shape]
@@ -167,7 +167,7 @@ def test_tessellate_source_shape_cache_respects_face_material_assignments(monkey
 
     def fake_tessellate_shape(
         shape: object,
-        _options: Tessellation,
+        _options: TessellationOptions,
         *,
         face_material_indices: list[int] | None = None,
     ) -> Mesh:
@@ -180,7 +180,7 @@ def test_tessellate_source_shape_cache_respects_face_material_assignments(monkey
 
     monkeypatch.setattr(tessellate_module, "tessellate_shape", fake_tessellate_shape)
 
-    tessellated = asset.tessellate(Tessellation())
+    tessellated = asset.tessellate(TessellationOptions())
     part_ids = [node.part_id for node in tessellated.root.walk() if node.part_id is not None]
 
     assert calls == [[0], [1]]
@@ -196,14 +196,14 @@ def test_tessellation_keep_brep_controls_source_shape_retention(monkeypatch) -> 
     asset = Asset(root=root, parts={"part": Part(id="part", name="Part", source_shape=source_shape)})
     calls: list[object] = []
 
-    def fake_tessellate_shape(shape: object, _options: Tessellation, **_kwargs: object) -> Mesh:
+    def fake_tessellate_shape(shape: object, _options: TessellationOptions, **_kwargs: object) -> Mesh:
         calls.append(shape)
         return triangle_mesh().compute_normals()
 
     monkeypatch.setattr(tessellate_module, "tessellate_shape", fake_tessellate_shape)
 
-    dropped = asset.tessellate(Tessellation(keep_brep=False))
-    kept = asset.tessellate(Tessellation(keep_brep=True))
+    dropped = asset.tessellate(TessellationOptions(keep_brep=False))
+    kept = asset.tessellate(TessellationOptions(keep_brep=True))
 
     assert calls == [source_shape, source_shape]
     assert dropped.parts["part"].source_shape is None
@@ -231,7 +231,7 @@ def test_tessellation_attribute_sources_record_reused_meshes() -> None:
         parts={"part": Part(id="part", name="Part", mesh=mesh, source_shape=object())},
     )
 
-    tessellated = asset.tessellate(Tessellation(free_edge_report=True))
+    tessellated = asset.tessellate(TessellationOptions(free_edge_report=True))
     part = tessellated.parts["part"]
     sources = json.loads(str(part.metadata["tessellation_attribute_sources"]))
 
@@ -267,7 +267,7 @@ def test_tessellation_warns_about_retained_patch_and_submesh_risk(monkeypatch) -
         },
     )
 
-    def fake_tessellate_shape(shape: object, _options: Tessellation, **_kwargs: object) -> Mesh:
+    def fake_tessellate_shape(shape: object, _options: TessellationOptions, **_kwargs: object) -> Mesh:
         assert shape is source_shape
         face_count = 65
         points = np.asarray(
@@ -289,7 +289,7 @@ def test_tessellation_warns_about_retained_patch_and_submesh_risk(monkeypatch) -
 
     monkeypatch.setattr(tessellate_module, "tessellate_shape", fake_tessellate_shape)
 
-    tessellated = asset.tessellate(Tessellation(keep_brep=True))
+    tessellated = asset.tessellate(TessellationOptions(keep_brep=True))
     part = tessellated.parts["part"]
     assert part.mesh is not None
     assert part.metadata["tessellation_face_groups"] == "65"
@@ -319,7 +319,7 @@ def test_tessellate_reuses_existing_meshes_by_default(monkeypatch) -> None:  # t
     )
     calls: list[object] = []
 
-    def fake_tessellate_shape(shape: object, _options: Tessellation, **_kwargs: object) -> Mesh:
+    def fake_tessellate_shape(shape: object, _options: TessellationOptions, **_kwargs: object) -> Mesh:
         calls.append(shape)
         return Mesh(
             points=np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], dtype=float),
@@ -328,7 +328,7 @@ def test_tessellate_reuses_existing_meshes_by_default(monkeypatch) -> None:  # t
 
     monkeypatch.setattr(tessellate_module, "tessellate_shape", fake_tessellate_shape)
 
-    tessellated = asset.tessellate(Tessellation())
+    tessellated = asset.tessellate(TessellationOptions())
 
     assert calls == []
     assert tessellated.parts["part"].mesh is not None
@@ -346,7 +346,7 @@ def test_tessellate_replaces_existing_meshes_when_requested(monkeypatch) -> None
     )
     calls: list[object] = []
 
-    def fake_tessellate_shape(shape: object, _options: Tessellation, **_kwargs: object) -> Mesh:
+    def fake_tessellate_shape(shape: object, _options: TessellationOptions, **_kwargs: object) -> Mesh:
         calls.append(shape)
         return Mesh(
             points=np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], dtype=float),
@@ -355,7 +355,7 @@ def test_tessellate_replaces_existing_meshes_when_requested(monkeypatch) -> None
 
     monkeypatch.setattr(tessellate_module, "tessellate_shape", fake_tessellate_shape)
 
-    tessellated = asset.tessellate(Tessellation(reuse_existing_meshes=False))
+    tessellated = asset.tessellate(TessellationOptions(reuse_existing_meshes=False))
 
     assert calls == [source_shape]
     assert tessellated.parts["part"].mesh is not None
@@ -369,7 +369,7 @@ def test_tessellate_warns_when_existing_mesh_cannot_be_retessellated() -> None:
         parts={"part": Part(id="part", name="Part", mesh=triangle_mesh())},
     )
 
-    tessellated = asset.tessellate(Tessellation(reuse_existing_meshes=False))
+    tessellated = asset.tessellate(TessellationOptions(reuse_existing_meshes=False))
 
     assert tessellated.parts["part"].mesh is not None
     assert tessellated.report.steps[-1].warnings == [
@@ -384,7 +384,7 @@ def test_occt_mesh_parameters_use_sag_ratio_as_relative_deflection() -> None:
         pass
 
     parameters = tessellate_module._occt_mesh_parameters(
-        Tessellation(sag=0.25, sag_ratio=0.01, angle=20.0, relative=False, curvature_adaptive=True),
+        TessellationOptions(sag=0.25, sag_ratio=0.01, angle=20.0, relative=False, curvature_adaptive=True),
         Parameters,
     )
 
@@ -409,7 +409,7 @@ def test_tessellation_report_includes_unit_aware_tolerance_policy() -> None:
     )
 
     tessellated = asset.tessellate(
-        Tessellation(
+        TessellationOptions(
             sag=5000.0,
             relative=False,
             max_polygon_length=2_000_000.0,
@@ -460,7 +460,7 @@ def test_relative_tessellation_policy_keeps_sag_unitless() -> None:
         metadata={"source_units": "millimetre", "source_meters_per_unit": "0.001"},
     )
 
-    tessellated = asset.tessellate(Tessellation(sag=0.05, relative=True))
+    tessellated = asset.tessellate(TessellationOptions(sag=0.05, relative=True))
 
     policy = json.loads(str(tessellated.parts["part"].metadata["tessellation_tolerance_policy"]))
     assert policy["active_deflection_kind"] == "relative_sag"
@@ -492,7 +492,7 @@ def test_tessellate_cache_respects_per_part_settings_and_records_quality(monkeyp
 
     def fake_tessellate_shape(
         shape: object,
-        options: Tessellation,
+        options: TessellationOptions,
         *,
         face_material_indices: list[int] | None = None,
     ) -> Mesh:
@@ -504,7 +504,7 @@ def test_tessellate_cache_respects_per_part_settings_and_records_quality(monkeyp
     monkeypatch.setattr(tessellate_module, "tessellate_shape", fake_tessellate_shape)
 
     tessellated = asset.tessellate(
-        Tessellation(
+        TessellationOptions(
             sag=0.1,
             quality_report=True,
             part_settings={"part_b": {"sag": 0.25, "sag_ratio": 0.01, "max_edge_length": 0.75}},
@@ -529,13 +529,15 @@ def test_tessellation_quality_report_uses_max_polygon_length(monkeypatch) -> Non
         parts={"part": Part(id="part", name="Part", source_shape=source_shape)},
     )
 
-    def fake_tessellate_shape(shape: object, _options: Tessellation, **_kwargs: object) -> Mesh:
+    def fake_tessellate_shape(shape: object, _options: TessellationOptions, **_kwargs: object) -> Mesh:
         assert shape is source_shape
         return triangle_mesh()
 
     monkeypatch.setattr(tessellate_module, "tessellate_shape", fake_tessellate_shape)
 
-    tessellated = asset.tessellate(Tessellation(quality_report=True, max_edge_length=5.0, max_polygon_length=0.5))
+    tessellated = asset.tessellate(
+        TessellationOptions(quality_report=True, max_edge_length=5.0, max_polygon_length=0.5)
+    )
     payload = json.loads(str(tessellated.parts["part"].metadata["tessellation_quality"]))
 
     assert payload["options"]["max_edge_length"] == 5.0
@@ -558,7 +560,7 @@ def test_tessellation_max_polygon_length_warns_without_quality_report(monkeypatc
 
     monkeypatch.setattr(tessellate_module, "tessellate_shape", lambda *_args, **_kwargs: triangle_mesh())
 
-    tessellated = asset.tessellate(Tessellation(max_polygon_length=0.5))
+    tessellated = asset.tessellate(TessellationOptions(max_polygon_length=0.5))
 
     assert "tessellation_quality" not in tessellated.parts["part"].metadata
     assert tessellated.parts["part"].metadata["tessellation_long_polygon_edges"] == "3"
@@ -578,7 +580,7 @@ def test_tessellation_quality_advisor_warns_on_coarse_absolute_sag(monkeypatch) 
 
     monkeypatch.setattr(tessellate_module, "tessellate_shape", lambda *_args, **_kwargs: triangle_mesh())
 
-    tessellated = asset.tessellate(Tessellation(sag=0.1, relative=False, quality_report=True))
+    tessellated = asset.tessellate(TessellationOptions(sag=0.1, relative=False, quality_report=True))
     part = tessellated.parts["part"]
     payload = json.loads(str(part.metadata["tessellation_quality"]))
     advisories = json.loads(str(part.metadata["tessellation_quality_advisories"]))
@@ -604,7 +606,7 @@ def test_tessellation_quality_advisor_warns_on_aggressive_max_length(monkeypatch
 
     monkeypatch.setattr(tessellate_module, "tessellate_shape", lambda *_args, **_kwargs: triangle_mesh())
 
-    tessellated = asset.tessellate(Tessellation(max_edge_length=0.01))
+    tessellated = asset.tessellate(TessellationOptions(max_edge_length=0.01))
     part = tessellated.parts["part"]
     advisories = json.loads(str(part.metadata["tessellation_quality_advisories"]))
 
@@ -636,7 +638,7 @@ def test_tessellation_quality_advisor_flags_shiny_high_detail_parts() -> None:
         materials={material.id: material},
     )
 
-    tessellated = asset.tessellate(Tessellation(quality_report=True))
+    tessellated = asset.tessellate(TessellationOptions(quality_report=True))
     part = tessellated.parts["part"]
     advisories = json.loads(str(part.metadata["tessellation_quality_advisories"]))
     payload = json.loads(str(part.metadata["tessellation_quality"]))
@@ -674,7 +676,7 @@ def test_tessellation_quality_advisor_accepts_detail_tuned_settings() -> None:
         materials={material.id: material},
     )
 
-    tessellated = asset.tessellate(Tessellation(sag_ratio=0.01, quality_report=True))
+    tessellated = asset.tessellate(TessellationOptions(sag_ratio=0.01, quality_report=True))
     payload = json.loads(str(tessellated.parts["part"].metadata["tessellation_quality"]))
 
     assert "tessellation_quality_advisories" not in tessellated.parts["part"].metadata
@@ -688,7 +690,7 @@ def test_tessellation_free_edge_report_records_reused_meshes() -> None:
         parts={"part": Part(id="part", name="Part", mesh=triangle_mesh())},
     )
 
-    tessellated = asset.tessellate(Tessellation(free_edge_report=True))
+    tessellated = asset.tessellate(TessellationOptions(free_edge_report=True))
     part = tessellated.parts["part"]
 
     assert part.mesh is not None

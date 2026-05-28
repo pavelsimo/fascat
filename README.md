@@ -95,7 +95,7 @@ import fascat as fc
 asset = fc.read_step("motor.step")
 
 asset = asset.tessellate(
-    fc.Tessellation(
+    fc.TessellationOptions(
         sag=0.1,
         sag_ratio=None,
         angle=15.0,

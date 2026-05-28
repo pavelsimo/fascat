@@ -13,7 +13,7 @@ import fascat as fc
 asset = fc.read_step("motor.step")
 
 asset = asset.tessellate(
-    fc.Tessellation(
+    fc.TessellationOptions(
         sag=0.1,
         sag_ratio=None,
         angle=15.0,
@@ -102,7 +102,7 @@ Core pipeline calls:
 | API | Parameters | Purpose |
 |-----|------------|---------|
 | `fc.read_step(path, options=None)` | `path` is a STEP file path or `-` for stdin. `options` is `StepReadOptions`. | Import STEP assembly hierarchy, metadata, materials, and source BREP handles when the backend exposes them. |
-| `asset.tessellate(options, where=None)` | `options` is `Tessellation`. `where` optionally scopes the operation with a `Filter`. | Convert source BREP geometry into meshes. |
+| `asset.tessellate(options, where=None)` | `options` is `TessellationOptions`. `where` optionally scopes the operation with a `Filter`. | Convert source BREP geometry into meshes. |
 | `asset.repair(options, where=None)` | `options` is `RepairOptions`. `where` optionally scopes selected parts. | Clean mesh-level issues after tessellation. |
 | `asset.merge_vertices(options, where=None)` | `options` is `MergeVerticesOptions`. `where` optionally scopes selected parts. | Merge exact or tolerance-close vertices with attribute and material-boundary protection. |
 | `asset.delete_degenerate_polygons(options, where=None)` | `options` is `DeleteDegeneratePolygonsOptions`. `where` optionally scopes selected parts. | Remove repeated-vertex, duplicate, or near-zero-area triangles as a standalone cleanup step. |
@@ -362,7 +362,7 @@ Tessellation supports global and per-part settings for edge limits, boundary pre
 
 ```python
 asset = fc.read_step("motor.step").tessellate(
-    fc.Tessellation(
+    fc.TessellationOptions(
         sag=0.05,
         sag_ratio=None,
         angle=10.0,
@@ -395,7 +395,7 @@ the OCCT backend is available:
 asset = fc.read_step("motor.step")
 tessellation = fc.profiles.size_adaptive_tessellation(
     asset,
-    base=fc.Tessellation(sag=0.1, angle=15.0, quality_report=True),
+    base=fc.TessellationOptions(sag=0.1, angle=15.0, quality_report=True),
     bands=(
         fc.profiles.TessellationSizeBand(max_diagonal=25.0, sag=0.02, angle=8.0, max_polygon_length=1.0),
         fc.profiles.TessellationSizeBand(max_diagonal=None, sag=0.12, sag_ratio=0.01, angle=18.0),

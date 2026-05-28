@@ -10,7 +10,7 @@ from fascat._ocp import shape_fingerprint
 from fascat.asset import Asset, Part
 from fascat.mesh import Mesh
 from fascat.metadata import Metadata
-from fascat.options import Tessellation
+from fascat.options import TessellationOptions
 
 _FACE_GROUP_RISK_THRESHOLD = 64
 _DRAW_CALL_RISK_THRESHOLD = 16
@@ -41,7 +41,7 @@ _DETAIL_METADATA_VALUES = frozenset(
 _SHINY_MATERIAL_VALUES = frozenset({"chrome", "gloss", "glossy", "mirror", "polished", "shiny"})
 
 
-def tessellate_asset(asset: Asset, options: Tessellation, *, selected_part_ids: set[str] | None = None) -> Asset:
+def tessellate_asset(asset: Asset, options: TessellationOptions, *, selected_part_ids: set[str] | None = None) -> Asset:
     result = asset.copy(keep_source=True)
     mesh_by_source: dict[tuple[str, tuple[str, ...], tuple[int, ...] | None, tuple[object, ...]], Mesh] = {}
     for part in result.parts.values():
@@ -93,7 +93,7 @@ def tessellate_asset(asset: Asset, options: Tessellation, *, selected_part_ids: 
 
 def tessellate_shape(
     shape: object,
-    options: Tessellation,
+    options: TessellationOptions,
     *,
     face_material_indices: list[int] | None = None,
 ) -> Mesh:
@@ -173,17 +173,17 @@ def _face_material_indices_from_metadata(metadata: Metadata) -> list[int] | None
     return [int(item) for item in str(value).split(",") if item]
 
 
-def _options_for_part(options: Tessellation, part: Part) -> Tessellation:
+def _options_for_part(options: TessellationOptions, part: Part) -> TessellationOptions:
     overrides = options.part_settings.get(part.id) or options.part_settings.get(part.name)
     if not overrides:
         return options
     values = options.to_dict()
     values["part_settings"] = {}
     values.update(overrides)
-    return Tessellation(**cast(Any, values))
+    return TessellationOptions(**cast(Any, values))
 
 
-def _occt_mesh_parameters(options: Tessellation, parameters_factory: Any) -> Any:
+def _occt_mesh_parameters(options: TessellationOptions, parameters_factory: Any) -> Any:
     deflection, relative = _deflection_settings(options)
     parameters = parameters_factory()
     parameters.Deflection = deflection
@@ -202,13 +202,13 @@ def _occt_mesh_parameters(options: Tessellation, parameters_factory: Any) -> Any
     return parameters
 
 
-def _deflection_settings(options: Tessellation) -> tuple[float, bool]:
+def _deflection_settings(options: TessellationOptions) -> tuple[float, bool]:
     if options.sag_ratio is not None:
         return float(options.sag_ratio), True
     return float(options.sag), bool(options.relative)
 
 
-def _apply_mesh_tessellation_controls(mesh: Mesh, options: Tessellation) -> Mesh:
+def _apply_mesh_tessellation_controls(mesh: Mesh, options: TessellationOptions) -> Mesh:
     result = mesh
     if options.max_edge_length is not None:
         result = result.subdivide_long_edges(options.max_edge_length)
@@ -234,7 +234,7 @@ def _apply_mesh_tessellation_controls(mesh: Mesh, options: Tessellation) -> Mesh
     return result
 
 
-def _record_tessellation_diagnostics(asset: Asset, part: Part, options: Tessellation) -> None:
+def _record_tessellation_diagnostics(asset: Asset, part: Part, options: TessellationOptions) -> None:
     if part.mesh is None:
         return
     _record_tessellation_tolerance_policy(asset, part, options)
@@ -260,7 +260,7 @@ def _record_tessellation_diagnostics(asset: Asset, part: Part, options: Tessella
         _warn_long_polygons(asset, part, options, metrics)
 
 
-def tessellation_tolerance_policy(asset: Asset, options: Tessellation) -> dict[str, object]:
+def tessellation_tolerance_policy(asset: Asset, options: TessellationOptions) -> dict[str, object]:
     source_units = _metadata_str(asset.metadata.get("source_units"), asset.units)
     source_meters_per_unit = _metadata_float(asset.metadata.get("source_meters_per_unit"), asset.meters_per_unit)
     target_meters_per_unit = asset.meters_per_unit
@@ -301,7 +301,7 @@ def tessellation_tolerance_policy(asset: Asset, options: Tessellation) -> dict[s
     return policy
 
 
-def _record_tessellation_tolerance_policy(asset: Asset, part: Part, options: Tessellation) -> None:
+def _record_tessellation_tolerance_policy(asset: Asset, part: Part, options: TessellationOptions) -> None:
     policy = tessellation_tolerance_policy(asset, options)
     advisories = _tessellation_tolerance_policy_advisories(part, policy)
     if advisories:
@@ -339,7 +339,7 @@ def _add_length_policy_fields(
     policy[f"{key}_target_units"] = value_meters / target_meters_per_unit if target_meters_per_unit > 0.0 else value
 
 
-def _active_deflection_kind(options: Tessellation) -> str:
+def _active_deflection_kind(options: TessellationOptions) -> str:
     if options.sag_ratio is not None:
         return "sag_ratio"
     return "relative_sag" if options.relative else "absolute_sag"
@@ -477,7 +477,7 @@ def _policy_float(value: object) -> float | None:
 def _record_tessellation_attribute_sources(
     asset: Asset,
     part: Part,
-    options: Tessellation,
+    options: TessellationOptions,
     *,
     geometry_source: str,
 ) -> None:
@@ -499,7 +499,7 @@ def _record_tessellation_attribute_sources(
     mesh.metadata["tessellation_attribute_sources"] = encoded
 
 
-def _normal_attribute_source(mesh: Mesh, options: Tessellation, geometry_source: str) -> str:
+def _normal_attribute_source(mesh: Mesh, options: TessellationOptions, geometry_source: str) -> str:
     if geometry_source == "tessellation":
         if options.create_normals and mesh.normals is not None:
             return "tessellation"
@@ -528,7 +528,7 @@ def _face_group_attribute_source(mesh: Mesh, geometry_source: str) -> str:
     return "cad_face_groups" if geometry_source == "tessellation" else "imported_mesh"
 
 
-def _brep_patch_attribute_source(part: Part, options: Tessellation, geometry_source: str) -> str:
+def _brep_patch_attribute_source(part: Part, options: TessellationOptions, geometry_source: str) -> str:
     if part.source_shape is None:
         return "not_available"
     if geometry_source == "imported_mesh":
@@ -538,7 +538,7 @@ def _brep_patch_attribute_source(part: Part, options: Tessellation, geometry_sou
 
 def _store_quality_report(
     part: Part,
-    options: Tessellation,
+    options: TessellationOptions,
     metrics: dict[str, int | float],
     advisories: list[dict[str, object]],
 ) -> None:
@@ -559,11 +559,11 @@ def _store_quality_report(
     part.mesh.metadata["tessellation_quality"] = encoded
 
 
-def _quality_max_edge_length(options: Tessellation) -> float | None:
+def _quality_max_edge_length(options: TessellationOptions) -> float | None:
     return options.max_polygon_length if options.max_polygon_length is not None else options.max_edge_length
 
 
-def _tessellation_quality_advisories(asset: Asset, part: Part, options: Tessellation) -> list[dict[str, object]]:
+def _tessellation_quality_advisories(asset: Asset, part: Part, options: TessellationOptions) -> list[dict[str, object]]:
     mesh = part.mesh
     if mesh is None:
         return []
@@ -684,7 +684,7 @@ def _normalized_metadata_value(value: object) -> str:
     return str(value).strip().lower().replace("-", "_")
 
 
-def _active_max_length(options: Tessellation) -> tuple[float | None, str]:
+def _active_max_length(options: TessellationOptions) -> tuple[float | None, str]:
     if options.max_edge_length is None:
         return options.max_polygon_length, "max_polygon_length"
     if options.max_polygon_length is None:
@@ -745,7 +745,7 @@ def _store_free_edge_report(
 def _warn_long_polygons(
     asset: Asset,
     part: Part,
-    options: Tessellation,
+    options: TessellationOptions,
     metrics: dict[str, int | float] | None,
 ) -> None:
     if metrics is None or options.max_polygon_length is None:
@@ -757,7 +757,7 @@ def _warn_long_polygons(
         asset.report.add_warning(f"part has {long_edges} tessellated edges longer than max_polygon_length: {part.name}")
 
 
-def _record_brep_patch_cleanup(asset: Asset, part: Part, options: Tessellation) -> None:
+def _record_brep_patch_cleanup(asset: Asset, part: Part, options: TessellationOptions) -> None:
     if part.source_shape is None:
         return
     cleanup = "retained" if options.keep_brep else "deleted"
@@ -869,7 +869,7 @@ def _format_metadata_value(value: object) -> str:
     return str(value)
 
 
-def _tessellation_mesh_options(options: Tessellation) -> dict[str, object]:
+def _tessellation_mesh_options(options: TessellationOptions) -> dict[str, object]:
     data = options.to_dict()
     data.pop("part_settings", None)
     data.pop("keep_brep", None)
@@ -880,13 +880,13 @@ def _tessellation_cache_key(
     shape: object,
     material_ids: list[str],
     face_material_indices: list[int] | None,
-    options: Tessellation,
+    options: TessellationOptions,
 ) -> tuple[str, tuple[str, ...], tuple[int, ...] | None, tuple[object, ...]]:
     indices = None if face_material_indices is None else tuple(face_material_indices)
     return (shape_fingerprint(shape), tuple(material_ids), indices, _tessellation_settings_key(options))
 
 
-def _tessellation_settings_key(options: Tessellation) -> tuple[object, ...]:
+def _tessellation_settings_key(options: TessellationOptions) -> tuple[object, ...]:
     return (
         options.sag,
         options.sag_ratio,

@@ -97,7 +97,7 @@ def test_generated_step_assembly_preserves_repeated_occurrences_and_transforms_i
     converted = fc.convert(
         step_file,
         output,
-        tessellation=fc.Tessellation(sag=0.2, angle=20),
+        tessellation=fc.TessellationOptions(sag=0.2, angle=20),
         optimize=fc.OptimizeOptions(simplify=False, optimize_buffers=False),
         lods=None,
     )
@@ -151,7 +151,7 @@ def test_step_cad_color_imports_and_exports_as_visible_usd_material(tmp_path: Pa
     fc.convert(
         fixture,
         output,
-        tessellation=fc.Tessellation(sag=0.002, angle=20),
+        tessellation=fc.TessellationOptions(sag=0.002, angle=20),
         optimize=fc.OptimizeOptions(target_triangles=80),
         lods=None,
     )
@@ -172,7 +172,7 @@ def test_step_fixture_converts_to_valid_usd_with_report(tmp_path: Path) -> None:
     asset = fc.convert(
         "tests/fixtures/spool-clamp-lid.step",
         output,
-        tessellation=fc.Tessellation(sag=0.2, angle=20),
+        tessellation=fc.TessellationOptions(sag=0.2, angle=20),
         optimize=fc.OptimizeOptions(target_triangles=120),
         lods=fc.LODOptions((0.5,)),
     )
@@ -195,7 +195,7 @@ def test_step_fixture_converts_to_valid_usd_with_report(tmp_path: Path) -> None:
 
 def test_tessellation_max_edge_length_limits_fixture_edges() -> None:
     asset = fc.read_step("tests/fixtures/spool-clamp-lid.step").tessellate(
-        fc.Tessellation(sag=0.2, angle=20, max_edge_length=10.0, create_normals=False)
+        fc.TessellationOptions(sag=0.2, angle=20, max_edge_length=10.0, create_normals=False)
     )
     mesh = next(part.mesh for part in asset.parts.values() if part.mesh is not None)
     edge_lengths = []
@@ -220,7 +220,7 @@ def test_convert_progress_callback_receives_stage_stats(tmp_path: Path) -> None:
     fc.convert(
         "tests/fixtures/spool-clamp-lid.step",
         output,
-        tessellation=fc.Tessellation(sag=0.2, angle=20),
+        tessellation=fc.TessellationOptions(sag=0.2, angle=20),
         optimize=fc.OptimizeOptions(target_triangles=120),
         lods=fc.LODOptions((0.5,)),
         progress=lambda step, stats: progress.append((step, stats)),

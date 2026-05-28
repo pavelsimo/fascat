@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - add conversion reporting with dry-run operation classification, pipeline ordering advisories, workflow-summary, preflight, and conversion-manifest steps, pipeline TOML validation, and analysis reports for topology, slivers, tiny parts, draw calls, and self-intersections
 - add expanded API parameter docs, a Unity capability matrix, and a supported-format parity matrix
 
+### Changed
+- **breaking:** rename the `Tessellation` options dataclass to `TessellationOptions` for consistency with the other `*Options` classes; update callers to `fc.TessellationOptions(...)` (low impact pre-1.0 with no published consumers)
+
 ## [0.1.0] - 2026-05-26
 
 ### Added

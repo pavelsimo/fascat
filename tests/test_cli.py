@@ -1080,7 +1080,7 @@ def test_convert_writes_tessellation_quality_report(monkeypatch, tmp_path: Path)
     def fake_convert(*_args: object, **kwargs: object) -> fc.Asset:
         tessellation = kwargs["tessellation"]
         stage = kwargs["stage"]
-        assert isinstance(tessellation, fc.Tessellation)
+        assert isinstance(tessellation, fc.TessellationOptions)
         assert isinstance(stage, fc.StageOptions)
         assert tessellation.sag_ratio == 0.02
         assert tessellation.min_edge_length == 0.01

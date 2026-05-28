@@ -31,7 +31,7 @@ from fascat.options import (
     SceneOptimizeOptions,
     StageOptions,
     StepReadOptions,
-    Tessellation,
+    TessellationOptions,
     UnwrapOptions,
 )
 
@@ -810,8 +810,8 @@ def _apply_step(asset: Asset, step: PipelineStep, where: Filter | None) -> Asset
     raise ValueError(f"unsupported pipeline step op: {step.op}")
 
 
-def _tessellation(values: dict[str, object]) -> Tessellation:
-    return Tessellation(
+def _tessellation(values: dict[str, object]) -> TessellationOptions:
+    return TessellationOptions(
         sag=_as_float(values.get("sag", 0.1)),
         sag_ratio=_as_optional_float(values.get("sag_ratio")),
         angle=_as_float(values.get("angle", 15.0)),

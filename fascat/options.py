@@ -112,7 +112,7 @@ def _normalize_float3(value: object, field_name: str) -> tuple[float, float, flo
 
 
 @dataclass(frozen=True)
-class Tessellation:
+class TessellationOptions:
     sag: float = 0.1
     sag_ratio: float | None = None
     angle: float = 15.0
@@ -1038,7 +1038,7 @@ class WorkflowRecipe:
 @dataclass(frozen=True)
 class ConversionProfile:
     name: str
-    tessellation: Tessellation | None
+    tessellation: TessellationOptions | None
     repair: RepairOptions
     stage: StageOptions
     optimize: OptimizeOptions | None

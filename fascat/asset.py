@@ -32,7 +32,7 @@ from fascat.options import (
     SceneOptimizeOptions,
     StageOptions,
     StlExportOptions,
-    Tessellation,
+    TessellationOptions,
     UsdExportOptions,
 )
 from fascat.report import Report, timed_step
@@ -271,10 +271,10 @@ class Asset:
     def _report_stats(self) -> dict[str, int]:
         return self.stats(include_lods=any(part.lod_meshes for part in self.parts.values()))
 
-    def tessellate(self, options: Tessellation | None = None, *, where: Any | None = None) -> Asset:
+    def tessellate(self, options: TessellationOptions | None = None, *, where: Any | None = None) -> Asset:
         from fascat.ops.tessellate import tessellate_asset, tessellation_tolerance_policy
 
-        opts = options or Tessellation()
+        opts = options or TessellationOptions()
         scope = self._operation_scope(where)
         before = self.stats()
         warning_count = len(self.report.warnings)
