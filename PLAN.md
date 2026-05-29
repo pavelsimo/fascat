@@ -6,7 +6,7 @@ The single planning document for Fascat. For the log of shipped work, see
 
 ## What Fascat Is
 
-A Python library and CLI that converts CAD (STEP) into realtime-ready OpenUSD,
+A Python library and CLI that converts CAD (STEP, IGES, BREP) into realtime-ready OpenUSD,
 glTF/GLB, OBJ, and STL assets. The end-to-end V1 pipeline is implemented and produces
 real geometry — not just diagnostics. The goal is solid **CAD → realtime 3D (RT3D)**
 basics, refined over time. Matching Unity's Asset Transformer 100% is explicitly a
@@ -41,7 +41,7 @@ meshoptimizer / fast-simplification (decimation + meshopt compression), usd-core
 
 | Stage | Real & complete | Approximate (refine) | Gap (metadata-only / not implemented) |
 | --- | --- | --- | --- |
-| **Import** | hierarchy, transforms, colors, metadata, units, repeated-part instances | — | typed PMI, multi-file/multi-root, design variants, non-STEP formats |
+| **Import** | hierarchy, transforms, colors, metadata, units, repeated-part instances | — | typed PMI, multi-file/multi-root, design variants, IGES, BREP, other non-STEP formats |
 | **Tessellate** | sag / angle / min-edge / curvature-adaptive meshing | — | CAD-derived UVs, tessellation-time tangents, free-edge geometry output |
 | **Repair / Heal** | vertex merge, dedup, degenerate cleanup, winding fix, small-hole fill, normals; BREP fix-edge / sew | mesh-level hole removal | T-junction sewing, gap stitching, non-manifold cracking, sliver removal, viewer/open-shell orientation |
 | **Stage / UV** | normals, tangents, xatlas unwrap, AABB UV, UV copy, material PBR normalize / merge | — | bake-domain repack + padding, island merge / align, seam graph, backend-enforced solver |
@@ -87,6 +87,8 @@ Open gaps grouped by stage, **not ranked** — pick the next scoped item, then
 implement → test → document → commit → push → verify CI/docs.
 
 **Import**
+- **IGES input (`.igs`, `.iges`)**: `IGESCAFControl_Reader` is already available in the installed OCP build. Mirrors the STEP reader — same XDE document tree, same node/material/hierarchy extraction. New `IgesReadOptions`, new `fascat/io/iges.py`, format dispatch in `pipeline.py` and `cli.py`. No new dependencies.
+- **BREP input (`.brep`)**: OpenCASCADE native format. `BRepTools.Read_s` is already called in `fascat/_ocp.py`. Single-shape, no assembly or colors — creates one root node with one part. New `BrepReadOptions`, new `fascat/io/brep.py`. No new dependencies.
 - True multi-file/multi-root import: deterministic multi-root assemblies, shared material/image namespaces, per-member failure warnings.
 - Typed AP242 PMI entity extraction + visual annotation geometry.
 - Design-variant import.
@@ -156,7 +158,7 @@ implement → test → document → commit → push → verify CI/docs.
 Intentionally out of scope until a user need changes the priority:
 
 - **Draco** and **KTX2/Basis** compression — rejected with a clear error until a reliable encoder backend exists.
-- Non-STEP CAD formats: IGES, Parasolid, JT, CATIA, NX, SolidWorks, IFC, 3MF, QIF.
+- Non-STEP CAD formats (beyond IGES and BREP, which are now on the roadmap): Parasolid, JT, CATIA, NX, SolidWorks, IFC, 3MF, QIF.
 - Animation / skinning / morph targets / animated GLB passthrough.
 - Convex decomposition and physics proxy generation.
 - Advanced retopology and subdivision workflows.
