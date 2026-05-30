@@ -11,7 +11,7 @@ from fascat.export_report import stats_with_file_size as _stats_with_file_size
 from fascat.filter import Filter
 from fascat.io.brep import BREP_SUFFIXES, read_brep
 from fascat.io.gltf import GLTF_SUFFIXES, runtime_dependency_report, validate_gltf
-from fascat.io.gltf import write_gltf as _write_gltf
+from fascat.io.gltf import write_gltf_with_validation as _write_gltf
 from fascat.io.iges import IGES_SUFFIXES, read_iges
 from fascat.io.obj import OBJ_SUFFIXES, validate_obj
 from fascat.io.obj import write_obj as _write_obj
@@ -227,9 +227,10 @@ def convert(
     _add_texture_export_policy_report(asset, selected, output_format, gltf_options=gltf_options)
     file_size_budget = _file_size_budget(output_format, gltf_options, usd_options, obj_options, stl_options)
     write_timer = timed_step()
+    written_validation_stats: dict[str, int] | None = None
     try:
         with write_timer:
-            _write_output(
+            written_validation_stats = _write_output(
                 asset,
                 output_path,
                 output_format,
@@ -264,7 +265,7 @@ def convert(
         validate_timer = timed_step()
         try:
             with validate_timer:
-                validation_stats = _validate_output(output_path, output_format)
+                validation_stats = written_validation_stats or _validate_output(output_path, output_format)
         except Exception as exc:
             _record_failed_step(
                 asset,
@@ -1613,17 +1614,17 @@ def _write_output(
     usd_options: UsdExportOptions | None,
     obj_options: ObjExportOptions | None,
     stl_options: StlExportOptions | None,
-) -> None:
+) -> dict[str, int] | None:
     if output_format == "usd":
         _write_usd(asset, path, debug=debug, options=_usd_options_for_path(path, usd_options))
-        return
+        return None
     if output_format == "gltf":
-        _write_gltf(asset, path, options=gltf_options)
-        return
+        return _write_gltf(asset, path, options=gltf_options)
     if output_format == "obj":
         _write_obj(asset, path, options=obj_options)
-        return
+        return None
     _write_stl(asset, path, options=stl_options)
+    return None
 
 
 def _validate_output(path: str | Path, output_format: ExportFormat) -> dict[str, int]:

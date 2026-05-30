@@ -85,8 +85,10 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   candidate instead of testing all occurrences.
 - **Progress:** `_segment_intersects_mesh` now vectorizes Möller-Trumbore intersection across all
   faces in an occluder mesh after the existing per-occluder AABB reject, removing the pure-Python
-  per-triangle loop from the innermost ray test. A true BVH/grid and spatial occluder culling are
-  still open.
+  per-triangle loop from the innermost ray test. World occurrences now precompute triangle points,
+  edge vectors, and per-triangle bounds once, so each ray can cull candidate triangles by segment
+  AABB before the vectorized intersection without rebuilding `points[faces]`. A true BVH/grid and
+  broader spatial occluder culling are still open.
 
 ### P4 — Per-element Python loops in core mesh kernels — partial (2026-05-31)
 - **Where (all `fascat/mesh.py`):** `compute_flat_normals:1026`, `compute_hard_edge_normals:1055`,
@@ -100,9 +102,11 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   `np.bincount` (per component) or `np.add.reduceat` on sorted indices instead of `np.add.at`;
   rebuild flat/hard-edge vertices with array ops rather than Python lists.
 - **Progress:** `compute_normals()` now replaces `np.add.at` scatter accumulation with
-  `np.bincount` reductions for both angle-weighted and area-weighted smooth normals. The remaining
-  Python loops in flat/hard-edge normals, tangents, subdivide/collapse, and skinny-triangle
-  cleanup are still open.
+  `np.bincount` reductions for both angle-weighted and area-weighted smooth normals.
+  `compute_flat_normals()` now expands corner vertices/normals/UVs with array indexing instead of
+  append loops, and `compute_tangents()` computes per-face tangents in bulk and accumulates with
+  `np.bincount` instead of per-face `np.add.at`. The remaining Python loops in hard-edge normals,
+  subdivide/collapse, and skinny-triangle cleanup are still open.
 
 ### P5 — Edge / adjacency maps rebuilt from `.tolist()` repeatedly — partial (2026-05-31)
 - **Where:** `fascat/mesh.py:1886` (`_edge_faces_map`), `:2255` (`_undirected_edges_and_counts`),
@@ -115,8 +119,10 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   pass them into the metrics that need them (ties into P17).
 - **Progress:** `boundary_gap_count()` now builds undirected edge/count data once and derives both
   boundary vertices and connected-edge rejection from that table instead of calling
-  `_undirected_edges_and_counts()` twice. Shared edge/topology memoization across all metrics is
-  still open under P17.
+  `_undirected_edges_and_counts()` twice. `Mesh` now lazily caches undirected edge/count arrays,
+  edge→face maps, boundary loops, and face unit normals behind content-digest cache keys, so repeat
+  calls within a mesh state reuse derived topology while in-place array edits still invalidate the
+  cache. Broader cross-stage topology reuse is tracked under P17.
 
 ### P6 — `merge_vertices` recomputes connected components and per-vertex keys, plus heavy diagnostics — ✅ done (2026-05-31)
 - **Where:** `fascat/mesh.py:372` (`merge_vertices`), `:572` (`_merge_vertex_components`),
@@ -234,8 +240,10 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   large assets.
 - **Progress:** glTF validation now builds a validation context once and passes cached `scenes`,
   `nodes`, `meshes`, and `accessors` through recursive scene validation, removing repeated
-  document array extraction in `_walk_node`, `_validate_mesh`, and `_require_accessor`. The
-  write-then-re-read round trip remains open.
+  document array extraction in `_walk_node`, `_validate_mesh`, and `_require_accessor`. glTF writes
+  now validate the in-memory document and binary payload before writing and return those stats to
+  the pipeline validate step, avoiding the default write-then-re-read path for glTF exports. USD,
+  OBJ, and STL validation still re-read their outputs.
 
 ### P15 — Exporters build one Python object/string per vertex/triangle — partial (2026-05-31)
 - **Where:** glTF strided path `fascat/io/gltf.py:514-519` (`_accessor_payload` loops every vertex
@@ -268,7 +276,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 
 ## System design
 
-### P17 — No memoization of derived mesh topology across stages
+### P17 — No memoization of derived mesh topology across stages — partial (2026-05-31)
 - **Where:** cross-cutting; see P5 structures plus `quality_metrics` (`fascat/mesh.py:793`),
   `_face_unit_normals` (`:1894`), `fingerprint` (`:242`).
 - **Why:** Edge maps, boundary loops, face normals, quality metrics, and fingerprints are
@@ -277,6 +285,10 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   `mesh_by_source`, `fascat/ops/tessellate.py:46`, and dedups identical parts — good prior art.)
 - **Fix:** Attach a lazily-computed topology cache to `Mesh` (undirected edges, edge→faces,
   boundary loops, face normals) invalidated on geometry mutation.
+- **Progress:** `Mesh` now has lazy caches for undirected edge/count arrays, edge→face maps,
+  boundary loops, and face unit normals. Cache tokens hash the relevant point/face array contents,
+  so public in-place mutation of arrays invalidates cached topology. The cache is per mesh object;
+  persistent reuse across operation-created mesh copies/stages remains open.
 
 ### P18 — `stats()` / `walk()` / draw-call breakdown recomputed many times per stage — ✅ done (2026-05-31)
 - **Where:** `fascat/asset.py:76-80` (`Node.walk`), `:243-257` (`stats`), `:181-221`

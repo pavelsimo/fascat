@@ -139,6 +139,27 @@ _RUNTIME_TARGETS = {
 
 
 def write_gltf(asset: Asset, path: str | Path, *, options: GltfExportOptions | None = None) -> None:
+    _write_gltf(asset, path, options=options, validate=False)
+
+
+def write_gltf_with_validation(
+    asset: Asset,
+    path: str | Path,
+    *,
+    options: GltfExportOptions | None = None,
+) -> dict[str, int]:
+    validation_stats = _write_gltf(asset, path, options=options, validate=True)
+    assert validation_stats is not None
+    return validation_stats
+
+
+def _write_gltf(
+    asset: Asset,
+    path: str | Path,
+    *,
+    options: GltfExportOptions | None,
+    validate: bool,
+) -> dict[str, int] | None:
     opts = options or GltfExportOptions()
     output_path = Path(path)
     suffix = output_path.suffix.lower()
@@ -150,12 +171,14 @@ def write_gltf(asset: Asset, path: str | Path, *, options: GltfExportOptions | N
     _apply_export_options(document, opts)
     if opts.meshopt:
         binary = _apply_meshopt_compression(document, binary)
+    validation_stats = validate_gltf_document(document, binary) if validate else None
     if suffix == ".gltf":
         _embed_binary_uri(document, binary)
     if suffix == ".glb":
         output_path.write_bytes(_pack_glb(document, binary))
-        return
+        return validation_stats
     output_path.write_text(json.dumps(document, indent=2, sort_keys=False) + "\n", encoding="utf-8")
+    return validation_stats
 
 
 def runtime_dependency_report(asset: Asset, options: GltfExportOptions | None = None) -> dict[str, object]:
@@ -434,6 +457,14 @@ def _has_exportable_lods(asset: Asset) -> bool:
 
 def validate_gltf(path: str | Path) -> dict[str, int]:
     document, buffers = _read_document(Path(path))
+    return validate_gltf_payload(document, buffers)
+
+
+def validate_gltf_document(document: dict[str, Any], binary: BinaryPayload) -> dict[str, int]:
+    return validate_gltf_payload(document, [binary])
+
+
+def validate_gltf_payload(document: dict[str, Any], buffers: Sequence[BinaryPayload]) -> dict[str, int]:
     asset_info = _object(document.get("asset"), "glTF asset metadata")
     if asset_info.get("version") != "2.0":
         raise RuntimeError("glTF asset version must be 2.0")
@@ -1398,7 +1429,7 @@ def _read_gltf(path: Path) -> tuple[dict[str, Any], list[bytes]]:
     return document, buffers
 
 
-def _validate_buffers(document: dict[str, Any], buffers: list[bytes]) -> None:
+def _validate_buffers(document: dict[str, Any], buffers: Sequence[BinaryPayload]) -> None:
     buffer_objects = _array(document.get("buffers"), "buffers")
     if len(buffer_objects) != len(buffers):
         raise RuntimeError("glTF buffer count does not match payload count")

@@ -5,7 +5,7 @@ import math
 from collections import defaultdict, deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -16,6 +16,7 @@ from fascat.options import DeleteDegeneratePolygonsOptions, MergeVerticesOptions
 FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int64]
 Point2D = tuple[float, float]
+_CachedValue = TypeVar("_CachedValue")
 
 # Upper bound on the number of grid cells a single edge's bounding box may span
 # before t_junction_count falls back to a full-array scan for that edge. Keeps
@@ -175,6 +176,12 @@ class Mesh:
     material_indices: IntArray | None = None
     face_groups: dict[str, IntArray] = field(default_factory=dict)
     metadata: Metadata = field(default_factory=dict)
+    _cache: dict[str, tuple[tuple[object, ...], object]] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         self.points = np.array(self.points, dtype=np.float64, copy=True)
@@ -213,6 +220,7 @@ class Mesh:
         mesh.material_indices = material_indices
         mesh.face_groups = face_groups
         mesh.metadata = metadata
+        mesh._cache = {}
         return mesh
 
     @property
@@ -285,6 +293,25 @@ class Mesh:
         digest.update(points.tobytes())
         digest.update(faces.tobytes())
         return digest.hexdigest()
+
+    def _cached_value(
+        self,
+        name: str,
+        token: tuple[object, ...],
+        factory: Callable[[], _CachedValue],
+    ) -> _CachedValue:
+        cached = self._cache.get(name)
+        if cached is not None and cached[0] == token:
+            return cast(_CachedValue, cached[1])
+        value = factory()
+        self._cache[name] = (token, value)
+        return value
+
+    def _faces_cache_token(self) -> tuple[object, ...]:
+        return ("faces", _array_cache_token(self.faces))
+
+    def _geometry_cache_token(self) -> tuple[object, ...]:
+        return ("geometry", _array_cache_token(self.points), _array_cache_token(self.faces))
 
     def bounds(self) -> tuple[FloatArray, FloatArray]:
         if self.vertex_count == 0:
@@ -1163,25 +1190,14 @@ class Mesh:
     def compute_flat_normals(self) -> Mesh:
         if self.triangle_count == 0:
             return self.compute_normals()
-        points: list[list[float]] = []
-        normals: list[list[float]] = []
-        faces: list[list[int]] = []
-        uvs: dict[int, list[list[float]]] = {channel: [] for channel in self.uvs}
         face_normals = self._face_unit_normals()
-        for face_index, face in enumerate(self.faces.astype(int).tolist()):
-            new_face: list[int] = []
-            for vertex in face:
-                new_face.append(len(points))
-                points.append(self.points[vertex].astype(float).tolist())
-                normals.append(face_normals[face_index].astype(float).tolist())
-                for channel, values in self.uvs.items():
-                    uvs[channel].append(values[vertex].astype(float).tolist())
-            faces.append(new_face)
+        flat_vertices = self.faces.reshape(-1)
+        faces = np.arange(flat_vertices.shape[0], dtype=np.int64).reshape((-1, 3))
         mesh = Mesh(
-            points=np.asarray(points, dtype=np.float64),
-            faces=np.asarray(faces, dtype=np.int64),
-            normals=np.asarray(normals, dtype=np.float64),
-            uvs={channel: np.asarray(values, dtype=np.float64) for channel, values in uvs.items()},
+            points=self.points[flat_vertices].copy(),
+            faces=faces,
+            normals=np.repeat(face_normals, 3, axis=0),
+            uvs={channel: values[flat_vertices].copy() for channel, values in self.uvs.items()},
             material_indices=None if self.material_indices is None else self.material_indices.copy(),
             face_groups={name: values.copy() for name, values in self.face_groups.items()},
             metadata={**self.metadata, "normal_mode": "flat"},
@@ -1317,31 +1333,42 @@ class Mesh:
         uv = mesh.uvs[channel]
         tangents = np.zeros((mesh.vertex_count, 3), dtype=np.float64)
         bitangents = np.zeros((mesh.vertex_count, 3), dtype=np.float64)
-        for face in mesh.faces.astype(int).tolist():
-            i0, i1, i2 = face
-            p0, p1, p2 = mesh.points[[i0, i1, i2]]
-            uv0, uv1, uv2 = uv[[i0, i1, i2]]
-            edge1 = p1 - p0
-            edge2 = p2 - p0
-            duv1 = uv1 - uv0
-            duv2 = uv2 - uv0
-            denom = float(duv1[0] * duv2[1] - duv2[0] * duv1[1])
-            if abs(denom) <= 1e-12:
-                continue
-            tangent = (edge1 * duv2[1] - edge2 * duv1[1]) / denom
-            bitangent = (edge2 * duv1[0] - edge1 * duv2[0]) / denom
-            np.add.at(tangents, face, tangent)
-            np.add.at(bitangents, face, bitangent)
+        triangles = mesh.points[mesh.faces]
+        uv_triangles = uv[mesh.faces]
+        edge1 = triangles[:, 1] - triangles[:, 0]
+        edge2 = triangles[:, 2] - triangles[:, 0]
+        duv1 = uv_triangles[:, 1] - uv_triangles[:, 0]
+        duv2 = uv_triangles[:, 2] - uv_triangles[:, 0]
+        denom = duv1[:, 0] * duv2[:, 1] - duv2[:, 0] * duv1[:, 1]
+        valid = np.abs(denom) > 1e-12
+        if np.any(valid):
+            face_tangents = np.zeros((mesh.triangle_count, 3), dtype=np.float64)
+            face_bitangents = np.zeros((mesh.triangle_count, 3), dtype=np.float64)
+            face_tangents[valid] = (edge1[valid] * duv2[valid, 1, None] - edge2[valid] * duv1[valid, 1, None]) / denom[
+                valid, None
+            ]
+            face_bitangents[valid] = (
+                edge2[valid] * duv1[valid, 0, None] - edge1[valid] * duv2[valid, 0, None]
+            ) / denom[valid, None]
+            corner_indices = mesh.faces.reshape(-1)
+            tangents = _accumulate_vertex_vectors(
+                mesh.vertex_count, corner_indices, np.repeat(face_tangents, 3, axis=0)
+            )
+            bitangents = _accumulate_vertex_vectors(
+                mesh.vertex_count,
+                corner_indices,
+                np.repeat(face_bitangents, 3, axis=0),
+            )
         handedness = np.ones(mesh.vertex_count, dtype=np.float64)
-        for index, normal in enumerate(mesh.normals):
-            tangent = tangents[index]
-            tangent = tangent - normal * float(np.dot(normal, tangent))
-            length = float(np.linalg.norm(tangent))
-            tangent = _fallback_tangent(normal) if length <= 0.0 else tangent / length
-            tangents[index] = tangent
-            bitangent = bitangents[index]
-            if float(np.linalg.norm(bitangent)) > 0.0 and float(np.dot(np.cross(normal, tangent), bitangent)) < 0.0:
-                handedness[index] = -1.0
+        tangents = tangents - mesh.normals * np.einsum("ij,ij->i", mesh.normals, tangents)[:, None]
+        lengths = np.linalg.norm(tangents, axis=1)
+        nonzero = lengths > 0.0
+        tangents[nonzero] = tangents[nonzero] / lengths[nonzero, None]
+        if np.any(~nonzero):
+            tangents[~nonzero] = _fallback_tangents(mesh.normals[~nonzero])
+        bitangent_lengths = np.linalg.norm(bitangents, axis=1)
+        orientation = np.einsum("ij,ij->i", np.cross(mesh.normals, tangents), bitangents)
+        handedness[(bitangent_lengths > 0.0) & (orientation < 0.0)] = -1.0
         result = mesh.copy()
         result.tangents = np.column_stack([tangents, handedness])
         result.metadata = {**result.metadata, "tangents": "mikktspace_like"}
@@ -2028,25 +2055,41 @@ class Mesh:
         return result
 
     def _edge_faces_map(self) -> dict[tuple[int, int], list[int]]:
-        edge_faces: dict[tuple[int, int], list[int]] = {}
-        for face_index, face in enumerate(self.faces.astype(int).tolist()):
-            for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
-                edge = (min(start, end), max(start, end))
-                edge_faces.setdefault(edge, []).append(face_index)
-        return edge_faces
+        def build() -> dict[tuple[int, int], list[int]]:
+            if self.triangle_count == 0:
+                return {}
+            edges = np.sort(self._face_edges(), axis=1)
+            face_indices = np.tile(np.arange(self.triangle_count, dtype=np.int64), 3)
+            order = np.lexsort((edges[:, 1], edges[:, 0]))
+            sorted_edges = edges[order]
+            sorted_faces = face_indices[order]
+            boundaries = np.flatnonzero(np.any(sorted_edges[1:] != sorted_edges[:-1], axis=1)) + 1
+            starts = np.concatenate([np.zeros(1, dtype=np.int64), boundaries])
+            ends = np.concatenate([boundaries, np.asarray([sorted_edges.shape[0]], dtype=np.int64)])
+            return {
+                (int(sorted_edges[start, 0]), int(sorted_edges[start, 1])): np.sort(sorted_faces[start:end])
+                .astype(int)
+                .tolist()
+                for start, end in zip(starts.tolist(), ends.tolist(), strict=True)
+            }
+
+        return self._cached_value("edge_faces_map", self._faces_cache_token(), build)
 
     def _face_unit_normals(self) -> FloatArray:
-        if self.triangle_count == 0:
-            return np.empty((0, 3), dtype=np.float64)
-        p0 = self.points[self.faces[:, 0]]
-        p1 = self.points[self.faces[:, 1]]
-        p2 = self.points[self.faces[:, 2]]
-        normals = np.cross(p1 - p0, p2 - p0)
-        lengths = np.linalg.norm(normals, axis=1)
-        valid = lengths > 0.0
-        unit = np.zeros_like(normals, dtype=np.float64)
-        unit[valid] = normals[valid] / lengths[valid, None]
-        return unit
+        def build() -> FloatArray:
+            if self.triangle_count == 0:
+                return np.empty((0, 3), dtype=np.float64)
+            p0 = self.points[self.faces[:, 0]]
+            p1 = self.points[self.faces[:, 1]]
+            p2 = self.points[self.faces[:, 2]]
+            normals = np.cross(p1 - p0, p2 - p0)
+            lengths = np.linalg.norm(normals, axis=1)
+            valid = lengths > 0.0
+            unit = np.zeros_like(normals, dtype=np.float64)
+            unit[valid] = normals[valid] / lengths[valid, None]
+            return unit
+
+        return self._cached_value("face_unit_normals", self._geometry_cache_token(), build)
 
     def _orientation_volume_epsilon(self) -> float:
         mins, maxs = self.bounds()
@@ -2289,46 +2332,49 @@ class Mesh:
             return self._flip_inward_closed_components()
 
     def _boundary_loops(self) -> list[list[int]]:
-        if self.triangle_count == 0:
-            return []
-        edges, counts = self._undirected_edges_and_counts()
-        boundary_edges = edges[counts == 1]
-        if boundary_edges.size == 0:
-            return []
+        def build() -> list[list[int]]:
+            if self.triangle_count == 0:
+                return []
+            edges, counts = self._undirected_edges_and_counts()
+            boundary_edges = edges[counts == 1]
+            if boundary_edges.size == 0:
+                return []
 
-        adjacency: dict[int, set[int]] = {}
-        for start, end in boundary_edges.astype(int).tolist():
-            adjacency.setdefault(start, set()).add(end)
-            adjacency.setdefault(end, set()).add(start)
+            adjacency: dict[int, set[int]] = {}
+            for start, end in boundary_edges.astype(int).tolist():
+                adjacency.setdefault(start, set()).add(end)
+                adjacency.setdefault(end, set()).add(start)
 
-        loops: list[list[int]] = []
-        visited: set[tuple[int, int]] = set()
-        for start, neighbors in adjacency.items():
-            for neighbor in sorted(neighbors):
-                edge = (min(start, neighbor), max(start, neighbor))
-                if edge in visited:
-                    continue
-                loop = [start]
-                previous = start
-                current = neighbor
-                while True:
-                    loop.append(current)
-                    visited.add(edge)
-                    next_candidates = sorted(item for item in adjacency[current] if item != previous)
-                    if not next_candidates:
-                        break
-                    next_vertex = next_candidates[0]
-                    next_edge = (min(current, next_vertex), max(current, next_vertex))
-                    if next_vertex == start:
-                        visited.add(next_edge)
-                        break
-                    if next_edge in visited:
-                        break
-                    edge = next_edge
-                    previous, current = current, next_vertex
-                if len(loop) >= 3:
-                    loops.append(loop)
-        return loops
+            loops: list[list[int]] = []
+            visited: set[tuple[int, int]] = set()
+            for start, neighbors in adjacency.items():
+                for neighbor in sorted(neighbors):
+                    edge = (min(start, neighbor), max(start, neighbor))
+                    if edge in visited:
+                        continue
+                    loop = [start]
+                    previous = start
+                    current = neighbor
+                    while True:
+                        loop.append(current)
+                        visited.add(edge)
+                        next_candidates = sorted(item for item in adjacency[current] if item != previous)
+                        if not next_candidates:
+                            break
+                        next_vertex = next_candidates[0]
+                        next_edge = (min(current, next_vertex), max(current, next_vertex))
+                        if next_vertex == start:
+                            visited.add(next_edge)
+                            break
+                        if next_edge in visited:
+                            break
+                        edge = next_edge
+                        previous, current = current, next_vertex
+                    if len(loop) >= 3:
+                        loops.append(loop)
+            return loops
+
+        return self._cached_value("boundary_loops", self._faces_cache_token(), build)
 
     def _triangle_edge_lengths(self) -> FloatArray:
         if self.triangle_count == 0:
@@ -2372,11 +2418,14 @@ class Mesh:
         )
 
     def _undirected_edges_and_counts(self) -> tuple[IntArray, IntArray]:
-        if self.triangle_count == 0:
-            return np.empty((0, 2), dtype=np.int64), np.empty((0,), dtype=np.int64)
-        undirected = np.sort(self._face_edges(), axis=1)
-        edges, counts = np.unique(undirected, axis=0, return_counts=True)
-        return edges, counts
+        def build() -> tuple[IntArray, IntArray]:
+            if self.triangle_count == 0:
+                return np.empty((0, 2), dtype=np.int64), np.empty((0,), dtype=np.int64)
+            undirected = np.sort(self._face_edges(), axis=1)
+            edges, counts = np.unique(undirected, axis=0, return_counts=True)
+            return edges, counts
+
+        return self._cached_value("undirected_edges_and_counts", self._faces_cache_token(), build)
 
     def _boundary_edges_set(self) -> set[tuple[int, int]]:
         edges, counts = self._undirected_edges_and_counts()
@@ -2574,6 +2623,13 @@ def _accumulate_vertex_vectors(vertex_count: int, indices: IntArray, values: Flo
     return accumulated
 
 
+def _array_cache_token(array: NDArray[Any]) -> tuple[tuple[int, ...], str, bytes]:
+    contiguous = np.ascontiguousarray(array)
+    digest = hashlib.blake2b(digest_size=16)
+    digest.update(contiguous.tobytes())
+    return tuple(int(size) for size in contiguous.shape), str(contiguous.dtype), digest.digest()
+
+
 def _boundary_edges_from_faces(faces: list[list[int]]) -> set[tuple[int, int]]:
     counts: dict[tuple[int, int], int] = {}
     for face in faces:
@@ -2592,3 +2648,16 @@ def _fallback_tangent(normal: FloatArray) -> FloatArray:
     if length <= 0.0:
         return np.array([1.0, 0.0, 0.0], dtype=np.float64)
     return tangent / length
+
+
+def _fallback_tangents(normals: FloatArray) -> FloatArray:
+    if normals.shape[0] == 0:
+        return np.empty((0, 3), dtype=np.float64)
+    axes = np.tile(np.array([1.0, 0.0, 0.0], dtype=np.float64), (normals.shape[0], 1))
+    axes[np.abs(normals[:, 0]) > 0.9] = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+    tangents = axes - normals * np.einsum("ij,ij->i", axes, normals)[:, None]
+    lengths = np.linalg.norm(tangents, axis=1)
+    valid = lengths > 0.0
+    tangents[valid] = tangents[valid] / lengths[valid, None]
+    tangents[~valid] = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+    return cast(FloatArray, tangents)

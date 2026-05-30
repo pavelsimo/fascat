@@ -1271,6 +1271,32 @@ def test_convert_dispatches_gltf_writer_and_validator(monkeypatch, tmp_path: Pat
     assert steps["validate"].after["validated_triangles"] == 1
 
 
+def test_convert_reuses_gltf_writer_validation_stats(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.pipeline as pipeline
+
+    asset = _triangle_asset()
+
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: asset)
+
+    def fake_write_gltf(_asset: Asset, path: str | Path, *, options: object = None) -> dict[str, int]:
+        Path(path).write_bytes(b"not parsed by this test")
+        return {"meshes": 2, "points": 6, "triangles": 2}
+
+    monkeypatch.setattr(pipeline, "_write_gltf", fake_write_gltf)
+    monkeypatch.setattr(pipeline, "validate_gltf", lambda _path: pytest.fail("validation should stay in memory"))
+
+    converted = convert(
+        "input.step",
+        tmp_path / "output.glb",
+        profile=_test_profile(),
+    )
+    steps = {step.name: step for step in converted.report.steps}
+
+    assert steps["validate"].after["validated_meshes"] == 2
+    assert steps["validate"].after["validated_points"] == 6
+    assert steps["validate"].after["validated_triangles"] == 2
+
+
 def test_convert_report_output_stats_include_lod_totals(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     import fascat.pipeline as pipeline
 

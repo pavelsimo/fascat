@@ -367,6 +367,11 @@ class _WorldOccurrence:
     part_id: str
     world_points: FloatArray
     faces: IntArray
+    triangles: FloatArray
+    triangle_edges1: FloatArray
+    triangle_edges2: FloatArray
+    triangle_bounds_min: FloatArray
+    triangle_bounds_max: FloatArray
     bounds_min: FloatArray
     bounds_max: FloatArray
     volume: float
@@ -1667,19 +1672,59 @@ def _segment_blocked(start: FloatArray, end: FloatArray, occluders: list[_WorldO
     for occluder in occluders:
         if not _segment_intersects_bounds(start, end, occluder.bounds_min, occluder.bounds_max):
             continue
-        if _segment_intersects_mesh(start, end, occluder.world_points, occluder.faces):
+        if _segment_intersects_occurrence(start, end, occluder):
             return True
     return False
+
+
+def _segment_intersects_occurrence(start: FloatArray, end: FloatArray, occurrence: _WorldOccurrence) -> bool:
+    return _segment_intersects_triangles(
+        start,
+        end,
+        occurrence.triangles,
+        occurrence.triangle_edges1,
+        occurrence.triangle_edges2,
+        occurrence.triangle_bounds_min,
+        occurrence.triangle_bounds_max,
+    )
 
 
 def _segment_intersects_mesh(start: FloatArray, end: FloatArray, points: FloatArray, faces: IntArray) -> bool:
     if faces.size == 0:
         return False
-    epsilon = 1e-12
     triangles = points[faces]
+    return _segment_intersects_triangles(
+        start,
+        end,
+        triangles,
+        triangles[:, 1] - triangles[:, 0],
+        triangles[:, 2] - triangles[:, 0],
+        triangles.min(axis=1),
+        triangles.max(axis=1),
+    )
+
+
+def _segment_intersects_triangles(
+    start: FloatArray,
+    end: FloatArray,
+    triangles: FloatArray,
+    edge1: FloatArray,
+    edge2: FloatArray,
+    triangle_bounds_min: FloatArray,
+    triangle_bounds_max: FloatArray,
+) -> bool:
+    if triangles.shape[0] == 0:
+        return False
+    epsilon = 1e-12
     direction = end - start
-    edge1 = triangles[:, 1] - triangles[:, 0]
-    edge2 = triangles[:, 2] - triangles[:, 0]
+    segment_min = np.minimum(start, end) - epsilon
+    segment_max = np.maximum(start, end) + epsilon
+    candidates = np.all((triangle_bounds_max >= segment_min) & (triangle_bounds_min <= segment_max), axis=1)
+    if not np.any(candidates):
+        return False
+    triangles = triangles[candidates]
+    edge1 = edge1[candidates]
+    edge2 = edge2[candidates]
     pvec = np.cross(np.broadcast_to(direction, edge2.shape), edge2)
     determinant = np.einsum("ij,ij->i", edge1, pvec)
     active = np.abs(determinant) > epsilon
@@ -1864,12 +1909,15 @@ def _world_occurrences(asset: Asset) -> list[_WorldOccurrence]:
             part = asset.parts[node.part_id]
             if part.mesh is not None:
                 world_points = _transform_points(part.mesh.points, current)
+                triangles = world_points[part.mesh.faces]
                 if world_points.shape[0] == 0:
                     mins, maxs = part.mesh.bounds()
                     world_min, world_max = _transform_bounds(mins, maxs, current)
                 else:
                     world_min = cast(FloatArray, world_points.min(axis=0))
                     world_max = cast(FloatArray, world_points.max(axis=0))
+                triangle_edges1 = triangles[:, 1] - triangles[:, 0]
+                triangle_edges2 = triangles[:, 2] - triangles[:, 0]
                 volume = float(np.prod(np.maximum(world_max - world_min, 0.0)))
                 occurrences.append(
                     _WorldOccurrence(
@@ -1877,6 +1925,15 @@ def _world_occurrences(asset: Asset) -> list[_WorldOccurrence]:
                         part_id=node.part_id,
                         world_points=world_points,
                         faces=part.mesh.faces.copy(),
+                        triangles=triangles,
+                        triangle_edges1=triangle_edges1,
+                        triangle_edges2=triangle_edges2,
+                        triangle_bounds_min=triangles.min(axis=1)
+                        if triangles.shape[0]
+                        else np.empty((0, 3), dtype=np.float64),
+                        triangle_bounds_max=triangles.max(axis=1)
+                        if triangles.shape[0]
+                        else np.empty((0, 3), dtype=np.float64),
                         bounds_min=world_min,
                         bounds_max=world_max,
                         volume=volume,

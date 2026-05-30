@@ -1002,6 +1002,22 @@ def test_quality_metrics_counts_edge_and_topology_risks() -> None:
     assert metrics["boundary_edges"] > 0
 
 
+def test_mesh_topology_cache_rebuilds_after_in_place_face_mutation() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [0, 2, 3]], dtype=int),
+    )
+
+    edge_faces = mesh._edge_faces_map()
+    assert edge_faces[(0, 2)] == [0, 1]
+
+    mesh.faces[1] = np.array([0, 1, 3], dtype=np.int64)
+
+    updated_edge_faces = mesh._edge_faces_map()
+    assert updated_edge_faces[(0, 1)] == [0, 1]
+    assert updated_edge_faces[(0, 2)] == [0]
+
+
 def test_optimize_buffers_preserves_uvs_and_material_indices() -> None:
     mesh = Mesh(
         points=np.array(
