@@ -3,19 +3,18 @@
 A living checklist of performance issues in the fascat conversion pipeline
 (STEP → tessellate → repair → stage → optimize/decimate → LOD → export).
 
-Status: **identified, not yet fixed.** We will work these one at a time. Each item has a
+Status: **partially fixed; remaining items still open.** We will work these one at a time. Each item has a
 category, severity, code location, why it is slow, and a fix direction (not a full solution).
 
-> **Measure before fixing (P19).** There is per-step timing in the report but no profiling or
-> benchmark harness. Profile a representative STEP file first so effort lands on the real
-> bottleneck rather than a guessed one.
+> **Measure before fixing.** Use `make benchmark` or `scripts/benchmark.py` on a representative
+> CAD file first so effort lands on the real bottleneck rather than a guessed one.
 
 ## Priority summary
 
 | #   | Item                                                            | Category      | Severity |
 | --- | --------------------------------------------------------------- | ------------- | -------- |
 | ~~P1~~ | ~~`t_junction_count` is O(edges × vertices)~~ ✅ **done**     | CPU           | High     |
-| P2  | `repair()` runs a full before/after diagnostic suite, always-on | CPU           | High     |
+| ~~P2~~ | ~~`repair()` runs a full before/after diagnostic suite, always-on~~ ✅ **done** | CPU           | High     |
 | P3  | Occlusion ray cast has no acceleration structure                | CPU           | High     |
 | P4  | Per-element Python loops in core mesh kernels                   | CPU           | High     |
 | P11 | `Asset.copy()` duplicates every mesh array ~4–8×, ~10×/pipeline | Memory        | High     |
@@ -32,7 +31,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 | P14 | Default `validate_output` re-reads & re-parses the output       | I/O           | Medium   |
 | P16 | Pipeline processes independent parts serially                   | Concurrency   | Medium   |
 | P17 | No memoization of derived mesh topology across stages           | System design | Medium   |
-| P19 | Metrics are heuristic estimates; no benchmark/profiling harness | Measurement   | High*    |
+| ~~P19~~ | ~~Metrics are heuristic estimates; no benchmark/profiling harness~~ ✅ **done** | Measurement   | High*    |
 
 \* High as an *enabler* — do this first so the rest is data-driven.
 
@@ -58,7 +57,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   where the old code was effectively O(V²). Remaining per-edge Python/NumPy overhead could be
   vectorized later (out of P1 scope).
 
-### P2 — `repair()` always runs a full before/after diagnostic suite
+### P2 — `repair()` always runs a full before/after diagnostic suite — ✅ done (2026-05-31)
 - **Where:** `fascat/mesh.py:256` (`repair`), metrics at `:265-267` (before) and `:289-292`
   (after): `quality_metrics`, `t_junction_count`, `boundary_gap_count`, `orientability_metrics`
   — each computed twice. Invoked unconditionally at `fascat/pipeline.py:157`, and again after
@@ -66,8 +65,12 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 - **Why:** These diagnostics exist to populate report metadata, but they run even when the
   caller only needs geometric cleanup, and the before/after pairs double the cost (P1 is one
   of them).
-- **Fix:** Gate the expensive metrics behind a flag (e.g. only when a repair/quality report is
-  requested); compute shared structures once and reuse for before/after deltas.
+- **Resolution:** `RepairOptions.quality_report` now gates repair-only diagnostic scans. The
+  default conversion path keeps geometric cleanup and orientation policy metadata, but skips
+  before/after `quality_metrics`, `t_junction_count`, `boundary_gap_count`, and
+  `orientability_metrics`. Set `quality_report=True` through the API or pipeline file to restore
+  the detailed repair report and warning behavior. The repair `tolerance_policy` records whether
+  quality diagnostics were enabled.
 
 ### P3 — Occlusion removal is a brute-force ray cast with no acceleration structure
 - **Where:** `fascat/ops/actions.py:1653` (`_sample_is_visible`), `:1666` (`_segment_blocked`),
@@ -241,7 +244,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 
 ## Measurement
 
-### P19 — Reported metrics are heuristic estimates; there is no benchmark/profiling harness
+### P19 — Reported metrics are heuristic estimates; there is no benchmark/profiling harness — ✅ done (2026-05-31)
 - **Where:** fixed "5 GB per million triangles" decimation rule
   (`fascat/ops/actions.py:30-31`, `:1055`), `_estimated_load_time` (`fascat/pipeline.py:1352`),
   and PLAN.md ("the budgets are numeric only"; missing "measured … load-time, memory, and FPS
@@ -249,7 +252,8 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 - **Why:** Memory/load-time/throughput numbers are formulas, not measurements, so they can point
   optimization at the wrong place. There is per-step `timed_step` timing in the report, but no
   per-hotspot profiling and no regression benchmark for conversion throughput.
-- **Fix:** Add a small benchmark suite (a few representative STEP files) recording per-stage wall
-  time + peak RSS, and profile (`cProfile`/`py-spy`/`scalene`) before optimizing. Expected top
-  costs to confirm: tessellation, `repair` T-junctions (P1/P2), occlusion (P3), and export
-  serialization (P15). **Do this first** so the rest of the list is data-driven.
+- **Resolution:** Added `fascat.benchmark`, `scripts/benchmark.py`, and `make benchmark`. The
+  harness runs conversions against chosen STEP/IGES/BREP inputs, records total wall time,
+  per-report-step durations, final mesh stats, output paths, and process peak RSS when the
+  platform exposes it. Use `--repeat` for repeat runs and `--validate-output` when validation
+  round-trips should be included in the measured path.

@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "fascat"
 dynamic = ["version"]
-description = "convert CAD STEP data into realtime-ready OpenUSD and glTF assets"
+description = "convert CAD data into realtime-ready OpenUSD and glTF assets"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "pavelsimo" }]
-keywords = ["cad", "cli", "gltf", "openusd", "step", "usd"]
+keywords = ["brep", "cad", "cli", "gltf", "iges", "openusd", "step", "usd"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -68,9 +68,10 @@ include = [
     "/fascat",
     "/tests",
     "/docs",
+    "/scripts",
+    "/specs",
     "/README.md",
     "/LICENSE",
-    "/PLAN.md",
     "/pyproject.toml",
 ]
 

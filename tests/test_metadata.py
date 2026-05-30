@@ -137,11 +137,11 @@ def test_cli_inspect_can_emit_metadata_and_pmi(monkeypatch) -> None:  # type: ig
 
     captured = {}
 
-    def fake_read_step(_path, _ctx, _payload, *, import_options=None):  # type: ignore[no-untyped-def]
+    def fake_read_cad(_path, _ctx, _payload, *, import_options=None):  # type: ignore[no-untyped-def]
         captured["options"] = import_options
         return _asset_with_metadata()
 
-    monkeypatch.setattr(cli, "_read_step_for_cli", fake_read_step)
+    monkeypatch.setattr(cli, "_read_cad_for_cli", fake_read_cad)
 
     result = runner.invoke(
         app,

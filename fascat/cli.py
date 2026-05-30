@@ -20,7 +20,9 @@ from rich.progress import Progress, SpinnerColumn, TaskID, TextColumn, TimeElaps
 from fascat import __version__
 from fascat.analysis import AnalysisReport, analyze_output
 from fascat.filter import Filter, FilterExpressionError
+from fascat.io.brep import BREP_SUFFIXES, read_brep
 from fascat.io.gltf import GLTF_SUFFIXES
+from fascat.io.iges import IGES_SUFFIXES, read_iges
 from fascat.io.obj import OBJ_SUFFIXES
 from fascat.io.step import read_step, read_step_bytes
 from fascat.io.stl import STL_SUFFIXES
@@ -65,6 +67,7 @@ DOCS_URL = "https://pavelsimo.github.io/fascat"
 ISSUES_URL = "https://github.com/pavelsimo/fascat/issues"
 rich_utils.MAX_WIDTH = 120
 STEP_SUFFIXES = {".step", ".stp"}
+CAD_SUFFIXES = STEP_SUFFIXES | IGES_SUFFIXES | BREP_SUFFIXES
 USD_SUFFIXES = {".usd", ".usda", ".usdc", ".usdz"}
 EXPORT_SUFFIXES = USD_SUFFIXES | GLTF_SUFFIXES | OBJ_SUFFIXES | STL_SUFFIXES
 COMMAND_NAMES = ("inspect", "convert", "validate", "version", "help")
@@ -83,7 +86,9 @@ HELP_FLAGS = {"-h", "--help"}
 VERSION_FLAGS = {"-V", "--version"}
 TOP_LEVEL_EPILOG = f"""Examples:
   fascat inspect motor.step
+  fascat inspect legacy.igs
   fascat convert motor.step motor.usdc --profile realtime-desktop
+  fascat convert source.brep source.glb --profile realtime-web
   fascat convert motor.step motor.glb --profile virtual-reality
   fascat --json validate motor.usdc
 
@@ -92,7 +97,7 @@ Issues: {ISSUES_URL}"""
 
 app = typer.Typer(
     name="fascat",
-    help="convert CAD STEP data into realtime-ready OpenUSD and glTF assets",
+    help="convert CAD data into realtime-ready OpenUSD and glTF assets",
     epilog=TOP_LEVEL_EPILOG,
     no_args_is_help=True,
     rich_markup_mode="rich",
@@ -330,7 +335,7 @@ def main(
     dry_run: Annotated[bool, typer.Option("--dry-run", "-n", help="Preview changes without applying them.")] = False,
     no_input: Annotated[bool, typer.Option("--no-input", help="Disable interactive prompts.")] = False,
 ) -> None:
-    """convert CAD STEP data into realtime-ready OpenUSD and glTF assets"""
+    """convert CAD data into realtime-ready OpenUSD and glTF assets"""
     _configure_consoles(no_color)
     ctx.obj = CliState(
         verbose=verbose,
@@ -353,7 +358,7 @@ Docs: {DOCS_URL}/reference.html""",
 )
 def cmd_inspect(
     ctx: typer.Context,
-    input_path: Annotated[Path, typer.Argument(help="STEP file to inspect, or '-' for stdin.", allow_dash=True)],
+    input_path: Annotated[Path, typer.Argument(help="CAD file to inspect, or '-' for stdin STEP.", allow_dash=True)],
     profile: Annotated[Profile, typer.Option("--profile", help="Inspection profile to apply.")] = Profile.INSPECT_ONLY,
     metadata: Annotated[
         MetadataMode,
@@ -443,7 +448,7 @@ def cmd_inspect(
         typer.Option("--exclude-filter", help="Exclude selector matches from --filter results."),
     ] = None,
 ) -> None:
-    """Inspect STEP assembly metadata and planned conversion inputs."""
+    """Inspect CAD assembly metadata and planned conversion inputs."""
     state = _state(ctx)
     payload = {
         "command": "inspect",
@@ -481,7 +486,7 @@ def cmd_inspect(
         _fail(ctx, payload, "--source-meters-per-unit must be greater than 0.", code=2)
     if target_meters_per_unit is not None and target_meters_per_unit <= 0.0:
         _fail(ctx, payload, "--target-meters-per-unit must be greater than 0.", code=2)
-    _validate_step_input(input_path, ctx, payload)
+    _validate_cad_input(input_path, ctx, payload)
     if state.dry_run:
         _emit(ctx, payload, f"Would inspect {input_path} with profile {profile.value}.")
         return
@@ -503,7 +508,7 @@ def cmd_inspect(
         target_up_axis=None if target_up_axis is None else target_up_axis.value,
         target_handedness=None if target_handedness is None else target_handedness.value,
     )
-    asset = _read_step_for_cli(input_path, ctx, payload, import_options=import_options)
+    asset = _read_cad_for_cli(input_path, ctx, payload, import_options=import_options)
     if heal_brep:
         asset = asset.heal_brep(
             _brep_heal_options(
@@ -545,6 +550,8 @@ def cmd_inspect(
     "convert",
     epilog=f"""Examples:
   fascat convert motor.step motor.usdc
+  fascat convert legacy.igs legacy.glb
+  fascat convert native.brep native.usdc
   fascat convert motor.step motor.glb --profile virtual-reality
   fascat convert motor.step motor.glb --pipeline realtime.toml
   fascat convert motor.step
@@ -556,7 +563,7 @@ Docs: {DOCS_URL}/reference.html""",
 )
 def cmd_convert(
     ctx: typer.Context,
-    input_path: Annotated[Path, typer.Argument(help="Input STEP file, or '-' for stdin.", allow_dash=True)],
+    input_path: Annotated[Path, typer.Argument(help="Input CAD file, or '-' for stdin STEP.", allow_dash=True)],
     output_path: Annotated[
         Path | None,
         typer.Argument(
@@ -1206,7 +1213,7 @@ def cmd_convert(
     report: Annotated[Path | None, typer.Option("--report", help="Write a JSON conversion report sidecar.")] = None,
     force: Annotated[bool, typer.Option("--force", "-f", help="Overwrite an existing output file.")] = False,
 ) -> None:
-    """Convert a STEP file into a realtime-ready OpenUSD or glTF asset."""
+    """Convert a CAD file into a realtime-ready OpenUSD or glTF asset."""
     state = _state(ctx)
     payload: dict[str, Any] = {
         "command": "convert",
@@ -1397,7 +1404,7 @@ def cmd_convert(
     payload["decimate_cleanup_attributes"] = list(cleanup_attributes)
     payload["lod_screen_coverage"] = lod_coverages
     payload["normalize_uvs"] = list(normalized_uv_channels)
-    _validate_step_input(input_path, ctx, payload)
+    _validate_cad_input(input_path, ctx, payload)
     output_path = _resolve_convert_output(input_path, output_path, ctx, payload)
     payload["output"] = str(output_path)
     _validate_export_output(output_path, ctx, payload)
@@ -2095,7 +2102,7 @@ def _resolve_convert_output(
     if output_path is not None:
         return output_path
     if _is_stdio(input_path):
-        _fail(ctx, payload, "Output path is required when reading STEP data from stdin.", code=2)
+        _fail(ctx, payload, "Output path is required when reading CAD data from stdin.", code=2)
     return input_path.with_suffix(".usdc")
 
 
@@ -2122,7 +2129,7 @@ def _convert_operation_diagnostics(payload: dict[str, Any]) -> list[dict[str, st
     def add(operation: str, level: str, message: str) -> None:
         diagnostics.append({"operation": operation, "level": level, "message": message})
 
-    add("import", "exact", "STEP import reads hierarchy, metadata, materials, and BREP handles when available")
+    add("import", "exact", "CAD import reads hierarchy, metadata, materials, and BREP handles when available")
     if payload["heal_brep"]:
         if payload["remove_sliver_faces"]:
             add(
@@ -2507,9 +2514,14 @@ def _pmi_summary(asset: Any) -> dict[str, int]:
     return {"count": len(asset.pmi), **{f"kind_{kind}": count for kind, count in sorted(kinds.items())}}
 
 
-def _validate_step_input(path: Path, ctx: typer.Context, payload: dict[str, Any]) -> None:
-    if not _is_stdio(path) and path.suffix.lower() not in STEP_SUFFIXES:
-        _fail(ctx, payload, f"Unsupported STEP extension: {path.suffix or '<none>'}. Use .step or .stp.", code=2)
+def _validate_cad_input(path: Path, ctx: typer.Context, payload: dict[str, Any]) -> None:
+    if not _is_stdio(path) and path.suffix.lower() not in CAD_SUFFIXES:
+        _fail(
+            ctx,
+            payload,
+            f"Unsupported CAD extension: {path.suffix or '<none>'}. Use .step, .stp, .igs, .iges, or .brep.",
+            code=2,
+        )
 
 
 def _validate_export_output(path: Path, ctx: typer.Context, payload: dict[str, Any]) -> None:
@@ -2535,7 +2547,7 @@ def _fail(ctx: typer.Context, payload: dict[str, Any], message: str, code: int =
     raise typer.Exit(code)
 
 
-def _read_step_for_cli(
+def _read_cad_for_cli(
     path: Path,
     ctx: typer.Context,
     payload: dict[str, Any],
@@ -2549,7 +2561,14 @@ def _read_step_for_cli(
         return read_step_bytes(data, options=import_options)
     _require_existing_file(path, "input", ctx, payload)
     try:
-        return read_step(path, options=import_options)
+        suffix = path.suffix.lower()
+        if suffix in STEP_SUFFIXES:
+            return read_step(path, options=import_options)
+        if suffix in IGES_SUFFIXES:
+            return read_iges(path, options=import_options)
+        if suffix in BREP_SUFFIXES:
+            return read_brep(path, options=import_options)
+        raise ValueError(f"unsupported CAD extension: {path.suffix or '<none>'}")
     except Exception as exc:
         _fail(ctx, payload, str(exc))
         raise AssertionError("unreachable") from exc

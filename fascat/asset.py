@@ -308,6 +308,7 @@ class Asset:
                 "degenerate_polygon_cleanup": "enabled" if opts.delete_degenerate else "disabled",
                 "face_orientation": _repair_face_orientation_operation(opts),
                 "normal_orientation": _repair_normal_orientation_operation(opts),
+                "quality_diagnostics": "enabled" if opts.quality_report else "disabled",
                 "t_junction_sewing": "not_implemented",
                 "boundary_gap_stitching": "not_implemented",
                 "non_manifold_edge_cracking": "not_implemented",

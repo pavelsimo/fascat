@@ -9,8 +9,10 @@ from fascat.asset import Asset
 from fascat.export_report import referenced_materials
 from fascat.export_report import stats_with_file_size as _stats_with_file_size
 from fascat.filter import Filter
+from fascat.io.brep import BREP_SUFFIXES, read_brep
 from fascat.io.gltf import GLTF_SUFFIXES, runtime_dependency_report, validate_gltf
 from fascat.io.gltf import write_gltf as _write_gltf
+from fascat.io.iges import IGES_SUFFIXES, read_iges
 from fascat.io.obj import OBJ_SUFFIXES, validate_obj
 from fascat.io.obj import write_obj as _write_obj
 from fascat.io.step import read_step
@@ -58,6 +60,7 @@ if TYPE_CHECKING:
     from fascat.analysis import AnalysisReport
 
 USD_SUFFIXES = {".usd", ".usda", ".usdc", ".usdz"}
+CAD_SUFFIXES = {".step", ".stp"} | IGES_SUFFIXES | BREP_SUFFIXES
 ExportFormat = Literal["usd", "gltf", "obj", "stl"]
 _LOAD_ESTIMATE_BYTES_PER_MS = 50_000
 _LOAD_ESTIMATE_VERTEX_BYTES = 32
@@ -110,11 +113,7 @@ def convert(
     effective_import_options = import_options
     if effective_import_options is None and pipeline is not None:
         effective_import_options = pipeline.import_options
-    asset = (
-        read_step(input_path, options=effective_import_options)
-        if effective_import_options is not None
-        else read_step(input_path)
-    )
+    asset = _read_input(input_path, options=effective_import_options)
     if progress is not None:
         progress("source", asset.stats())
     planned_tessellation: TessellationOptions | None = None
@@ -320,6 +319,17 @@ def convert(
     _add_profile_budget_report(asset, selected)
     asset.report.finish(_report_stats(asset))
     return asset
+
+
+def _read_input(path: str | Path, *, options: StepReadOptions | None = None) -> Asset:
+    suffix = Path(path).suffix.lower()
+    if suffix in {".step", ".stp"}:
+        return read_step(path, options=options) if options is not None else read_step(path)
+    if suffix in IGES_SUFFIXES:
+        return read_iges(path, options=options)
+    if suffix in BREP_SUFFIXES:
+        return read_brep(path, options=options)
+    raise ValueError(f"unsupported CAD extension: {suffix or '<none>'}")
 
 
 def _add_preflight_report(
@@ -1164,7 +1174,7 @@ def _workflow_summary_stages(
         "run" if "import" in steps else "skipped",
         "exact" if "import" in steps else "not_applicable",
         "import",
-        "STEP hierarchy, metadata, materials, and BREP handles were read when available"
+        "CAD hierarchy, metadata, materials, and BREP handles were read when available"
         if "import" in steps
         else "input import did not run in this report",
     )
@@ -1717,6 +1727,7 @@ def repair(
     face_orientation: FaceOrientationStrategy = "exterior",
     normal_orientation: NormalOrientationStrategy = "from_faces",
     viewer_position: tuple[float, float, float] | None = None,
+    quality_report: bool = False,
     where: Filter | None = None,
 ) -> Asset:
     from fascat.options import RepairOptions
@@ -1727,6 +1738,7 @@ def repair(
             face_orientation=face_orientation,
             normal_orientation=normal_orientation,
             viewer_position=viewer_position,
+            quality_report=quality_report,
         ),
         where=where,
     )

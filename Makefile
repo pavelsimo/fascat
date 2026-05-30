@@ -1,7 +1,7 @@
 TOOL_NAME := fascat
 MODULE    := fascat
 
-.PHONY: install build test coverage lint fmt fmt-check docs ci publish clean tools help
+.PHONY: install build test coverage lint fmt fmt-check docs ci benchmark publish clean tools help
 
 install: ## Install project and dev dependencies
 	uv sync --dev
@@ -30,6 +30,9 @@ fmt-check: ## Check formatting and linting (CI-safe, exits non-zero if dirty)
 
 docs: ## Build documentation site to dist/docs-site/
 	node scripts/build-docs-site.mjs
+
+benchmark: ## Run conversion benchmark harness on bundled STEP fixtures
+	uv run python scripts/benchmark.py tests/fixtures/vertical-screw.step --output-dir dist/benchmarks --output-suffix .glb
 
 ci: fmt-check lint test build ## Full CI gate
 

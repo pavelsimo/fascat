@@ -31,8 +31,8 @@ Dry-run JSON for `convert` includes `operation_diagnostics`, a list of planned o
 
 | Command | Description |
 |---------|-------------|
-| `fascat inspect input.step` | Inspect STEP assembly metadata and planned conversion inputs |
-| `fascat convert input.step [output.usdc]` | Convert STEP CAD into OpenUSD, glTF, OBJ, or STL |
+| `fascat inspect input.step` | Inspect CAD assembly metadata and planned conversion inputs |
+| `fascat convert input.step [output.usdc]` | Convert STEP, IGES, or BREP CAD into OpenUSD, glTF, OBJ, or STL |
 | `fascat validate output.usdc` | Validate generated USD, glTF, OBJ, or STL output |
 | `fascat help [command]` | Show top-level or command-specific help |
 | `fascat version` | Print version and exit |
@@ -46,11 +46,12 @@ all listed formats are implemented.
 | Format family | Input support | Output support | Current decision |
 |---------------|---------------|----------------|------------------|
 | STEP `.step`, `.stp` | Supported | Not emitted as CAD | Primary neutral CAD input path |
+| IGES `.igs`, `.iges` | Supported | Not emitted as CAD | Legacy CAD geometry import through OCP/XDE |
+| OpenCASCADE BREP `.brep` | Supported | Not emitted as CAD | Native-kernel shape import as a single source-shape part |
 | OpenUSD `.usd`, `.usda`, `.usdc`, `.usdz` | Not imported | Supported | Runtime and scene-composition delivery |
 | glTF `.gltf`, `.glb` | Not imported | Supported | Preferred web/mobile runtime delivery |
 | OBJ `.obj` | Not imported | Supported | Mesh-only interchange output |
 | STL `.stl` | Not imported | Supported | Mesh-only manufacturing or inspection output |
-| IGES `.igs`, `.iges` | Not supported | Not supported | Legacy CAD import candidate, not in scope yet |
 | Parasolid `.x_t`, `.x_b` | Not supported | Not supported | Native-kernel CAD import candidate, not in scope yet |
 | JT `.jt` | Not supported | Not supported | Visualization/CAD hybrid import candidate, not in scope yet |
 | CATIA, NX, SolidWorks, Inventor | Not supported | Not supported | Native CAD coverage is deferred |
@@ -62,6 +63,9 @@ and `backend_default` states for Unity-style import toggles such as PMI,
 variants, existing meshes, construction cleanup, and coordinate normalization.
 They also include `loaded_representations`, a per-part BREP/construction-shape
 summary plus deleted construction-only nodes and source topology counts.
+IGES import uses the same OCP/XDE shape tree traversal for hierarchy, transforms,
+colors, and materials. BREP import creates one root occurrence and one part with
+the native source shape retained for tessellation and healing.
 
 ## Convert flags
 
@@ -382,10 +386,10 @@ fallbacks.
 
 | Capability | Fascat status | Report or diagnostic | Next step |
 |------------|---------------|----------------------|-----------|
-| STEP import, hierarchy, names, transforms, colors, metadata | Implemented for STEP | `import` report stats, cleanup counts, import decisions, pipeline import options, per-part loaded-representation reports, space normalization transforms, and AP242 PMI warnings when typed PMI import is unavailable | Add real design variant loading, typed PMI entity extraction, mixed BREP construction-curve cleanup, and true multi-file import |
+| CAD import, hierarchy, names, transforms, colors, metadata | Implemented for STEP and IGES; native BREP imports as a single source-shape part | `import` report stats, cleanup counts, STEP import decisions, pipeline import options, per-part loaded-representation reports, space normalization transforms, and AP242 PMI warnings when typed PMI import is unavailable | Add real design variant loading, typed PMI entity extraction, mixed BREP construction-curve cleanup, and true multi-file import |
 | BREP healing | Partial | `heal_brep`; records open shells, free/unstitched edges, small edges, and sliver counts; sliver removal warns that the backend leaves shapes unchanged | Implement sliver-face removal, duplicate-face cleanup, and deeper face/wire repair |
 | Tessellation | Implemented | `tessellate` report options, unit-aware tolerance policy with source/local/target unit conversions and normalized-tolerance warnings, explicit sag-ratio, existing mesh reuse/retessellation controls, size-adaptive `part_settings` helpers, max-polygon-length diagnostics, free-edge diagnostics, retained-patch/submesh risk warnings, quality advisories for coarse absolute sag, aggressive polygon-length settings, and shiny/high-detail parts without detail-tuned sag or curvature settings, attribute-provenance metadata, and quality metadata | Add CAD UV/tangent extraction and backend-driven material/metadata/curvature-targeted profiles |
-| Mesh repair | Implemented for core cleanup | `repair` report step; mesh metadata records before/after duplicate polygon, degenerate triangle, boundary edge, boundary gap, non-manifold edge, T-junction, flipped closed-component, non-orientable shared-edge counts, face-orientation strategy/status, and normal-orientation strategy/status; standalone `merge_vertices` and `delete_degenerate_polygons` are available through Python, CLI flags, and TOML pipelines with before/after reports; vertex-merge reports use Euclidean tolerance matching across spatial bucket boundaries and include same-position candidates, exact-duplicate, boundary, non-manifold, hard-edge, T-junction, boundary-gap, and near-duplicate candidate counts, skipped normal, tangent, UV, and material-boundary protection reasons, and tolerance-risk warnings; degenerate-polygon reports include duplicate-vertex, collapsed-edge, near-flat, and exact duplicate-polygon removal reasons | Add T-junction sewing, boundary-gap stitching, non-manifold cracking, topology-only merge connectivity, tolerance-overlap cleanup, and backend implementation for viewer/open-shell orientation strategies |
+| Mesh repair | Implemented for core cleanup | `repair` report step; mesh metadata always records face-orientation strategy/status and normal-orientation strategy/status, while `RepairOptions.quality_report=True` adds before/after duplicate polygon, degenerate triangle, boundary edge, boundary gap, non-manifold edge, T-junction, flipped closed-component, and non-orientable shared-edge counts; standalone `merge_vertices` and `delete_degenerate_polygons` are available through Python, CLI flags, and TOML pipelines with before/after reports; vertex-merge reports use Euclidean tolerance matching across spatial bucket boundaries and include same-position candidates, exact-duplicate, boundary, non-manifold, hard-edge, T-junction, boundary-gap, and near-duplicate candidate counts, skipped normal, tangent, UV, and material-boundary protection reasons, and tolerance-risk warnings; degenerate-polygon reports include duplicate-vertex, collapsed-edge, near-flat, and exact duplicate-polygon removal reasons | Add T-junction sewing, boundary-gap stitching, non-manifold cracking, topology-only merge connectivity, tolerance-overlap cleanup, and backend implementation for viewer/open-shell orientation strategies |
 | Staging, normals, tangents, UV metadata | Partial | `stage` report step; normal generation supports hard-edge angle, angle or area weighting, and preserve-versus-override behavior with generated/regenerated/preserved/disabled metadata; tangents require the selected UV channel when generated; existing tangents are preserved by default and mesh/asset metadata report generated, regenerated, preserved, missing, invalidated, or dropped tangent states; UV metadata records per-channel domain, bounds, validation status, degenerates, overlap counts, island counts, pack efficiency, normalized-space utilization, angle/edge distortion, AABB box-projection scope/scale/destination/override/unit policy, UV0-to-UV1 copy status, explicit normalization status, unwrap solver intent, sharp-to-seam and forbid-overlap policy intent, and missing bake repack status, with warnings for UV1/lightmap bake violations, missing repack/padding, and unsupported solver or policy controls | Add seam planning, backend-enforced unwrap solver controls, island merge, and real repack/padding controls |
 | Material baking | Approximate | `bake_materials` emits constant embedded texture maps from material factors, glTF exports them as material texture slots, USD exports them as `UsdUVTexture` shader networks, and reports warn that raster baking is not implemented | Generate real atlas textures from source texture/material inputs |
 | Hole removal | Approximate | `remove_holes` warns when it falls back to mesh boundary classification and filling | Add BREP feature-level removal for closed cylindrical and pocket holes |
@@ -443,11 +447,24 @@ When the convert output argument is omitted for a file input, Fascat writes besi
 
 When output is `-`, USD bytes are reserved for stdout and progress/errors stay on stderr.
 
+Supported input suffixes are `.step`, `.stp`, `.igs`, `.iges`, and `.brep`.
 Supported output suffixes are `.usd`, `.usda`, `.usdc`, `.usdz`, `.gltf`, `.glb`, `.obj`, and `.stl`.
 
 `--debug` is only valid with `.usd` or `.usda` output. Binary `.usdc`, `.gltf`, and `.glb` output is rejected when debug mode is enabled.
 
 `convert` validates the generated asset before reporting success. If validation fails, the command exits non-zero.
+
+## Benchmarking
+
+Use the benchmark harness before performance-sensitive changes:
+
+```bash
+make benchmark
+# or
+uv run python scripts/benchmark.py tests/fixtures/vertical-screw.step --output-dir dist/benchmarks --output-suffix .glb
+```
+
+The harness writes JSON with total wall time, process peak RSS where the platform exposes it, per-report-step durations, output paths, and final mesh statistics. Pass `--repeat N` for repeated runs and `--validate-output` when the validation round trip should be included in the measured path.
 
 ## Output streams
 

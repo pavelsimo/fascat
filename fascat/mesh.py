@@ -268,15 +268,17 @@ class Mesh:
         mesh = mesh.remove_unreferenced_vertices()
         t_junction_tolerance = max(opts.tolerance, 1e-9)
         boundary_gap_tolerance = max(opts.tolerance, 1e-9)
-        before_metrics = mesh.quality_metrics(area_epsilon=opts.area_epsilon)
-        before_t_junctions = mesh.t_junction_count(tolerance=t_junction_tolerance)
-        before_boundary_gaps = mesh.boundary_gap_count(tolerance=boundary_gap_tolerance)
+        if opts.quality_report:
+            before_metrics = mesh.quality_metrics(area_epsilon=opts.area_epsilon)
+            before_t_junctions = mesh.t_junction_count(tolerance=t_junction_tolerance)
+            before_boundary_gaps = mesh.boundary_gap_count(tolerance=boundary_gap_tolerance)
         if opts.merge_vertices and opts.tolerance > 0.0:
             mesh = mesh.merge_close_vertices(opts.tolerance)
         mesh = mesh.remove_duplicate_faces()
         if opts.delete_degenerate:
             mesh = mesh.remove_degenerate_faces(opts.area_epsilon)
-        orientation_metrics = mesh.orientability_metrics()
+        if opts.quality_report:
+            orientation_metrics = mesh.orientability_metrics()
         face_orientation_status = _repair_face_orientation_status(opts)
         if _should_repair_winding(opts):
             mesh = mesh.fix_winding()
@@ -292,43 +294,54 @@ class Mesh:
             if mesh.triangle_count != previous_triangle_count:
                 mesh = mesh.compute_normals()
                 normal_orientation_status = "generated_after_hole_fill"
-        after_orientation_metrics = mesh.orientability_metrics()
-        after_metrics = mesh.quality_metrics(area_epsilon=opts.area_epsilon)
-        after_t_junctions = mesh.t_junction_count(tolerance=t_junction_tolerance)
-        after_boundary_gaps = mesh.boundary_gap_count(tolerance=boundary_gap_tolerance)
+        if opts.quality_report:
+            after_orientation_metrics = mesh.orientability_metrics()
+            after_metrics = mesh.quality_metrics(area_epsilon=opts.area_epsilon)
+            after_t_junctions = mesh.t_junction_count(tolerance=t_junction_tolerance)
+            after_boundary_gaps = mesh.boundary_gap_count(tolerance=boundary_gap_tolerance)
         repair_metadata = {
             **mesh.metadata,
-            "repair_duplicate_polygons_before": str(int(before_metrics["duplicate_polygons"])),
-            "repair_duplicate_polygons_after": str(int(after_metrics["duplicate_polygons"])),
-            "repair_degenerate_triangles_before": str(int(before_metrics["degenerate_triangles"])),
-            "repair_degenerate_triangles_after": str(int(after_metrics["degenerate_triangles"])),
-            "repair_boundary_edges_before": str(int(before_metrics["boundary_edges"])),
-            "repair_boundary_edges_after": str(int(after_metrics["boundary_edges"])),
-            "repair_non_manifold_edges_before": str(int(before_metrics["non_manifold_edges"])),
-            "repair_non_manifold_edges_after": str(int(after_metrics["non_manifold_edges"])),
-            "repair_t_junctions_before": str(before_t_junctions),
-            "repair_t_junctions_after": str(after_t_junctions),
-            "repair_boundary_gaps_before": str(before_boundary_gaps),
-            "repair_boundary_gaps_after": str(after_boundary_gaps),
-            "repair_orientation_components_before_orientation": str(int(orientation_metrics["orientation_components"])),
-            "repair_non_orientable_edges_before_orientation": str(int(orientation_metrics["non_orientable_edges"])),
-            "repair_closed_orientation_components_before_orientation": str(
-                int(orientation_metrics["closed_orientation_components"])
-            ),
-            "repair_closed_orientation_components_after_orientation": str(
-                int(after_orientation_metrics["closed_orientation_components"])
-            ),
-            "repair_flipped_components_before_orientation": str(
-                int(orientation_metrics["flipped_orientation_components"])
-            ),
-            "repair_flipped_components_after_orientation": str(
-                int(after_orientation_metrics["flipped_orientation_components"])
-            ),
+            "repair_quality_report": "enabled" if opts.quality_report else "disabled",
             "repair_face_orientation_strategy": opts.face_orientation,
             "repair_face_orientation_status": face_orientation_status,
             "repair_normal_orientation_strategy": opts.normal_orientation,
             "repair_normal_orientation_status": normal_orientation_status,
         }
+        if opts.quality_report:
+            repair_metadata.update(
+                {
+                    "repair_duplicate_polygons_before": str(int(before_metrics["duplicate_polygons"])),
+                    "repair_duplicate_polygons_after": str(int(after_metrics["duplicate_polygons"])),
+                    "repair_degenerate_triangles_before": str(int(before_metrics["degenerate_triangles"])),
+                    "repair_degenerate_triangles_after": str(int(after_metrics["degenerate_triangles"])),
+                    "repair_boundary_edges_before": str(int(before_metrics["boundary_edges"])),
+                    "repair_boundary_edges_after": str(int(after_metrics["boundary_edges"])),
+                    "repair_non_manifold_edges_before": str(int(before_metrics["non_manifold_edges"])),
+                    "repair_non_manifold_edges_after": str(int(after_metrics["non_manifold_edges"])),
+                    "repair_t_junctions_before": str(before_t_junctions),
+                    "repair_t_junctions_after": str(after_t_junctions),
+                    "repair_boundary_gaps_before": str(before_boundary_gaps),
+                    "repair_boundary_gaps_after": str(after_boundary_gaps),
+                    "repair_orientation_components_before_orientation": str(
+                        int(orientation_metrics["orientation_components"])
+                    ),
+                    "repair_non_orientable_edges_before_orientation": str(
+                        int(orientation_metrics["non_orientable_edges"])
+                    ),
+                    "repair_closed_orientation_components_before_orientation": str(
+                        int(orientation_metrics["closed_orientation_components"])
+                    ),
+                    "repair_closed_orientation_components_after_orientation": str(
+                        int(after_orientation_metrics["closed_orientation_components"])
+                    ),
+                    "repair_flipped_components_before_orientation": str(
+                        int(orientation_metrics["flipped_orientation_components"])
+                    ),
+                    "repair_flipped_components_after_orientation": str(
+                        int(after_orientation_metrics["flipped_orientation_components"])
+                    ),
+                }
+            )
         if opts.viewer_position is not None:
             repair_metadata["repair_orientation_viewer_position"] = ",".join(
                 _format_float_value(value) for value in opts.viewer_position

@@ -161,6 +161,7 @@ class RepairOptions:
     merge_vertices: bool = True
     delete_degenerate: bool = True
     fix_winding: bool = True
+    quality_report: bool = False
     face_orientation: FaceOrientationStrategy = "exterior"
     normal_orientation: NormalOrientationStrategy = "from_faces"
     viewer_position: tuple[float, float, float] | None = None
@@ -273,6 +274,26 @@ class StepReadOptions:
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class IgesReadOptions(StepReadOptions):
+    pmi: bool = False
+    design_variants: bool = False
+    multi_file: bool = False
+
+
+@dataclass(frozen=True)
+class BrepReadOptions(StepReadOptions):
+    metadata: bool = True
+    product_metadata: bool = False
+    properties: bool = False
+    layers: bool = False
+    validation_properties: bool = True
+    pmi: bool = False
+    design_variants: bool = False
+    existing_meshes: bool = False
+    multi_file: bool = False
 
 
 @dataclass(frozen=True)

@@ -124,13 +124,26 @@ def test_mesh_removes_degenerate_and_duplicate_faces() -> None:
         faces=np.array([[0, 1, 2], [2, 1, 0], [0, 0, 1]], dtype=int),
     )
 
-    repaired = mesh.repair(RepairOptions())
+    repaired = mesh.repair(RepairOptions(quality_report=True))
 
     assert repaired.triangle_count == 1
     assert repaired.metadata["repair_duplicate_polygons_before"] == "1"
     assert repaired.metadata["repair_duplicate_polygons_after"] == "0"
     assert repaired.metadata["repair_degenerate_triangles_before"] == "1"
     assert repaired.metadata["repair_degenerate_triangles_after"] == "0"
+
+
+def test_repair_skips_heavy_quality_diagnostics_by_default() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [2, 0, 0], [0, 1, 0], [1, 0, 0], [1, -1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [0, 3, 4]], dtype=int),
+    )
+
+    repaired = mesh.repair(RepairOptions())
+
+    assert repaired.metadata["repair_quality_report"] == "disabled"
+    assert "repair_t_junctions_before" not in repaired.metadata
+    assert "repair_boundary_gaps_before" not in repaired.metadata
 
 
 def test_merge_vertices_preserves_attribute_seams_by_default() -> None:
@@ -449,7 +462,7 @@ def test_repair_records_t_junction_counts() -> None:
         faces=np.array([[0, 1, 2], [0, 3, 4]], dtype=int),
     )
 
-    repaired = mesh.repair(RepairOptions())
+    repaired = mesh.repair(RepairOptions(quality_report=True))
 
     assert mesh.t_junction_count() == 1
     assert repaired.metadata["repair_t_junctions_before"] == "1"
@@ -568,7 +581,7 @@ def test_repair_records_boundary_gap_counts() -> None:
         faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=int),
     )
 
-    repaired = mesh.repair(RepairOptions(tolerance=0.01, merge_vertices=False))
+    repaired = mesh.repair(RepairOptions(tolerance=0.01, merge_vertices=False, quality_report=True))
 
     assert mesh.boundary_gap_count(tolerance=0.01) == 1
     assert repaired.metadata["repair_boundary_gaps_before"] == "1"
@@ -579,7 +592,7 @@ def test_orientability_metrics_detect_mobius_like_strip() -> None:
     mesh = mobius_strip_mesh()
 
     metrics = mesh.orientability_metrics()
-    repaired = mesh.repair(RepairOptions())
+    repaired = mesh.repair(RepairOptions(quality_report=True))
 
     assert metrics["orientation_components"] == 1
     assert metrics["non_orientable_edges"] == 1
@@ -591,8 +604,8 @@ def test_repair_records_flipped_closed_orientation_components() -> None:
     mesh = flipped_tetrahedron_mesh()
 
     metrics = mesh.orientability_metrics()
-    repaired = mesh.repair(RepairOptions())
-    not_fixed = mesh.repair(RepairOptions(fix_winding=False))
+    repaired = mesh.repair(RepairOptions(quality_report=True))
+    not_fixed = mesh.repair(RepairOptions(fix_winding=False, quality_report=True))
 
     assert metrics["closed_orientation_components"] == 1
     assert metrics["flipped_orientation_components"] == 1
@@ -610,7 +623,7 @@ def test_repair_records_flipped_closed_orientation_components() -> None:
 def test_repair_can_record_trusted_source_orientation_policy() -> None:
     mesh = flipped_tetrahedron_mesh()
 
-    repaired = mesh.repair(RepairOptions(face_orientation="source_trusted"))
+    repaired = mesh.repair(RepairOptions(face_orientation="source_trusted", quality_report=True))
 
     assert repaired.metadata["repair_flipped_components_before_orientation"] == "1"
     assert repaired.metadata["repair_flipped_components_after_orientation"] == "1"
@@ -623,6 +636,7 @@ def test_repair_records_viewer_standpoint_orientation_intent() -> None:
 
     repaired = mesh.repair(
         RepairOptions(
+            quality_report=True,
             face_orientation="viewer_standpoint",
             normal_orientation="viewer_standpoint",
             viewer_position=(0.0, 0.0, 10.0),

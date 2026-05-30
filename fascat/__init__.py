@@ -1,10 +1,12 @@
-"""Convert CAD STEP data into realtime-ready OpenUSD and glTF assets."""
+"""Convert CAD data into realtime-ready OpenUSD and glTF assets."""
 
 from fascat import profiles
 from fascat.analysis import AnalysisReport
 from fascat.asset import Asset, Node, Part
 from fascat.filter import Filter, FilterExpressionError, SelectionMatch, SelectionResult
+from fascat.io.brep import read_brep
 from fascat.io.gltf import validate_gltf
+from fascat.io.iges import read_iges
 from fascat.io.step import read_step
 from fascat.io.usd import validate_usd
 from fascat.material import Material
@@ -16,10 +18,12 @@ from fascat.options import (
     AtlasOptions,
     BakeMaterialOptions,
     BrepHealOptions,
+    BrepReadOptions,
     DecimateOptions,
     DeleteDegeneratePolygonsOptions,
     ExplodeOptions,
     GltfExportOptions,
+    IgesReadOptions,
     LODGeneratorOptions,
     LODLevel,
     LODOptions,
@@ -81,12 +85,14 @@ __all__ = [
     "AtlasOptions",
     "BakeMaterialOptions",
     "BrepHealOptions",
+    "BrepReadOptions",
     "DecimateOptions",
     "DeleteDegeneratePolygonsOptions",
     "ExplodeOptions",
     "Filter",
     "FilterExpressionError",
     "GltfExportOptions",
+    "IgesReadOptions",
     "LODGeneratorOptions",
     "LODLevel",
     "LODOptions",
@@ -136,6 +142,8 @@ __all__ = [
     "optimize_scene",
     "profiles",
     "read_step",
+    "read_brep",
+    "read_iges",
     "repair",
     "remove_holes",
     "remove_occluded",

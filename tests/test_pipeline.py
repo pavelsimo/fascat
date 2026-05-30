@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import fascat.pipeline as pipeline
 from fascat import profiles
 from fascat.asset import Asset, Node, Part
 from fascat.material import Material
@@ -168,6 +169,7 @@ def test_asset_operations_return_new_assets_without_mutating_originals() -> None
     assert original_mesh.uvs == {}
     assert original_mesh.triangle_count == 2
     assert asset.parts["part"].lod_meshes == []
+
     assert staged_mesh is not None
     assert staged_mesh.normals is not None
     assert 0 in staged_mesh.uvs
@@ -200,6 +202,35 @@ def test_asset_operations_return_new_assets_without_mutating_originals() -> None
     assert repaired.parts["part"].mesh.triangle_count == 1
 
 
+@pytest.mark.parametrize("input_name,reader_name", [("input.igs", "read_iges"), ("input.brep", "read_brep")])
+def test_convert_dispatches_non_step_cad_readers(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    input_name: str,
+    reader_name: str,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_reader(path: str | Path, *, options: object = None) -> Asset:
+        captured["path"] = path
+        captured["options"] = options
+        return _triangle_asset()
+
+    monkeypatch.setattr(pipeline, reader_name, fake_reader)
+
+    converted = convert(
+        input_name,
+        tmp_path / "output.usdc",
+        profile=_test_profile(),
+        import_options=StepReadOptions(target_units="metre"),
+        validate_output=False,
+    )
+
+    assert captured["path"] == input_name
+    assert isinstance(captured["options"], StepReadOptions)
+    assert converted.report.steps[0].name == "import"
+
+
 def test_repair_report_includes_unit_aware_tolerance_policy() -> None:
     asset = _triangle_asset()
     asset.units = "metre"
@@ -223,6 +254,7 @@ def test_repair_report_includes_unit_aware_tolerance_policy() -> None:
         "degenerate_polygon_cleanup": "enabled",
         "face_orientation": "closed_exterior",
         "normal_orientation": "from_faces",
+        "quality_diagnostics": "disabled",
         "t_junction_sewing": "not_implemented",
         "boundary_gap_stitching": "not_implemented",
         "non_manifold_edge_cracking": "not_implemented",
@@ -240,7 +272,7 @@ def test_repair_reports_non_orientable_topology_before_winding_fix() -> None:
         parts={"strip": Part(id="strip", name="Strip", mesh=_mobius_strip_mesh())},
     )
 
-    repaired = asset.repair(RepairOptions())
+    repaired = asset.repair(RepairOptions(quality_report=True))
 
     mesh = repaired.parts["strip"].mesh
     step = repaired.report.steps[-1]
@@ -256,7 +288,7 @@ def test_repair_report_includes_t_junction_metrics() -> None:
         parts={"panel": Part(id="panel", name="Panel", mesh=_t_junction_mesh())},
     )
 
-    repaired = asset.repair(RepairOptions())
+    repaired = asset.repair(RepairOptions(quality_report=True))
 
     mesh = repaired.parts["panel"].mesh
     step = repaired.report.steps[-1]
@@ -274,7 +306,7 @@ def test_repair_report_includes_boundary_gap_metrics() -> None:
         parts={"panel": Part(id="panel", name="Panel", mesh=_boundary_gap_mesh())},
     )
 
-    repaired = asset.repair(RepairOptions(tolerance=0.01, merge_vertices=False))
+    repaired = asset.repair(RepairOptions(tolerance=0.01, merge_vertices=False, quality_report=True))
 
     mesh = repaired.parts["panel"].mesh
     step = repaired.report.steps[-1]
@@ -293,7 +325,7 @@ def test_repair_report_includes_flipped_component_metrics() -> None:
         parts={"solid": Part(id="solid", name="Solid", mesh=_flipped_tetrahedron_mesh())},
     )
 
-    repaired = asset.repair(RepairOptions(fix_winding=False))
+    repaired = asset.repair(RepairOptions(fix_winding=False, quality_report=True))
 
     mesh = repaired.parts["solid"].mesh
     step = repaired.report.steps[-1]

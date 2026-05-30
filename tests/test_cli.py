@@ -625,6 +625,18 @@ target_triangles = 80000
     assert payload["pipeline_steps"][0]["reuse_existing_meshes"] is False
 
 
+@pytest.mark.parametrize("input_name", ["legacy.igs", "legacy.iges", "native.brep"])
+def test_convert_dry_run_accepts_non_step_cad_inputs(input_name: str) -> None:
+    output_name = "output.glb"
+
+    result = runner.invoke(app, ["--json", "--dry-run", "convert", input_name, output_name])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["input"] == input_name
+    assert payload["output"] == output_name
+
+
 def test_convert_dry_run_reports_pipeline_advisories(tmp_path: Path) -> None:
     pipeline_file = tmp_path / "bad-order.toml"
     pipeline_file.write_text(
@@ -1558,7 +1570,7 @@ def test_json_error_payload_for_missing_file(capsys) -> None:  # type: ignore[no
 def test_convert_rejects_bad_input_suffix(capsys) -> None:  # type: ignore[no-untyped-def]
     result = invoke_run(["--dry-run", "convert", "input.txt", "output.usdc"], capsys)
     assert result.exit_code == 2
-    assert "Unsupported STEP extension" in result.stderr
+    assert "Unsupported CAD extension" in result.stderr
 
 
 def test_convert_rejects_bad_output_suffix(capsys) -> None:  # type: ignore[no-untyped-def]

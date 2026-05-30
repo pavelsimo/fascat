@@ -11,6 +11,9 @@ The Python API exposes the same pipeline as the CLI, but keeps each conversion s
 import fascat as fc
 
 asset = fc.read_step("motor.step")
+# Or import other CAD inputs:
+# asset = fc.read_iges("legacy.igs")
+# asset = fc.read_brep("native.brep")
 
 asset = asset.tessellate(
     fc.TessellationOptions(
@@ -36,6 +39,7 @@ asset = asset.repair(
         merge_vertices=True,
         delete_degenerate=True,
         fix_winding=True,
+        quality_report=False,
         face_orientation="exterior",
         normal_orientation="from_faces",
         fill_small_holes=False,
@@ -102,6 +106,8 @@ Core pipeline calls:
 | API | Parameters | Purpose |
 |-----|------------|---------|
 | `fc.read_step(path, options=None)` | `path` is a STEP file path or `-` for stdin. `options` is `StepReadOptions`. | Import STEP assembly hierarchy, metadata, materials, and source BREP handles when the backend exposes them. |
+| `fc.read_iges(path, options=None)` | `path` ends in `.igs` or `.iges`. `options` is `IgesReadOptions`. | Import IGES geometry through the same OCP/XDE hierarchy, transform, color, and material path used by STEP. |
+| `fc.read_brep(path, options=None)` | `path` ends in `.brep`. `options` is `BrepReadOptions`. | Import a native OpenCASCADE BREP file as one root occurrence and one source-shape part. |
 | `asset.tessellate(options, where=None)` | `options` is `TessellationOptions`. `where` optionally scopes the operation with a `Filter`. | Convert source BREP geometry into meshes. |
 | `asset.repair(options, where=None)` | `options` is `RepairOptions`. `where` optionally scopes selected parts. | Clean mesh-level issues after tessellation. |
 | `asset.merge_vertices(options, where=None)` | `options` is `MergeVerticesOptions`. `where` optionally scopes selected parts. | Merge exact or tolerance-close vertices with attribute and material-boundary protection. |
@@ -436,13 +442,14 @@ Repair parameters:
 | `merge_vertices` | Deduplicate vertices after tessellation. |
 | `delete_degenerate` | Remove triangles with repeated vertices or near-zero area. |
 | `fix_winding` | Normalize triangle winding where a consistent orientation can be inferred, including inward closed components detected by signed volume. |
+| `quality_report` | Run heavier before/after repair diagnostics for duplicate polygons, degenerate triangles, boundary and non-manifold edges, T-junctions, boundary gaps, and orientability. Defaults to `False` so conversion repair does geometric cleanup without paying for report-only topology scans. |
 | `face_orientation` | Face-orientation policy: `exterior` runs the current closed-component outward winding path; `source_trusted` and `preserve` keep source winding; `viewer_standpoint`, `single_sided_open_shell`, and `unstitched_groups` are recorded as intent until those strategies have a backend. |
 | `normal_orientation` | Normal-orientation policy: `from_faces` regenerates normals from repaired faces; `source_trusted` and `preserve` keep compatible source normals when possible; `viewer_standpoint` is recorded as intent until implemented. |
 | `viewer_position` | Three-number viewer position required when either orientation policy is `viewer_standpoint`. Recorded in metadata and reports. |
 | `fill_small_holes` | Fill small mesh boundary loops as a fallback mesh repair step. |
 | `area_epsilon` | Area threshold used to classify degenerate triangles. |
 
-Repair metadata records before/after counts for `repair_duplicate_polygons`, `repair_degenerate_triangles`, `repair_boundary_edges`, `repair_non_manifold_edges`, `repair_t_junctions`, and `repair_boundary_gaps`. Duplicate polygons are triangles that reference the same three vertices, regardless of winding. T-junction counts identify vertices that lie on another triangle edge without splitting that edge; non-zero counts after repair emit a warning because T-junction sewing is still not implemented. Boundary-gap counts identify nearby, unconnected boundary vertices within the repair tolerance; non-zero counts after repair warn because boundary stitching is also not implemented. Before winding normalization runs, repair records `repair_orientation_components_before_orientation`, `repair_non_orientable_edges_before_orientation`, `repair_closed_orientation_components_before_orientation`, and `repair_flipped_components_before_orientation`; after orientation it records closed and flipped component counts again. Closed flipped components are coherent closed shells whose signed volume is inward; non-zero counts after repair emit a warning because outward face orientation was not produced. Non-zero non-orientable counts emit a report warning because Mobius-like topology cannot be fixed by ordinary face flipping. Orientation policy metadata includes `repair_face_orientation_strategy`, `repair_face_orientation_status`, `repair_normal_orientation_strategy`, `repair_normal_orientation_status`, and optional `repair_orientation_viewer_position`, so viewer-standpoint or source-trusted choices are visible even when the backend preserves source orientation. The `repair` report step also records `tolerance_policy`, including effective source/local units, declared target units, meter conversions, vertex merge tolerance in meters, degenerate area epsilon in square meters, and the status of vertex merge, degenerate-polygon cleanup, face orientation, normal orientation, T-junction sewing, boundary-gap stitching, and non-manifold edge cracking.
+Repair always records orientation policy metadata: `repair_face_orientation_strategy`, `repair_face_orientation_status`, `repair_normal_orientation_strategy`, `repair_normal_orientation_status`, and optional `repair_orientation_viewer_position`, so viewer-standpoint or source-trusted choices are visible even when the backend preserves source orientation. When `quality_report=True`, repair also records before/after counts for `repair_duplicate_polygons`, `repair_degenerate_triangles`, `repair_boundary_edges`, `repair_non_manifold_edges`, `repair_t_junctions`, and `repair_boundary_gaps`. Duplicate polygons are triangles that reference the same three vertices, regardless of winding. T-junction counts identify vertices that lie on another triangle edge without splitting that edge; non-zero counts after repair emit a warning because T-junction sewing is still not implemented. Boundary-gap counts identify nearby, unconnected boundary vertices within the repair tolerance; non-zero counts after repair warn because boundary stitching is also not implemented. With `quality_report=True`, repair also records orientability counts before and after winding normalization. The `repair` report step records `tolerance_policy`, including effective source/local units, declared target units, meter conversions, vertex merge tolerance in meters, degenerate area epsilon in square meters, and the status of vertex merge, degenerate-polygon cleanup, face orientation, normal orientation, quality diagnostics, T-junction sewing, boundary-gap stitching, and non-manifold edge cracking.
 
 Use `MergeVerticesOptions` when you want Unity-style vertex merge as a standalone pipeline step instead of the broad repair pass. `tolerance=0.0` merges exact duplicate positions; larger values merge Euclidean tolerance-close positions, including pairs that fall across spatial bucket boundaries. By default the operation keeps normals, tangents, UVs, and material-boundary signatures in the merge key so hard edges and UV seams are not collapsed accidentally. Set `preserve_normals=False`, `preserve_tangents=False`, or `preserve_uvs=False` to ignore and drop those attributes during merging. Reports include `merge_vertices_removed`, `merge_vertices_degenerate_triangles_removed`, same-position candidate counts, exact-duplicate, boundary, non-manifold, hard-edge, T-junction, and boundary-gap candidate counts, skipped merge counts, skipped merge reasons for normal, tangent, UV, and material-boundary protection, tolerance scale ratios against the part bounding-box diagonal and shortest mesh edge, warnings for high-risk tolerances, too-small tolerance advisories for near-duplicate pairs that remain unmerged, and a unit-aware `tolerance_policy`.
 
@@ -821,6 +828,8 @@ fc.convert("motor.step", "motor.glb", profile="virtual-reality")
 fc.convert("motor.step", "motor.glb", profile="realtime-mobile")
 fc.convert("motor.step", "motor.glb", profile="mixed-reality")
 fc.convert("motor.step", "motor.gltf", profile="realtime-web")
+fc.convert("legacy.igs", "legacy.glb")
+fc.convert("native.brep", "native.usdc")
 ```
 
 `fc.convert()` validates generated output by default. Pass `validate_output=False` only when another step in your pipeline validates the asset.
@@ -830,7 +839,7 @@ Conversion parameters:
 
 | Parameter | Meaning |
 |-----------|---------|
-| `input_path` | STEP input path or `-` for stdin. |
+| `input_path` | CAD input path ending in `.step`, `.stp`, `.igs`, `.iges`, or `.brep`. CLI stdin remains STEP-oriented because stdin has no suffix. |
 | `output_path` | Output path. Suffix selects USD, glTF, OBJ, or STL. |
 | `profile` | Profile name or `ConversionProfile` that supplies default tessellation, repair, stage, optimize, LOD, budget, and workflow-recipe metadata. |
 | `import_options` | `StepReadOptions` for STEP metadata and PMI import. |

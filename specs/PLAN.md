@@ -1,7 +1,7 @@
 # Fascat Plan
 
 The single planning document for Fascat. For the log of shipped work, see
-[CHANGELOG.md](CHANGELOG.md). This file tracks **what the pipeline does today** and
+[CHANGELOG.md](../CHANGELOG.md). This file tracks **what the pipeline does today** and
 **what is still open**.
 
 ## What Fascat Is
@@ -41,20 +41,20 @@ meshoptimizer / fast-simplification (decimation + meshopt compression), usd-core
 
 | Stage | Real & complete | Approximate (refine) | Gap (metadata-only / not implemented) |
 | --- | --- | --- | --- |
-| **Import** | hierarchy, transforms, colors, metadata, units, repeated-part instances | — | typed PMI, multi-file/multi-root, design variants, IGES, BREP, other non-STEP formats |
+| **Import** | STEP hierarchy, transforms, colors, metadata, units, repeated-part instances; IGES XDE hierarchy/material import; native BREP single-shape import | — | typed PMI, multi-file/multi-root, design variants, other non-STEP formats |
 | **Tessellate** | sag / angle / min-edge / curvature-adaptive meshing | — | CAD-derived UVs, tessellation-time tangents, free-edge geometry output |
 | **Repair / Heal** | vertex merge, dedup, degenerate cleanup, winding fix, small-hole fill, normals; BREP fix-edge / sew | mesh-level hole removal | T-junction sewing, gap stitching, non-manifold cracking, sliver removal, viewer/open-shell orientation |
 | **Stage / UV** | normals, tangents, xatlas unwrap, AABB UV, UV copy, material PBR normalize / merge | — | bake-domain repack + padding, island merge / align, seam graph, backend-enforced solver |
 | **Materials** | per-face colors + PBR factors preserved | — | raster textures, atlas packing, AO bake, material-library mapping |
 | **Optimize** | decimation, instance reconstruction, buffer optimization | sampled occlusion, quality→ratio decimation | error-bounded decimation, weighted decimation, retopology, GPU occlusion |
 | **LOD** | real decimated mesh levels | — | occurrence LOD groups, far-LOD bake-to-one-material, switching-distance validation |
-| **Export** | USD/USDZ, glTF/GLB (quantize + meshopt), OBJ, STL | — | Draco, KTX2/Basis, real texture files, size-ladder reports, named presets |
+| **Export** | USD/USDZ, glTF/GLB (quantize + meshopt), OBJ, STL | — | FBX output, Draco, KTX2/Basis, real texture files, size-ladder reports, named presets |
 
 ### A. Works end-to-end — real geometry
 
 The basics are present and produce a valid RT3D asset:
 
-- **Import** (`io/step.py`, OCCT/OCP): STEP geometry, assembly hierarchy, transforms, colors, metadata, units, repeated-part instances, source-space normalization.
+- **Import** (`io/step.py`, `io/iges.py`, `io/brep.py`, OCCT/OCP): STEP geometry, STEP/IGES assembly hierarchy where exposed, transforms, colors, metadata, units, repeated-part instances, native BREP single-shape import, source-space normalization.
 - **Tessellate** (`ops/tessellate.py`, OCCT `BRepMesh`): `sag`, `angle`, `min_edge_length`, `curvature_adaptive`, `preserve_boundaries` all change the real mesh.
 - **Repair — mesh** (`mesh.py`): vertex merge (Euclidean union-find), duplicate / degenerate face removal, winding fix (trimesh + inward-shell flip), small-hole fill, normal generation.
 - **Heal — BREP** (`ops/heal.py`): `fix_edges`, `unify_tolerances`, `sew_faces` via OCCT `ShapeFix` / `BRepBuilderAPI_Sewing`.
@@ -87,8 +87,8 @@ Open gaps grouped by stage, **not ranked** — pick the next scoped item, then
 implement → test → document → commit → push → verify CI/docs.
 
 **Import**
-- **IGES input (`.igs`, `.iges`)**: `IGESCAFControl_Reader` is already available in the installed OCP build. Mirrors the STEP reader — same XDE document tree, same node/material/hierarchy extraction. New `IgesReadOptions`, new `fascat/io/iges.py`, format dispatch in `pipeline.py` and `cli.py`. No new dependencies.
-- **BREP input (`.brep`)**: OpenCASCADE native format. `BRepTools.Read_s` is already called in `fascat/_ocp.py`. Single-shape, no assembly or colors — creates one root node with one part. New `BrepReadOptions`, new `fascat/io/brep.py`. No new dependencies.
+- ~~**IGES input (`.igs`, `.iges`)**: `IGESCAFControl_Reader` is already available in the installed OCP build. Mirrors the STEP reader — same XDE document tree, same node/material/hierarchy extraction. New `IgesReadOptions`, new `fascat/io/iges.py`, format dispatch in `pipeline.py` and `cli.py`. No new dependencies.~~ ✅ **done (2026-05-31)**
+- ~~**BREP input (`.brep`)**: OpenCASCADE native format. `BRepTools.Read_s` is already called in `fascat/_ocp.py`. Single-shape, no assembly or colors — creates one root node with one part. New `BrepReadOptions`, new `fascat/io/brep.py`. No new dependencies.~~ ✅ **done (2026-05-31)**
 - True multi-file/multi-root import: deterministic multi-root assemblies, shared material/image namespaces, per-member failure warnings.
 - Typed AP242 PMI entity extraction + visual annotation geometry.
 - Design-variant import.
@@ -135,6 +135,7 @@ implement → test → document → commit → push → verify CI/docs.
 - Switching-distance validation + engine-specific LOD export profiles (Unity, Unreal).
 
 **Export**
+- **FBX output (`.fbx`)**: ASCII FBX 7.x writer for DCC / engine pipelines (Maya, 3ds Max, Unreal, Unity, Blender). Hand-written like the existing glTF / OBJ / STL writers — walks the same occurrence tree (`io/obj.py` `_occurrences` / `_transform_points` / `referenced_materials`) and emits the FBX object graph: `Geometry::` (vertices + `PolygonVertexIndex` polygon-end bit, normals, tangents, UV layers, per-face `LayerElementMaterial`), `Model::` nodes with hierarchy + transforms, `Material::` nodes, `GlobalSettings` unit / up-axis, and the `Connections` graph. PBR maps to legacy Phong — base color + opacity faithful; metallic / roughness approximated (optionally via Autodesk stingray-PBS properties), the same PBR-in-non-PBR limitation as OBJ/MTL. New `FbxExportOptions`, new `fascat/io/fbx.py` (`write_fbx` + `validate_fbx`), format dispatch in `pipeline.py` and `cli.py`. No new dependencies (hand-written ASCII); binary FBX deferred.
 - Real Draco encoder (or keep `draco=True` rejected).
 - Real KTX2/Basis texture output (after first-class images exist).
 - Baseline-vs-optimized + compressed-GLB size-ladder reports.
@@ -158,7 +159,7 @@ implement → test → document → commit → push → verify CI/docs.
 Intentionally out of scope until a user need changes the priority:
 
 - **Draco** and **KTX2/Basis** compression — rejected with a clear error until a reliable encoder backend exists.
-- Non-STEP CAD formats (beyond IGES and BREP, which are now on the roadmap): Parasolid, JT, CATIA, NX, SolidWorks, IFC, 3MF, QIF.
+- Non-STEP CAD formats beyond the supported IGES and native BREP paths: Parasolid, JT, CATIA, NX, SolidWorks, IFC, 3MF, QIF.
 - Animation / skinning / morph targets / animated GLB passthrough.
 - Convex decomposition and physics proxy generation.
 - Advanced retopology and subdivision workflows.
