@@ -287,12 +287,15 @@ class Mesh:
         return {"vertices": self.vertex_count, "triangles": self.triangle_count}
 
     def fingerprint(self) -> str:
-        points = np.ascontiguousarray(np.round(self.points, 9))
-        faces = np.ascontiguousarray(self.faces)
-        digest = hashlib.sha1()
-        digest.update(points.tobytes())
-        digest.update(faces.tobytes())
-        return digest.hexdigest()
+        def build() -> str:
+            points = np.ascontiguousarray(np.round(self.points, 9))
+            faces = np.ascontiguousarray(self.faces)
+            digest = hashlib.sha1()
+            digest.update(points.tobytes())
+            digest.update(faces.tobytes())
+            return digest.hexdigest()
+
+        return self._cached_value("fingerprint", self._geometry_cache_token(), build)
 
     def _cached_value(
         self,

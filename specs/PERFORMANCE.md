@@ -209,9 +209,9 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   digests once per part and reuse.
 - **Progress:** Scene reconstruction now computes material, attribute, and metadata keys once per
   candidate part and reuses them for group-blocked diagnostics plus canonical selection, avoiding
-  duplicate `_array_digest` calls within one optimize-scene pass. Mesh-level fingerprint caching is
-  still open because the current `Mesh` API exposes mutable arrays and needs a broader invalidation
-  design.
+  duplicate `_array_digest` calls within one optimize-scene pass. `Mesh.fingerprint()` is now cached
+  per mesh object with content-digest invalidation for public in-place point/face mutations. The
+  remaining gap is persistent reuse across operation-created mesh copies/stages.
 
 ### P13 — Export binary buffer is copied several times — partial (2026-05-31)
 - **Where:** `fascat/io/gltf.py:604` (`bytes(builder.data)`), `:982` (`bytearray(binary)` for
@@ -286,9 +286,10 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 - **Fix:** Attach a lazily-computed topology cache to `Mesh` (undirected edges, edge→faces,
   boundary loops, face normals) invalidated on geometry mutation.
 - **Progress:** `Mesh` now has lazy caches for undirected edge/count arrays, edge→face maps,
-  boundary loops, and face unit normals. Cache tokens hash the relevant point/face array contents,
-  so public in-place mutation of arrays invalidates cached topology. The cache is per mesh object;
-  persistent reuse across operation-created mesh copies/stages remains open.
+  boundary loops, face unit normals, and mesh fingerprints. Cache tokens hash the relevant
+  point/face array contents, so public in-place mutation of arrays invalidates cached topology. The
+  cache is per mesh object; persistent reuse across operation-created mesh copies/stages remains
+  open.
 
 ### P18 — `stats()` / `walk()` / draw-call breakdown recomputed many times per stage — ✅ done (2026-05-31)
 - **Where:** `fascat/asset.py:76-80` (`Node.walk`), `:243-257` (`stats`), `:181-221`
