@@ -261,7 +261,9 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   through a structured dtype (`normal`, `vertices`, attribute byte count) plus one `tobytes()`,
   eliminating per-triangle/per-vertex `struct.pack` loops for the default STL path. glTF strided
   accessor payloads now use a `(rows, byte_stride)` uint8 view instead of copying each row in
-  Python. OBJ, ASCII STL, and USD object construction remain open.
+  Python. OBJ export now writes vertex, normal, and face lines in bulk blocks (faces grouped by
+  consecutive material runs), and ASCII STL writes facet records through one vectorized
+  `np.savetxt` pass over normals + triangle vertices. USD object construction remains open.
 
 ## Concurrency
 

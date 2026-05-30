@@ -347,6 +347,19 @@ def test_stl_export_writes_binary_mesh(tmp_path) -> None:  # type: ignore[no-unt
     assert validate_stl(output) == {"meshes": 1, "points": 3, "triangles": 1}
 
 
+def test_stl_export_writes_ascii_mesh(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    output = tmp_path / "triangle_ascii.stl"
+
+    _asset().write_stl(output, options=StlExportOptions(binary=False))
+
+    text = output.read_text(encoding="utf-8")
+    assert text.startswith("solid fascat\n")
+    assert "facet normal 0 0 1" in text
+    assert "vertex 1 0 0" in text
+    assert text.endswith("endsolid fascat\n")
+    assert validate_stl(output) == {"meshes": 1, "points": 3, "triangles": 1}
+
+
 def test_cli_convert_accepts_runtime_export_options_during_dry_run() -> None:
     result = runner.invoke(
         app,

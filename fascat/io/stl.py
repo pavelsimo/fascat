@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import struct
+from io import StringIO
 from pathlib import Path
 
 import numpy as np
@@ -73,25 +74,26 @@ def _binary_stl(triangles: FloatArray) -> bytes:
 
 
 def _ascii_stl(triangles: FloatArray) -> str:
-    lines = ["solid fascat"]
-    for triangle in triangles:
-        normal = _normal(triangle)
-        lines.append(f"  facet normal {normal[0]:.9g} {normal[1]:.9g} {normal[2]:.9g}")
-        lines.append("    outer loop")
-        for point in triangle:
-            lines.append(f"      vertex {point[0]:.9g} {point[1]:.9g} {point[2]:.9g}")
-        lines.append("    endloop")
-        lines.append("  endfacet")
-    lines.append("endsolid fascat")
-    return "\n".join(lines) + "\n"
-
-
-def _normal(triangle: FloatArray) -> FloatArray:
-    normal = np.cross(triangle[1] - triangle[0], triangle[2] - triangle[0])
-    length = float(np.linalg.norm(normal))
-    if length == 0.0:
-        return np.zeros(3, dtype=np.float64)
-    return np.asarray(normal / length, dtype=np.float64)
+    if triangles.shape[0] == 0:
+        return "solid fascat\nendsolid fascat\n"
+    rows = np.column_stack([_normals(triangles), triangles.reshape((triangles.shape[0], 9))])
+    output = StringIO()
+    output.write("solid fascat\n")
+    np.savetxt(
+        output,
+        rows,
+        fmt=(
+            "  facet normal %.9g %.9g %.9g\n"
+            "    outer loop\n"
+            "      vertex %.9g %.9g %.9g\n"
+            "      vertex %.9g %.9g %.9g\n"
+            "      vertex %.9g %.9g %.9g\n"
+            "    endloop\n"
+            "  endfacet"
+        ),
+    )
+    output.write("endsolid fascat\n")
+    return output.getvalue()
 
 
 def _normals(triangles: FloatArray) -> FloatArray:
