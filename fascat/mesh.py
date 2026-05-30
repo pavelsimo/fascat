@@ -1230,7 +1230,6 @@ class Mesh:
             }
             return mesh
 
-        edge_faces = self._edge_faces_map()
         face_normals = self._face_unit_normals()
         triangle_points = self.points[self.faces]
         corner_angles = _triangle_corner_angles(triangle_points)
@@ -1238,79 +1237,106 @@ class Mesh:
         p1 = triangle_points[:, 1]
         p2 = triangle_points[:, 2]
         raw_face_normals = np.cross(p1 - p0, p2 - p0)
-        incident_faces: dict[int, set[int]] = {index: set() for index in range(self.vertex_count)}
-        for face_index, face in enumerate(self.faces.astype(int).tolist()):
-            for vertex in face:
-                incident_faces[vertex].add(face_index)
+        corner_faces = np.repeat(np.arange(self.triangle_count, dtype=np.int64), 3)
+        corner_vertices = self.faces.reshape(-1)
+        pair_keys_raw, first_corner_indices_raw, corner_to_pair_raw = np.unique(
+            np.column_stack((corner_faces, corner_vertices)),
+            axis=0,
+            return_index=True,
+            return_inverse=True,
+        )
+        pair_keys = pair_keys_raw
+        first_corner_indices = np.asarray(first_corner_indices_raw, dtype=np.int64)
+        corner_to_pair = np.asarray(corner_to_pair_raw, dtype=np.int64)
+        pair_count = int(pair_keys.shape[0])
+        pair_faces = pair_keys[:, 0]
+        pair_vertices = pair_keys[:, 1]
 
-        component_by_vertex_face: dict[tuple[int, int], int] = {}
-        component_normals: list[FloatArray] = []
-        for vertex, faces in incident_faces.items():
-            remaining = set(faces)
-            while remaining:
-                seed = remaining.pop()
-                component = {seed}
-                stack = [seed]
-                while stack:
-                    current = stack.pop()
-                    current_face = self.faces[current].astype(int).tolist()
-                    for edge in (
-                        (current_face[0], current_face[1]),
-                        (current_face[1], current_face[2]),
-                        (current_face[2], current_face[0]),
-                    ):
-                        if vertex not in edge:
-                            continue
-                        key = (min(edge), max(edge))
-                        if key in hard_edges:
-                            continue
-                        for neighbor in edge_faces.get(key, []):
-                            if neighbor in remaining:
-                                remaining.remove(neighbor)
-                                component.add(neighbor)
-                                stack.append(neighbor)
-                if angle_weighted:
-                    normal = np.zeros(3, dtype=np.float64)
-                    for face_index in component:
-                        face_vertices = self.faces[face_index].astype(int).tolist()
-                        corner = face_vertices.index(vertex)
-                        normal += face_normals[face_index] * corner_angles[face_index, corner]
-                else:
-                    normal = raw_face_normals[list(component)].sum(axis=0)
-                length = float(np.linalg.norm(normal))
-                if length > 0.0:
-                    normal = normal / length
-                component_index = len(component_normals)
-                component_normals.append(normal)
-                for face_index in component:
-                    component_by_vertex_face[(vertex, face_index)] = component_index
+        parent = np.arange(pair_count, dtype=np.int64)
+        rank = np.zeros(pair_count, dtype=np.int64)
 
-        points: list[list[float]] = []
-        normals: list[list[float]] = []
-        uvs: dict[int, list[list[float]]] = {channel: [] for channel in self.uvs}
-        vertex_map: dict[tuple[int, int], int] = {}
-        new_faces: list[list[int]] = []
-        for face_index, face in enumerate(self.faces.astype(int).tolist()):
-            new_face: list[int] = []
-            for vertex in face:
-                component_index = component_by_vertex_face[(vertex, face_index)]
-                key = (vertex, component_index)
-                new_index = vertex_map.get(key)
-                if new_index is None:
-                    new_index = len(points)
-                    vertex_map[key] = new_index
-                    points.append(self.points[vertex].astype(float).tolist())
-                    normals.append(component_normals[component_index].astype(float).tolist())
-                    for channel, values in self.uvs.items():
-                        uvs[channel].append(values[vertex].astype(float).tolist())
-                new_face.append(new_index)
-            new_faces.append(new_face)
+        def find(index: int) -> int:
+            while int(parent[index]) != index:
+                parent[index] = parent[int(parent[index])]
+                index = int(parent[index])
+            return index
+
+        def union(left: int, right: int) -> None:
+            left_root = find(left)
+            right_root = find(right)
+            if left_root == right_root:
+                return
+            if rank[left_root] < rank[right_root]:
+                left_root, right_root = right_root, left_root
+            parent[right_root] = left_root
+            if rank[left_root] == rank[right_root]:
+                rank[left_root] += 1
+
+        pair_lookup = {
+            (int(face_index), int(vertex_index)): pair_index
+            for pair_index, (face_index, vertex_index) in enumerate(pair_keys.tolist())
+        }
+        for edge, faces in self._edge_faces_map().items():
+            if edge in hard_edges or len(faces) < 2:
+                continue
+            for vertex in edge:
+                first_pair: int | None = None
+                for face_index in faces:
+                    pair_index = pair_lookup.get((int(face_index), vertex))
+                    if pair_index is None:
+                        continue
+                    if first_pair is None:
+                        first_pair = pair_index
+                    else:
+                        union(first_pair, pair_index)
+
+        roots = np.asarray([find(index) for index in range(pair_count)], dtype=np.int64)
+        pair_component_keys = np.column_stack((pair_vertices, roots))
+        corner_component_keys = pair_component_keys[corner_to_pair]
+        component_keys_raw, component_first_raw, corner_to_component_raw = np.unique(
+            corner_component_keys,
+            axis=0,
+            return_index=True,
+            return_inverse=True,
+        )
+        component_keys = component_keys_raw
+        component_first = np.asarray(component_first_raw, dtype=np.int64)
+        corner_to_component = np.asarray(corner_to_component_raw, dtype=np.int64)
+        component_order = np.argsort(component_first)
+        component_remap = np.empty(component_order.shape[0], dtype=np.int64)
+        component_remap[component_order] = np.arange(component_order.shape[0], dtype=np.int64)
+        vertex_component_keys = component_keys[component_order]
+        corner_to_new = component_remap[corner_to_component]
+        component_lookup = {
+            (int(vertex_index), int(root)): component_index
+            for component_index, (vertex_index, root) in enumerate(vertex_component_keys.tolist())
+        }
+        pair_to_new = np.asarray(
+            [component_lookup[(int(vertex_index), int(root))] for vertex_index, root in pair_component_keys.tolist()],
+            dtype=np.int64,
+        )
+
+        if angle_weighted:
+            pair_corners = first_corner_indices % 3
+            pair_normal_contributions = face_normals[pair_faces] * corner_angles[pair_faces, pair_corners, None]
+        else:
+            pair_normal_contributions = raw_face_normals[pair_faces]
+        normals = _accumulate_vertex_vectors(
+            int(vertex_component_keys.shape[0]),
+            pair_to_new,
+            pair_normal_contributions,
+        )
+        lengths = np.linalg.norm(normals, axis=1)
+        nonzero = lengths > 0.0
+        normals[nonzero] = normals[nonzero] / lengths[nonzero, None]
+        new_vertices = vertex_component_keys[:, 0]
+        new_faces = corner_to_new.reshape(self.faces.shape)
 
         mesh = Mesh(
-            points=np.asarray(points, dtype=np.float64),
-            faces=np.asarray(new_faces, dtype=np.int64),
-            normals=np.asarray(normals, dtype=np.float64),
-            uvs={channel: np.asarray(values, dtype=np.float64) for channel, values in uvs.items()},
+            points=self.points[new_vertices].copy(),
+            faces=new_faces,
+            normals=normals,
+            uvs={channel: values[new_vertices].copy() for channel, values in self.uvs.items()},
             material_indices=None if self.material_indices is None else self.material_indices.copy(),
             face_groups={name: values.copy() for name, values in self.face_groups.items()},
             metadata={

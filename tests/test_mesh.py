@@ -730,6 +730,43 @@ def test_hard_edge_normals_split_vertices_across_sharp_edges() -> None:
     assert np.allclose(np.linalg.norm(hard.normals, axis=1), 1.0)
 
 
+def test_hard_edge_normals_reuse_smooth_components_and_split_sharp_edges() -> None:
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [1, 1, 0],
+                [1, 0, 1],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [1, 3, 2], [1, 4, 3]], dtype=int),
+        uvs={0: np.array([[0, 0], [1, 0], [0, 1], [1, 1], [1, 0.5]], dtype=float)},
+        material_indices=np.array([0, 0, 1], dtype=int),
+    )
+
+    hard = mesh.compute_hard_edge_normals(hard_edge_angle=30.0)
+
+    assert hard.faces.tolist() == [[0, 1, 2], [1, 3, 2], [4, 5, 6]]
+    assert hard.vertex_count == 7
+    assert hard.uvs[0].tolist() == [
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [0.0, 1.0],
+        [1.0, 1.0],
+        [1.0, 0.0],
+        [1.0, 0.5],
+        [1.0, 1.0],
+    ]
+    assert hard.material_indices is not None
+    assert hard.material_indices.tolist() == [0, 0, 1]
+    assert hard.normals is not None
+    assert np.allclose(hard.normals[1], [0.0, 0.0, 1.0])
+    assert np.allclose(hard.normals[4], [-1.0, 0.0, 0.0])
+
+
 def test_tangents_are_generated_from_uv0_and_normals() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),

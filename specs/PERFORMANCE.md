@@ -104,9 +104,11 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 - **Progress:** `compute_normals()` now replaces `np.add.at` scatter accumulation with
   `np.bincount` reductions for both angle-weighted and area-weighted smooth normals.
   `compute_flat_normals()` now expands corner vertices/normals/UVs with array indexing instead of
-  append loops, and `compute_tangents()` computes per-face tangents in bulk and accumulates with
-  `np.bincount` instead of per-face `np.add.at`. The remaining Python loops in hard-edge normals,
-  subdivide/collapse, and skinny-triangle cleanup are still open.
+  append loops, `compute_tangents()` computes per-face tangents in bulk and accumulates with
+  `np.bincount` instead of per-face `np.add.at`, and `compute_hard_edge_normals()` now splits
+  normal islands with a `(face, vertex)` union-find and remaps faces/attributes in bulk instead of
+  walking per-vertex face sets and appending vertices one corner at a time. The remaining Python
+  loops in subdivide/collapse and skinny-triangle cleanup are still open.
 
 ### P5 — Edge / adjacency maps rebuilt from `.tolist()` repeatedly — partial (2026-05-31)
 - **Where:** `fascat/mesh.py:1886` (`_edge_faces_map`), `:2255` (`_undirected_edges_and_counts`),
