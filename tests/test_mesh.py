@@ -5,6 +5,7 @@ import math
 import numpy as np
 import pytest
 
+import fascat.mesh as mesh_module
 from fascat.mesh import Mesh, MeshValidationError
 from fascat.options import DeleteDegeneratePolygonsOptions, MergeVerticesOptions, RepairOptions
 
@@ -160,6 +161,25 @@ def test_merge_vertices_preserves_attribute_seams_by_default() -> None:
     assert merged.normals is not None
     assert sorted(merged.uvs) == [0]
     assert merged.metadata["merge_vertices_removed"] == "0"
+    assert merged.metadata["merge_vertices_quality_report"] == "disabled"
+    assert merged.metadata["merge_vertices_near_duplicate_check"] == "skipped"
+    assert merged.metadata["merge_vertices_tolerance_advisory"] == "not_evaluated"
+    assert "merge_vertices_candidate_position_buckets" not in merged.metadata
+
+
+def test_merge_vertices_quality_report_records_candidate_diagnostics() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [3, 2, 1]], dtype=int),
+        normals=np.array([[0, 0, 1], [0, 0, 1], [0, 0, 1], [0, 1, 0]], dtype=float),
+        uvs={0: np.array([[0, 0], [1, 0], [0, 1], [0.5, 0.5]], dtype=float)},
+    )
+
+    merged = mesh.merge_vertices(MergeVerticesOptions(quality_report=True))
+
+    assert merged.vertex_count == 4
+    assert merged.metadata["merge_vertices_quality_report"] == "enabled"
+    assert merged.metadata["merge_vertices_near_duplicate_check"] == "checked"
     assert merged.metadata["merge_vertices_candidate_position_buckets"] == "1"
     assert merged.metadata["merge_vertices_candidate_vertices"] == "1"
     assert merged.metadata["merge_vertices_candidate_exact_duplicate_buckets"] == "0"
@@ -185,7 +205,7 @@ def test_merge_vertices_reports_tangent_and_material_boundary_protection() -> No
         material_indices=np.array([0, 1], dtype=int),
     )
 
-    merged = mesh.merge_vertices(MergeVerticesOptions())
+    merged = mesh.merge_vertices(MergeVerticesOptions(quality_report=True))
 
     assert merged.vertex_count == 4
     assert merged.metadata["merge_vertices_removed"] == "0"
@@ -213,7 +233,7 @@ def test_merge_vertices_classifies_non_manifold_candidate_buckets() -> None:
         faces=np.array([[0, 1, 2], [0, 3, 1], [0, 1, 4], [5, 2, 3]], dtype=int),
     )
 
-    merged = mesh.merge_vertices(MergeVerticesOptions())
+    merged = mesh.merge_vertices(MergeVerticesOptions(quality_report=True))
 
     assert merged.metadata["merge_vertices_candidate_position_buckets"] == "1"
     assert merged.metadata["merge_vertices_candidate_vertices"] == "1"
@@ -233,14 +253,14 @@ def test_merge_vertices_reports_t_junction_and_boundary_gap_candidates() -> None
             dtype=float,
         ),
         faces=np.array([[0, 1, 2], [0, 3, 4]], dtype=int),
-    ).merge_vertices(MergeVerticesOptions())
+    ).merge_vertices(MergeVerticesOptions(quality_report=True))
     boundary_gap = Mesh(
         points=np.array(
             [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1.005, 0, 0], [2, 0, 0], [1.005, 1, 0]],
             dtype=float,
         ),
         faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=int),
-    ).merge_vertices(MergeVerticesOptions(tolerance=0.01))
+    ).merge_vertices(MergeVerticesOptions(tolerance=0.01, quality_report=True))
 
     assert t_junction.metadata["merge_vertices_candidate_t_junctions"] == "1"
     assert t_junction.metadata["merge_vertices_candidate_boundary_gaps"] == "0"
@@ -254,7 +274,7 @@ def test_merge_vertices_reports_tolerance_scale_risk() -> None:
         faces=np.array([[0, 1, 2]], dtype=int),
     )
 
-    merged = mesh.merge_vertices(MergeVerticesOptions(tolerance=0.3))
+    merged = mesh.merge_vertices(MergeVerticesOptions(tolerance=0.3, quality_report=True))
 
     assert merged.metadata["merge_vertices_bbox_diagonal"] == "1.41421356"
     assert merged.metadata["merge_vertices_min_edge_length"] == "1"
@@ -282,7 +302,7 @@ def test_merge_vertices_reports_tolerance_too_small_for_near_duplicates() -> Non
         faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=int),
     )
 
-    merged = mesh.merge_vertices(MergeVerticesOptions(tolerance=0.0001))
+    merged = mesh.merge_vertices(MergeVerticesOptions(tolerance=0.0001, quality_report=True))
 
     assert merged.vertex_count == 6
     assert merged.metadata["merge_vertices_removed"] == "0"
@@ -307,7 +327,7 @@ def test_merge_vertices_uses_distance_tolerance_across_position_buckets() -> Non
         faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=int),
     )
 
-    merged = mesh.merge_vertices(MergeVerticesOptions(tolerance=0.1))
+    merged = mesh.merge_vertices(MergeVerticesOptions(tolerance=0.1, quality_report=True))
 
     assert merged.vertex_count == 5
     assert merged.metadata["merge_vertices_removed"] == "1"
@@ -336,7 +356,7 @@ def test_merge_vertices_preserves_cross_bucket_attribute_seams() -> None:
         ),
     )
 
-    merged = mesh.merge_vertices(MergeVerticesOptions(tolerance=0.1))
+    merged = mesh.merge_vertices(MergeVerticesOptions(tolerance=0.1, quality_report=True))
 
     assert merged.vertex_count == 6
     assert merged.metadata["merge_vertices_removed"] == "0"
@@ -857,6 +877,12 @@ def test_uv_layout_stats_detects_overlap_bounds_and_degenerate_faces() -> None:
     assert stats["degenerate_faces"] == 1
     assert stats["overlapping_face_pairs"] == 1
 
+    skipped = mesh.uv_layout_stats(0, detect_overlaps=False)
+
+    assert skipped["out_of_unit_vertices"] == 1
+    assert skipped["degenerate_faces"] == 1
+    assert skipped["overlapping_face_pairs"] == 0
+
 
 def test_uv_distortion_metrics_record_islands_pack_and_stretch() -> None:
     mesh = Mesh(
@@ -882,6 +908,29 @@ def test_uv_distortion_metrics_record_islands_pack_and_stretch() -> None:
     assert distorted_metrics["pack_efficiency"] == pytest.approx(0.625)
     assert distorted_metrics["max_angle_distortion_degrees"] > 0.0
     assert distorted_metrics["max_edge_length_distortion"] > 0.0
+
+
+def test_mesh_copy_does_not_reenter_constructor_copy(monkeypatch: pytest.MonkeyPatch) -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+        uvs={0: np.array([[0, 0], [1, 0], [0, 1]], dtype=float)},
+    )
+    calls = 0
+
+    def spy_post_init(self: Mesh) -> None:
+        nonlocal calls
+        calls += 1
+
+    monkeypatch.setattr(Mesh, "__post_init__", spy_post_init)
+
+    copied = mesh.copy()
+    copied.points[0, 0] = 9.0
+    copied.uvs[0][0, 0] = 0.5
+
+    assert calls == 0
+    assert mesh.points[0, 0] == 0.0
+    assert mesh.uvs[0][0, 0] == 0.0
 
 
 def test_subdivide_long_edges_enforces_limit_and_preserves_materials() -> None:
@@ -1181,6 +1230,30 @@ def test_assign_materials_by_nearest_centroid_matches_brute_force() -> None:
 
     target_points = rng.random((50, 3))
     target_faces = rng.integers(0, 50, size=(30, 3))
+
+    assigned = source._assign_materials_by_nearest_centroid(target_points, target_faces)
+
+    assert assigned is not None
+    expected = _brute_force_nearest_materials(source, target_points, target_faces)
+    assert assigned.tolist() == expected
+
+
+def test_assign_materials_by_nearest_centroid_kd_tree_matches_brute_force(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mesh_module, "_NEAREST_CENTROID_PAIR_LIMIT", 0)
+    rng = np.random.default_rng(4321)
+    source_points = rng.random((180, 3))
+    source_faces = rng.integers(0, 180, size=(90, 3))
+    material_indices = rng.integers(0, 7, size=90)
+    source = Mesh(
+        points=source_points,
+        faces=source_faces,
+        material_indices=material_indices.astype(int),
+    )
+
+    target_points = rng.random((60, 3))
+    target_faces = rng.integers(0, 60, size=(40, 3))
 
     assigned = source._assign_materials_by_nearest_centroid(target_points, target_faces)
 

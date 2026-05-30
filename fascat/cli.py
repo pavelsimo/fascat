@@ -770,6 +770,13 @@ def cmd_convert(
             help="Delete degenerate polygons created by --merge-vertices.",
         ),
     ] = True,
+    merge_vertex_quality_report: Annotated[
+        bool,
+        typer.Option(
+            "--merge-vertex-quality-report",
+            help="Run heavy merge-vertex candidate, topology, and near-duplicate diagnostics.",
+        ),
+    ] = False,
     merge_vertex_area_epsilon: Annotated[
         float,
         typer.Option("--merge-vertex-area-epsilon", help="Area threshold for degenerate polygons after merging."),
@@ -1269,6 +1276,7 @@ def cmd_convert(
         "preserve_merge_vertex_attributes": preserve_merge_vertex_attributes,
         "preserve_merge_vertex_material_boundaries": preserve_merge_vertex_material_boundaries,
         "delete_merge_vertex_degenerate": delete_merge_vertex_degenerate,
+        "merge_vertex_quality_report": merge_vertex_quality_report,
         "merge_vertex_area_epsilon": merge_vertex_area_epsilon,
         "delete_degenerate_polygons": delete_degenerate_polygons,
         "degenerate_area_epsilon": degenerate_area_epsilon,
@@ -1645,6 +1653,7 @@ def cmd_convert(
                 preserve_uvs=preserve_merge_vertex_attributes,
                 preserve_material_boundaries=preserve_merge_vertex_material_boundaries,
                 delete_degenerate=delete_merge_vertex_degenerate,
+                quality_report=merge_vertex_quality_report,
                 area_epsilon=merge_vertex_area_epsilon,
             )
             if merge_vertices

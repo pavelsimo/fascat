@@ -19,6 +19,7 @@ from fascat.metadata import pmi_ids_by_part
 from fascat.options import GltfExportOptions, MetadataExportOptions
 
 GLTF_SUFFIXES = {".gltf", ".glb"}
+BinaryPayload = bytes | bytearray
 
 _GLB_MAGIC = b"glTF"
 _GLB_VERSION = 2
@@ -438,10 +439,30 @@ def validate_gltf(path: str | Path) -> dict[str, int]:
         raise RuntimeError("glTF asset version must be 2.0")
 
     _validate_buffers(document, buffers)
-    stats = _validate_default_scene(document)
+    context = _GltfValidationContext.from_document(document)
+    stats = _validate_default_scene(context)
     if stats["meshes"] == 0:
         raise RuntimeError("glTF asset contains no meshes in default scene")
     return stats
+
+
+@dataclass(frozen=True)
+class _GltfValidationContext:
+    document: dict[str, Any]
+    scenes: list[Any]
+    nodes: list[Any]
+    meshes: list[Any]
+    accessors: list[Any]
+
+    @classmethod
+    def from_document(cls, document: dict[str, Any]) -> _GltfValidationContext:
+        return cls(
+            document=document,
+            scenes=_array(document.get("scenes"), "scenes"),
+            nodes=_array(document.get("nodes"), "nodes"),
+            meshes=_array(document.get("meshes"), "meshes"),
+            accessors=_array(document.get("accessors"), "accessors"),
+        )
 
 
 @dataclass
@@ -547,7 +568,7 @@ def _build_document(
     *,
     metadata_options: MetadataExportOptions,
     quantize: bool,
-) -> tuple[dict[str, Any], bytes]:
+) -> tuple[dict[str, Any], bytearray]:
     export_space = _export_space(asset)
     quantization = _part_quantization(asset, export_space) if quantize else {}
     builder = _BufferBuilder()
@@ -601,7 +622,7 @@ def _build_document(
 
     nodes: list[dict[str, Any]] = []
     root_node = _append_node(nodes, asset.root, part_meshes, part_lods, export_space, metadata_options, quantization)
-    binary = bytes(builder.data)
+    binary = builder.data
     buffers: list[dict[str, object]] = [{"byteLength": len(binary)}]
 
     document: dict[str, Any] = {
@@ -979,7 +1000,7 @@ def _apply_export_options(document: dict[str, Any], options: GltfExportOptions) 
         fascat_extras["compression"] = compression
 
 
-def _apply_meshopt_compression(document: dict[str, Any], binary: bytes) -> bytes:
+def _apply_meshopt_compression(document: dict[str, Any], binary: BinaryPayload) -> bytearray:
     try:
         import meshoptimizer
     except ImportError as exc:
@@ -1018,7 +1039,7 @@ def _apply_meshopt_compression(document: dict[str, Any], binary: bytes) -> bytes
         _add_extension_used(document, _EXT_MESHOPT_COMPRESSION)
         buffers = _array(document.get("buffers"), "buffers")
         _object(buffers[0], "buffer 0")["byteLength"] = len(payload)
-    return bytes(payload)
+    return payload
 
 
 @dataclass(frozen=True)
@@ -1042,7 +1063,7 @@ def _accessors_by_buffer_view(document: dict[str, Any]) -> dict[int, dict[str, A
 def _meshopt_view_spec(
     view: dict[str, Any],
     accessor: dict[str, Any],
-    source: bytes,
+    source: BinaryPayload,
 ) -> _MeshoptViewSpec | None:
     component_type = _int(accessor.get("componentType"), "meshopt accessor componentType")
     accessor_type = accessor.get("type")
@@ -1068,7 +1089,7 @@ def _meshopt_view_spec(
     return None
 
 
-def _meshopt_encode(source: bytes, spec: _MeshoptViewSpec, meshoptimizer: Any) -> bytes:
+def _meshopt_encode(source: BinaryPayload, spec: _MeshoptViewSpec, meshoptimizer: Any) -> bytes:
     if spec.mode in {"TRIANGLES", "INDICES"}:
         dtype = np.dtype("<u2") if spec.byte_stride == 2 else np.dtype("<u4")
         indices = np.frombuffer(source, dtype=dtype, count=spec.count).copy()
@@ -1104,7 +1125,7 @@ def _add_extension_required(document: dict[str, Any], extension: str) -> None:
     _add_extension_used(document, extension)
 
 
-def _embed_binary_uri(document: dict[str, Any], binary: bytes) -> None:
+def _embed_binary_uri(document: dict[str, Any], binary: BinaryPayload) -> None:
     buffers = _array(document.get("buffers"), "buffers")
     buffer = _object(buffers[0], "buffer 0")
     buffer["byteLength"] = len(binary)
@@ -1301,20 +1322,27 @@ def _matrix_to_export_space(matrix: NDArray[np.float64], export_space: _ExportSp
     return export_space.matrix @ matrix @ export_space.inverse_matrix
 
 
-def _pack_glb(document: dict[str, Any], binary: bytes) -> bytes:
+def _pack_glb(document: dict[str, Any], binary: BinaryPayload) -> bytearray:
     json_payload = json.dumps(document, separators=(",", ":"), sort_keys=False).encode("utf-8")
-    json_payload += b" " * ((-len(json_payload)) % 4)
-    bin_payload = binary + b"\x00" * ((-len(binary)) % 4)
-    length = 12 + 8 + len(json_payload) + 8 + len(bin_payload)
-    return b"".join(
-        [
-            struct.pack("<4sII", _GLB_MAGIC, _GLB_VERSION, length),
-            struct.pack("<II", len(json_payload), _JSON_CHUNK),
-            json_payload,
-            struct.pack("<II", len(bin_payload), _BIN_CHUNK),
-            bin_payload,
-        ]
-    )
+    json_padding = (-len(json_payload)) % 4
+    bin_padding = (-len(binary)) % 4
+    json_length = len(json_payload) + json_padding
+    bin_length = len(binary) + bin_padding
+    length = 12 + 8 + json_length + 8 + bin_length
+    payload = bytearray(length)
+    offset = 0
+    struct.pack_into("<4sII", payload, offset, _GLB_MAGIC, _GLB_VERSION, length)
+    offset += 12
+    struct.pack_into("<II", payload, offset, json_length, _JSON_CHUNK)
+    offset += 8
+    payload[offset : offset + len(json_payload)] = json_payload
+    if json_padding:
+        payload[offset + len(json_payload) : offset + json_length] = b" " * json_padding
+    offset += json_length
+    struct.pack_into("<II", payload, offset, bin_length, _BIN_CHUNK)
+    offset += 8
+    payload[offset : offset + len(binary)] = binary
+    return payload
 
 
 def _read_document(path: Path) -> tuple[dict[str, Any], list[bytes]]:
@@ -1416,39 +1444,37 @@ def _validate_accessor_storage(document: dict[str, Any], index: int, accessor: d
         raise RuntimeError(f"glTF accessor {index} is out of range")
 
 
-def _validate_default_scene(document: dict[str, Any]) -> dict[str, int]:
-    scenes = _array(document.get("scenes"), "scenes")
-    nodes = _array(document.get("nodes"), "nodes")
-    scene_index = _int(document.get("scene", 0), "default scene")
-    if scene_index < 0 or scene_index >= len(scenes):
+def _validate_default_scene(context: _GltfValidationContext) -> dict[str, int]:
+    scene_index = _int(context.document.get("scene", 0), "default scene")
+    if scene_index < 0 or scene_index >= len(context.scenes):
         raise RuntimeError("glTF default scene index is invalid")
     stats = {"meshes": 0, "points": 0, "triangles": 0}
-    for node_index in _array(_object(scenes[scene_index], f"scene {scene_index}").get("nodes", []), "scene nodes"):
-        _walk_node(document, _int(node_index, "scene node"), stats, stack=set())
-    if len(nodes) == 0:
+    for node_index in _array(
+        _object(context.scenes[scene_index], f"scene {scene_index}").get("nodes", []), "scene nodes"
+    ):
+        _walk_node(context, _int(node_index, "scene node"), stats, stack=set())
+    if len(context.nodes) == 0:
         raise RuntimeError("glTF asset contains no nodes")
     return stats
 
 
-def _walk_node(document: dict[str, Any], node_index: int, stats: dict[str, int], *, stack: set[int]) -> None:
-    nodes = _array(document.get("nodes"), "nodes")
-    if node_index < 0 or node_index >= len(nodes):
+def _walk_node(context: _GltfValidationContext, node_index: int, stats: dict[str, int], *, stack: set[int]) -> None:
+    if node_index < 0 or node_index >= len(context.nodes):
         raise RuntimeError("glTF node index is invalid")
     if node_index in stack:
         raise RuntimeError("glTF node hierarchy contains a cycle")
-    node = _object(nodes[node_index], f"node {node_index}")
+    node = _object(context.nodes[node_index], f"node {node_index}")
     mesh_index = node.get("mesh")
     if mesh_index is not None:
-        _validate_mesh(document, _int(mesh_index, f"node {node_index} mesh"), stats)
+        _validate_mesh(context, _int(mesh_index, f"node {node_index} mesh"), stats)
     for child_index in _array(node.get("children", []), f"node {node_index} children"):
-        _walk_node(document, _int(child_index, f"node {node_index} child"), stats, stack=stack | {node_index})
+        _walk_node(context, _int(child_index, f"node {node_index} child"), stats, stack=stack | {node_index})
 
 
-def _validate_mesh(document: dict[str, Any], mesh_index: int, stats: dict[str, int]) -> None:
-    meshes = _array(document.get("meshes"), "meshes")
-    if mesh_index < 0 or mesh_index >= len(meshes):
+def _validate_mesh(context: _GltfValidationContext, mesh_index: int, stats: dict[str, int]) -> None:
+    if mesh_index < 0 or mesh_index >= len(context.meshes):
         raise RuntimeError("glTF mesh index is invalid")
-    mesh = _object(meshes[mesh_index], f"mesh {mesh_index}")
+    mesh = _object(context.meshes[mesh_index], f"mesh {mesh_index}")
     position_accessors: set[int] = set()
     triangles = 0
     for primitive_index, primitive_value in enumerate(_array(mesh.get("primitives"), f"mesh {mesh_index} primitives")):
@@ -1457,19 +1483,19 @@ def _validate_mesh(document: dict[str, Any], mesh_index: int, stats: dict[str, i
             raise RuntimeError("glTF validation only supports triangle primitives")
         attributes = _object(primitive.get("attributes"), f"mesh {mesh_index} primitive attributes")
         position_index = _int(attributes.get("POSITION"), f"mesh {mesh_index} POSITION accessor")
-        position_accessor = _require_accessor(document, position_index, accessor_type="VEC3")
-        if not _position_accessor_allowed(document, position_accessor):
+        position_accessor = _require_accessor(context, position_index, accessor_type="VEC3")
+        if not _position_accessor_allowed(context.document, position_accessor):
             raise RuntimeError("glTF POSITION accessor must use FLOAT or KHR_mesh_quantization component types")
         position_accessors.add(position_index)
         indices = primitive.get("indices")
         if indices is None:
-            position_count = _accessor_count(document, position_index)
+            position_count = _accessor_count(context, position_index)
             if position_count % 3:
                 raise RuntimeError("glTF non-indexed triangle primitive has invalid vertex count")
             triangles += position_count // 3
         else:
             index = _int(indices, f"mesh {mesh_index} indices accessor")
-            accessor = _require_accessor(document, index, accessor_type="SCALAR")
+            accessor = _require_accessor(context, index, accessor_type="SCALAR")
             component_type = _int(accessor.get("componentType"), f"accessor {index} componentType")
             if component_type not in {_UNSIGNED_SHORT, _UNSIGNED_INT}:
                 raise RuntimeError("glTF index accessor must use unsigned integer components")
@@ -1478,18 +1504,22 @@ def _validate_mesh(document: dict[str, Any], mesh_index: int, stats: dict[str, i
                 raise RuntimeError("glTF indexed triangle primitive has invalid index count")
             triangles += index_count // 3
     stats["meshes"] += 1
-    stats["points"] += sum(_accessor_count(document, accessor) for accessor in position_accessors)
+    stats["points"] += sum(_accessor_count(context, accessor) for accessor in position_accessors)
     stats["triangles"] += triangles
 
 
 def _require_accessor(
-    document: dict[str, Any],
+    context: _GltfValidationContext | dict[str, Any],
     accessor_index: int,
     *,
     component_type: int | None = None,
     accessor_type: str | None = None,
 ) -> dict[str, Any]:
-    accessors = _array(document.get("accessors"), "accessors")
+    accessors = (
+        context.accessors
+        if isinstance(context, _GltfValidationContext)
+        else _array(context.get("accessors"), "accessors")
+    )
     if accessor_index < 0 or accessor_index >= len(accessors):
         raise RuntimeError("glTF accessor index is invalid")
     accessor = _object(accessors[accessor_index], f"accessor {accessor_index}")
@@ -1521,8 +1551,8 @@ def _has_extension(document: dict[str, Any], extension: str) -> bool:
     return (isinstance(used, list) and extension in used) or (isinstance(required, list) and extension in required)
 
 
-def _accessor_count(document: dict[str, Any], accessor_index: int) -> int:
-    accessor = _require_accessor(document, accessor_index)
+def _accessor_count(context: _GltfValidationContext, accessor_index: int) -> int:
+    accessor = _require_accessor(context, accessor_index)
     return _int(accessor.get("count"), f"accessor {accessor_index} count")
 
 

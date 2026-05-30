@@ -5,6 +5,7 @@ import json
 import numpy as np
 from typer.testing import CliRunner
 
+import fascat.ops.scene as scene_module
 from fascat.asset import Asset, Node, Part
 from fascat.cli import app
 from fascat.material import Material
@@ -89,6 +90,42 @@ def test_optimize_scene_batches_by_material_and_annotates_index_buffers() -> Non
     assert advisor["lost_reused_instances"] == 1
     assert advisor["draw_call_savings"] == 1
     assert "preserve or reconstruct instances" in advisor["recommendation"]
+
+
+def test_instance_reconstruction_reuses_attribute_digests(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    mesh = _triangle().compute_normals()
+    mesh.uvs[0] = np.array([[0, 0], [1, 0], [0, 1]], dtype=float)
+    mesh.face_groups["source"] = np.array([0], dtype=int)
+    fingerprint = mesh.fingerprint()
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="part_a_node", name="A", part_id="part_a"),
+                Node(id="part_b_node", name="B", part_id="part_b"),
+            ],
+        ),
+        parts={
+            "part_a": Part(id="part_a", name="A", mesh=mesh, material_ids=["steel"], fingerprint=fingerprint),
+            "part_b": Part(id="part_b", name="B", mesh=mesh.copy(), material_ids=["steel"], fingerprint=fingerprint),
+        },
+        materials={"steel": Material(id="steel", name="Steel", base_color=(0.7, 0.7, 0.7, 1.0))},
+    )
+    calls = 0
+    original_digest = scene_module._array_digest
+
+    def counting_digest(values: np.ndarray | None) -> str | None:
+        nonlocal calls
+        calls += 1
+        return original_digest(values)
+
+    monkeypatch.setattr(scene_module, "_array_digest", counting_digest)
+
+    optimized = asset.optimize_scene(SceneOptimizeOptions(instance_policy="preserve"))
+
+    assert optimized.metadata["scene_reconstructed_part_count"] == "1"
+    assert calls == 8
 
 
 def test_optimize_scene_splits_large_merged_meshes() -> None:

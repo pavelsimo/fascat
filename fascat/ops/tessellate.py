@@ -210,26 +210,35 @@ def _deflection_settings(options: TessellationOptions) -> tuple[float, bool]:
 
 def _apply_mesh_tessellation_controls(mesh: Mesh, options: TessellationOptions) -> Mesh:
     result = mesh
+    edge_control_changed = False
     if options.max_edge_length is not None:
+        before_counts = (result.vertex_count, result.triangle_count)
         result = result.subdivide_long_edges(options.max_edge_length)
+        edge_control_changed = edge_control_changed or (result.vertex_count, result.triangle_count) != before_counts
     if options.min_edge_length is not None:
+        before_counts = (result.vertex_count, result.triangle_count)
         result = result.collapse_short_edges(
             options.min_edge_length,
             preserve_boundaries=options.preserve_boundaries,
         )
+        edge_control_changed = edge_control_changed or (result.vertex_count, result.triangle_count) != before_counts
     if options.avoid_skinny_triangles:
+        before_counts = (result.vertex_count, result.triangle_count)
         result = result.improve_skinny_triangles(preserve_boundaries=options.preserve_boundaries)
-    if options.max_edge_length is not None:
-        result = result.subdivide_long_edges(options.max_edge_length)
-    if options.min_edge_length is not None:
-        result = result.collapse_short_edges(
-            options.min_edge_length,
-            preserve_boundaries=options.preserve_boundaries,
-        )
+        edge_control_changed = edge_control_changed or (result.vertex_count, result.triangle_count) != before_counts
+    if edge_control_changed:
+        if options.max_edge_length is not None:
+            result = result.subdivide_long_edges(options.max_edge_length)
+        if options.min_edge_length is not None:
+            result = result.collapse_short_edges(
+                options.min_edge_length,
+                preserve_boundaries=options.preserve_boundaries,
+            )
     result.metadata = {
         **result.metadata,
         "tessellation_feature_aware": str(options.curvature_adaptive or options.preserve_boundaries).lower(),
         "preserve_boundaries": str(options.preserve_boundaries).lower(),
+        "tessellation_edge_control_passes": "2" if edge_control_changed else "1",
     }
     return result
 

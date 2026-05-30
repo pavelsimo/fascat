@@ -211,6 +211,7 @@ class MergeVerticesOptions:
     preserve_uvs: bool = True
     preserve_material_boundaries: bool = True
     delete_degenerate: bool = True
+    quality_report: bool = False
     area_epsilon: float = 1e-12
 
     def __post_init__(self) -> None:

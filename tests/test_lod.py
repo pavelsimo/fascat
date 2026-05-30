@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pytest
 
 from fascat.asset import Asset, Node, Part
 from fascat.mesh import Mesh
@@ -98,6 +99,48 @@ def test_lods_are_monotonic() -> None:
     assert step.after["lod_added_mesh_bytes"] == int(with_lods.metadata["lod_added_mesh_bytes"])
     assert step.after["lod_reused_instance_levels"] == 0
     assert step.after["lod_advisory_count"] == 0
+
+
+def test_lods_simplify_progressively_from_previous_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    points = np.array(
+        [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [2, 0, 0], [2, 1, 0], [3, 0, 0], [3, 1, 0]],
+        dtype=float,
+    )
+    faces = np.array(
+        [[0, 1, 2], [1, 3, 2], [1, 4, 3], [4, 5, 3], [4, 6, 5], [6, 7, 5], [0, 2, 3], [4, 3, 5]],
+        dtype=int,
+    )
+    mesh = Mesh(points=points, faces=faces)
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="strip")]),
+        parts={"strip": Part(id="strip", name="Strip", mesh=mesh)},
+    )
+    calls: list[tuple[int, int | None, float | None]] = []
+
+    def fake_simplify(
+        self: Mesh,
+        *,
+        target_triangles: int | None = None,
+        ratio: float | None = None,
+        **_kwargs: object,
+    ) -> Mesh:
+        calls.append((self.triangle_count, target_triangles, ratio))
+        target = self.triangle_count if target_triangles is None else min(target_triangles, self.triangle_count)
+        return self._filter_faces(np.arange(target, dtype=np.int64)).remove_unreferenced_vertices()
+
+    monkeypatch.setattr(Mesh, "simplify", fake_simplify)
+
+    with_lods = asset.lods(LODOptions((0.5, 0.25, 0.125)))
+    part = with_lods.parts["strip"]
+
+    assert calls == [(8, 4, None), (4, 2, None), (2, 1, None)]
+    assert [lod.triangle_count for lod in part.lod_meshes] == [4, 2, 1]
+    assert part.metadata["lod_level_simplification_source"] == "source,previous,previous"
+    assert [lod.metadata["lod_simplification_source"] for lod in part.lod_meshes] == [
+        "source",
+        "previous",
+        "previous",
+    ]
 
 
 def test_lods_report_level_policy_for_reused_instances() -> None:

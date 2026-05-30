@@ -95,12 +95,23 @@ def _reconstruct_instances(asset: Asset, selected_node_ids: set[str], *, similar
     material_blocked_groups = 0
     attribute_blocked_groups = 0
     metadata_blocked_groups = 0
+    material_key_by_part: dict[str, tuple[tuple[str, ...], tuple[int, ...] | None]] = {}
+    attribute_key_by_part: dict[
+        str,
+        tuple[str | None, str | None, tuple[tuple[int, str], ...], tuple[tuple[str, str], ...]],
+    ] = {}
+    metadata_key_by_part: dict[str, tuple[str, str]] = {}
     for part_ids in part_ids_by_fingerprint.values():
         if len(part_ids) <= 1:
             continue
-        material_keys = {_part_material_key(asset.parts[part_id]) for part_id in part_ids}
-        attribute_keys = {_part_mesh_attribute_key(asset.parts[part_id].mesh) for part_id in part_ids}
-        metadata_keys = {_part_metadata_key(asset.parts[part_id]) for part_id in part_ids}
+        for part_id in part_ids:
+            part = asset.parts[part_id]
+            material_key_by_part.setdefault(part_id, _part_material_key(part))
+            attribute_key_by_part.setdefault(part_id, _part_mesh_attribute_key(part.mesh))
+            metadata_key_by_part.setdefault(part_id, _part_metadata_key(part))
+        material_keys = {material_key_by_part[part_id] for part_id in part_ids}
+        attribute_keys = {attribute_key_by_part[part_id] for part_id in part_ids}
+        metadata_keys = {metadata_key_by_part[part_id] for part_id in part_ids}
         if len(material_keys) > 1:
             material_blocked_groups += 1
         if len(attribute_keys) > 1:
@@ -110,10 +121,9 @@ def _reconstruct_instances(asset: Asset, selected_node_ids: set[str], *, similar
 
         canonical_by_key: dict[tuple[object, ...], str] = {}
         for part_id in part_ids:
-            part = asset.parts[part_id]
-            material_key = _part_material_key(part)
-            attribute_key = _part_mesh_attribute_key(part.mesh)
-            metadata_key = _part_metadata_key(part)
+            material_key = material_key_by_part[part_id]
+            attribute_key = attribute_key_by_part[part_id]
+            metadata_key = metadata_key_by_part[part_id]
             key = (material_key, attribute_key, metadata_key)
             canonical_id = canonical_by_key.get(key)
             if canonical_id is None:

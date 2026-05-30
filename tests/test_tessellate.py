@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pytest
 
 from fascat.asset import Asset, Node, Part
 from fascat.material import Material
 from fascat.mesh import Mesh
+from fascat.ops.tessellate import _apply_mesh_tessellation_controls
 from fascat.options import TessellationOptions
 
 
@@ -89,6 +91,45 @@ def test_tessellate_keeps_distinct_per_face_material_assignments() -> None:
 
     assert tessellated.part_count == 2
     assert part_ids == ["part_a", "part_b"]
+
+
+def test_tessellation_edge_controls_skip_second_pass_when_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = 0
+
+    def fake_subdivide(self: Mesh, _max_edge_length: float) -> Mesh:
+        nonlocal calls
+        calls += 1
+        return self.copy()
+
+    monkeypatch.setattr(Mesh, "subdivide_long_edges", fake_subdivide)
+
+    result = _apply_mesh_tessellation_controls(triangle_mesh(), TessellationOptions(max_edge_length=10.0))
+
+    assert calls == 1
+    assert result.metadata["tessellation_edge_control_passes"] == "1"
+
+
+def test_tessellation_edge_controls_rerun_when_first_pass_changes_mesh(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = 0
+
+    def fake_subdivide(self: Mesh, _max_edge_length: float) -> Mesh:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return Mesh(
+                points=np.vstack([self.points, np.array([[0.5, 0.5, 0.0]], dtype=float)]),
+                faces=np.array([[0, 1, 3], [1, 2, 3]], dtype=int),
+                metadata=dict(self.metadata),
+            )
+        return self.copy()
+
+    monkeypatch.setattr(Mesh, "subdivide_long_edges", fake_subdivide)
+
+    result = _apply_mesh_tessellation_controls(triangle_mesh(), TessellationOptions(max_edge_length=0.5))
+
+    assert calls == 2
+    assert result.triangle_count == 2
+    assert result.metadata["tessellation_edge_control_passes"] == "2"
 
 
 def test_tessellate_reuses_source_shape_mesh_for_matching_parts(monkeypatch) -> None:  # type: ignore[no-untyped-def]

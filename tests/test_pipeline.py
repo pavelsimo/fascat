@@ -401,7 +401,7 @@ def test_merge_vertices_asset_operation_reports_counts() -> None:
         parts={"part": Part(id="part", name="Part", mesh=mesh)},
     )
 
-    merged = asset.merge_vertices(MergeVerticesOptions())
+    merged = asset.merge_vertices(MergeVerticesOptions(quality_report=True))
     part = merged.parts["part"]
     step = merged.report.steps[-1]
 
@@ -477,7 +477,7 @@ def test_merge_vertices_asset_operation_warns_on_small_tolerance() -> None:
         parts={"part": Part(id="part", name="Part", mesh=mesh)},
     )
 
-    merged = asset.merge_vertices(MergeVerticesOptions(tolerance=0.0001))
+    merged = asset.merge_vertices(MergeVerticesOptions(tolerance=0.0001, quality_report=True))
     part = merged.parts["part"]
     step = merged.report.steps[-1]
 
@@ -553,6 +553,7 @@ def test_asset_operation_reports_include_options_and_before_after_counts() -> No
             "preserve_uvs",
             "preserve_material_boundaries",
             "delete_degenerate",
+            "quality_report",
             "area_epsilon",
         },
         "delete_degenerate_polygons": {"area_epsilon", "delete_duplicates"},

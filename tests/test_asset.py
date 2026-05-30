@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from fascat.asset import Asset, Node, Part
+from fascat.asset import Asset, Node, Part, _hierarchy_report_stats
 from fascat.filter import Filter
 from fascat.material import Material
 from fascat.mesh import Mesh
@@ -197,6 +197,43 @@ def test_asset_copies_report_on_construction() -> None:
     assert asset.report.input_stats == {"parts": 1}
 
 
+def test_asset_copy_does_not_reenter_defensive_constructors(monkeypatch: pytest.MonkeyPatch) -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh, lod_meshes=[mesh.copy()])},
+        report=Report(steps=[ReportStep("stage", options={"mode": "cad"})]),
+    )
+    calls = {"asset": 0, "part": 0, "report": 0}
+
+    def asset_post_init(self: Asset) -> None:
+        calls["asset"] += 1
+
+    def part_post_init(self: Part) -> None:
+        calls["part"] += 1
+
+    def report_post_init(self: Report) -> None:
+        calls["report"] += 1
+
+    monkeypatch.setattr(Asset, "__post_init__", asset_post_init)
+    monkeypatch.setattr(Part, "__post_init__", part_post_init)
+    monkeypatch.setattr(Report, "__post_init__", report_post_init)
+
+    copied = asset.copy()
+    copied.parts["part"].mesh.points[0, 0] = 9.0
+    copied.parts["part"].lod_meshes[0].faces[0, 0] = 2
+    copied.report.steps[0].options["mode"] = "changed"
+
+    assert calls == {"asset": 0, "part": 0, "report": 0}
+    assert asset.parts["part"].mesh is not None
+    assert asset.parts["part"].mesh.points[0, 0] == 0.0
+    assert asset.parts["part"].lod_meshes[0].faces.tolist() == [[0, 1, 2]]
+    assert asset.report.steps[0].options == {"mode": "cad"}
+
+
 def _scoped_asset() -> Asset:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
@@ -217,6 +254,45 @@ def _scoped_asset() -> Asset:
             "shared": Part(id="shared", name="Shared", mesh=mesh),
         },
     )
+
+
+def test_asset_stats_reuses_single_hierarchy_walk(monkeypatch: pytest.MonkeyPatch) -> None:
+    asset = _scoped_asset()
+    original_walk = asset.root.walk
+    calls = 0
+
+    def counting_walk() -> list[Node]:
+        nonlocal calls
+        calls += 1
+        return original_walk()
+
+    monkeypatch.setattr(asset.root, "walk", counting_walk)
+
+    stats = asset.stats()
+
+    assert calls == 1
+    assert stats["nodes"] == 4
+    assert stats["occurrences"] == 3
+
+
+def test_hierarchy_report_stats_reuses_single_hierarchy_walk(monkeypatch: pytest.MonkeyPatch) -> None:
+    asset = _scoped_asset()
+    original_walk = asset.root.walk
+    calls = 0
+
+    def counting_walk() -> list[Node]:
+        nonlocal calls
+        calls += 1
+        return original_walk()
+
+    monkeypatch.setattr(asset.root, "walk", counting_walk)
+
+    stats = _hierarchy_report_stats(asset)
+
+    assert calls == 1
+    assert stats["nodes"] == 4
+    assert stats["occurrences"] == 3
+    assert stats["draw_calls"] == 3
 
 
 def test_operation_scope_skips_asset_copy_when_selection_does_not_split_occurrences(

@@ -149,6 +149,7 @@ _MERGE_VERTICES_KEYS = frozenset(
         "preserve_uvs",
         "preserve_material_boundaries",
         "delete_degenerate",
+        "quality_report",
         "area_epsilon",
     }
 )
@@ -855,6 +856,7 @@ def _merge_vertices_options(values: dict[str, object]) -> MergeVerticesOptions:
         preserve_uvs=bool(values.get("preserve_uvs", True)),
         preserve_material_boundaries=bool(values.get("preserve_material_boundaries", True)),
         delete_degenerate=bool(values.get("delete_degenerate", True)),
+        quality_report=bool(values.get("quality_report", False)),
         area_epsilon=_as_float(values.get("area_epsilon", 1e-12)),
     )
 

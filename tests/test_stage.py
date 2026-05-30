@@ -352,13 +352,15 @@ def test_stage_records_uv_layout_quality_and_warns_for_uv1_overlap() -> None:
     assert staged_mesh.metadata["uv1_bounds"] == "0,0,1,1"
     assert staged_mesh.metadata["uv1_unit_domain_status"] == "ok"
     assert staged_mesh.metadata["uv1_validation_status"] == "overlap_pairs"
-    assert staged_mesh.metadata["uv0_overlap_pairs"] == "1"
+    assert staged_mesh.metadata["uv0_overlap_check"] == "skipped"
+    assert staged_mesh.metadata["uv0_overlap_pairs"] == "not_evaluated"
+    assert staged_mesh.metadata["uv0_distortion_check"] == "skipped"
     assert staged_mesh.metadata["uv1_overlap_pairs"] == "1"
-    assert staged_mesh.metadata["uv0_island_count"] == "2"
+    assert staged_mesh.metadata["uv1_overlap_check"] == "checked"
+    assert staged_mesh.metadata["uv1_distortion_check"] == "checked"
+    assert "uv0_island_count" not in staged_mesh.metadata
     assert staged_mesh.metadata["uv1_island_count"] == "2"
-    assert staged_mesh.metadata["uv0_pack_efficiency"] == "1"
     assert staged_mesh.metadata["uv1_normalized_pack_efficiency"] == "1"
-    assert staged_mesh.metadata["uv0_max_angle_distortion_degrees"] == "0"
     assert staged_mesh.metadata["uv1_max_edge_length_distortion"] == "0"
     assert len(warnings) == 1
     assert "part part uv1 violates lightmap/baking constraints" in warnings[0]
@@ -764,6 +766,8 @@ def test_stage_records_forbid_overlapping_policy_for_tileable_uv0() -> None:
     assert staged_mesh.metadata["uv0_forbid_overlapping_requested"] == "true"
     assert staged_mesh.metadata["uv0_forbid_overlapping_effective"] == "true"
     assert staged_mesh.metadata["uv0_forbid_overlapping_status"] == "violation"
+    assert staged_mesh.metadata["uv0_overlap_check"] == "checked"
+    assert staged_mesh.metadata["uv0_overlap_pairs"] == "1"
     assert staged_mesh.metadata["uv0_validation_status"] == "overlap_pairs"
     assert staged.metadata["stage_uv_forbid_overlapping_violations"] == "1"
     assert staged.report.steps[-1].after["stage_uv_forbid_overlapping_violations"] == 1

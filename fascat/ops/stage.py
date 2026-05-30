@@ -542,10 +542,14 @@ def _tag_uv_layout_quality(
     for channel in sorted(mesh.uvs):
         prefix = f"uv{channel}"
         mode = uv_modes.get(channel, str(mesh.metadata.get(f"{prefix}_mode", mesh.metadata.get(prefix, "existing"))))
-        stats = mesh.uv_layout_stats(channel)
-        distortion = mesh.uv_distortion_metrics(channel)
         domain = _uv_domain(channel, mode)
         forbid_overlapping = options.unwrap.forbid_overlapping or domain == "bake"
+        stats = mesh.uv_layout_stats(channel, detect_overlaps=forbid_overlapping)
+        distortion = (
+            mesh.uv_distortion_metrics(channel)
+            if _should_compute_uv_distortion(domain=domain, options=options)
+            else None
+        )
         validation_problems = _uv_validation_problems(stats, domain=domain, forbid_overlapping=forbid_overlapping)
         _tag_uv_policy_metadata(mesh, prefix, mode, domain, stats, options, uv_summary)
         mesh.metadata[f"{prefix}_domain"] = domain
@@ -556,24 +560,11 @@ def _tag_uv_layout_quality(
         )
         mesh.metadata[f"{prefix}_out_of_unit_vertices"] = str(stats["out_of_unit_vertices"])
         mesh.metadata[f"{prefix}_degenerate_faces"] = str(stats["degenerate_faces"])
-        mesh.metadata[f"{prefix}_overlap_pairs"] = str(stats["overlapping_face_pairs"])
-        mesh.metadata[f"{prefix}_island_count"] = str(distortion["island_count"])
-        mesh.metadata[f"{prefix}_pack_efficiency"] = _format_uv_metric(distortion["pack_efficiency"])
-        mesh.metadata[f"{prefix}_normalized_pack_efficiency"] = _format_uv_metric(
-            distortion["normalized_pack_efficiency"]
+        mesh.metadata[f"{prefix}_overlap_check"] = "checked" if forbid_overlapping else "skipped"
+        mesh.metadata[f"{prefix}_overlap_pairs"] = (
+            str(stats["overlapping_face_pairs"]) if forbid_overlapping else "not_evaluated"
         )
-        mesh.metadata[f"{prefix}_max_angle_distortion_degrees"] = _format_uv_metric(
-            distortion["max_angle_distortion_degrees"]
-        )
-        mesh.metadata[f"{prefix}_mean_angle_distortion_degrees"] = _format_uv_metric(
-            distortion["mean_angle_distortion_degrees"]
-        )
-        mesh.metadata[f"{prefix}_max_edge_length_distortion"] = _format_uv_metric(
-            distortion["max_edge_length_distortion"]
-        )
-        mesh.metadata[f"{prefix}_mean_edge_length_distortion"] = _format_uv_metric(
-            distortion["mean_edge_length_distortion"]
-        )
+        _tag_uv_distortion_metadata(mesh, prefix, distortion)
         mesh.metadata[f"{prefix}_workflow_steps"] = _uv_workflow_steps(mesh, prefix, mode)
         if domain != "bake":
             if options.unwrap.forbid_overlapping and stats["overlapping_face_pairs"]:
@@ -637,6 +628,34 @@ def _tag_uv_policy_metadata(
     mesh.metadata[f"{prefix}_forbid_overlapping_status"] = status
     if requested_forbid and mode in {"unwrap", "lightmap"}:
         uv_summary["policy_intent"] += 1
+
+
+def _should_compute_uv_distortion(*, domain: str, options: StageOptions) -> bool:
+    return domain == "bake" or options.unwrap.max_stretch is not None
+
+
+def _tag_uv_distortion_metadata(
+    mesh: Mesh,
+    prefix: str,
+    distortion: dict[str, int | float] | None,
+) -> None:
+    if distortion is None:
+        mesh.metadata[f"{prefix}_distortion_check"] = "skipped"
+        return
+    mesh.metadata[f"{prefix}_distortion_check"] = "checked"
+    mesh.metadata[f"{prefix}_island_count"] = str(distortion["island_count"])
+    mesh.metadata[f"{prefix}_pack_efficiency"] = _format_uv_metric(distortion["pack_efficiency"])
+    mesh.metadata[f"{prefix}_normalized_pack_efficiency"] = _format_uv_metric(distortion["normalized_pack_efficiency"])
+    mesh.metadata[f"{prefix}_max_angle_distortion_degrees"] = _format_uv_metric(
+        distortion["max_angle_distortion_degrees"]
+    )
+    mesh.metadata[f"{prefix}_mean_angle_distortion_degrees"] = _format_uv_metric(
+        distortion["mean_angle_distortion_degrees"]
+    )
+    mesh.metadata[f"{prefix}_max_edge_length_distortion"] = _format_uv_metric(distortion["max_edge_length_distortion"])
+    mesh.metadata[f"{prefix}_mean_edge_length_distortion"] = _format_uv_metric(
+        distortion["mean_edge_length_distortion"]
+    )
 
 
 def _tag_uv_summary(asset: Asset, uv_summary: dict[str, int]) -> None:

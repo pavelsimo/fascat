@@ -22,6 +22,15 @@ Point2D = tuple[float, float]
 # per-edge work bounded for rare giant/diagonal edges (which only occur on coarse
 # meshes, where the full scan is cheap anyway).
 _T_JUNCTION_CELL_BUDGET = 4096
+_NEAREST_CENTROID_PAIR_LIMIT = 4_000_000
+
+
+@dataclass(frozen=True, slots=True)
+class _CentroidKdNode:
+    index: int
+    axis: int
+    left: _CentroidKdNode | None = None
+    right: _CentroidKdNode | None = None
 
 
 class MeshValidationError(ValueError):
@@ -182,6 +191,30 @@ class Mesh:
         }
         self.metadata = dict(self.metadata)
 
+    @classmethod
+    def _adopt(
+        cls,
+        *,
+        points: FloatArray,
+        faces: IntArray,
+        normals: FloatArray | None,
+        tangents: FloatArray | None,
+        uvs: dict[int, FloatArray],
+        material_indices: IntArray | None,
+        face_groups: dict[str, IntArray],
+        metadata: Metadata,
+    ) -> Mesh:
+        mesh = object.__new__(cls)
+        mesh.points = points
+        mesh.faces = faces
+        mesh.normals = normals
+        mesh.tangents = tangents
+        mesh.uvs = uvs
+        mesh.material_indices = material_indices
+        mesh.face_groups = face_groups
+        mesh.metadata = metadata
+        return mesh
+
     @property
     def vertex_count(self) -> int:
         return int(self.points.shape[0])
@@ -191,7 +224,7 @@ class Mesh:
         return int(self.faces.shape[0])
 
     def copy(self) -> Mesh:
-        return Mesh(
+        return Mesh._adopt(
             points=self.points.copy(),
             faces=self.faces.copy(),
             normals=None if self.normals is None else self.normals.copy(),
@@ -395,9 +428,17 @@ class Mesh:
         before_vertex_count = self.vertex_count
         before_triangle_count = self.triangle_count
         material_signatures = self._vertex_material_signatures() if opts.preserve_material_boundaries else None
-        skip_diagnostics = self._merge_vertex_skip_diagnostics(opts, material_signatures)
-        tolerance_diagnostics = self._merge_vertex_tolerance_diagnostics(opts.tolerance)
-        components = self._merge_vertex_components(opts, material_signatures)
+        attribute_keys = self._merge_vertex_attribute_keys(opts, material_signatures)
+        skip_diagnostics = (
+            self._merge_vertex_skip_diagnostics(opts, material_signatures, attribute_keys)
+            if opts.quality_report
+            else {}
+        )
+        tolerance_diagnostics = self._merge_vertex_tolerance_diagnostics(
+            opts.tolerance,
+            include_near_duplicates=opts.quality_report,
+        )
+        components = self._distance_connected_components(tolerance=opts.tolerance, component_keys=attribute_keys)
         old_to_new = np.empty(self.vertex_count, dtype=np.int64)
         representative_indices: list[int] = []
         for new_index, vertices in enumerate(components):
@@ -437,23 +478,27 @@ class Mesh:
             "merge_vertices_preserve_tangents": str(opts.preserve_tangents).lower(),
             "merge_vertices_preserve_uvs": str(opts.preserve_uvs).lower(),
             "merge_vertices_preserve_material_boundaries": str(opts.preserve_material_boundaries).lower(),
+            "merge_vertices_quality_report": "enabled" if opts.quality_report else "disabled",
             **{key: str(value) for key, value in skip_diagnostics.items()},
             **tolerance_diagnostics,
         }
         mesh.validate()
         return mesh
 
-    def _merge_vertex_tolerance_diagnostics(self, tolerance: float) -> dict[str, str]:
+    def _merge_vertex_tolerance_diagnostics(self, tolerance: float, *, include_near_duplicates: bool) -> dict[str, str]:
         mins, maxs = self.bounds()
         diagonal = float(np.linalg.norm(maxs - mins))
         edge_lengths = self._triangle_edge_lengths().reshape(-1)
         positive_edges = edge_lengths[edge_lengths > 0.0]
         min_edge = float(positive_edges.min()) if positive_edges.size else 0.0
-        near_duplicate_pairs, nearest_near_duplicate = self._near_duplicate_unmerged_stats(
-            tolerance=tolerance,
-            diagonal=diagonal,
-            min_edge=min_edge,
-        )
+        near_duplicate_pairs = 0
+        nearest_near_duplicate = 0.0
+        if include_near_duplicates:
+            near_duplicate_pairs, nearest_near_duplicate = self._near_duplicate_unmerged_stats(
+                tolerance=tolerance,
+                diagonal=diagonal,
+                min_edge=min_edge,
+            )
         bbox_ratio = tolerance / diagonal if tolerance > 0.0 and diagonal > 0.0 else 0.0
         min_edge_ratio = tolerance / min_edge if tolerance > 0.0 and min_edge > 0.0 else 0.0
         risk = "exact_only"
@@ -470,9 +515,12 @@ class Mesh:
             "merge_vertices_tolerance_bbox_ratio": f"{bbox_ratio:.9g}",
             "merge_vertices_tolerance_min_edge_ratio": f"{min_edge_ratio:.9g}",
             "merge_vertices_tolerance_risk": risk,
+            "merge_vertices_near_duplicate_check": "checked" if include_near_duplicates else "skipped",
             "merge_vertices_near_duplicate_pairs": str(near_duplicate_pairs),
             "merge_vertices_nearest_near_duplicate_distance": f"{nearest_near_duplicate:.9g}",
-            "merge_vertices_tolerance_advisory": "near_duplicates_unmerged" if near_duplicate_pairs else "none",
+            "merge_vertices_tolerance_advisory": ("near_duplicates_unmerged" if near_duplicate_pairs else "none")
+            if include_near_duplicates
+            else "not_evaluated",
         }
 
     def _near_duplicate_unmerged_stats(
@@ -588,21 +636,21 @@ class Mesh:
             components.setdefault(find(vertex), []).append(vertex)
         return sorted(components.values(), key=lambda vertices: vertices[0])
 
-    def _merge_vertex_components(
+    def _merge_vertex_attribute_keys(
         self,
         options: MergeVerticesOptions,
         material_signatures: tuple[tuple[int, ...], ...] | None,
-    ) -> list[list[int]]:
-        attribute_keys = [
+    ) -> list[tuple[object, ...]]:
+        return [
             self._merge_vertex_attribute_key(vertex_index, options, material_signatures)
             for vertex_index in range(self.vertex_count)
         ]
-        return self._distance_connected_components(tolerance=options.tolerance, component_keys=attribute_keys)
 
     def _merge_vertex_skip_diagnostics(
         self,
         options: MergeVerticesOptions,
         material_signatures: tuple[tuple[int, ...], ...] | None,
+        attribute_keys: Sequence[tuple[object, ...]],
     ) -> dict[str, int]:
         candidate_components = self._distance_connected_components(tolerance=options.tolerance)
 
@@ -628,7 +676,11 @@ class Mesh:
             diagnostics["merge_vertices_candidate_position_buckets"] += 1
             diagnostics["merge_vertices_candidate_vertices"] += len(vertices) - 1
             exact_keys = {
-                self._merge_vertex_exact_identity_key(vertex, options, material_signatures) for vertex in vertices
+                (
+                    ("position", tuple(float(value) for value in self.points[vertex])),
+                    *attribute_keys[vertex],
+                )
+                for vertex in vertices
             }
             if len(exact_keys) < len(vertices):
                 diagnostics["merge_vertices_candidate_exact_duplicate_buckets"] += 1
@@ -638,10 +690,8 @@ class Mesh:
                 diagnostics["merge_vertices_candidate_non_manifold_buckets"] += 1
             if self.normals is not None and self._has_distinct_normals(vertices):
                 diagnostics["merge_vertices_candidate_hard_edge_buckets"] += 1
-            attribute_keys = {
-                self._merge_vertex_attribute_key(vertex, options, material_signatures) for vertex in vertices
-            }
-            skipped = len(attribute_keys) - 1
+            component_attribute_keys = {attribute_keys[vertex] for vertex in vertices}
+            skipped = len(component_attribute_keys) - 1
             if skipped <= 0:
                 continue
             diagnostics["merge_vertices_skipped_by_protection"] += skipped
@@ -1094,10 +1144,13 @@ class Mesh:
                     right = self.points[self.faces[:, (corner + 2) % 3]] - origin
                     angles = _vector_angles(left, right)
                     weighted = unit_normals * angles[:, None]
-                    np.add.at(normals, self.faces[:, corner], weighted)
+                    normals += _accumulate_vertex_vectors(self.vertex_count, self.faces[:, corner], weighted)
             else:
-                for corner in range(3):
-                    np.add.at(normals, self.faces[:, corner], face_normals)
+                normals += _accumulate_vertex_vectors(
+                    self.vertex_count,
+                    self.faces.reshape(-1),
+                    np.repeat(face_normals, 3, axis=0),
+                )
         lengths = np.linalg.norm(normals, axis=1)
         nonzero = lengths > 0.0
         normals[nonzero] = normals[nonzero] / lengths[nonzero, None]
@@ -1497,7 +1550,13 @@ class Mesh:
         mesh.tangents = None
         return mesh
 
-    def uv_layout_stats(self, channel: int = 0, *, tolerance: float = 1e-9) -> dict[str, int]:
+    def uv_layout_stats(
+        self,
+        channel: int = 0,
+        *,
+        tolerance: float = 1e-9,
+        detect_overlaps: bool = True,
+    ) -> dict[str, int]:
         if tolerance < 0.0:
             raise ValueError("tolerance must be greater than or equal to 0")
         if channel not in self.uvs:
@@ -1519,32 +1578,33 @@ class Mesh:
         edge_b = triangles[:, 2] - triangles[:, 0]
         signed_areas = 0.5 * (edge_a[:, 0] * edge_b[:, 1] - edge_a[:, 1] * edge_b[:, 0])
         degenerate = np.abs(signed_areas) <= tolerance
-        min_uv = triangles.min(axis=1)
-        max_uv = triangles.max(axis=1)
-        order = np.argsort(min_uv[:, 0], kind="mergesort")
-
         overlapping_pairs = 0
-        for position, left_index_value in enumerate(order):
-            left_index = int(left_index_value)
-            if bool(degenerate[left_index]):
-                continue
-            left_min = min_uv[left_index]
-            left_max = max_uv[left_index]
-            for right_index_value in order[position + 1 :]:
-                right_index = int(right_index_value)
-                if min_uv[right_index, 0] > left_max[0] + tolerance:
-                    break
-                if bool(degenerate[right_index]):
+        if detect_overlaps:
+            min_uv = triangles.min(axis=1)
+            max_uv = triangles.max(axis=1)
+            order = np.argsort(min_uv[:, 0], kind="mergesort")
+
+            for position, left_index_value in enumerate(order):
+                left_index = int(left_index_value)
+                if bool(degenerate[left_index]):
                     continue
-                if min_uv[right_index, 1] > left_max[1] + tolerance:
-                    continue
-                if max_uv[right_index, 1] + tolerance < left_min[1]:
-                    continue
-                if (
-                    _triangle_overlap_area_2d(triangles[left_index], triangles[right_index], tolerance=tolerance)
-                    > tolerance
-                ):
-                    overlapping_pairs += 1
+                left_min = min_uv[left_index]
+                left_max = max_uv[left_index]
+                for right_index_value in order[position + 1 :]:
+                    right_index = int(right_index_value)
+                    if min_uv[right_index, 0] > left_max[0] + tolerance:
+                        break
+                    if bool(degenerate[right_index]):
+                        continue
+                    if min_uv[right_index, 1] > left_max[1] + tolerance:
+                        continue
+                    if max_uv[right_index, 1] + tolerance < left_min[1]:
+                        continue
+                    if (
+                        _triangle_overlap_area_2d(triangles[left_index], triangles[right_index], tolerance=tolerance)
+                        > tolerance
+                    ):
+                        overlapping_pairs += 1
 
         return {
             "vertices": self.vertex_count,
@@ -2184,32 +2244,7 @@ class Mesh:
             return None
         source_centroids = self.points[self.faces].mean(axis=1)
         target_centroids = points[faces].mean(axis=1)
-        n_target = target_centroids.shape[0]
-        n_source = source_centroids.shape[0]
-        nearest = np.zeros(n_target, dtype=np.int64)
-        # Chunk both dimensions so the (target_block x source_block x 3) working
-        # array stays bounded (~tens of MB) regardless of mesh size; otherwise a
-        # full-resolution source mesh would allocate tens of GB and exhaust RAM.
-        max_block_elems = 4_000_000
-        target_block = max(1, min(n_target, max_block_elems // max(1, n_source)))
-        if target_block * n_source > max_block_elems:
-            target_block = max(1, min(n_target, 2048))
-        source_block = max(1, min(n_source, max_block_elems // target_block))
-        for t0 in range(0, n_target, target_block):
-            t1 = min(t0 + target_block, n_target)
-            tgt = target_centroids[t0:t1]
-            best_dist = np.full(t1 - t0, np.inf)
-            best_idx = np.zeros(t1 - t0, dtype=np.int64)
-            for s0 in range(0, n_source, source_block):
-                s1 = min(s0 + source_block, n_source)
-                delta = tgt[:, None, :] - source_centroids[None, s0:s1, :]
-                dist = np.einsum("ijk,ijk->ij", delta, delta)
-                local_idx = np.argmin(dist, axis=1)
-                local_dist = dist[np.arange(t1 - t0), local_idx]
-                improved = local_dist < best_dist
-                best_dist[improved] = local_dist[improved]
-                best_idx[improved] = local_idx[improved] + s0
-            nearest[t0:t1] = best_idx
+        nearest = _nearest_centroid_indices(source_centroids, target_centroids)
         return cast(IntArray, np.asarray(self.material_indices[nearest], dtype=np.int64).copy())
 
     def fill_holes(self) -> Mesh:
@@ -2434,6 +2469,109 @@ class Mesh:
             },
             "metadata": dict(self.metadata),
         }
+
+
+def _nearest_centroid_indices(source_centroids: FloatArray, target_centroids: FloatArray) -> IntArray:
+    n_target = target_centroids.shape[0]
+    n_source = source_centroids.shape[0]
+    if n_target == 0 or n_source == 0:
+        return np.empty((0,), dtype=np.int64)
+    if n_target * n_source <= _NEAREST_CENTROID_PAIR_LIMIT:
+        return _nearest_centroid_indices_chunked(source_centroids, target_centroids)
+
+    root = _build_centroid_kd_tree(source_centroids, np.arange(n_source, dtype=np.int64))
+    if root is None:
+        return np.empty((0,), dtype=np.int64)
+    nearest = np.empty(n_target, dtype=np.int64)
+    for target_index, centroid in enumerate(target_centroids):
+        nearest[target_index] = _query_centroid_kd_tree(source_centroids, root, centroid)
+    return nearest
+
+
+def _nearest_centroid_indices_chunked(source_centroids: FloatArray, target_centroids: FloatArray) -> IntArray:
+    n_target = target_centroids.shape[0]
+    n_source = source_centroids.shape[0]
+    nearest = np.zeros(n_target, dtype=np.int64)
+    # Chunk both dimensions so the (target_block x source_block x 3) working
+    # array stays bounded (~tens of MB) regardless of mesh size; otherwise a
+    # full-resolution source mesh would allocate tens of GB and exhaust RAM.
+    target_block = max(1, min(n_target, _NEAREST_CENTROID_PAIR_LIMIT // max(1, n_source)))
+    if target_block * n_source > _NEAREST_CENTROID_PAIR_LIMIT:
+        target_block = max(1, min(n_target, 2048))
+    source_block = max(1, min(n_source, _NEAREST_CENTROID_PAIR_LIMIT // target_block))
+    for t0 in range(0, n_target, target_block):
+        t1 = min(t0 + target_block, n_target)
+        target = target_centroids[t0:t1]
+        best_dist = np.full(t1 - t0, np.inf)
+        best_idx = np.zeros(t1 - t0, dtype=np.int64)
+        for s0 in range(0, n_source, source_block):
+            s1 = min(s0 + source_block, n_source)
+            delta = target[:, None, :] - source_centroids[None, s0:s1, :]
+            dist = np.einsum("ijk,ijk->ij", delta, delta)
+            local_idx = np.argmin(dist, axis=1)
+            local_dist = dist[np.arange(t1 - t0), local_idx]
+            improved = local_dist < best_dist
+            best_dist[improved] = local_dist[improved]
+            best_idx[improved] = local_idx[improved] + s0
+        nearest[t0:t1] = best_idx
+    return nearest
+
+
+def _build_centroid_kd_tree(centroids: FloatArray, indices: IntArray) -> _CentroidKdNode | None:
+    if indices.size == 0:
+        return None
+    if indices.size == 1:
+        return _CentroidKdNode(index=int(indices[0]), axis=0)
+
+    span = np.ptp(centroids[indices], axis=0)
+    axis = int(np.argmax(span))
+    axis_values = centroids[indices, axis]
+    median = indices.size // 2
+    order = np.argpartition(axis_values, median)
+    partitioned = indices[order]
+    return _CentroidKdNode(
+        index=int(partitioned[median]),
+        axis=axis,
+        left=_build_centroid_kd_tree(centroids, partitioned[:median]),
+        right=_build_centroid_kd_tree(centroids, partitioned[median + 1 :]),
+    )
+
+
+def _query_centroid_kd_tree(centroids: FloatArray, root: _CentroidKdNode, target: FloatArray) -> int:
+    best_index = root.index
+    best_distance = math.inf
+
+    def search(node: _CentroidKdNode | None) -> None:
+        nonlocal best_distance, best_index
+        if node is None:
+            return
+        centroid = centroids[node.index]
+        delta_vector = centroid - target
+        distance = float(np.dot(delta_vector, delta_vector))
+        if distance < best_distance or (math.isclose(distance, best_distance) and node.index < best_index):
+            best_distance = distance
+            best_index = node.index
+
+        axis_delta = float(target[node.axis] - centroid[node.axis])
+        first = node.left if axis_delta <= 0.0 else node.right
+        second = node.right if axis_delta <= 0.0 else node.left
+        search(first)
+        if axis_delta * axis_delta <= best_distance:
+            search(second)
+
+    search(root)
+    return best_index
+
+
+def _accumulate_vertex_vectors(vertex_count: int, indices: IntArray, values: FloatArray) -> FloatArray:
+    accumulated = np.empty((vertex_count, values.shape[1]), dtype=np.float64)
+    for component in range(values.shape[1]):
+        accumulated[:, component] = np.bincount(
+            indices,
+            weights=values[:, component],
+            minlength=vertex_count,
+        )
+    return accumulated
 
 
 def _boundary_edges_from_faces(faces: list[list[int]]) -> set[tuple[int, int]]:

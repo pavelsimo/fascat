@@ -26,8 +26,28 @@ class ReportStep:
         self.after = dict(self.after)
         self.warnings = list(self.warnings)
 
+    @classmethod
+    def _adopt(
+        cls,
+        *,
+        name: str,
+        options: dict[str, object],
+        duration: float,
+        before: dict[str, int],
+        after: dict[str, int],
+        warnings: list[str],
+    ) -> ReportStep:
+        step = object.__new__(cls)
+        step.name = name
+        step.options = options
+        step.duration = duration
+        step.before = before
+        step.after = after
+        step.warnings = warnings
+        return step
+
     def copy(self) -> ReportStep:
-        return ReportStep(
+        return ReportStep._adopt(
             name=self.name,
             options=dict(self.options),
             duration=self.duration,
@@ -65,8 +85,32 @@ class Report:
         self.input_stats = dict(self.input_stats)
         self.output_stats = dict(self.output_stats)
 
+    @classmethod
+    def _adopt(
+        cls,
+        *,
+        source_path: str | None,
+        started_at: str,
+        finished_at: str | None,
+        steps: list[ReportStep],
+        warnings: list[str],
+        errors: list[str],
+        input_stats: dict[str, int],
+        output_stats: dict[str, int],
+    ) -> Report:
+        report = object.__new__(cls)
+        report.source_path = source_path
+        report.started_at = started_at
+        report.finished_at = finished_at
+        report.steps = steps
+        report.warnings = warnings
+        report.errors = errors
+        report.input_stats = input_stats
+        report.output_stats = output_stats
+        return report
+
     def copy(self) -> Report:
-        return Report(
+        return Report._adopt(
             source_path=self.source_path,
             started_at=self.started_at,
             finished_at=self.finished_at,

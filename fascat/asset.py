@@ -63,8 +63,28 @@ class Node:
             raise ValueError("node transform must have shape (4, 4)")
         self.metadata = dict(self.metadata)
 
+    @classmethod
+    def _adopt(
+        cls,
+        *,
+        id: str,
+        name: str,
+        children: list[Node],
+        part_id: str | None,
+        transform: Transform,
+        metadata: Metadata,
+    ) -> Node:
+        node = object.__new__(cls)
+        node.id = id
+        node.name = name
+        node.children = children
+        node.part_id = part_id
+        node.transform = transform
+        node.metadata = metadata
+        return node
+
     def copy(self) -> Node:
-        return Node(
+        return Node._adopt(
             id=self.id,
             name=self.name,
             children=[child.copy() for child in self.children],
@@ -108,8 +128,32 @@ class Part:
         self.metadata = dict(self.metadata)
         self.lod_meshes = [mesh.copy() for mesh in self.lod_meshes]
 
+    @classmethod
+    def _adopt(
+        cls,
+        *,
+        id: str,
+        name: str,
+        source_shape: object | None,
+        mesh: Mesh | None,
+        material_ids: list[str],
+        metadata: Metadata,
+        fingerprint: str | None,
+        lod_meshes: list[Mesh],
+    ) -> Part:
+        part = object.__new__(cls)
+        part.id = id
+        part.name = name
+        part.source_shape = source_shape
+        part.mesh = mesh
+        part.material_ids = material_ids
+        part.metadata = metadata
+        part.fingerprint = fingerprint
+        part.lod_meshes = lod_meshes
+        return part
+
     def copy(self, *, keep_source: bool = True) -> Part:
-        return Part(
+        return Part._adopt(
             id=self.id,
             name=self.name,
             source_shape=self.source_shape if keep_source else None,
@@ -154,6 +198,34 @@ class Asset:
         self.pmi = [annotation for annotation in self.pmi]
         self.report = self.report.copy()
 
+    @classmethod
+    def _adopt(
+        cls,
+        *,
+        root: Node,
+        parts: dict[str, Part],
+        materials: dict[str, Material],
+        units: str,
+        meters_per_unit: float,
+        up_axis: Literal["Y", "Z"],
+        source_path: Path | None,
+        metadata: Metadata,
+        pmi: list[PmiAnnotation],
+        report: Report,
+    ) -> Asset:
+        asset = object.__new__(cls)
+        asset.root = root
+        asset.parts = parts
+        asset.materials = materials
+        asset.units = units
+        asset.meters_per_unit = meters_per_unit
+        asset.up_axis = up_axis
+        asset.source_path = source_path
+        asset.metadata = metadata
+        asset.pmi = pmi
+        asset.report = report
+        return asset
+
     @property
     def part_count(self) -> int:
         return len(self.parts)
@@ -179,8 +251,11 @@ class Asset:
         return self.draw_call_breakdown()["draw_calls"]
 
     def draw_call_breakdown(self) -> dict[str, int]:
+        return self._draw_call_breakdown_from_nodes(self.root.walk())
+
+    def _draw_call_breakdown_from_nodes(self, nodes: list[Node]) -> dict[str, int]:
         occurrence_counts: dict[str, int] = {}
-        for node in self.root.walk():
+        for node in nodes:
             if node.part_id is None:
                 continue
             part = self.parts.get(node.part_id)
@@ -221,7 +296,7 @@ class Asset:
         }
 
     def copy(self, *, keep_source: bool = True) -> Asset:
-        return Asset(
+        return Asset._adopt(
             root=self.root.copy(),
             parts={part_id: part.copy(keep_source=keep_source) for part_id, part in self.parts.items()},
             materials={material_id: material.copy() for material_id, material in self.materials.items()},
@@ -241,13 +316,17 @@ class Asset:
         return selector.select(self)
 
     def stats(self, *, include_lods: bool = False) -> dict[str, int]:
+        return self._stats_from_nodes(self.root.walk(), include_lods=include_lods)
+
+    def _stats_from_nodes(self, nodes: list[Node], *, include_lods: bool = False) -> dict[str, int]:
+        mesh_parts = [part for part in self.parts.values() if part.mesh is not None]
         stats = {
-            "nodes": len(self.root.walk()),
-            "parts": self.part_count,
-            "occurrences": self.occurrence_count,
-            "materials": self.material_count,
-            "vertices": self.vertex_count,
-            "triangles": self.triangle_count,
+            "nodes": len(nodes),
+            "parts": len(self.parts),
+            "occurrences": sum(1 for node in nodes if node.part_id is not None),
+            "materials": len(self.materials),
+            "vertices": sum(part.mesh.vertex_count for part in mesh_parts if part.mesh is not None),
+            "triangles": sum(part.mesh.triangle_count for part in mesh_parts if part.mesh is not None),
         }
         if include_lods:
             lod_meshes = [lod for part in self.parts.values() for lod in part.lod_meshes]
@@ -1117,7 +1196,11 @@ def _part_is_merged_batch(part: Part) -> bool:
 
 
 def _hierarchy_report_stats(asset: Asset) -> dict[str, int]:
-    return {**asset.stats(include_lods=True), **asset.draw_call_breakdown()}
+    nodes = asset.root.walk()
+    return {
+        **asset._stats_from_nodes(nodes, include_lods=True),
+        **asset._draw_call_breakdown_from_nodes(nodes),
+    }
 
 
 def _lod_report_stats(asset: Asset) -> dict[str, int]:

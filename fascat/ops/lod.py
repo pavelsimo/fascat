@@ -57,13 +57,16 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
         part_material_merged_levels = 0
         part_texture_baked_levels = 0
         part_culling_changed_levels = 0
+        previous_mesh = part.mesh
         level_instance_reuse: list[str] = []
         level_material_merge: list[str] = []
         level_texture_bake: list[str] = []
         level_culling_granularity: list[str] = []
         level_policy_advisory_values: list[str] = []
+        level_simplification_sources: list[str] = []
         for index, ratio in enumerate(options.ratios):
             coverage = screen_coverage[index]
+            simplification_source = "source" if index == 0 else "previous"
             policy_metadata = _level_policy_metadata(
                 part_occurrences=part_occurrences,
                 culling_granularity="omitted_tiny_part"
@@ -91,14 +94,17 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
                     "lod_ratio": f"{ratio:.9g}",
                     "lod_screen_coverage": f"{coverage:.9g}",
                     "lod_omitted": "tiny_part",
+                    "lod_simplification_source": simplification_source,
                     **policy_metadata,
                 }
                 part.lod_meshes.append(lod)
                 previous_count = 0
+                previous_mesh = lod
                 part_omitted_tiny += 1
+                level_simplification_sources.append(simplification_source)
                 continue
 
-            lod = part.mesh.simplify(ratio=ratio)
+            lod = previous_mesh.simplify(target_triangles=_target_lod_triangles(part_source_triangles, ratio))
             if lod.triangle_count > previous_count:
                 lod = lod.simplify(target_triangles=previous_count)
             lod.metadata = {
@@ -107,14 +113,17 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
                 "lod_screen_coverage": f"{coverage:.9g}",
                 "lod_mode": options.mode,
                 "lod_per_part_budget": str(options.per_part_budget).lower(),
+                "lod_simplification_source": simplification_source,
                 **policy_metadata,
             }
             lod.validate()
             previous_count = lod.triangle_count
+            previous_mesh = lod
             part.lod_meshes.append(lod)
             part_lod_vertices += lod.vertex_count
             part_lod_triangles += lod.triangle_count
             part_lod_bytes += _mesh_payload_bytes(lod)
+            level_simplification_sources.append(simplification_source)
         source_vertices += part_source_vertices
         source_triangles += part_source_triangles
         source_mesh_bytes += part_source_bytes
@@ -155,6 +164,7 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
             "lod_level_texture_bake": ",".join(level_texture_bake),
             "lod_level_culling_granularity": ",".join(level_culling_granularity),
             "lod_level_policy_advisory": ",".join(level_policy_advisory_values),
+            "lod_level_simplification_source": ",".join(level_simplification_sources),
             "lod_reused_instance_levels": str(part_reused_instance_levels),
             "lod_material_merged_levels": str(part_material_merged_levels),
             "lod_texture_baked_levels": str(part_texture_baked_levels),
@@ -340,6 +350,12 @@ def _empty_lod(mesh: Mesh) -> Mesh:
         faces=np.empty((0, 3), dtype=np.int64),
         metadata={**mesh.metadata, "lod_omitted": "tiny_part"},
     )
+
+
+def _target_lod_triangles(source_triangles: int, ratio: float) -> int:
+    if source_triangles <= 0:
+        return 0
+    return max(1, int(round(source_triangles * ratio)))
 
 
 def _mesh_payload_bytes(mesh: Mesh) -> int:

@@ -330,6 +330,7 @@ def test_convert_dry_run_reports_merge_vertices_operation() -> None:
     assert payload["merge_vertex_tolerance"] == 0.001
     assert payload["preserve_merge_vertex_attributes"] is False
     assert payload["preserve_merge_vertex_material_boundaries"] is False
+    assert payload["merge_vertex_quality_report"] is False
     assert diagnostics["merge_vertices"]["level"] == "exact"
 
 
