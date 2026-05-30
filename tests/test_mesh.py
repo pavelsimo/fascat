@@ -1008,6 +1008,27 @@ def test_collapse_short_edges_respects_boundary_preservation() -> None:
     assert collapsed.vertex_count < mesh.vertex_count
 
 
+def test_collapse_short_edges_averages_transitive_components() -> None:
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [0.01, 0.0, 0.0],
+                [0.02, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 4], [1, 2, 4], [2, 3, 4]], dtype=int),
+    )
+
+    collapsed = mesh.collapse_short_edges(0.05, preserve_boundaries=False)
+
+    assert collapsed.triangle_count == 1
+    assert any(np.allclose(point, [0.01, 0.0, 0.0]) for point in collapsed.points)
+
+
 def test_improve_skinny_triangles_splits_long_internal_edges_and_reports_quality() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [10, 0, 0], [0.1, 1, 0], [9.9, -1, 0]], dtype=float),

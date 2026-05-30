@@ -1499,21 +1499,32 @@ class Mesh:
                 rank[left_root] += 1
             merged = True
 
-        for start, end in self._face_edges().astype(int).tolist():
+        edges = self._face_edges()
+        edge_lengths = np.linalg.norm(self.points[edges[:, 1]] - self.points[edges[:, 0]], axis=1)
+        candidate_edges = edges[edge_lengths < min_edge_length]
+        for start, end in candidate_edges.astype(int).tolist():
             edge = (min(start, end), max(start, end))
             if edge in boundary_edges:
                 continue
-            if float(np.linalg.norm(self.points[end] - self.points[start])) < min_edge_length:
-                union(start, end)
+            union(start, end)
 
         if not merged:
             return self.copy()
 
         roots = np.asarray([find(index) for index in range(self.vertex_count)], dtype=np.int64)
-        unique_roots, inverse = np.unique(roots, return_inverse=True)
-        new_points = np.empty((unique_roots.shape[0], 3), dtype=np.float64)
-        for new_index, root in enumerate(unique_roots.astype(int).tolist()):
-            new_points[new_index] = self.points[roots == root].mean(axis=0)
+        _, inverse = np.unique(roots, return_inverse=True)
+        component_count = int(inverse.max()) + 1 if inverse.size else 0
+        counts = np.bincount(inverse, minlength=component_count).astype(np.float64)
+        new_points = np.empty((component_count, 3), dtype=np.float64)
+        for axis in range(3):
+            new_points[:, axis] = (
+                np.bincount(
+                    inverse,
+                    weights=self.points[:, axis],
+                    minlength=component_count,
+                )
+                / counts
+            )
 
         mesh = self.copy()
         mesh.points = new_points

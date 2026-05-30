@@ -107,8 +107,10 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   append loops, `compute_tangents()` computes per-face tangents in bulk and accumulates with
   `np.bincount` instead of per-face `np.add.at`, and `compute_hard_edge_normals()` now splits
   normal islands with a `(face, vertex)` union-find and remaps faces/attributes in bulk instead of
-  walking per-vertex face sets and appending vertices one corner at a time. The remaining Python
-  loops in subdivide/collapse and skinny-triangle cleanup are still open.
+  walking per-vertex face sets and appending vertices one corner at a time. `collapse_short_edges()`
+  now filters short-edge candidates with one vectorized length pass and averages merged vertex
+  components with `np.bincount`, so the union loop only visits edges that can actually collapse.
+  The remaining Python loops in subdivide and skinny-triangle cleanup are still open.
 
 ### P5 — Edge / adjacency maps rebuilt from `.tolist()` repeatedly — partial (2026-05-31)
 - **Where:** `fascat/mesh.py:1886` (`_edge_faces_map`), `:2255` (`_undirected_edges_and_counts`),
