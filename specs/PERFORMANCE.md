@@ -243,8 +243,11 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   `nodes`, `meshes`, and `accessors` through recursive scene validation, removing repeated
   document array extraction in `_walk_node`, `_validate_mesh`, and `_require_accessor`. glTF writes
   now validate the in-memory document and binary payload before writing and return those stats to
-  the pipeline validate step, avoiding the default write-then-re-read path for glTF exports. USD,
-  OBJ, and STL validation still re-read their outputs.
+  the pipeline validate step, avoiding the default write-then-re-read path for glTF exports. OBJ
+  and STL pipeline writes now return in-memory validation stats for known-valid outputs, so their
+  default validate steps also skip the file reread; invalid/empty text outputs still fall back to
+  the file validators to preserve existing validate-step failures. USD validation still re-reads
+  its output.
 
 ### P15 — Exporters build one Python object/string per vertex/triangle — partial (2026-05-31)
 - **Where:** glTF strided path `fascat/io/gltf.py:514-519` (`_accessor_payload` loops every vertex

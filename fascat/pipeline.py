@@ -14,10 +14,10 @@ from fascat.io.gltf import GLTF_SUFFIXES, runtime_dependency_report, validate_gl
 from fascat.io.gltf import write_gltf_with_validation as _write_gltf
 from fascat.io.iges import IGES_SUFFIXES, read_iges
 from fascat.io.obj import OBJ_SUFFIXES, validate_obj
-from fascat.io.obj import write_obj as _write_obj
+from fascat.io.obj import write_obj_with_validation_stats as _write_obj
 from fascat.io.step import read_step
 from fascat.io.stl import STL_SUFFIXES, validate_stl
-from fascat.io.stl import write_stl as _write_stl
+from fascat.io.stl import write_stl_with_validation_stats as _write_stl
 from fascat.io.usd import validate_usd
 from fascat.io.usd import write_usd as _write_usd
 from fascat.options import (
@@ -1621,10 +1621,8 @@ def _write_output(
     if output_format == "gltf":
         return _write_gltf(asset, path, options=gltf_options)
     if output_format == "obj":
-        _write_obj(asset, path, options=obj_options)
-        return None
-    _write_stl(asset, path, options=stl_options)
-    return None
+        return _write_obj(asset, path, options=obj_options)
+    return _write_stl(asset, path, options=stl_options)
 
 
 def _validate_output(path: str | Path, output_format: ExportFormat) -> dict[str, int]:

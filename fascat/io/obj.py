@@ -15,6 +15,25 @@ OBJ_SUFFIXES = {".obj"}
 
 
 def write_obj(asset: Asset, path: str | Path, *, options: ObjExportOptions | None = None) -> None:
+    _write_obj(asset, path, options=options, collect_stats=False)
+
+
+def write_obj_with_validation_stats(
+    asset: Asset,
+    path: str | Path,
+    *,
+    options: ObjExportOptions | None = None,
+) -> dict[str, int] | None:
+    return _write_obj(asset, path, options=options, collect_stats=True)
+
+
+def _write_obj(
+    asset: Asset,
+    path: str | Path,
+    *,
+    options: ObjExportOptions | None,
+    collect_stats: bool,
+) -> dict[str, int] | None:
     opts = options or ObjExportOptions()
     output_path = Path(path)
     if output_path.suffix.lower() not in OBJ_SUFFIXES:
@@ -27,6 +46,8 @@ def write_obj(asset: Asset, path: str | Path, *, options: ObjExportOptions | Non
         chunks.append(f"mtllib {output_path.with_suffix('.mtl').name}\n")
     vertex_offset = 1
     normal_offset = 1
+    written_vertices = 0
+    written_triangles = 0
     for occurrence in _occurrences(asset):
         part = asset.parts.get(occurrence.part_id)
         if part is None or part.mesh is None:
@@ -37,6 +58,8 @@ def write_obj(asset: Asset, path: str | Path, *, options: ObjExportOptions | Non
             chunks.append(f"g {name}\n")
             chunks.append(f"o {name}\n")
         points = _transform_points(mesh.points, occurrence.world_transform)
+        written_vertices += int(points.shape[0])
+        written_triangles += mesh.triangle_count
         chunks.append(_format_prefixed_rows("v", points))
         normals = _occurrence_normals(mesh, points, occurrence.world_transform)
         chunks.append(_format_prefixed_rows("vn", normals.values))
@@ -57,6 +80,9 @@ def write_obj(asset: Asset, path: str | Path, *, options: ObjExportOptions | Non
     output_path.write_text("".join(chunks), encoding="utf-8")
     if opts.materials and opts.write_mtl and written_materials:
         _write_mtl(output_path.with_suffix(".mtl"), written_materials)
+    if collect_stats and written_vertices > 0 and written_triangles > 0:
+        return {"meshes": 1, "points": written_vertices, "triangles": written_triangles}
+    return None
 
 
 def validate_obj(path: str | Path) -> dict[str, int]:

@@ -15,6 +15,25 @@ FloatArray = NDArray[np.float64]
 
 
 def write_stl(asset: Asset, path: str | Path, *, options: StlExportOptions | None = None) -> None:
+    _write_stl(asset, path, options=options, collect_stats=False)
+
+
+def write_stl_with_validation_stats(
+    asset: Asset,
+    path: str | Path,
+    *,
+    options: StlExportOptions | None = None,
+) -> dict[str, int] | None:
+    return _write_stl(asset, path, options=options, collect_stats=True)
+
+
+def _write_stl(
+    asset: Asset,
+    path: str | Path,
+    *,
+    options: StlExportOptions | None,
+    collect_stats: bool,
+) -> dict[str, int] | None:
     opts = options or StlExportOptions()
     output_path = Path(path)
     if output_path.suffix.lower() not in STL_SUFFIXES:
@@ -23,8 +42,12 @@ def write_stl(asset: Asset, path: str | Path, *, options: StlExportOptions | Non
     triangles = _triangles(asset)
     if opts.binary:
         output_path.write_bytes(_binary_stl(triangles))
-        return
-    output_path.write_text(_ascii_stl(triangles), encoding="utf-8")
+    else:
+        output_path.write_text(_ascii_stl(triangles), encoding="utf-8")
+    triangle_count = int(triangles.shape[0])
+    if collect_stats and (triangle_count > 0 or opts.binary):
+        return {"meshes": 1, "points": triangle_count * 3, "triangles": triangle_count}
+    return None
 
 
 def validate_stl(path: str | Path) -> dict[str, int]:
