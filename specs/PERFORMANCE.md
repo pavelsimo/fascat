@@ -222,8 +222,9 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 - **Progress:** glTF export now keeps the builder's `bytearray` instead of immediately copying it
   to `bytes`, meshopt returns a mutable payload, and GLB packing fills one final bytearray with
   `struct.pack_into` plus slice writes instead of creating padded binary copies and joining chunks.
-  The meshopt path still needs a mutable working payload, so fully streaming compression remains
-  open.
+  Meshopt compression now appends compressed views to the builder's existing mutable payload and
+  reads source views through `memoryview` slices, avoiding the previous full-buffer working copy.
+  Fully streaming compression remains open.
 
 ## I/O
 

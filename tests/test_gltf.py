@@ -3,14 +3,16 @@ from __future__ import annotations
 import base64
 import json
 import struct
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
 import pytest
 
 from fascat.asset import Asset, Node, Part
-from fascat.io.gltf import validate_gltf, write_gltf
+from fascat.io.gltf import _apply_meshopt_compression, validate_gltf, write_gltf
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.options import BakeMaterialOptions
@@ -70,6 +72,29 @@ def _asset_with_materials_and_lods() -> Asset:
         meters_per_unit=1.0,
         up_axis="Y",
     )
+
+
+def test_meshopt_compression_reuses_mutable_binary_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    document: dict[str, Any] = {
+        "buffers": [{"byteLength": 6}],
+        "bufferViews": [{"buffer": 0, "byteOffset": 0, "byteLength": 6, "target": 34963}],
+        "accessors": [{"bufferView": 0, "count": 3, "componentType": 5123, "type": "SCALAR"}],
+    }
+    binary = bytearray(np.asarray([0, 1, 2], dtype="<u2").tobytes())
+
+    fake_meshoptimizer = SimpleNamespace(
+        encode_index_buffer=lambda indices, *, index_count: b"abc",
+        encode_index_sequence=lambda indices, *, index_count: b"unused",
+        encode_vertex_buffer=lambda vertices, *, vertex_count, vertex_size: b"unused",
+    )
+    monkeypatch.setitem(sys.modules, "meshoptimizer", fake_meshoptimizer)
+
+    compressed = _apply_meshopt_compression(document, binary)
+
+    assert compressed is binary
+    assert len(compressed) > 6
+    assert document["buffers"][0]["byteLength"] == len(compressed)
+    assert document["bufferViews"][0]["extensions"]["EXT_meshopt_compression"]["byteOffset"] == 8
 
 
 def _read_glb(path: Path) -> tuple[dict[str, Any], bytes]:

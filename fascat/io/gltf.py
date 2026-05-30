@@ -19,7 +19,7 @@ from fascat.metadata import pmi_ids_by_part
 from fascat.options import GltfExportOptions, MetadataExportOptions
 
 GLTF_SUFFIXES = {".gltf", ".glb"}
-BinaryPayload = bytes | bytearray
+BinaryPayload = bytes | bytearray | memoryview
 
 _GLB_MAGIC = b"glTF"
 _GLB_VERSION = 2
@@ -1035,7 +1035,7 @@ def _apply_meshopt_compression(document: dict[str, Any], binary: BinaryPayload) 
     except ImportError as exc:
         raise RuntimeError("glTF meshopt compression requires meshoptimizer") from exc
 
-    payload = bytearray(binary)
+    payload = binary if isinstance(binary, bytearray) else bytearray(binary)
     accessors_by_view = _accessors_by_buffer_view(document)
     compressed_views = 0
     for view_index, view_value in enumerate(_array(document.get("bufferViews"), "bufferViews")):
@@ -1047,11 +1047,14 @@ def _apply_meshopt_compression(document: dict[str, Any], binary: BinaryPayload) 
             continue
         byte_offset = _int(view.get("byteOffset", 0), f"bufferView {view_index} byteOffset")
         byte_length = _int(view.get("byteLength"), f"bufferView {view_index} byteLength")
-        source = binary[byte_offset : byte_offset + byte_length]
-        spec = _meshopt_view_spec(view, accessor, source)
-        if spec is None:
-            continue
-        encoded = _meshopt_encode(source, spec, meshoptimizer)
+        source = memoryview(binary)[byte_offset : byte_offset + byte_length]
+        try:
+            spec = _meshopt_view_spec(view, accessor, source)
+            if spec is None:
+                continue
+            encoded = _meshopt_encode(source, spec, meshoptimizer)
+        finally:
+            source.release()
         if not encoded:
             continue
         compressed_offset = _append_aligned(payload, encoded)
