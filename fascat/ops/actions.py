@@ -1673,12 +1673,36 @@ def _segment_blocked(start: FloatArray, end: FloatArray, occluders: list[_WorldO
 
 
 def _segment_intersects_mesh(start: FloatArray, end: FloatArray, points: FloatArray, faces: IntArray) -> bool:
-    for face in faces.astype(int).tolist():
-        triangle = points[np.asarray(face, dtype=np.int64)]
-        hit = _segment_triangle_t(start, end, triangle)
-        if hit is not None and 1e-8 < hit < 1.0 - 1e-8:
-            return True
-    return False
+    if faces.size == 0:
+        return False
+    epsilon = 1e-12
+    triangles = points[faces]
+    direction = end - start
+    edge1 = triangles[:, 1] - triangles[:, 0]
+    edge2 = triangles[:, 2] - triangles[:, 0]
+    pvec = np.cross(np.broadcast_to(direction, edge2.shape), edge2)
+    determinant = np.einsum("ij,ij->i", edge1, pvec)
+    active = np.abs(determinant) > epsilon
+    if not np.any(active):
+        return False
+
+    inverse = np.zeros_like(determinant)
+    inverse[active] = 1.0 / determinant[active]
+    tvec = start - triangles[:, 0]
+    u = np.einsum("ij,ij->i", tvec, pvec) * inverse
+    active &= (u >= -epsilon) & (u <= 1.0 + epsilon)
+    if not np.any(active):
+        return False
+
+    qvec = np.cross(tvec, edge1)
+    v = np.einsum("j,ij->i", direction, qvec) * inverse
+    active &= (v >= -epsilon) & (u + v <= 1.0 + epsilon)
+    if not np.any(active):
+        return False
+
+    t = np.einsum("ij,ij->i", edge2, qvec) * inverse
+    active &= (t >= -epsilon) & (t <= 1.0 + epsilon)
+    return bool(np.any(active & (t > 1e-8) & (t < 1.0 - 1e-8)))
 
 
 def _segment_triangle_t(start: FloatArray, end: FloatArray, triangle: FloatArray) -> float | None:

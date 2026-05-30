@@ -72,7 +72,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   the detailed repair report and warning behavior. The repair `tolerance_policy` records whether
   quality diagnostics were enabled.
 
-### P3 — Occlusion removal is a brute-force ray cast with no acceleration structure
+### P3 — Occlusion removal is a brute-force ray cast with no acceleration structure — partial (2026-05-31)
 - **Where:** `fascat/ops/actions.py:1653` (`_sample_is_visible`), `:1666` (`_segment_blocked`),
   `:1675` (`_segment_intersects_mesh`), `:1684` (`_segment_triangle_t`); occluder set built at
   `:1462` (`_candidate_occluders`, all other occurrences).
@@ -83,6 +83,10 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 - **Fix:** Build a BVH/uniform grid per occluder (or use `trimesh.ray`/embree), vectorize the
   ray–triangle test across all candidate faces at once, and spatially cull occluders per
   candidate instead of testing all occurrences.
+- **Progress:** `_segment_intersects_mesh` now vectorizes Möller-Trumbore intersection across all
+  faces in an occluder mesh after the existing per-occluder AABB reject, removing the pure-Python
+  per-triangle loop from the innermost ray test. A true BVH/grid and spatial occluder culling are
+  still open.
 
 ### P4 — Per-element Python loops in core mesh kernels — partial (2026-05-31)
 - **Where (all `fascat/mesh.py`):** `compute_flat_normals:1026`, `compute_hard_edge_normals:1055`,
@@ -100,7 +104,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   Python loops in flat/hard-edge normals, tangents, subdivide/collapse, and skinny-triangle
   cleanup are still open.
 
-### P5 — Edge / adjacency maps rebuilt from `.tolist()` repeatedly
+### P5 — Edge / adjacency maps rebuilt from `.tolist()` repeatedly — partial (2026-05-31)
 - **Where:** `fascat/mesh.py:1886` (`_edge_faces_map`), `:2255` (`_undirected_edges_and_counts`),
   `:923` (`orientability_metrics`), `:2172` (`_boundary_loops`); duplicate boundary-loop builder
   at `fascat/ops/actions.py:1344`.
@@ -109,6 +113,10 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   and again during feature-preservation in `simplify`.
 - **Fix:** Compute the undirected-edge / edge→faces / boundary structures once per mesh state and
   pass them into the metrics that need them (ties into P17).
+- **Progress:** `boundary_gap_count()` now builds undirected edge/count data once and derives both
+  boundary vertices and connected-edge rejection from that table instead of calling
+  `_undirected_edges_and_counts()` twice. Shared edge/topology memoization across all metrics is
+  still open under P17.
 
 ### P6 — `merge_vertices` recomputes connected components and per-vertex keys, plus heavy diagnostics — ✅ done (2026-05-31)
 - **Where:** `fascat/mesh.py:372` (`merge_vertices`), `:572` (`_merge_vertex_components`),
@@ -243,8 +251,9 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   via `Vt.*Array` from NumPy buffers instead of Python comprehensions.
 - **Progress:** Binary STL export now collects triangle chunks as NumPy arrays and writes records
   through a structured dtype (`normal`, `vertices`, attribute byte count) plus one `tobytes()`,
-  eliminating per-triangle/per-vertex `struct.pack` loops for the default STL path. OBJ, ASCII
-  STL, glTF strided payloads, and USD object construction remain open.
+  eliminating per-triangle/per-vertex `struct.pack` loops for the default STL path. glTF strided
+  accessor payloads now use a `(rows, byte_stride)` uint8 view instead of copying each row in
+  Python. OBJ, ASCII STL, and USD object construction remain open.
 
 ## Concurrency
 

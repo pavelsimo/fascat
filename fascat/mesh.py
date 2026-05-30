@@ -1025,11 +1025,11 @@ class Mesh:
         if self.triangle_count == 0 or self.vertex_count < 2:
             return 0
         distance_tolerance = max(float(tolerance), 1e-12)
-        boundary_edges = self._boundary_edges_set()
+        all_edges, counts = self._undirected_edges_and_counts()
+        boundary_edges = {(int(edge[0]), int(edge[1])) for edge in all_edges[counts == 1].astype(int).tolist()}
         if not boundary_edges:
             return 0
         boundary_vertices = sorted({vertex for edge in boundary_edges for vertex in edge})
-        all_edges, _counts = self._undirected_edges_and_counts()
         connected_edges = {(int(edge[0]), int(edge[1])) for edge in all_edges.astype(int).tolist()}
         buckets: dict[tuple[int, int, int], list[int]] = {}
         gaps: set[tuple[int, int]] = set()

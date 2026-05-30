@@ -10,6 +10,7 @@ from fascat.asset import Asset, Node, Part
 from fascat.cli import app
 from fascat.material import Material
 from fascat.mesh import Mesh
+from fascat.ops.actions import _segment_intersects_mesh, _segment_triangle_t
 from fascat.options import (
     BakeMaterialOptions,
     DecimateOptions,
@@ -31,6 +32,34 @@ def _triangle_strip(count: int) -> Mesh:
         points.extend([[base, 0, 0], [base + 1, 0, 0], [base, 1, 0]])
         faces.append([offset, offset + 1, offset + 2])
     return Mesh(points=np.asarray(points, dtype=float), faces=np.asarray(faces, dtype=int))
+
+
+def test_segment_intersects_mesh_matches_scalar_triangle_hits() -> None:
+    points = np.array(
+        [
+            [0, 0, 0],
+            [1, 0, 0],
+            [0, 1, 0],
+            [2, 0, 0],
+            [3, 0, 0],
+            [2, 1, 0],
+        ],
+        dtype=float,
+    )
+    faces = np.array([[0, 1, 2], [3, 4, 5]], dtype=int)
+    start = np.array([0.25, 0.25, 1.0], dtype=float)
+    end = np.array([0.25, 0.25, -1.0], dtype=float)
+    miss_start = np.array([1.5, 0.25, 1.0], dtype=float)
+    miss_end = np.array([1.5, 0.25, -1.0], dtype=float)
+
+    scalar_hits = [
+        _segment_triangle_t(start, end, points[face]) is not None
+        and 1e-8 < _segment_triangle_t(start, end, points[face]) < 1.0 - 1e-8
+        for face in faces
+    ]
+
+    assert _segment_intersects_mesh(start, end, points, faces) is any(scalar_hits)
+    assert _segment_intersects_mesh(miss_start, miss_end, points, faces) is False
 
 
 def _triangle_strip_with_uvs(count: int) -> Mesh:

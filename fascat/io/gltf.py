@@ -533,11 +533,9 @@ def _accessor_payload(
     if byte_stride < item_size or byte_stride % 4:
         raise ValueError("glTF vertex byte stride must be a 4-byte aligned size that fits the accessor item")
     rows = np.ascontiguousarray(values.reshape((values.shape[0], width)))
-    payload = bytearray(byte_stride * rows.shape[0])
-    for index, row in enumerate(rows):
-        start = index * byte_stride
-        payload[start : start + item_size] = row.tobytes()
-    return bytes(payload)
+    payload = np.zeros((rows.shape[0], byte_stride), dtype=np.uint8)
+    payload[:, :item_size] = rows.view(np.uint8).reshape((rows.shape[0], item_size))
+    return payload.tobytes()
 
 
 @dataclass(frozen=True)
