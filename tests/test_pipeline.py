@@ -733,11 +733,11 @@ mode = "bounding_box"
     captured: dict[str, Asset] = {}
 
     monkeypatch.setattr(pipeline, "read_step", lambda _path: asset)
-    monkeypatch.setattr(
-        pipeline,
-        "_write_usd",
-        lambda written_asset, _path, *, debug=False, options=None: captured.setdefault("asset", written_asset),
-    )
+
+    def fake_write_usd(written_asset: Asset, _path: str | Path, *, debug: bool = False, options: object = None) -> None:
+        captured["asset"] = written_asset
+
+    monkeypatch.setattr(pipeline, "_write_usd", fake_write_usd)
     monkeypatch.setattr(pipeline, "validate_usd", lambda _path: {"meshes": 1, "points": 8, "triangles": 12})
 
     converted = convert("input.step", tmp_path / "output.usdc", pipeline=PipelineSpec.from_file(pipeline_file))
@@ -1034,11 +1034,11 @@ def test_pipeline_advisories_are_added_to_convert_report(monkeypatch, tmp_path: 
     spec = PipelineSpec.from_dict({"steps": [{"op": "decimate", "target_ratio": 0.9}, {"op": "repair"}]})
 
     monkeypatch.setattr(pipeline, "read_step", lambda _path, *, options=None: _triangle_asset())
-    monkeypatch.setattr(
-        pipeline,
-        "_write_usd",
-        lambda written_asset, _path, *, debug=False, options=None: captured.setdefault("asset", written_asset),
-    )
+
+    def fake_write_usd(written_asset: Asset, _path: str | Path, *, debug: bool = False, options: object = None) -> None:
+        captured["asset"] = written_asset
+
+    monkeypatch.setattr(pipeline, "_write_usd", fake_write_usd)
     monkeypatch.setattr(pipeline, "validate_usd", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
 
     converted = convert("input.step", tmp_path / "output.usdc", pipeline=spec)
@@ -1295,6 +1295,36 @@ def test_convert_reuses_gltf_writer_validation_stats(monkeypatch, tmp_path: Path
     assert steps["validate"].after["validated_meshes"] == 2
     assert steps["validate"].after["validated_points"] == 6
     assert steps["validate"].after["validated_triangles"] == 2
+
+
+def test_convert_reuses_usd_writer_validation_stats(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.pipeline as pipeline
+
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
+
+    def fake_write_usd(
+        _asset: Asset,
+        path: str | Path,
+        *,
+        debug: bool = False,
+        options: object = None,
+    ) -> dict[str, int]:
+        Path(path).write_text("#usda 1.0\n", encoding="utf-8")
+        return {"meshes": 3, "points": 9, "triangles": 3}
+
+    monkeypatch.setattr(pipeline, "_write_usd", fake_write_usd)
+    monkeypatch.setattr(pipeline, "validate_usd", lambda _path: pytest.fail("validation should stay in memory"))
+
+    converted = convert(
+        "input.step",
+        tmp_path / "output.usda",
+        profile=_test_profile(),
+    )
+    steps = {step.name: step for step in converted.report.steps}
+
+    assert steps["validate"].after["validated_meshes"] == 3
+    assert steps["validate"].after["validated_points"] == 9
+    assert steps["validate"].after["validated_triangles"] == 3
 
 
 def test_convert_reuses_obj_writer_validation_stats(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
@@ -1706,9 +1736,11 @@ def test_convert_report_records_validation_failure(monkeypatch, tmp_path: Path) 
 
     captured: dict[str, Asset] = {}
     monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
-    monkeypatch.setattr(
-        pipeline, "_write_usd", lambda asset, _path, *, debug=False, options=None: captured.setdefault("asset", asset)
-    )
+
+    def fake_write_usd(asset: Asset, _path: str | Path, *, debug: bool = False, options: object = None) -> None:
+        captured["asset"] = asset
+
+    monkeypatch.setattr(pipeline, "_write_usd", fake_write_usd)
     monkeypatch.setattr(pipeline, "validate_usd", lambda _path: (_ for _ in ()).throw(RuntimeError("invalid usd")))
 
     with pytest.raises(RuntimeError, match="invalid usd") as error:

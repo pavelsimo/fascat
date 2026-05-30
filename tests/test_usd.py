@@ -7,7 +7,7 @@ import pytest
 
 import fascat as fc
 from fascat.asset import Asset, Node, Part
-from fascat.io.usd import _usd_custom_data, validate_usd, write_usd
+from fascat.io.usd import _usd_custom_data, validate_usd, write_usd, write_usd_with_validation_stats
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.options import OptimizeOptions, UsdExportOptions
@@ -537,7 +537,7 @@ def test_usd_export_uses_instanceable_references_for_repeated_parts(tmp_path: Pa
     asset = Asset(root=root, parts={"cube": Part(id="cube", name="Cube", mesh=mesh)}, materials={})
     output = tmp_path / "instances.usda"
 
-    write_usd(asset, output)
+    written_stats = write_usd_with_validation_stats(asset, output)
     stats = validate_usd(output)
 
     stage = Usd.Stage.Open(str(output))
@@ -545,6 +545,7 @@ def test_usd_export_uses_instanceable_references_for_repeated_parts(tmp_path: Pa
     assert stage.GetPrimAtPath("/Scene/Cube_A").IsInstanceable()
     assert stage.GetPrimAtPath("/Scene/Cube_B").IsInstanceable()
     assert stage.GetPrimAtPath("/__Prototypes/cube_lod0/Mesh")
+    assert written_stats == stats
     assert stats["meshes"] == 2
     assert stats["triangles"] == mesh.triangle_count * 2
 

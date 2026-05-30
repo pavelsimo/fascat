@@ -1278,6 +1278,18 @@ def test_convert_writes_failure_report_when_usd_validation_fails(
     def fail_validate(_path: str | Path) -> dict[str, int]:
         raise RuntimeError("invalid generated USD")
 
+    original_write_usd = pipeline._write_usd
+
+    def write_usd_without_stats(
+        asset: Asset,
+        path: str | Path,
+        *,
+        debug: bool = False,
+        options: object = None,
+    ) -> None:
+        original_write_usd(asset, path, debug=debug, options=options)
+
+    monkeypatch.setattr(pipeline, "_write_usd", write_usd_without_stats)
     monkeypatch.setattr(pipeline, "validate_usd", fail_validate)
 
     result = runner.invoke(

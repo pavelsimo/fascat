@@ -28,7 +28,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 | P10 | Tessellation: Python-list extraction + duplicated edge passes   | CPU           | Medium   |
 | P12 | Whole-mesh fingerprint/digest recomputed after every op         | Memory        | Medium   |
 | P13 | Export binary buffer copied several times                       | Memory        | Medium   |
-| P14 | Default `validate_output` re-reads & re-parses the output       | I/O           | Medium   |
+| ~~P14~~ | ~~Default `validate_output` re-reads & re-parses the output~~ ✅ **done** | I/O           | Medium   |
 | P16 | Pipeline processes independent parts serially                   | Concurrency   | Medium   |
 | P17 | No memoization of derived mesh topology across stages           | System design | Medium   |
 | ~~P19~~ | ~~Metrics are heuristic estimates; no benchmark/profiling harness~~ ✅ **done** | Measurement   | High*    |
@@ -230,7 +230,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 
 ## I/O
 
-### P14 — Default `validate_output` re-reads and re-parses the just-written file — partial (2026-05-31)
+### P14 — Default `validate_output` re-reads and re-parses the just-written file — ✅ done (2026-05-31)
 - **Where:** `fascat/pipeline.py:262-293` (validate step, `validate_output=True` by default);
   glTF validator at `fascat/io/gltf.py:1433-1526` re-fetches and re-typechecks
   `document["nodes"]`/`["accessors"]` arrays on **every** recursion (`_walk_node`,
@@ -238,18 +238,19 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 - **Why:** Every conversion writes the file, then reads the whole thing back and re-parses it;
   the validator's repeated `_array(document.get(...))` lookups add quadratic-ish overhead on big
   documents.
-- **Fix:** Validate the in-memory document/arrays before/at write time instead of round-tripping
+- **Resolution:** Validate the in-memory document/arrays before/at write time instead of round-tripping
   through disk; cache the parsed `nodes`/`accessors` lists once; allow skipping validation for
   large assets.
-- **Progress:** glTF validation now builds a validation context once and passes cached `scenes`,
+- glTF validation now builds a validation context once and passes cached `scenes`,
   `nodes`, `meshes`, and `accessors` through recursive scene validation, removing repeated
   document array extraction in `_walk_node`, `_validate_mesh`, and `_require_accessor`. glTF writes
   now validate the in-memory document and binary payload before writing and return those stats to
   the pipeline validate step, avoiding the default write-then-re-read path for glTF exports. OBJ
   and STL pipeline writes now return in-memory validation stats for known-valid outputs, so their
   default validate steps also skip the file reread; invalid/empty text outputs still fall back to
-  the file validators to preserve existing validate-step failures. USD validation still re-reads
-  its output.
+  the file validators to preserve existing validate-step failures. USD pipeline writes now return
+  occurrence-level mesh/point/triangle stats from the just-written scene, avoiding the default
+  validation reread while preserving the existing fallback for zero-mesh outputs.
 
 ### P15 — Exporters build one Python object/string per vertex/triangle — partial (2026-05-31)
 - **Where:** glTF strided path `fascat/io/gltf.py:514-519` (`_accessor_payload` loops every vertex

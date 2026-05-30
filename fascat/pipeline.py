@@ -19,7 +19,7 @@ from fascat.io.step import read_step
 from fascat.io.stl import STL_SUFFIXES, validate_stl
 from fascat.io.stl import write_stl_with_validation_stats as _write_stl
 from fascat.io.usd import validate_usd
-from fascat.io.usd import write_usd as _write_usd
+from fascat.io.usd import write_usd_with_validation_stats as _write_usd
 from fascat.options import (
     AabbProjectionOptions,
     AnalyzeOptions,
@@ -1616,8 +1616,7 @@ def _write_output(
     stl_options: StlExportOptions | None,
 ) -> dict[str, int] | None:
     if output_format == "usd":
-        _write_usd(asset, path, debug=debug, options=_usd_options_for_path(path, usd_options))
-        return None
+        return _write_usd(asset, path, debug=debug, options=_usd_options_for_path(path, usd_options))
     if output_format == "gltf":
         return _write_gltf(asset, path, options=gltf_options)
     if output_format == "obj":
