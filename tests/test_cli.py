@@ -697,6 +697,38 @@ def test_convert_passes_extra_step_inputs_to_pipeline(monkeypatch: pytest.Monkey
     assert captured["input_path"] == [input_a, input_b]
 
 
+def test_convert_passes_material_library_paths_to_import_options(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import fascat as fc
+    import fascat.cli as cli
+
+    input_file = tmp_path / "input.step"
+    output_file = tmp_path / "output.glb"
+    library = tmp_path / "vendor-materials.json"
+    input_file.write_text("ISO-10303-21;", encoding="utf-8")
+    library.write_text('{"materials":[]}', encoding="utf-8")
+    asset = fc.Asset(root=fc.Node(id="root", name="root"))
+    captured: dict[str, object] = {}
+
+    def fake_convert(_input_path: object, *_args: object, **kwargs: object) -> fc.Asset:
+        captured["import_options"] = kwargs["import_options"]
+        return asset
+
+    monkeypatch.setattr(cli, "_convert_for_cli", fake_convert)
+
+    result = runner.invoke(
+        app,
+        ["convert", str(input_file), str(output_file), "--material-library", str(library)],
+    )
+
+    assert result.exit_code == 0, result.output
+    import_options = captured["import_options"]
+    assert isinstance(import_options, fc.StepReadOptions)
+    assert import_options.material_library_paths == (str(library),)
+
+
 def test_convert_dry_run_reports_pipeline_advisories(tmp_path: Path) -> None:
     pipeline_file = tmp_path / "bad-order.toml"
     pipeline_file.write_text(

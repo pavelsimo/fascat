@@ -403,6 +403,10 @@ def cmd_inspect(
             help="Resolve quoted external STEP references from a master STEP file.",
         ),
     ] = False,
+    material_libraries: Annotated[
+        list[Path] | None,
+        typer.Option("--material-library", help="Vendor material-library JSON/MTL file or folder to apply on import."),
+    ] = None,
     delete_free_vertices: Annotated[
         bool,
         typer.Option(
@@ -487,6 +491,7 @@ def cmd_inspect(
         "design_variants": design_variants,
         "import_existing_meshes": import_existing_meshes,
         "multi_file_import": multi_file_import,
+        "material_libraries": [str(path) for path in material_libraries or []],
         "delete_free_vertices": delete_free_vertices,
         "delete_lines": delete_lines,
         "source_units": source_units,
@@ -529,6 +534,7 @@ def cmd_inspect(
         design_variants=design_variants,
         existing_meshes=import_existing_meshes,
         multi_file=multi_file_import,
+        material_library_paths=material_libraries,
         delete_free_vertices=delete_free_vertices,
         delete_lines=delete_lines,
         source_units=source_units,
@@ -911,6 +917,10 @@ def cmd_convert(
             help="Resolve quoted external STEP references from a master STEP file.",
         ),
     ] = False,
+    material_libraries: Annotated[
+        list[Path] | None,
+        typer.Option("--material-library", help="Vendor material-library JSON/MTL file or folder to apply on import."),
+    ] = None,
     delete_free_vertices: Annotated[
         bool,
         typer.Option(
@@ -1377,6 +1387,7 @@ def cmd_convert(
         "design_variants": design_variants,
         "import_existing_meshes": import_existing_meshes,
         "multi_file_import": multi_file_import,
+        "material_libraries": [str(path) for path in material_libraries or []],
         "delete_free_vertices": delete_free_vertices,
         "delete_lines": delete_lines,
         "source_units": source_units,
@@ -1771,6 +1782,7 @@ def cmd_convert(
                 design_variants=design_variants,
                 existing_meshes=import_existing_meshes,
                 multi_file=multi_file_import,
+                material_library_paths=material_libraries,
                 delete_free_vertices=delete_free_vertices,
                 delete_lines=delete_lines,
                 source_units=source_units,
@@ -2637,6 +2649,7 @@ def _step_read_options(
     design_variants: bool = False,
     existing_meshes: bool = True,
     multi_file: bool = False,
+    material_library_paths: list[Path] | tuple[str, ...] | None = None,
     delete_free_vertices: bool = False,
     delete_lines: bool = False,
     source_units: str | None = None,
@@ -2660,6 +2673,7 @@ def _step_read_options(
         design_variants=design_variants,
         existing_meshes=existing_meshes,
         multi_file=multi_file,
+        material_library_paths=tuple(str(path) for path in material_library_paths or ()),
         delete_free_vertices=delete_free_vertices,
         delete_lines=delete_lines,
         source_units=source_units,

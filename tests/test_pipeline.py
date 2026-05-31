@@ -1205,6 +1205,7 @@ multi_file = true
 source_textures = true
 source_texture_search_paths = ["textures", "shared/textures"]
 material_library_mapping = false
+material_library_paths = ["materials/vendor.json", "materials/vendor.mtl"]
 delete_free_vertices = true
 delete_lines = true
 source_units = "millimetre"
@@ -1250,6 +1251,7 @@ op = "repair"
     assert import_options.source_textures is True
     assert import_options.source_texture_search_paths == ("textures", "shared/textures")
     assert import_options.material_library_mapping is False
+    assert import_options.material_library_paths == ("materials/vendor.json", "materials/vendor.mtl")
     assert import_options.delete_free_vertices is True
     assert import_options.delete_lines is True
     assert import_options.source_units == "millimetre"

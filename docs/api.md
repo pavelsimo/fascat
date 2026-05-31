@@ -263,6 +263,7 @@ asset = fc.read_step(
         source_textures=True,
         source_texture_search_paths=("textures",),
         material_library_mapping=True,
+        material_library_paths=("vendor-materials.json",),
         delete_free_vertices=False,
         delete_lines=False,
         source_units=None,
@@ -292,7 +293,7 @@ glTF export writes metadata and PMI into `extras.fascat`. USD export writes Fasc
 
 STEP AP242 files can advertise PMI even when the current OCP-backed importer cannot extract typed annotation entities. In that case the import report records `pmi_present=true`, `unsupported_pmi_count=1`, and a warning instead of silently implying that PMI was imported.
 
-STEP and IGES import can scan source-file string references for sidecar PNG, JPEG, and KTX2 textures, load them as first-class `ImageResource` objects, and bind semantic names such as `baseColor`, `normal`, `ao`, or `emissive` to material texture metadata. XDE visual material PBR/common values are preserved where exposed, and common CAD material names such as steel, aluminum, brass, copper, glass, plastic, rubber, and paint are mapped to deterministic PBR defaults with diagnostics in material metadata.
+STEP and IGES import can scan source-file string references for sidecar PNG, JPEG, and KTX2 textures, load them as first-class `ImageResource` objects, and bind semantic names such as `baseColor`, `normal`, `ao`, or `emissive` to material texture metadata. XDE visual material PBR/common values are preserved where exposed, and common CAD material names such as steel, aluminum, brass, copper, glass, plastic, rubber, and paint are mapped to deterministic PBR defaults with diagnostics in material metadata. Supported vendor material-library sidecars can also be supplied explicitly, or referenced from the CAD source, as JSON or MTL files; imported records update matching CAD materials with PBR factors and texture slots while reporting resolved, missing, unreadable, matched, and unmatched counts.
 
 STEP import reports also include `import_decisions`, which records each import toggle as requested, effective, and `honored`, `approximated`, `unsupported`, `disabled`, `not_present`, or `backend_default`. The same report step includes `loaded_representations`, a per-part list of BREP, construction-point, construction-line, or empty-shape inputs plus deleted construction-only nodes and source topology counts.
 
@@ -316,6 +317,7 @@ Metadata and PMI parameters:
 | `StepReadOptions` | `source_textures` | Scan STEP/IGES source text for referenced sidecar PNG/JPEG/KTX2 texture files, load resolved files into `asset.images`, and report resolved/missing/unreadable counts. |
 | `StepReadOptions` | `source_texture_search_paths` | Extra directories used to resolve relative source texture references in addition to the CAD file directory. |
 | `StepReadOptions` | `material_library_mapping` | Apply deterministic CAD material-name mapping rules to PBR metallic, roughness, opacity, and default color values when source visual material names are available. |
+| `StepReadOptions` | `material_library_paths` | Explicit vendor material-library JSON/MTL files or folders to load during STEP/IGES import. Referenced library files are resolved relative to the CAD source and texture search paths. |
 | `StepReadOptions` | `delete_free_vertices` | Drop construction-only point shapes during import and record deletion counts in the import report. |
 | `StepReadOptions` | `delete_lines` | Drop construction-only line shapes during import and record deleted edge and vertex counts. Mixed BREP parts with faces are preserved. |
 | `StepReadOptions` | `source_units`, `source_meters_per_unit` | Override the source unit declaration when the STEP header is wrong or ambiguous. Known unit names include `metre`, `centimetre`, `millimetre`, `inch`, and `foot`; custom factors use meters per source unit. |
@@ -910,6 +912,7 @@ pmi = true
 design_variants = false
 existing_meshes = true
 multi_file = false
+material_library_paths = ["vendor-materials.json"]
 delete_free_vertices = false
 delete_lines = false
 target_units = "metre"

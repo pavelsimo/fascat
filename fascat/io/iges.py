@@ -80,13 +80,16 @@ def _read_iges_path(source: Path, *, source_identity: str, options: IgesReadOpti
             )
         source_textures = _step._extract_source_textures(source, source_identity, options)
         texture_binding_summary = _step._attach_source_textures_to_materials(materials, source_textures.images)
+        material_libraries = _step._extract_material_libraries(source, source_identity, options)
+        material_library_binding_summary = _step._apply_material_libraries_to_materials(materials, material_libraries)
+        images = {**source_textures.images, **material_libraries.images}
 
     report = Report(source_path=str(source))
     asset = Asset(
         root=root,
         parts=parts,
         materials=materials,
-        images=source_textures.images,
+        images=images,
         units=space.target_units,
         meters_per_unit=space.target_meters_per_unit,
         up_axis=cast(Any, space.target_up_axis),
@@ -101,7 +104,9 @@ def _read_iges_path(source: Path, *, source_identity: str, options: IgesReadOpti
         asset.metadata["import_representation_summary"] = loaded_representations["summary"]
         asset.metadata["source_texture_import"] = source_textures.summary
         asset.metadata["source_texture_bindings"] = texture_binding_summary
-    import_warnings = source_textures.warnings
+        asset.metadata["material_library_import"] = material_libraries.summary
+        asset.metadata["material_library_bindings"] = material_library_binding_summary
+    import_warnings = [*source_textures.warnings, *material_libraries.warnings]
     for warning in import_warnings:
         asset.report.add_warning(warning)
     asset.report.add_step(
@@ -115,6 +120,8 @@ def _read_iges_path(source: Path, *, source_identity: str, options: IgesReadOpti
             "space_normalization": space.metadata(),
             "source_textures": source_textures.summary,
             "source_texture_bindings": texture_binding_summary,
+            "material_libraries": material_libraries.summary,
+            "material_library_bindings": material_library_binding_summary,
             "loaded_representations": loaded_representations,
         },
         before={"nodes": 0, "parts": 0, "occurrences": 0, "materials": 0, "vertices": 0, "triangles": 0},

@@ -290,6 +290,7 @@ class StepReadOptions:
     source_textures: bool = True
     source_texture_search_paths: tuple[str, ...] = ()
     material_library_mapping: bool = True
+    material_library_paths: tuple[str, ...] = ()
     delete_free_vertices: bool = False
     delete_lines: bool = False
     source_units: str | None = None
@@ -319,10 +320,16 @@ class StepReadOptions:
             "source_texture_search_paths",
             _normalize_path_tuple(self.source_texture_search_paths, "source_texture_search_paths"),
         )
+        object.__setattr__(
+            self,
+            "material_library_paths",
+            _normalize_path_tuple(self.material_library_paths, "material_library_paths"),
+        )
 
     def to_dict(self) -> dict[str, object]:
         data = asdict(self)
         data["source_texture_search_paths"] = list(self.source_texture_search_paths)
+        data["material_library_paths"] = list(self.material_library_paths)
         return data
 
 

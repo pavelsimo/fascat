@@ -9,12 +9,14 @@ from PIL import Image
 import fascat as fc
 import fascat.io.step as step_io
 from fascat.io.step import (
+    _apply_material_libraries_to_materials,
     _apply_material_library_mapping,
     _attach_source_textures_to_materials,
     _CadMaterialSpec,
     _canonical_part_id,
     _cleanup_action,
     _color_material_spec,
+    _extract_material_libraries,
     _extract_source_textures,
     _import_decisions,
     _import_warnings,
@@ -215,6 +217,103 @@ def test_step_source_texture_extraction_reports_missing_references(tmp_path: Pat
     assert extraction.images == {}
     assert extraction.summary == {"references": 1, "resolved": 0, "missing": 1, "unsupported": 0, "unreadable": 0}
     assert extraction.warnings == ["source texture reference could not be resolved: missing_normal.jpg"]
+
+
+def test_step_material_library_json_maps_pbr_factors_and_textures(tmp_path: Path) -> None:
+    texture = tmp_path / "steel_baseColor.png"
+    Image.new("RGBA", (2, 2), (200, 210, 220, 255)).save(texture)
+    library = tmp_path / "vendor-materials.json"
+    library.write_text(
+        """
+{
+  "materials": [
+    {
+      "materialName": "Brushed Steel",
+      "baseColorFactor": [0.78, 0.8, 0.82, 1.0],
+      "metallicFactor": 1.0,
+      "roughnessFactor": 0.22,
+      "textures": {"baseColor": "steel_baseColor.png"}
+    }
+  ]
+}
+""",
+        encoding="utf-8",
+    )
+    source = tmp_path / "panel.step"
+    source.write_text(
+        "ISO-10303-21;\nDATA;\n#1=EXTERNAL_REFERENCE('vendor-materials.json');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    materials = {
+        "steel": fc.Material(id="steel", name="Brushed Steel", base_color=(0.75, 0.75, 0.75, 1.0)),
+    }
+
+    extraction = _extract_material_libraries(source, "panel.step", StepReadOptions())
+    summary = _apply_material_libraries_to_materials(materials, extraction)
+    material = materials["steel"]
+
+    assert extraction.summary == {
+        "references": 1,
+        "resolved": 1,
+        "missing": 0,
+        "unsupported": 0,
+        "unreadable": 0,
+        "materials": 1,
+        "textures": 1,
+        "texture_missing": 0,
+        "texture_unreadable": 0,
+    }
+    assert summary == {
+        "library_materials": 1,
+        "matched_library_materials": 1,
+        "unmatched_library_materials": 0,
+        "applied_materials": 1,
+        "bound_textures": 1,
+    }
+    assert material.base_color == pytest.approx((0.78, 0.8, 0.82, 1.0))
+    assert material.metallic == pytest.approx(1.0)
+    assert material.roughness == pytest.approx(0.22)
+    assert material.metadata["material_library_matched"] == "true"
+    assert material.metadata["source_texture_base_color_image"] in extraction.images
+
+
+def test_step_material_library_mtl_can_be_supplied_explicitly(tmp_path: Path) -> None:
+    texture = tmp_path / "aluminum.png"
+    Image.new("RGB", (1, 1), (160, 170, 180)).save(texture)
+    library = tmp_path / "vendor.mtl"
+    library.write_text(
+        """
+newmtl Anodized Aluminum
+Kd 0.55 0.6 0.65
+Pm 1
+Pr 0.18
+map_Kd aluminum.png
+""",
+        encoding="utf-8",
+    )
+    source = tmp_path / "panel.step"
+    source.write_text("ISO-10303-21;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n", encoding="utf-8")
+    materials = {
+        "aluminum": fc.Material(id="aluminum", name="Anodized Aluminum", base_color=(0.75, 0.75, 0.75, 1.0)),
+    }
+
+    extraction = _extract_material_libraries(
+        source,
+        "panel.step",
+        StepReadOptions(material_library_paths=(str(library),)),
+    )
+    summary = _apply_material_libraries_to_materials(materials, extraction)
+    material = materials["aluminum"]
+
+    assert extraction.summary["references"] == 1
+    assert extraction.summary["resolved"] == 1
+    assert extraction.summary["materials"] == 1
+    assert extraction.summary["textures"] == 1
+    assert summary["applied_materials"] == 1
+    assert material.base_color == pytest.approx((0.55, 0.6, 0.65, 1.0))
+    assert material.metallic == pytest.approx(1.0)
+    assert material.roughness == pytest.approx(0.18)
+    assert material.metadata["source_texture_base_color_image"] in extraction.images
 
 
 def test_read_step_many_namespaces_members_and_prefixes_member_warnings(

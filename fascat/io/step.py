@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import tempfile
 from collections.abc import Iterable
@@ -50,6 +51,8 @@ _UNIT_NAMES = {
 }
 _SOURCE_TEXTURE_SUFFIXES = {".png", ".jpg", ".jpeg", ".ktx2"}
 _SOURCE_TEXTURE_REF_RE = re.compile(r"'([^']+\.(?:png|jpe?g|ktx2)(?:[#?][^']*)?)'", re.IGNORECASE)
+_MATERIAL_LIBRARY_SUFFIXES = {".json", ".mtl"}
+_MATERIAL_LIBRARY_REF_RE = re.compile(r"'([^']+\.(?:json|mtl)(?:[#?][^']*)?)'", re.IGNORECASE)
 _STEP_SUFFIXES = {".step", ".stp"}
 _STEP_EXTERNAL_REF_RE = re.compile(r"'([^']+\.(?:step|stp)(?:[#?][^']*)?)'", re.IGNORECASE)
 _GENERIC_MATERIAL_TOKENS = {"cad", "color", "material", "mat", "texture", "map", "source"}
@@ -90,6 +93,28 @@ class _MaterialLibraryRule:
 
 @dataclass
 class _SourceTextureExtraction:
+    images: dict[str, ImageResource]
+    summary: dict[str, int]
+    warnings: list[str]
+
+
+@dataclass(frozen=True)
+class _MaterialLibrarySpec:
+    name: str
+    base_color: tuple[float, float, float, float] | None = None
+    metallic: float | None = None
+    roughness: float | None = None
+    opacity: float | None = None
+    texture_images: tuple[tuple[str, str], ...] = ()
+    metadata: tuple[tuple[str, str], ...] = ()
+
+    def metadata_dict(self) -> Metadata:
+        return dict(self.metadata)
+
+
+@dataclass
+class _MaterialLibraryExtraction:
+    materials: list[_MaterialLibrarySpec]
     images: dict[str, ImageResource]
     summary: dict[str, int]
     warnings: list[str]
@@ -507,13 +532,16 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
             )
         source_textures = _extract_source_textures(source, source_identity, options)
         texture_binding_summary = _attach_source_textures_to_materials(materials, source_textures.images)
+        material_libraries = _extract_material_libraries(source, source_identity, options)
+        material_library_binding_summary = _apply_material_libraries_to_materials(materials, material_libraries)
+        images = {**source_textures.images, **material_libraries.images}
 
     report = Report(source_path=str(source))
     asset = Asset(
         root=root,
         parts=parts,
         materials=materials,
-        images=source_textures.images,
+        images=images,
         units=space.target_units,
         meters_per_unit=space.target_meters_per_unit,
         up_axis=cast(Any, space.target_up_axis),
@@ -534,6 +562,8 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         space=space,
         source_texture_summary=source_textures.summary,
         texture_binding_summary=texture_binding_summary,
+        material_library_summary=material_libraries.summary,
+        material_library_binding_summary=material_library_binding_summary,
     )
     loaded_representations = _loaded_representation_report(asset)
     if asset.metadata:
@@ -541,7 +571,13 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         asset.metadata["import_representation_summary"] = loaded_representations["summary"]
         asset.metadata["source_texture_import"] = source_textures.summary
         asset.metadata["source_texture_bindings"] = texture_binding_summary
-    import_warnings = [*_import_warnings(options, header_info, unsupported_pmi_count), *source_textures.warnings]
+        asset.metadata["material_library_import"] = material_libraries.summary
+        asset.metadata["material_library_bindings"] = material_library_binding_summary
+    import_warnings = [
+        *_import_warnings(options, header_info, unsupported_pmi_count),
+        *source_textures.warnings,
+        *material_libraries.warnings,
+    ]
     for warning in import_warnings:
         asset.report.add_warning(warning)
     asset.report.add_step(
@@ -559,6 +595,8 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
             "space_normalization": space.metadata(),
             "source_textures": source_textures.summary,
             "source_texture_bindings": texture_binding_summary,
+            "material_libraries": material_libraries.summary,
+            "material_library_bindings": material_library_binding_summary,
             "import_decisions": import_decisions,
             "loaded_representations": loaded_representations,
         },
@@ -1240,6 +1278,8 @@ def _asset_metadata(
     space: _SpaceNormalization,
     source_texture_summary: dict[str, int] | None = None,
     texture_binding_summary: dict[str, int] | None = None,
+    material_library_summary: dict[str, int] | None = None,
+    material_library_binding_summary: dict[str, int] | None = None,
 ) -> Metadata:
     if not options.metadata:
         return {}
@@ -1262,6 +1302,10 @@ def _asset_metadata(
         metadata["source_texture_import"] = source_texture_summary
     if texture_binding_summary is not None:
         metadata["source_texture_bindings"] = texture_binding_summary
+    if material_library_summary is not None:
+        metadata["material_library_import"] = material_library_summary
+    if material_library_binding_summary is not None:
+        metadata["material_library_bindings"] = material_library_binding_summary
     if header_info.schema:
         metadata["step_schema"] = header_info.schema
     if header_info.pmi_present:
@@ -1316,6 +1360,8 @@ def _import_decisions(
     space: _SpaceNormalization,
     source_texture_summary: dict[str, int] | None = None,
     texture_binding_summary: dict[str, int] | None = None,
+    material_library_summary: dict[str, int] | None = None,
+    material_library_binding_summary: dict[str, int] | None = None,
 ) -> dict[str, object]:
     cleanup_counts = cleanup.to_dict()
     texture_summary = source_texture_summary or {
@@ -1326,6 +1372,8 @@ def _import_decisions(
         "unreadable": 0,
     }
     binding_summary = texture_binding_summary or {"bound_images": 0, "bound_materials": 0, "unbound_images": 0}
+    library_summary = material_library_summary or _empty_material_library_summary()
+    library_binding_summary = material_library_binding_summary or _empty_material_library_binding_summary()
     return {
         "metadata": _import_decision(
             requested=options.metadata,
@@ -1401,9 +1449,14 @@ def _import_decisions(
         ),
         "material_library_mapping": _import_decision(
             requested=options.material_library_mapping,
-            effective=options.material_library_mapping,
-            state="honored" if options.material_library_mapping else "disabled",
-            detail="known CAD material names are mapped to PBR metallic/roughness/opacity defaults when present",
+            effective=options.material_library_mapping
+            and (library_binding_summary["applied_materials"] > 0 or library_summary["references"] == 0),
+            state=_material_library_import_state(options, library_summary, library_binding_summary),
+            detail=(
+                "known CAD material names and supported JSON/MTL sidecar material libraries are mapped "
+                "to PBR factors and texture slots when present"
+            ),
+            counts={**library_summary, **library_binding_summary},
         ),
         "delete_free_vertices": _import_decision(
             requested=options.delete_free_vertices,
@@ -2058,6 +2111,761 @@ def _shape_color(color_tool: Any, shape: Any) -> tuple[float, float, float, floa
         if color_tool.GetInstanceColor(shape, color_type, color):
             return (float(color.Red()), float(color.Green()), float(color.Blue()), 1.0)
     return None
+
+
+def _empty_material_library_summary() -> dict[str, int]:
+    return {
+        "references": 0,
+        "resolved": 0,
+        "missing": 0,
+        "unsupported": 0,
+        "unreadable": 0,
+        "materials": 0,
+        "textures": 0,
+        "texture_missing": 0,
+        "texture_unreadable": 0,
+    }
+
+
+def _empty_material_library_binding_summary() -> dict[str, int]:
+    return {
+        "library_materials": 0,
+        "matched_library_materials": 0,
+        "unmatched_library_materials": 0,
+        "applied_materials": 0,
+        "bound_textures": 0,
+    }
+
+
+def _material_library_import_state(
+    options: StepReadOptions,
+    summary: dict[str, int],
+    binding_summary: dict[str, int],
+) -> str:
+    if not options.material_library_mapping:
+        return "disabled"
+    if summary["references"] and summary["resolved"] == 0:
+        return "missing_sources"
+    if summary["unreadable"] and summary["materials"] == 0:
+        return "unsupported"
+    if summary["materials"] and binding_summary["applied_materials"] == 0:
+        return "approximated"
+    return "honored"
+
+
+def _extract_material_libraries(
+    source: Path,
+    source_identity: str,
+    options: StepReadOptions,
+) -> _MaterialLibraryExtraction:
+    if not options.material_library_mapping:
+        return _MaterialLibraryExtraction(
+            materials=[],
+            images={},
+            summary=_empty_material_library_summary(),
+            warnings=[],
+        )
+
+    references = _material_library_references(source)
+    configured_paths = [Path(path) for path in options.material_library_paths]
+    search_roots = [
+        source.parent,
+        *(Path(path) for path in options.source_texture_search_paths),
+        *(path for path in configured_paths if path.is_dir()),
+    ]
+    candidates: list[tuple[str, Path | None]] = []
+    missing = 0
+    unsupported = 0
+    unreadable = 0
+    texture_missing = 0
+    texture_unreadable = 0
+    warnings: list[str] = []
+
+    for reference in references:
+        library_path = _resolve_material_library_reference(reference, search_roots)
+        if library_path is None:
+            missing += 1
+            warnings.append(f"material library reference could not be resolved: {reference}")
+            candidates.append((reference, None))
+        else:
+            candidates.append((reference, library_path))
+
+    for configured in configured_paths:
+        explicit_candidates = _material_library_path_candidates(configured)
+        if not explicit_candidates:
+            missing += 1
+            warnings.append(f"material library path could not be resolved: {configured}")
+            candidates.append((str(configured), None))
+            continue
+        candidates.extend((str(configured), path) for path in explicit_candidates)
+
+    materials: list[_MaterialLibrarySpec] = []
+    images: dict[str, ImageResource] = {}
+    seen_libraries: set[Path] = set()
+    seen_texture_paths: set[Path] = set()
+    resolved_libraries = 0
+    for reference, library_path in candidates:
+        if library_path is None:
+            continue
+        suffix = library_path.suffix.lower()
+        if suffix not in _MATERIAL_LIBRARY_SUFFIXES:
+            unsupported += 1
+            warnings.append(f"material library format is unsupported: {library_path}")
+            continue
+        resolved = library_path.resolve()
+        if resolved in seen_libraries:
+            continue
+        seen_libraries.add(resolved)
+        try:
+            specs, texture_stats = _load_material_library(
+                library_path,
+                source_identity=source_identity,
+                reference=reference,
+                images=images,
+                seen_texture_paths=seen_texture_paths,
+                search_roots=[library_path.parent, *search_roots],
+            )
+        except ValueError as exc:
+            unreadable += 1
+            warnings.append(str(exc))
+            continue
+        resolved_libraries += 1
+        materials.extend(specs)
+        texture_missing += texture_stats["missing"]
+        texture_unreadable += texture_stats["unreadable"]
+
+    summary = _empty_material_library_summary()
+    summary.update(
+        {
+            "references": len(references) + len(configured_paths),
+            "resolved": resolved_libraries,
+            "missing": missing,
+            "unsupported": unsupported,
+            "unreadable": unreadable,
+            "materials": len(materials),
+            "textures": len(images),
+            "texture_missing": texture_missing,
+            "texture_unreadable": texture_unreadable,
+        }
+    )
+    return _MaterialLibraryExtraction(materials=materials, images=images, summary=summary, warnings=warnings)
+
+
+def _material_library_references(source: Path) -> list[str]:
+    try:
+        text = source.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return []
+    references: list[str] = []
+    seen: set[str] = set()
+    for match in _MATERIAL_LIBRARY_REF_RE.finditer(text):
+        reference = _clean_source_texture_reference(match.group(1))
+        if not reference or reference in seen:
+            continue
+        seen.add(reference)
+        references.append(reference)
+    return references
+
+
+def _resolve_material_library_reference(reference: str, search_roots: list[Path]) -> Path | None:
+    candidate = Path(reference)
+    candidates: list[Path] = []
+    if candidate.is_absolute():
+        candidates.append(candidate)
+    else:
+        for root in search_roots:
+            candidates.append(root / candidate)
+            if candidate.name != str(candidate):
+                candidates.append(root / candidate.name)
+    for item in candidates:
+        try:
+            if item.is_file() and item.suffix.lower() in _MATERIAL_LIBRARY_SUFFIXES:
+                return item
+        except OSError:
+            continue
+    return None
+
+
+def _material_library_path_candidates(path: Path) -> list[Path]:
+    if path.is_file() and path.suffix.lower() in _MATERIAL_LIBRARY_SUFFIXES:
+        return [path]
+    if path.is_dir():
+        try:
+            return sorted(
+                item for item in path.iterdir() if item.is_file() and item.suffix.lower() in _MATERIAL_LIBRARY_SUFFIXES
+            )
+        except OSError:
+            return []
+    return []
+
+
+def _load_material_library(
+    path: Path,
+    *,
+    source_identity: str,
+    reference: str,
+    images: dict[str, ImageResource],
+    seen_texture_paths: set[Path],
+    search_roots: list[Path],
+) -> tuple[list[_MaterialLibrarySpec], dict[str, int]]:
+    if path.suffix.lower() == ".json":
+        return _load_json_material_library(
+            path,
+            source_identity=source_identity,
+            reference=reference,
+            images=images,
+            seen_texture_paths=seen_texture_paths,
+            search_roots=search_roots,
+        )
+    if path.suffix.lower() == ".mtl":
+        return _load_mtl_material_library(
+            path,
+            source_identity=source_identity,
+            reference=reference,
+            images=images,
+            seen_texture_paths=seen_texture_paths,
+            search_roots=search_roots,
+        )
+    raise ValueError(f"material library format is unsupported: {path}")
+
+
+def _load_json_material_library(
+    path: Path,
+    *,
+    source_identity: str,
+    reference: str,
+    images: dict[str, ImageResource],
+    seen_texture_paths: set[Path],
+    search_roots: list[Path],
+) -> tuple[list[_MaterialLibrarySpec], dict[str, int]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"material library could not be read: {path}") from exc
+    entries = _json_material_entries(payload)
+    if not entries:
+        raise ValueError(f"material library did not contain supported material records: {path}")
+    specs: list[_MaterialLibrarySpec] = []
+    texture_stats = {"missing": 0, "unreadable": 0}
+    for entry in entries:
+        spec, stats = _json_material_spec(
+            entry,
+            path,
+            source_identity=source_identity,
+            reference=reference,
+            images=images,
+            seen_texture_paths=seen_texture_paths,
+            search_roots=search_roots,
+        )
+        texture_stats["missing"] += stats["missing"]
+        texture_stats["unreadable"] += stats["unreadable"]
+        if spec is not None:
+            specs.append(spec)
+    if not specs:
+        raise ValueError(f"material library did not contain supported material records: {path}")
+    return specs, texture_stats
+
+
+def _json_material_entries(payload: object) -> list[dict[str, object]]:
+    if isinstance(payload, list):
+        return [cast(dict[str, object], item) for item in payload if isinstance(item, dict)]
+    if not isinstance(payload, dict):
+        return []
+    for key in ("materials", "materialLibrary", "material_library", "library", "items"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return [cast(dict[str, object], item) for item in value if isinstance(item, dict)]
+        if isinstance(value, dict):
+            return _json_material_entries(value)
+    entries: list[dict[str, object]] = []
+    for key, value in payload.items():
+        if not isinstance(value, dict):
+            continue
+        entry = dict(cast(dict[str, object], value))
+        entry.setdefault("name", key)
+        entries.append(entry)
+    return entries
+
+
+def _json_material_spec(
+    entry: dict[str, object],
+    library_path: Path,
+    *,
+    source_identity: str,
+    reference: str,
+    images: dict[str, ImageResource],
+    seen_texture_paths: set[Path],
+    search_roots: list[Path],
+) -> tuple[_MaterialLibrarySpec | None, dict[str, int]]:
+    name = _json_material_name(entry)
+    if not name:
+        return None, {"missing": 0, "unreadable": 0}
+    pbr = _json_mapping(entry.get("pbrMetallicRoughness")) or _json_mapping(entry.get("pbr_metallic_roughness")) or {}
+    base_color = (
+        _json_color(entry.get("base_color"))
+        or _json_color(entry.get("baseColor"))
+        or _json_color(entry.get("baseColorFactor"))
+        or _json_color(entry.get("base_color_factor"))
+        or _json_color(entry.get("diffuseColor"))
+        or _json_color(entry.get("diffuse"))
+        or _json_color(entry.get("albedo"))
+        or _json_color(entry.get("color"))
+        or _json_color(pbr.get("baseColorFactor"))
+    )
+    metallic = _optional_material_float(
+        entry.get("metallic"),
+        entry.get("metallicFactor"),
+        entry.get("metalness"),
+        entry.get("metalnessFactor"),
+        pbr.get("metallicFactor"),
+    )
+    roughness = _optional_material_float(
+        entry.get("roughness"), entry.get("roughnessFactor"), pbr.get("roughnessFactor")
+    )
+    opacity = _json_opacity(entry)
+    texture_images, texture_stats = _json_material_texture_images(
+        entry,
+        pbr,
+        library_path,
+        source_identity=source_identity,
+        images=images,
+        seen_texture_paths=seen_texture_paths,
+        search_roots=search_roots,
+        material_name=name,
+    )
+    metadata: Metadata = {
+        "cad_material_source": "material_library",
+        "material_library_name": name,
+        "material_library_reference": reference,
+        "material_library_path": str(library_path),
+        "pbr_mapping_status": "material_library",
+    }
+    return (
+        _MaterialLibrarySpec(
+            name=name,
+            base_color=base_color,
+            metallic=metallic,
+            roughness=roughness,
+            opacity=opacity,
+            texture_images=tuple(texture_images),
+            metadata=tuple(sorted((key, str(value)) for key, value in metadata.items())),
+        ),
+        texture_stats,
+    )
+
+
+def _json_material_name(entry: dict[str, object]) -> str:
+    for key in ("name", "materialName", "material_name", "displayName", "display_name", "id"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _json_mapping(value: object) -> dict[str, object] | None:
+    return cast(dict[str, object], value) if isinstance(value, dict) else None
+
+
+def _json_color(value: object) -> tuple[float, float, float, float] | None:
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        if stripped.startswith("#"):
+            return _hex_color(stripped)
+        parts = [part for part in re.split(r"[\s,]+", stripped) if part]
+        if len(parts) in {3, 4}:
+            return _numeric_color(parts)
+        return None
+    if isinstance(value, dict):
+        red = _optional_material_float(value.get("r"), value.get("red"))
+        green = _optional_material_float(value.get("g"), value.get("green"))
+        blue = _optional_material_float(value.get("b"), value.get("blue"))
+        alpha = _optional_material_float(value.get("a"), value.get("alpha"))
+        if red is None or green is None or blue is None:
+            return None
+        color = (red, green, blue, 1.0 if alpha is None else alpha)
+        return _normalize_color_range(color)
+    if isinstance(value, list | tuple) and len(value) in {3, 4}:
+        return _numeric_color(list(value))
+    return None
+
+
+def _hex_color(value: str) -> tuple[float, float, float, float] | None:
+    encoded = value.strip().removeprefix("#")
+    if len(encoded) not in {6, 8}:
+        return None
+    try:
+        red = int(encoded[0:2], 16) / 255.0
+        green = int(encoded[2:4], 16) / 255.0
+        blue = int(encoded[4:6], 16) / 255.0
+        alpha = int(encoded[6:8], 16) / 255.0 if len(encoded) == 8 else 1.0
+    except ValueError:
+        return None
+    return (_clamp01(red), _clamp01(green), _clamp01(blue), _clamp01(alpha))
+
+
+def _numeric_color(values: list[object]) -> tuple[float, float, float, float] | None:
+    parsed = [_optional_material_float(value) for value in values]
+    if any(value is None for value in parsed):
+        return None
+    numbers = [cast(float, value) for value in parsed]
+    red, green, blue = numbers[:3]
+    alpha = numbers[3] if len(numbers) == 4 else 1.0
+    return _normalize_color_range((red, green, blue, alpha))
+
+
+def _normalize_color_range(color: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+    if any(component > 1.0 for component in color):
+        return (
+            _clamp01(color[0] / 255.0),
+            _clamp01(color[1] / 255.0),
+            _clamp01(color[2] / 255.0),
+            _clamp01(color[3] / 255.0),
+        )
+    return _clamp_color(color)
+
+
+def _optional_material_float(*values: object) -> float | None:
+    for value in values:
+        if value is None or isinstance(value, bool):
+            continue
+        if not isinstance(value, str | int | float):
+            continue
+        try:
+            return _clamp01(float(value))
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _json_opacity(entry: dict[str, object]) -> float | None:
+    opacity = _optional_material_float(entry.get("opacity"), entry.get("alpha"))
+    if opacity is not None:
+        return opacity
+    transparency = _optional_material_float(entry.get("transparency"))
+    if transparency is not None:
+        return 1.0 - transparency
+    base_color = _json_color(entry.get("baseColorFactor")) or _json_color(entry.get("base_color"))
+    if base_color is not None:
+        return base_color[3]
+    return None
+
+
+def _json_material_texture_images(
+    entry: dict[str, object],
+    pbr: dict[str, object],
+    library_path: Path,
+    *,
+    source_identity: str,
+    images: dict[str, ImageResource],
+    seen_texture_paths: set[Path],
+    search_roots: list[Path],
+    material_name: str,
+) -> tuple[list[tuple[str, str]], dict[str, int]]:
+    references: list[tuple[str, str]] = []
+    texture_map = _json_mapping(entry.get("textures"))
+    if texture_map is not None:
+        for key, value in texture_map.items():
+            slot = _material_library_texture_slot(key)
+            reference = _texture_reference_from_value(value)
+            if slot is not None and reference:
+                references.append((slot, reference))
+    flat_keys = {
+        "baseColorTexture": "base_color",
+        "base_color_texture": "base_color",
+        "diffuseTexture": "base_color",
+        "albedoTexture": "base_color",
+        "metallicRoughnessTexture": "metallic_roughness",
+        "metallic_roughness_texture": "metallic_roughness",
+        "normalTexture": "normal",
+        "normal_texture": "normal",
+        "occlusionTexture": "occlusion",
+        "aoTexture": "occlusion",
+        "emissiveTexture": "emissive",
+        "opacityTexture": "opacity",
+        "alphaTexture": "opacity",
+        "roughnessTexture": "roughness",
+        "metallicTexture": "metallic",
+    }
+    for key, slot in flat_keys.items():
+        reference = _texture_reference_from_value(entry.get(key))
+        if reference:
+            references.append((slot, reference))
+    for key, slot in {"baseColorTexture": "base_color", "metallicRoughnessTexture": "metallic_roughness"}.items():
+        reference = _texture_reference_from_value(pbr.get(key))
+        if reference:
+            references.append((slot, reference))
+    return _load_material_library_texture_references(
+        references,
+        library_path,
+        source_identity=source_identity,
+        images=images,
+        seen_texture_paths=seen_texture_paths,
+        search_roots=search_roots,
+        material_name=material_name,
+    )
+
+
+def _texture_reference_from_value(value: object) -> str:
+    if isinstance(value, str):
+        return _clean_source_texture_reference(value)
+    if isinstance(value, dict):
+        for key in ("uri", "path", "file", "filename", "source", "name"):
+            reference = value.get(key)
+            if isinstance(reference, str) and reference.strip():
+                return _clean_source_texture_reference(reference)
+    return ""
+
+
+def _load_mtl_material_library(
+    path: Path,
+    *,
+    source_identity: str,
+    reference: str,
+    images: dict[str, ImageResource],
+    seen_texture_paths: set[Path],
+    search_roots: list[Path],
+) -> tuple[list[_MaterialLibrarySpec], dict[str, int]]:
+    try:
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError as exc:
+        raise ValueError(f"material library could not be read: {path}") from exc
+    entries: list[dict[str, object]] = []
+    current: dict[str, object] | None = None
+    for raw_line in lines:
+        line = raw_line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        keyword, _, rest = line.partition(" ")
+        key = keyword.lower()
+        value = rest.strip()
+        if key == "newmtl":
+            if current is not None:
+                entries.append(current)
+            current = {"name": value}
+            continue
+        if current is None:
+            continue
+        if key == "kd":
+            current["base_color"] = value
+        elif key == "d":
+            current["opacity"] = value
+        elif key == "tr":
+            transparency = _optional_material_float(value)
+            if transparency is not None:
+                current["opacity"] = 1.0 - transparency
+        elif key == "pm":
+            current["metallic"] = value
+        elif key == "pr":
+            current["roughness"] = value
+        elif key == "ns":
+            try:
+                shininess = _clamp01(float(value) / 1000.0)
+            except ValueError:
+                shininess = None
+            if shininess is not None:
+                current["roughness"] = max(0.04, 1.0 - shininess**0.5)
+        elif key.startswith("map_") or key in {"bump", "norm"}:
+            textures = cast(dict[str, object], current.setdefault("textures", {}))
+            slot = _material_library_texture_slot(key)
+            if slot is not None:
+                textures[slot] = _mtl_texture_reference(value)
+    if current is not None:
+        entries.append(current)
+    if not entries:
+        raise ValueError(f"material library did not contain supported material records: {path}")
+    specs: list[_MaterialLibrarySpec] = []
+    texture_stats = {"missing": 0, "unreadable": 0}
+    for entry in entries:
+        spec, stats = _json_material_spec(
+            entry,
+            path,
+            source_identity=source_identity,
+            reference=reference,
+            images=images,
+            seen_texture_paths=seen_texture_paths,
+            search_roots=search_roots,
+        )
+        texture_stats["missing"] += stats["missing"]
+        texture_stats["unreadable"] += stats["unreadable"]
+        if spec is not None:
+            specs.append(spec)
+    return specs, texture_stats
+
+
+def _mtl_texture_reference(value: str) -> str:
+    tokens = [token for token in value.split() if token]
+    if not tokens:
+        return ""
+    return _clean_source_texture_reference(tokens[-1])
+
+
+def _material_library_texture_slot(key: str) -> str | None:
+    normalized = key.lower().replace("-", "_")
+    aliases = {
+        "map_kd": "base_color",
+        "map_ka": "base_color",
+        "map_ke": "emissive",
+        "map_d": "opacity",
+        "map_bump": "normal",
+        "bump": "normal",
+        "norm": "normal",
+        "map_pr": "roughness",
+        "map_pm": "metallic",
+        "map_orm": "metallic_roughness",
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+    return _texture_slot(normalized)
+
+
+def _load_material_library_texture_references(
+    references: list[tuple[str, str]],
+    library_path: Path,
+    *,
+    source_identity: str,
+    images: dict[str, ImageResource],
+    seen_texture_paths: set[Path],
+    search_roots: list[Path],
+    material_name: str,
+) -> tuple[list[tuple[str, str]], dict[str, int]]:
+    texture_images: list[tuple[str, str]] = []
+    missing = 0
+    unreadable = 0
+    seen_references: set[tuple[str, str]] = set()
+    for slot, reference in references:
+        key = (slot, reference)
+        if key in seen_references:
+            continue
+        seen_references.add(key)
+        texture_path = _resolve_source_texture(reference, search_roots)
+        if texture_path is None:
+            missing += 1
+            continue
+        resolved = texture_path.resolve()
+        try:
+            image = _load_source_texture(texture_path, source_identity=source_identity, reference=reference)
+        except ValueError:
+            unreadable += 1
+            continue
+        if resolved in seen_texture_paths:
+            existing = next(
+                (
+                    image_id
+                    for image_id, existing_image in images.items()
+                    if Path(str(existing_image.metadata.get("source_texture_path", ""))).resolve() == resolved
+                ),
+                None,
+            )
+            if existing is not None:
+                texture_images.append((slot, existing))
+            continue
+        seen_texture_paths.add(resolved)
+        image_id = _stable_id("img", f"{source_identity}:{library_path.resolve()}:{resolved}:{slot}:{material_name}")
+        metadata = dict(image.metadata)
+        metadata.update(
+            {
+                "source_texture_slot": slot,
+                "source_texture_material_name": material_name,
+                "material_library_path": str(library_path),
+            }
+        )
+        images[image_id] = ImageResource(
+            id=image_id,
+            name=image.name,
+            mime_type=image.mime_type,
+            data=image.data,
+            width=image.width,
+            height=image.height,
+            metadata=metadata,
+        )
+        texture_images.append((slot, image_id))
+    return texture_images, {"missing": missing, "unreadable": unreadable}
+
+
+def _apply_material_libraries_to_materials(
+    materials: dict[str, Material],
+    extraction: _MaterialLibraryExtraction,
+) -> dict[str, int]:
+    summary = _empty_material_library_binding_summary()
+    summary["library_materials"] = len(extraction.materials)
+    applied_materials: set[str] = set()
+    for spec in extraction.materials:
+        targets = _material_library_targets(materials, spec)
+        if not targets:
+            summary["unmatched_library_materials"] += 1
+            continue
+        summary["matched_library_materials"] += 1
+        for material in targets:
+            materials[material.id] = _material_with_library_spec(material, spec)
+            applied_materials.add(material.id)
+            summary["bound_textures"] += len(spec.texture_images)
+    summary["applied_materials"] = len(applied_materials)
+    return summary
+
+
+def _material_library_targets(
+    materials: dict[str, Material],
+    spec: _MaterialLibrarySpec,
+) -> list[Material]:
+    if not materials:
+        return []
+    spec_key = _material_match_key(spec.name)
+    exact: list[Material] = []
+    fuzzy: list[Material] = []
+    for material in materials.values():
+        names = [
+            material.name,
+            str(material.metadata.get("cad_material_name", "")),
+            str(material.metadata.get("material_library_name", "")),
+        ]
+        if spec_key and any(_material_match_key(name) == spec_key for name in names if name):
+            exact.append(material)
+            continue
+        material_tokens = set().union(*(_name_tokens(name) for name in names if name))
+        spec_tokens = set(_name_tokens(spec.name)) - _GENERIC_MATERIAL_TOKENS
+        if spec_tokens and material_tokens.intersection(spec_tokens):
+            fuzzy.append(material)
+    if exact:
+        return exact
+    if fuzzy:
+        return fuzzy
+    return []
+
+
+def _material_match_key(value: str) -> str:
+    return "_".join(token for token in _name_tokens(value) if token not in _GENERIC_MATERIAL_TOKENS)
+
+
+def _material_with_library_spec(material: Material, spec: _MaterialLibrarySpec) -> Material:
+    opacity = material.opacity if spec.opacity is None else spec.opacity
+    base_color = material.base_color if spec.base_color is None else spec.base_color
+    if spec.opacity is not None:
+        base_color = (base_color[0], base_color[1], base_color[2], min(base_color[3], opacity))
+    metadata = {
+        **material.metadata,
+        **spec.metadata_dict(),
+        "material_library_matched": "true",
+        "material_library_material_name": spec.name,
+    }
+    for slot, image_id in spec.texture_images:
+        metadata[f"source_texture_{slot}_image"] = image_id
+        if slot in _SOURCE_TEXTURE_EXPORT_SLOTS:
+            metadata.setdefault(f"source_texture_{slot}_image", image_id)
+        existing = metadata.get("source_texture_slots")
+        slots = set(str(existing).split(",")) if isinstance(existing, str) and existing else set()
+        slots.add(slot)
+        metadata["source_texture_slots"] = ",".join(sorted(slots))
+    return Material(
+        id=material.id,
+        name=material.name,
+        base_color=base_color,
+        metallic=material.metallic if spec.metallic is None else spec.metallic,
+        roughness=material.roughness if spec.roughness is None else spec.roughness,
+        opacity=opacity,
+        metadata=metadata,
+    )
 
 
 def _extract_source_textures(source: Path, source_identity: str, options: StepReadOptions) -> _SourceTextureExtraction:
