@@ -412,7 +412,9 @@ def cmd_inspect(
     ] = False,
     material_libraries: Annotated[
         list[Path] | None,
-        typer.Option("--material-library", help="Vendor material-library JSON/MTL file or folder to apply on import."),
+        typer.Option(
+            "--material-library", help="Vendor material-library JSON/MTL/ZIP file or folder to apply on import."
+        ),
     ] = None,
     delete_free_vertices: Annotated[
         bool,
@@ -926,7 +928,9 @@ def cmd_convert(
     ] = False,
     material_libraries: Annotated[
         list[Path] | None,
-        typer.Option("--material-library", help="Vendor material-library JSON/MTL file or folder to apply on import."),
+        typer.Option(
+            "--material-library", help="Vendor material-library JSON/MTL/ZIP file or folder to apply on import."
+        ),
     ] = None,
     delete_free_vertices: Annotated[
         bool,

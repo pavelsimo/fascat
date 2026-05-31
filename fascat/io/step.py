@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import re
 import tempfile
+import zipfile
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, cast
 from urllib.parse import unquote, urlparse
 
@@ -22,6 +23,7 @@ from fascat.options import StepReadOptions
 from fascat.report import Report, timed_step
 
 _PartIndex = dict[tuple[str, str, str, str], str]
+_ArchiveTextureMap = dict[str, tuple[str, bytes]]
 _UNIT_FACTORS = {
     "metre": 1.0,
     "meter": 1.0,
@@ -51,8 +53,10 @@ _UNIT_NAMES = {
 }
 _SOURCE_TEXTURE_SUFFIXES = {".png", ".jpg", ".jpeg", ".ktx2"}
 _SOURCE_TEXTURE_REF_RE = re.compile(r"'([^']+\.(?:png|jpe?g|ktx2)(?:[#?][^']*)?)'", re.IGNORECASE)
-_MATERIAL_LIBRARY_SUFFIXES = {".json", ".mtl"}
-_MATERIAL_LIBRARY_REF_RE = re.compile(r"'([^']+\.(?:json|mtl)(?:[#?][^']*)?)'", re.IGNORECASE)
+_MATERIAL_RECORD_SUFFIXES = {".json", ".mtl"}
+_MATERIAL_LIBRARY_CONTAINER_SUFFIXES = {".zip"}
+_MATERIAL_LIBRARY_SUFFIXES = _MATERIAL_RECORD_SUFFIXES | _MATERIAL_LIBRARY_CONTAINER_SUFFIXES
+_MATERIAL_LIBRARY_REF_RE = re.compile(r"'([^']+\.(?:json|mtl|zip)(?:[#?][^']*)?)'", re.IGNORECASE)
 _STEP_SUFFIXES = {".step", ".stp"}
 _STEP_EXTERNAL_REF_RE = re.compile(r"'([^']+\.(?:step|stp)(?:[#?][^']*)?)'", re.IGNORECASE)
 _GENERIC_MATERIAL_TOKENS = {"cad", "color", "material", "mat", "texture", "map", "source"}
@@ -2202,7 +2206,7 @@ def _extract_material_libraries(
     materials: list[_MaterialLibrarySpec] = []
     images: dict[str, ImageResource] = {}
     seen_libraries: set[Path] = set()
-    seen_texture_paths: set[Path] = set()
+    seen_texture_paths: set[str] = set()
     resolved_libraries = 0
     for reference, library_path in candidates:
         if library_path is None:
@@ -2305,7 +2309,7 @@ def _load_material_library(
     source_identity: str,
     reference: str,
     images: dict[str, ImageResource],
-    seen_texture_paths: set[Path],
+    seen_texture_paths: set[str],
     search_roots: list[Path],
 ) -> tuple[list[_MaterialLibrarySpec], dict[str, int]]:
     if path.suffix.lower() == ".json":
@@ -2326,6 +2330,15 @@ def _load_material_library(
             seen_texture_paths=seen_texture_paths,
             search_roots=search_roots,
         )
+    if path.suffix.lower() == ".zip":
+        return _load_zipped_material_library(
+            path,
+            source_identity=source_identity,
+            reference=reference,
+            images=images,
+            seen_texture_paths=seen_texture_paths,
+            search_roots=search_roots,
+        )
     raise ValueError(f"material library format is unsupported: {path}")
 
 
@@ -2335,7 +2348,7 @@ def _load_json_material_library(
     source_identity: str,
     reference: str,
     images: dict[str, ImageResource],
-    seen_texture_paths: set[Path],
+    seen_texture_paths: set[str],
     search_roots: list[Path],
 ) -> tuple[list[_MaterialLibrarySpec], dict[str, int]]:
     try:
@@ -2356,6 +2369,7 @@ def _load_json_material_library(
             images=images,
             seen_texture_paths=seen_texture_paths,
             search_roots=search_roots,
+            library_label=str(path),
         )
         texture_stats["missing"] += stats["missing"]
         texture_stats["unreadable"] += stats["unreadable"]
@@ -2364,6 +2378,119 @@ def _load_json_material_library(
     if not specs:
         raise ValueError(f"material library did not contain supported material records: {path}")
     return specs, texture_stats
+
+
+def _load_zipped_material_library(
+    path: Path,
+    *,
+    source_identity: str,
+    reference: str,
+    images: dict[str, ImageResource],
+    seen_texture_paths: set[str],
+    search_roots: list[Path],
+) -> tuple[list[_MaterialLibrarySpec], dict[str, int]]:
+    _ = search_roots
+    try:
+        with zipfile.ZipFile(path) as archive:
+            material_members = _archive_material_members(archive)
+            if not material_members:
+                raise ValueError(f"material library archive did not contain JSON or MTL records: {path}")
+            archive_textures = _archive_texture_members(archive)
+            specs: list[_MaterialLibrarySpec] = []
+            texture_stats = {"missing": 0, "unreadable": 0}
+            member_errors: list[str] = []
+            for member_name in material_members:
+                member_path = Path(member_name)
+                library_label = f"{path}!/{member_name}"
+                try:
+                    member_bytes = archive.read(member_name)
+                except (KeyError, OSError, zipfile.BadZipFile):
+                    member_errors.append(f"material library archive member could not be read: {library_label}")
+                    continue
+                try:
+                    if member_path.suffix.lower() == ".json":
+                        try:
+                            payload = json.loads(member_bytes.decode("utf-8"))
+                        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                            raise ValueError(f"material library could not be read: {library_label}") from exc
+                        entries = _json_material_entries(payload)
+                        if not entries:
+                            raise ValueError(
+                                f"material library did not contain supported material records: {library_label}"
+                            )
+                    else:
+                        lines = member_bytes.decode("utf-8", errors="ignore").splitlines()
+                        entries = _mtl_material_entries(lines, library_label)
+                    member_specs, member_texture_stats = _material_specs_from_entries(
+                        entries,
+                        member_path,
+                        source_identity=source_identity,
+                        reference=reference,
+                        images=images,
+                        seen_texture_paths=seen_texture_paths,
+                        search_roots=[],
+                        library_label=library_label,
+                        archive_textures=archive_textures,
+                        archive_container=path,
+                    )
+                except ValueError as exc:
+                    member_errors.append(str(exc))
+                    continue
+                specs.extend(member_specs)
+                texture_stats["missing"] += member_texture_stats["missing"]
+                texture_stats["unreadable"] += member_texture_stats["unreadable"]
+            if not specs:
+                detail = f": {member_errors[0]}" if member_errors else ""
+                raise ValueError(f"material library archive did not contain supported material records: {path}{detail}")
+            return specs, texture_stats
+    except zipfile.BadZipFile as exc:
+        raise ValueError(f"material library archive could not be read: {path}") from exc
+    except OSError as exc:
+        raise ValueError(f"material library archive could not be read: {path}") from exc
+
+
+def _archive_material_members(archive: zipfile.ZipFile) -> list[str]:
+    return sorted(
+        name
+        for name in archive.namelist()
+        if _safe_archive_member_name(name) and PurePosixPath(name).suffix.lower() in _MATERIAL_RECORD_SUFFIXES
+    )
+
+
+def _archive_texture_members(archive: zipfile.ZipFile) -> _ArchiveTextureMap:
+    textures: _ArchiveTextureMap = {}
+    for name in archive.namelist():
+        if not _safe_archive_member_name(name) or PurePosixPath(name).suffix.lower() not in _SOURCE_TEXTURE_SUFFIXES:
+            continue
+        try:
+            textures[_archive_member_key(name)] = (_archive_member_name(name), archive.read(name))
+        except (KeyError, OSError, zipfile.BadZipFile):
+            continue
+    return textures
+
+
+def _safe_archive_member_name(name: str) -> bool:
+    cleaned = name.replace("\\", "/")
+    member = PurePosixPath(cleaned)
+    return bool(cleaned and member.name and not member.is_absolute() and ".." not in member.parts)
+
+
+def _archive_member_name(name: str) -> str:
+    return str(PurePosixPath(name.replace("\\", "/"))).lstrip("./")
+
+
+def _archive_member_key(name: str) -> str:
+    member = PurePosixPath(name.replace("\\", "/"))
+    parts: list[str] = []
+    for part in member.parts:
+        if part in {"", "."}:
+            continue
+        if part == "..":
+            if parts:
+                parts.pop()
+            continue
+        parts.append(part)
+    return "/".join(parts).lower()
 
 
 def _json_material_entries(payload: object) -> list[dict[str, object]]:
@@ -2394,8 +2521,11 @@ def _json_material_spec(
     source_identity: str,
     reference: str,
     images: dict[str, ImageResource],
-    seen_texture_paths: set[Path],
+    seen_texture_paths: set[str],
     search_roots: list[Path],
+    library_label: str,
+    archive_textures: _ArchiveTextureMap | None = None,
+    archive_container: Path | None = None,
 ) -> tuple[_MaterialLibrarySpec | None, dict[str, int]]:
     name = _json_material_name(entry)
     if not name:
@@ -2432,14 +2562,19 @@ def _json_material_spec(
         seen_texture_paths=seen_texture_paths,
         search_roots=search_roots,
         material_name=name,
+        library_label=library_label,
+        archive_textures=archive_textures,
+        archive_container=archive_container,
     )
     metadata: Metadata = {
         "cad_material_source": "material_library",
         "material_library_name": name,
         "material_library_reference": reference,
-        "material_library_path": str(library_path),
+        "material_library_path": library_label,
         "pbr_mapping_status": "material_library",
     }
+    if archive_container is not None:
+        metadata["material_library_container"] = str(archive_container)
     return (
         _MaterialLibrarySpec(
             name=name,
@@ -2559,9 +2694,12 @@ def _json_material_texture_images(
     *,
     source_identity: str,
     images: dict[str, ImageResource],
-    seen_texture_paths: set[Path],
+    seen_texture_paths: set[str],
     search_roots: list[Path],
     material_name: str,
+    library_label: str,
+    archive_textures: _ArchiveTextureMap | None = None,
+    archive_container: Path | None = None,
 ) -> tuple[list[tuple[str, str]], dict[str, int]]:
     references: list[tuple[str, str]] = []
     texture_map = _json_mapping(entry.get("textures"))
@@ -2604,6 +2742,9 @@ def _json_material_texture_images(
         seen_texture_paths=seen_texture_paths,
         search_roots=search_roots,
         material_name=material_name,
+        library_label=library_label,
+        archive_textures=archive_textures,
+        archive_container=archive_container,
     )
 
 
@@ -2624,13 +2765,28 @@ def _load_mtl_material_library(
     source_identity: str,
     reference: str,
     images: dict[str, ImageResource],
-    seen_texture_paths: set[Path],
+    seen_texture_paths: set[str],
     search_roots: list[Path],
 ) -> tuple[list[_MaterialLibrarySpec], dict[str, int]]:
     try:
         lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
     except OSError as exc:
         raise ValueError(f"material library could not be read: {path}") from exc
+    entries = _mtl_material_entries(lines, str(path))
+    specs, texture_stats = _material_specs_from_entries(
+        entries,
+        path,
+        source_identity=source_identity,
+        reference=reference,
+        images=images,
+        seen_texture_paths=seen_texture_paths,
+        search_roots=search_roots,
+        library_label=str(path),
+    )
+    return specs, texture_stats
+
+
+def _mtl_material_entries(lines: list[str], library_label: str) -> list[dict[str, object]]:
     entries: list[dict[str, object]] = []
     current: dict[str, object] | None = None
     for raw_line in lines:
@@ -2674,18 +2830,37 @@ def _load_mtl_material_library(
     if current is not None:
         entries.append(current)
     if not entries:
-        raise ValueError(f"material library did not contain supported material records: {path}")
+        raise ValueError(f"material library did not contain supported material records: {library_label}")
+    return entries
+
+
+def _material_specs_from_entries(
+    entries: list[dict[str, object]],
+    library_path: Path,
+    *,
+    source_identity: str,
+    reference: str,
+    images: dict[str, ImageResource],
+    seen_texture_paths: set[str],
+    search_roots: list[Path],
+    library_label: str,
+    archive_textures: _ArchiveTextureMap | None = None,
+    archive_container: Path | None = None,
+) -> tuple[list[_MaterialLibrarySpec], dict[str, int]]:
     specs: list[_MaterialLibrarySpec] = []
     texture_stats = {"missing": 0, "unreadable": 0}
     for entry in entries:
         spec, stats = _json_material_spec(
             entry,
-            path,
+            library_path,
             source_identity=source_identity,
             reference=reference,
             images=images,
             seen_texture_paths=seen_texture_paths,
             search_roots=search_roots,
+            library_label=library_label,
+            archive_textures=archive_textures,
+            archive_container=archive_container,
         )
         texture_stats["missing"] += stats["missing"]
         texture_stats["unreadable"] += stats["unreadable"]
@@ -2720,15 +2895,40 @@ def _material_library_texture_slot(key: str) -> str | None:
     return _texture_slot(normalized)
 
 
+def _resolve_archive_texture_reference(
+    reference: str,
+    archive_textures: _ArchiveTextureMap,
+    library_path: Path,
+) -> tuple[str, bytes] | None:
+    library_parent = PurePosixPath(library_path.as_posix()).parent
+    reference_path = PurePosixPath(reference.replace("\\", "/"))
+    candidate_keys = [
+        _archive_member_key(str(library_parent / reference_path)),
+        _archive_member_key(str(reference_path)),
+        _archive_member_key(reference_path.name),
+    ]
+    for key in candidate_keys:
+        if key in archive_textures:
+            return archive_textures[key]
+    basename = reference_path.name.lower()
+    basename_matches = [item for key, item in archive_textures.items() if PurePosixPath(key).name == basename]
+    if len(basename_matches) == 1:
+        return basename_matches[0]
+    return None
+
+
 def _load_material_library_texture_references(
     references: list[tuple[str, str]],
     library_path: Path,
     *,
     source_identity: str,
     images: dict[str, ImageResource],
-    seen_texture_paths: set[Path],
+    seen_texture_paths: set[str],
     search_roots: list[Path],
     material_name: str,
+    library_label: str,
+    archive_textures: _ArchiveTextureMap | None = None,
+    archive_container: Path | None = None,
 ) -> tuple[list[tuple[str, str]], dict[str, int]]:
     texture_images: list[tuple[str, str]] = []
     missing = 0
@@ -2739,38 +2939,64 @@ def _load_material_library_texture_references(
         if key in seen_references:
             continue
         seen_references.add(key)
-        texture_path = _resolve_source_texture(reference, search_roots)
-        if texture_path is None:
-            missing += 1
-            continue
-        resolved = texture_path.resolve()
-        try:
-            image = _load_source_texture(texture_path, source_identity=source_identity, reference=reference)
-        except ValueError:
-            unreadable += 1
-            continue
-        if resolved in seen_texture_paths:
+        if archive_textures is not None and archive_container is not None:
+            resolved_archive = _resolve_archive_texture_reference(reference, archive_textures, library_path)
+            if resolved_archive is None:
+                missing += 1
+                continue
+            member_name, data = resolved_archive
+            identity = f"{archive_container.resolve()}!/{member_name}"
+            path_label = f"{archive_container}!/{member_name}"
+            try:
+                image = _load_source_texture_data(
+                    data,
+                    suffix=Path(member_name).suffix.lower(),
+                    name=Path(member_name).name,
+                    source_identity=source_identity,
+                    reference=reference,
+                    path_label=path_label,
+                    stable_identity=identity,
+                )
+            except ValueError:
+                unreadable += 1
+                continue
+        else:
+            texture_path = _resolve_source_texture(reference, search_roots)
+            if texture_path is None:
+                missing += 1
+                continue
+            identity = str(texture_path.resolve())
+            try:
+                image = _load_source_texture(texture_path, source_identity=source_identity, reference=reference)
+            except ValueError:
+                unreadable += 1
+                continue
+        if identity in seen_texture_paths:
             existing = next(
                 (
                     image_id
                     for image_id, existing_image in images.items()
-                    if Path(str(existing_image.metadata.get("source_texture_path", ""))).resolve() == resolved
+                    if str(existing_image.metadata.get("source_texture_identity", "")) == identity
+                    or str(existing_image.metadata.get("source_texture_path", "")) == identity
                 ),
                 None,
             )
             if existing is not None:
                 texture_images.append((slot, existing))
             continue
-        seen_texture_paths.add(resolved)
-        image_id = _stable_id("img", f"{source_identity}:{library_path.resolve()}:{resolved}:{slot}:{material_name}")
+        seen_texture_paths.add(identity)
+        image_id = _stable_id("img", f"{source_identity}:{library_label}:{identity}:{slot}:{material_name}")
         metadata = dict(image.metadata)
         metadata.update(
             {
                 "source_texture_slot": slot,
                 "source_texture_material_name": material_name,
-                "material_library_path": str(library_path),
+                "material_library_path": library_label,
+                "source_texture_identity": identity,
             }
         )
+        if archive_container is not None:
+            metadata["material_library_container"] = str(archive_container)
         images[image_id] = ImageResource(
             id=image_id,
             name=image.name,
@@ -2966,11 +3192,31 @@ def _resolve_source_texture(reference: str, search_roots: list[Path]) -> Path | 
 
 def _load_source_texture(path: Path, *, source_identity: str, reference: str) -> ImageResource:
     data = path.read_bytes()
-    suffix = path.suffix.lower()
+    return _load_source_texture_data(
+        data,
+        suffix=path.suffix.lower(),
+        name=path.name,
+        source_identity=source_identity,
+        reference=reference,
+        path_label=str(path),
+        stable_identity=str(path.resolve()),
+    )
+
+
+def _load_source_texture_data(
+    data: bytes,
+    *,
+    suffix: str,
+    name: str,
+    source_identity: str,
+    reference: str,
+    path_label: str,
+    stable_identity: str,
+) -> ImageResource:
     if suffix == ".ktx2":
         size = _ktx2_dimensions(data)
         if size is None:
-            raise ValueError(f"source texture could not be read as KTX2: {path}")
+            raise ValueError(f"source texture could not be read as KTX2: {path_label}")
         width, height = size
         mime_type: ImageMimeType = "image/ktx2"
     else:
@@ -2980,18 +3226,19 @@ def _load_source_texture(path: Path, *, source_identity: str, reference: str) ->
                 width, height = image.size
                 mime_type = "image/png" if image.format == "PNG" else "image/jpeg"
         except Exception as exc:
-            raise ValueError(f"source texture could not be read: {path}") from exc
-    digest = _stable_id("img", f"{source_identity}:{path.resolve()}:{len(data)}")
-    slot = _texture_slot(path.stem)
+            raise ValueError(f"source texture could not be read: {path_label}") from exc
+    digest = _stable_id("img", f"{source_identity}:{stable_identity}:{len(data)}")
+    slot = _texture_slot(Path(name).stem)
     metadata: Metadata = {
         "source_texture": "true",
         "source_texture_reference": reference,
-        "source_texture_path": str(path),
+        "source_texture_path": path_label,
+        "source_texture_identity": stable_identity,
         "source_texture_slot": slot or "unknown",
     }
     return ImageResource(
         id=digest,
-        name=path.name,
+        name=name,
         mime_type=mime_type,
         data=data,
         width=width,

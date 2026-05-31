@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import zipfile
+from io import BytesIO
 from pathlib import Path
 
 import numpy as np
@@ -314,6 +317,63 @@ map_Kd aluminum.png
     assert material.metallic == pytest.approx(1.0)
     assert material.roughness == pytest.approx(0.18)
     assert material.metadata["source_texture_base_color_image"] in extraction.images
+
+
+def test_step_material_library_zip_container_maps_pbr_and_textures(tmp_path: Path) -> None:
+    image_buffer = BytesIO()
+    Image.new("RGBA", (2, 1), (180, 90, 40, 255)).save(image_buffer, format="PNG")
+    library = tmp_path / "vendor-materials.zip"
+    payload = {
+        "materials": [
+            {
+                "materialName": "Burnt Copper",
+                "baseColorFactor": [0.7, 0.35, 0.16, 1.0],
+                "metallicFactor": 1.0,
+                "roughnessFactor": 0.24,
+                "textures": {"baseColor": "../textures/copper_baseColor.png"},
+            }
+        ]
+    }
+    with zipfile.ZipFile(library, "w") as archive:
+        archive.writestr("metadata/manifest.json", '{"name":"not a material library"}')
+        archive.writestr("materials/vendor.json", json.dumps(payload))
+        archive.writestr("textures/copper_baseColor.png", image_buffer.getvalue())
+    source = tmp_path / "panel.step"
+    source.write_text(
+        "ISO-10303-21;\nDATA;\n#1=EXTERNAL_REFERENCE('vendor-materials.zip');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    materials = {
+        "copper": fc.Material(id="copper", name="Burnt Copper", base_color=(0.6, 0.3, 0.2, 1.0)),
+    }
+
+    extraction = _extract_material_libraries(source, "panel.step", StepReadOptions())
+    summary = _apply_material_libraries_to_materials(materials, extraction)
+    material = materials["copper"]
+    image_id = material.metadata["source_texture_base_color_image"]
+    image = extraction.images[image_id]
+
+    assert extraction.summary == {
+        "references": 1,
+        "resolved": 1,
+        "missing": 0,
+        "unsupported": 0,
+        "unreadable": 0,
+        "materials": 1,
+        "textures": 1,
+        "texture_missing": 0,
+        "texture_unreadable": 0,
+    }
+    assert summary["applied_materials"] == 1
+    assert summary["bound_textures"] == 1
+    assert material.base_color == pytest.approx((0.7, 0.35, 0.16, 1.0))
+    assert material.metallic == pytest.approx(1.0)
+    assert material.roughness == pytest.approx(0.24)
+    assert material.metadata["material_library_path"].endswith("vendor-materials.zip!/materials/vendor.json")
+    assert material.metadata["material_library_container"] == str(library)
+    assert image.mime_type == "image/png"
+    assert image.metadata["source_texture_path"].endswith("vendor-materials.zip!/textures/copper_baseColor.png")
+    assert "vendor-materials.zip!/" in image.metadata["source_texture_identity"]
 
 
 def test_read_step_many_namespaces_members_and_prefixes_member_warnings(
