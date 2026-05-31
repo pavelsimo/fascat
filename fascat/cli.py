@@ -1104,6 +1104,14 @@ def cmd_convert(
         bool,
         typer.Option("--protect-topology/--no-protect-topology", help="Preserve topology-sensitive faces."),
     ] = True,
+    preserve_painted_areas: Annotated[
+        bool,
+        typer.Option("--preserve-painted-areas", help="Preserve painted or protected face groups during decimation."),
+    ] = False,
+    preserve_ambient_occlusion: Annotated[
+        bool,
+        typer.Option("--preserve-ambient-occlusion", help="Preserve low-AO faces during decimation."),
+    ] = False,
     budget_scope: Annotated[
         BudgetScope,
         typer.Option("--budget-scope", help="Decimation budget scope: part or selection."),
@@ -1447,6 +1455,8 @@ def cmd_convert(
         "uv_tolerance": uv_tolerance,
         "decimate_iterative_threshold": decimate_iterative_threshold,
         "protect_topology": protect_topology,
+        "preserve_painted_areas": preserve_painted_areas,
+        "preserve_ambient_occlusion": preserve_ambient_occlusion,
         "budget_scope": budget_scope.value,
         "uv_importance": uv_importance.value,
         "decimate_cleanup_attributes": decimate_cleanup_attributes,
@@ -1905,6 +1915,8 @@ def cmd_convert(
                 uv_tolerance=uv_tolerance,
                 iterative_threshold=decimate_iterative_threshold,
                 protect_topology=protect_topology,
+                preserve_painted_areas=preserve_painted_areas,
+                preserve_ambient_occlusion=preserve_ambient_occlusion,
                 budget_scope=budget_scope.value,
                 uv_importance=cast(Any, uv_importance.value.replace("-", "_")),
                 cleanup_attributes=cast(Any, cleanup_attributes),

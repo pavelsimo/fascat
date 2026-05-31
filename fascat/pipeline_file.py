@@ -263,6 +263,7 @@ _DECIMATE_KEYS = frozenset(
         "iterative_threshold",
         "protect_topology",
         "preserve_painted_areas",
+        "preserve_ambient_occlusion",
         "budget_scope",
         "uv_importance",
         "cleanup_attributes",
@@ -1043,6 +1044,7 @@ def _decimate_options(values: dict[str, object]) -> DecimateOptions:
         iterative_threshold=_as_int(values.get("iterative_threshold", 1_000_000)),
         protect_topology=bool(values.get("protect_topology", True)),
         preserve_painted_areas=bool(values.get("preserve_painted_areas", False)),
+        preserve_ambient_occlusion=bool(values.get("preserve_ambient_occlusion", False)),
         budget_scope=cast(Any, values.get("budget_scope", "selection")),
         uv_importance=cast(Any, _literal(values.get("uv_importance", "preserve_islands"))),
         cleanup_attributes=cast(

@@ -219,6 +219,8 @@ def test_convert_help() -> None:
     assert "--bake-materials" in plain(result.output)
     assert "--decimate" in plain(result.output)
     assert "iterative" in plain(result.output)
+    assert "--preserve-painted-areas" in plain(result.output)
+    assert "low-AO faces" in plain(result.output)
     assert "--uv-importance" in plain(result.output)
     assert "--sag-ratio" in plain(result.output)
     assert "--reuse-existing-meshes" in plain(result.output)

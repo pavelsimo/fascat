@@ -2205,6 +2205,7 @@ class Mesh:
         preserve_material_boundaries: bool = False,
         preserve_uv_seams: bool = False,
         preserve_silhouette: bool = False,
+        protected_faces: IntArray | None = None,
     ) -> Mesh:
         if self.triangle_count == 0:
             return self.copy()
@@ -2220,6 +2221,9 @@ class Mesh:
             return self.copy()
         error_bound = None if target_error is None else max(0.0, float(target_error))
 
+        protected_sets: list[IntArray] = []
+        if protected_faces is not None and protected_faces.size:
+            protected_sets.append(np.asarray(protected_faces, dtype=np.int64))
         if any(
             (
                 preserve_hard_edges,
@@ -2229,14 +2233,19 @@ class Mesh:
                 preserve_silhouette,
             )
         ):
-            protected = self._feature_face_indices(
-                preserve_hard_edges=preserve_hard_edges,
-                hard_edge_angle=hard_edge_angle,
-                preserve_holes=preserve_holes,
-                preserve_material_boundaries=preserve_material_boundaries,
-                preserve_uv_seams=preserve_uv_seams,
-                preserve_silhouette=preserve_silhouette,
+            protected_sets.append(
+                self._feature_face_indices(
+                    preserve_hard_edges=preserve_hard_edges,
+                    hard_edge_angle=hard_edge_angle,
+                    preserve_holes=preserve_holes,
+                    preserve_material_boundaries=preserve_material_boundaries,
+                    preserve_uv_seams=preserve_uv_seams,
+                    preserve_silhouette=preserve_silhouette,
+                )
             )
+        if protected_sets:
+            protected = np.unique(np.concatenate(protected_sets))
+            protected = protected[(protected >= 0) & (protected < self.triangle_count)]
             if protected.size:
                 mesh = self._simplify_preserving_faces(protected, max(target_triangles, int(protected.shape[0])))
                 mesh.metadata = {

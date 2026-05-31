@@ -4,10 +4,11 @@ import base64
 import binascii
 import io as pyio
 import math
+import re
 import struct
 import zlib
 from dataclasses import dataclass
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -31,11 +32,30 @@ FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int64]
 
 _AGGRESSIVE_LOD0_RATIO = 0.2
+_AO_IMPORTANCE_THRESHOLD = 0.5
 _DECIMATION_MEMORY_BYTES_PER_MILLION_TRIANGLES = 5_000_000_000
 _DECIMATION_MEMORY_GB_PER_MILLION_TRIANGLES = 5.0
 _OCCLUSION_BVH_LEAF_OCCURRENCES = 8
 _OCCLUSION_BVH_LEAF_TRIANGLES = 64
 _OCCLUSION_BVH_MAX_DEPTH = 32
+_PAINTED_FACE_GROUP_TOKENS = (
+    "paint",
+    "painted",
+    "protect",
+    "protected",
+    "preserve",
+    "keep",
+    "weight",
+    "weighted",
+    "importance",
+)
+_PAINTED_FACE_METADATA_KEYS = (
+    "painted_faces",
+    "protected_faces",
+    "decimate_protected_faces",
+    "simplification_protected_faces",
+    "importance_faces",
+)
 
 
 def bake_materials_asset(
@@ -996,6 +1016,71 @@ def _preserve_uv_seams(options: DecimateOptions) -> bool:
     return options.uv_importance in {"preserve_islands", "preserve_seams"}
 
 
+def _decimation_importance_faces(mesh: Mesh, options: DecimateOptions) -> IntArray:
+    groups = _decimation_importance_face_groups(mesh, options)
+    if not groups:
+        return np.empty(0, dtype=np.int64)
+    return np.unique(np.concatenate(list(groups.values())))
+
+
+def _decimation_importance_face_groups(mesh: Mesh, options: DecimateOptions) -> dict[str, IntArray]:
+    groups: dict[str, IntArray] = {}
+    if options.preserve_painted_areas:
+        painted = _painted_face_indices(mesh)
+        if painted.size:
+            groups["painted_area_faces"] = painted
+    if options.preserve_ambient_occlusion:
+        ao = _ambient_occlusion_importance_faces(mesh)
+        if ao.size:
+            groups["ambient_occlusion_faces"] = ao
+    return groups
+
+
+def _painted_face_indices(mesh: Mesh) -> IntArray:
+    protected: list[IntArray] = []
+    for name, values in mesh.face_groups.items():
+        normalized = name.lower().replace("-", "_").replace(" ", "_")
+        if any(token in normalized for token in _PAINTED_FACE_GROUP_TOKENS):
+            protected.append(values.astype(np.int64, copy=False))
+    for key in _PAINTED_FACE_METADATA_KEYS:
+        parsed = _metadata_face_indices(mesh.metadata.get(key), mesh.triangle_count)
+        if parsed.size:
+            protected.append(parsed)
+    if not protected:
+        return np.empty(0, dtype=np.int64)
+    faces = np.unique(np.concatenate(protected))
+    return faces[(faces >= 0) & (faces < mesh.triangle_count)]
+
+
+def _metadata_face_indices(value: object, triangle_count: int) -> IntArray:
+    if value is None:
+        return np.empty(0, dtype=np.int64)
+    if isinstance(value, str):
+        tokens: list[object] = [token for token in re.split(r"[\s,;|]+", value) if token]
+    elif isinstance(value, list | tuple | np.ndarray):
+        tokens = list(value)
+    else:
+        tokens = [value]
+    indices: list[int] = []
+    for item in tokens:
+        if isinstance(item, bool):
+            continue
+        try:
+            index = int(cast(Any, item))
+        except (TypeError, ValueError):
+            continue
+        if 0 <= index < triangle_count:
+            indices.append(index)
+    return np.asarray(sorted(set(indices)), dtype=np.int64)
+
+
+def _ambient_occlusion_importance_faces(mesh: Mesh) -> IntArray:
+    values = _face_ambient_occlusion(mesh)
+    if values.size == 0:
+        return np.empty(0, dtype=np.int64)
+    return np.flatnonzero(values <= _AO_IMPORTANCE_THRESHOLD).astype(np.int64)
+
+
 def _prepare_decimation_asset(
     asset: Asset,
     options: DecimateOptions,
@@ -1119,6 +1204,7 @@ def _simplify_decimation_once(mesh: Mesh, options: DecimateOptions, target_trian
         preserve_material_boundaries=True,
         preserve_uv_seams=_preserve_uv_seams(options),
         preserve_silhouette=options.protect_topology,
+        protected_faces=_decimation_importance_faces(mesh, options),
     )
 
 
@@ -1131,6 +1217,7 @@ def _simplify_mesh_error_bounded(mesh: Mesh, options: DecimateOptions) -> tuple[
         preserve_material_boundaries=True,
         preserve_uv_seams=_preserve_uv_seams(options),
         preserve_silhouette=options.protect_topology,
+        protected_faces=_decimation_importance_faces(mesh, options),
     )
     passes = 1 if simplified.triangle_count < mesh.triangle_count else 0
     return simplified, _DecimationPassCount(simplification_passes=passes, iterative_passes=0)
@@ -1313,6 +1400,9 @@ def _annotate_decimation_result(
         "uv_seam_faces": 0,
         "silhouette_faces": 0,
         "total_feature_faces": 0,
+        "painted_area_faces": 0,
+        "ambient_occlusion_faces": 0,
+        "importance_faces": 0,
     }
     for part in asset.parts.values():
         if selected_part_ids is not None and part.id not in selected_part_ids:
@@ -1346,6 +1436,9 @@ def _annotate_decimation_result(
             "decimate_protect_uv_seam_faces": str(feature_counts["uv_seam_faces"]),
             "decimate_protect_silhouette_faces": str(feature_counts["silhouette_faces"]),
             "decimate_protect_total_feature_faces": str(feature_counts["total_feature_faces"]),
+            "decimate_protect_painted_area_faces": str(feature_counts["painted_area_faces"]),
+            "decimate_protect_ambient_occlusion_faces": str(feature_counts["ambient_occlusion_faces"]),
+            "decimate_protect_importance_faces": str(feature_counts["importance_faces"]),
             "decimate_iterative_threshold_triangles": str(options.iterative_threshold),
             "decimate_simplification_passes": str(counts.simplification_passes),
             "decimate_iterative_passes": str(counts.iterative_passes),
@@ -1419,6 +1512,9 @@ def _annotate_decimation_result(
     asset.metadata["decimate_protect_uv_seam_faces"] = str(feature_totals["uv_seam_faces"])
     asset.metadata["decimate_protect_silhouette_faces"] = str(feature_totals["silhouette_faces"])
     asset.metadata["decimate_protect_total_feature_faces"] = str(feature_totals["total_feature_faces"])
+    asset.metadata["decimate_protect_painted_area_faces"] = str(feature_totals["painted_area_faces"])
+    asset.metadata["decimate_protect_ambient_occlusion_faces"] = str(feature_totals["ambient_occlusion_faces"])
+    asset.metadata["decimate_protect_importance_faces"] = str(feature_totals["importance_faces"])
     if pre_cleanup_removed_uv_channels:
         asset.metadata["decimate_pre_cleanup_removed_uv_channels"] = ",".join(
             str(channel) for channel in sorted(pre_cleanup_removed_uv_channels)
@@ -1470,7 +1566,7 @@ def _annotate_decimation_result(
 
 
 def _decimation_feature_counts(mesh: Mesh, options: DecimateOptions) -> dict[str, int]:
-    return mesh.feature_preservation_counts(
+    counts = mesh.feature_preservation_counts(
         preserve_hard_edges=True,
         hard_edge_angle=options.normal_tolerance,
         preserve_holes=options.protect_topology,
@@ -1478,6 +1574,18 @@ def _decimation_feature_counts(mesh: Mesh, options: DecimateOptions) -> dict[str
         preserve_uv_seams=_preserve_uv_seams(options),
         preserve_silhouette=options.protect_topology,
     )
+    importance_groups = _decimation_importance_face_groups(mesh, options)
+    painted = importance_groups.get("painted_area_faces", np.empty(0, dtype=np.int64))
+    ambient_occlusion = importance_groups.get("ambient_occlusion_faces", np.empty(0, dtype=np.int64))
+    importance = (
+        np.unique(np.concatenate(list(importance_groups.values())))
+        if importance_groups
+        else np.empty(0, dtype=np.int64)
+    )
+    counts["painted_area_faces"] = int(painted.size)
+    counts["ambient_occlusion_faces"] = int(ambient_occlusion.size)
+    counts["importance_faces"] = int(importance.size)
+    return counts
 
 
 @dataclass(frozen=True)

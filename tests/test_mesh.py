@@ -1307,6 +1307,33 @@ def test_simplify_preserves_material_indices() -> None:
     assert set(simplified.material_indices.tolist()).issubset({0, 1})
 
 
+def test_simplify_preserves_explicit_protected_faces() -> None:
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [10, 0, 0],
+                [11, 0, 0],
+                [10, 1, 0],
+                [20, 0, 0],
+                [21, 0, 0],
+                [20, 1, 0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [3, 4, 5], [6, 7, 8]], dtype=int),
+    )
+
+    simplified = mesh.simplify(target_triangles=1, protected_faces=np.asarray([2], dtype=int))
+    centroid = simplified.points[simplified.faces[0]].mean(axis=0)
+
+    assert simplified.triangle_count == 1
+    assert centroid[0] > 19.0
+    assert simplified.metadata["simplification_preserved_feature_faces"] == "1"
+
+
 def test_merge_close_vertices_preserves_material_indices() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [0.001, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),

@@ -767,6 +767,7 @@ class DecimateOptions:
     uv_tolerance: float | None = None
     protect_topology: bool = True
     preserve_painted_areas: bool = False
+    preserve_ambient_occlusion: bool = False
     budget_scope: BudgetScope = "selection"
     uv_importance: DecimateUVImportance = "preserve_islands"
     cleanup_attributes: tuple[DecimateCleanupAttribute, ...] = ()

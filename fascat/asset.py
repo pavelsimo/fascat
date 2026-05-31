@@ -1568,6 +1568,9 @@ def _decimation_report_stats(asset: Asset) -> dict[str, int]:
         "decimate_protect_uv_seam_faces",
         "decimate_protect_silhouette_faces",
         "decimate_protect_total_feature_faces",
+        "decimate_protect_painted_area_faces",
+        "decimate_protect_ambient_occlusion_faces",
+        "decimate_protect_importance_faces",
     ):
         if key in asset.metadata:
             stats[key] = _metadata_int(asset.metadata[key], 0)

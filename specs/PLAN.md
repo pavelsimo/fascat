@@ -48,7 +48,7 @@ writers, trimesh + numpy (mesh ops).
 | **Repair / Heal** | vertex merge, dedup, degenerate cleanup, winding fix, small-hole fill, normals; mesh T-junction sewing, boundary-gap stitching, non-manifold cracking, sliver removal, viewer/open-shell orientation; BREP fix-edge / sew / same-domain cleanup / coplanar overlap cleanup | mesh-level hole removal, open-shell component orientation | non-orientable strip cracking |
 | **Stage / UV** | normals, tangents, xatlas unwrap + bake-domain packing/padding, AABB UV, UV copy, material PBR normalize / merge | solver policy intent | island merge / align, seam graph, backend-enforced solver controls |
 | **Materials** | per-face colors + PBR factors preserved, first-class image resources, raster material atlas baking, source image resize/dedupe/PNG-JPEG fallback processing, JSON/MTL/ZIP vendor material-library import | source texture sidecar extraction, CAD material-name PBR rule mapping, sampled AO bake | high-poly transfer, closed/proprietary vendor material-library containers |
-| **Optimize** | decimation, quality target-error simplification, instance reconstruction, buffer optimization | sampled occlusion | weighted decimation, retopology, GPU occlusion |
+| **Optimize** | decimation, quality target-error simplification, painted/AO protected-face decimation constraints, instance reconstruction, buffer optimization | sampled occlusion | continuous weighted decimation, retopology, GPU occlusion |
 | **LOD** | real decimated mesh levels, occurrence-aware LOD metadata, far-LOD one-material bake policy, engine switch-distance validation, scene-level far proxy mesh | per-part and scene proxy bake policies | format-specific engine LOD export profiles beyond metadata |
 | **Export** | USD/USDZ, glTF/GLB (quantize + meshopt + Draco + KTX2/Basis), GLB size-ladder reports, named export presets, OBJ, STL, FBX, real baked texture images | — | — |
 | **Validation** | output validators, geometry analysis, profile budget estimates, optional headless browser/WebGL glTF runtime measurement, optional browser/WebGL rendered screenshots for supported glTF/GLB primitives, optional packaged or project-backed Unity/Unreal runtime harness drivers, deterministic software preview PNGs and LOD contact sheets | browser runtime harness uses a bounded triangle proxy workload; browser screenshots do not yet sample textures or compressed mesh payloads; packaged Unity/Unreal templates measure engine-process file load/parse rather than full renderer FPS; preview renderer is orthographic software shading | full Unity/Unreal material/lighting renderer validation |
@@ -63,7 +63,7 @@ The basics are present and produce a valid RT3D asset:
 - **Heal — BREP** (`ops/heal.py`): `fix_edges`, `unify_tolerances`, `sew_faces`, same-domain face/edge cleanup, and coplanar overlap/z-fighting face cleanup via OCCT `ShapeFix`, `BRepBuilderAPI_Sewing`, `ShapeUpgrade_UnifySameDomain`, and `BRepTools_ReShape`.
 - **Stage** (`ops/stage.py`): normals, tangents, UV unwrap/repack/padding (**xatlas**), AABB/box UV projection, UV copy, material normalize-to-PBR, duplicate-material merge.
 - **Materials** (`ops/actions.py`, `ops/textures.py`, `image.py`, `io/step.py`): material bake creates first-class PNG images and raster atlas maps for base color, opacity, metallic/roughness, normal, AO, and emissive; texture processing resizes, dedupes, and applies PNG/JPEG fallback policy to first-class images; imported source textures and JSON/MTL material-library records, including ZIP packages with embedded textures, can bind to material texture slots for glTF/USD export.
-- **Optimize** (`ops/optimize.py`, `ops/actions.py`): decimation (**meshoptimizer / fast-simplification**) including quality target-error bounds, instance reconstruction (real scene rewrite), buffer optimization.
+- **Optimize** (`ops/optimize.py`, `ops/actions.py`): decimation (**meshoptimizer / fast-simplification**) including quality target-error bounds and painted/AO protected-face constraints, instance reconstruction (real scene rewrite), buffer optimization.
 - **LODs** (`ops/lod.py`): real decimated mesh levels per part, occurrence-aware reuse metadata, far-level one-material bake policy, optional scene-level far proxy mesh, and engine-specific switch-distance metadata.
 - **Export** (`io/{usd,gltf,obj,stl,fbx}.py`): USD/USDZ (usd-core), glTF/GLB with real quantization, meshopt, Draco, and KTX2/Basis paths, OBJ, STL, FBX — all write valid geometry, hierarchy, transforms, material factors, and referenced baked textures.
 
@@ -129,13 +129,13 @@ This is the master TODO list. Keep items in one of three states:
 - [x] Real atlas packing with first-class image resources. Done 2026-05-31.
 - [x] Image resize/dedupe passes and PNG/JPEG fallback conversion policy for first-class images. Done 2026-05-31.
 - [~] Source texture pipeline: CAD import now extracts referenced sidecar PNG/JPEG/KTX2 files and binds semantic slots; JSON/MTL material-library sidecars and ZIP packages can also load texture slots. Closed/proprietary vendor material-library containers are still open. Updated 2026-05-31.
-- [ ] AO bake to texture and/or vertex colors feeding decimation weights.
+- [~] AO bake to texture exists and low-AO faces can feed decimation protection; vertex-color output and continuous decimation weights remain open. Updated 2026-06-01.
 - [~] Material-library import + CAD-material-to-PBR mapping tables + diagnostics: XDE visual material values, common CAD material-name rules, JSON/MTL sidecar material libraries, and ZIP packages with embedded textures are mapped to PBR factors and texture slots with resolved/matched/unmatched diagnostics; closed/proprietary vendor material-library containers are still open. Updated 2026-05-31.
 - [ ] High-poly → proxy normal-map baking.
 
 **Optimize**
 - [x] Geometric-error-bounded simplification replacing quality-heuristic ratio mapping. Done 2026-05-31.
-- [ ] AO / user-painted vertex weights as simplification constraints; vertex-color/weight cleanup.
+- [~] AO / user-painted vertex weights as simplification constraints; vertex-color/weight cleanup: painted/protected face groups, metadata face indices, and low-AO faces now become protected simplification constraints. Continuous vertex-weight simplification and vertex-color/weight cleanup remain open. Updated 2026-06-01.
 - [ ] Optional raster/GPU occlusion backend; standard vs advanced params.
 - [ ] Loose / precise + symmetry / mirror-aware instance reconstruction.
 - [ ] Retopology / proxy-mesh paths and normal-map transfer.

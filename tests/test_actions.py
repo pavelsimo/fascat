@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from typer.testing import CliRunner
 
+import fascat.ops.actions as actions
 from fascat.asset import Asset, Node, Part
 from fascat.cli import app
 from fascat.material import Material
@@ -612,6 +613,53 @@ def test_decimate_reports_topology_protection_metrics() -> None:
     assert step.after["decimate_protect_total_feature_faces"] == 2
 
 
+def test_decimate_preserves_painted_and_ambient_occlusion_faces(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[set[int]] = []
+
+    def fake_simplify(
+        self: Mesh,
+        *,
+        protected_faces: np.ndarray | None = None,
+        **_kwargs: object,
+    ) -> Mesh:
+        captured.append(set() if protected_faces is None else set(protected_faces.astype(int).tolist()))
+        return self.copy()
+
+    monkeypatch.setattr(Mesh, "simplify", fake_simplify)
+    monkeypatch.setattr(actions, "_face_ambient_occlusion", lambda _mesh: np.asarray([1.0, 0.9, 0.7, 0.2]))
+    mesh = _triangle_strip(4)
+    mesh.face_groups["painted_area"] = np.asarray([1], dtype=int)
+    mesh.metadata["decimate_protected_faces"] = "2, 99, invalid"
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="body", name="Body", part_id="body")]),
+        parts={"body": Part(id="body", name="Body", mesh=mesh)},
+    )
+
+    decimated = asset.decimate(
+        DecimateOptions(
+            target_ratio=0.5,
+            protect_topology=False,
+            preserve_painted_areas=True,
+            preserve_ambient_occlusion=True,
+        )
+    )
+    part = decimated.parts["body"]
+    step = decimated.report.steps[-1]
+
+    assert captured == [{1, 2, 3}]
+    assert part.metadata["decimate_protect_painted_area_faces"] == "2"
+    assert part.metadata["decimate_protect_ambient_occlusion_faces"] == "1"
+    assert part.metadata["decimate_protect_importance_faces"] == "3"
+    assert decimated.metadata["decimate_protect_painted_area_faces"] == "2"
+    assert decimated.metadata["decimate_protect_ambient_occlusion_faces"] == "1"
+    assert decimated.metadata["decimate_protect_importance_faces"] == "3"
+    assert step.after["decimate_protect_painted_area_faces"] == 2
+    assert step.after["decimate_protect_ambient_occlusion_faces"] == 1
+    assert step.after["decimate_protect_importance_faces"] == 3
+    assert step.options["preserve_painted_areas"] is True
+    assert step.options["preserve_ambient_occlusion"] is True
+
+
 def test_remove_holes_fills_small_boundary_loop() -> None:
     mesh = Mesh(
         points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float),
@@ -943,6 +991,8 @@ def test_cli_convert_accepts_optimization_action_options_during_dry_run() -> Non
             "0.01",
             "--decimate-iterative-threshold",
             "500",
+            "--preserve-painted-areas",
+            "--preserve-ambient-occlusion",
             "--budget-scope",
             "selection",
             "--uv-importance",
@@ -986,6 +1036,8 @@ def test_cli_convert_accepts_optimization_action_options_during_dry_run() -> Non
     assert payload["bake"] == ["base_color", "opacity"]
     assert payload["decimate"] is True
     assert payload["uv_importance"] == "ignore"
+    assert payload["preserve_painted_areas"] is True
+    assert payload["preserve_ambient_occlusion"] is True
     assert payload["decimate_cleanup_attributes"] == ["unused_uvs", "tangents"]
     assert payload["decimate_iterative_threshold"] == 500
     assert payload["remove_holes"] is True

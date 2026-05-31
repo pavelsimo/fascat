@@ -621,6 +621,7 @@ def test_asset_operation_reports_include_options_and_before_after_counts() -> No
             "iterative_threshold",
             "protect_topology",
             "preserve_painted_areas",
+            "preserve_ambient_occlusion",
             "budget_scope",
             "uv_importance",
             "cleanup_attributes",
@@ -898,7 +899,17 @@ def test_pipeline_validates_step_options_during_parse() -> None:
 
 def test_pipeline_decimate_accepts_cleanup_attributes() -> None:
     spec = PipelineSpec.from_dict(
-        {"steps": [{"op": "decimate", "target_ratio": 0.5, "cleanup_attributes": "unused-uvs,tangents"}]}
+        {
+            "steps": [
+                {
+                    "op": "decimate",
+                    "target_ratio": 0.5,
+                    "preserve_painted_areas": True,
+                    "preserve_ambient_occlusion": True,
+                    "cleanup_attributes": "unused-uvs,tangents",
+                }
+            ]
+        }
     )
     asset = _triangle_asset()
     mesh = asset.parts["part"].mesh
@@ -913,6 +924,8 @@ def test_pipeline_decimate_accepts_cleanup_attributes() -> None:
     assert output_mesh is not None
     assert sorted(output_mesh.uvs) == [0]
     assert output_mesh.tangents is None
+    assert decimated.report.steps[-1].options["preserve_painted_areas"] is True
+    assert decimated.report.steps[-1].options["preserve_ambient_occlusion"] is True
     assert decimated.report.steps[-1].options["cleanup_attributes"] == ["unused_uvs", "tangents"]
     assert decimated.metadata["decimate_pre_cleanup_attributes"] == "unused_uvs,tangents"
 
