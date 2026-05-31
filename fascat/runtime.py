@@ -9,10 +9,11 @@ import subprocess
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 from fascat.io.gltf import validate_gltf
 
+RuntimeEngineName = Literal["unity", "unreal"]
 _RESULT_RE = re.compile(r'<pre id="result">(?P<payload>.*?)</pre>', re.DOTALL)
 _BROWSER_CANDIDATES = (
     "chromium",
@@ -22,6 +23,14 @@ _BROWSER_CANDIDATES = (
     "chrome",
     "msedge",
 )
+_ENGINE_ENV_VARS: dict[RuntimeEngineName, tuple[str, ...]] = {
+    "unity": ("FASCAT_UNITY", "UNITY_EDITOR"),
+    "unreal": ("FASCAT_UNREAL", "UNREAL_EDITOR"),
+}
+_ENGINE_CANDIDATES: dict[RuntimeEngineName, tuple[str, ...]] = {
+    "unity": ("Unity", "unity", "unity-editor"),
+    "unreal": ("UnrealEditor-Cmd", "UnrealEditor", "UE4Editor-Cmd", "UE4Editor"),
+}
 
 
 @dataclass(frozen=True)
@@ -84,6 +93,67 @@ class RuntimeBrowserReport:
         }
 
 
+@dataclass(frozen=True)
+class RuntimeEngineOptions:
+    engine: RuntimeEngineName
+    executable: str | None = None
+    project: str | Path | None = None
+    timeout_seconds: float = 120.0
+    extra_args: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.engine not in {"unity", "unreal"}:
+            raise ValueError("runtime engine must be one of: unity, unreal")
+        if self.timeout_seconds <= 0.0:
+            raise ValueError("runtime engine timeout_seconds must be greater than 0")
+        if isinstance(self.extra_args, str) or not isinstance(self.extra_args, tuple):
+            raise ValueError("runtime engine extra_args must be a tuple of strings")
+        if any(not isinstance(item, str) or not item for item in self.extra_args):
+            raise ValueError("runtime engine extra_args values must be non-empty strings")
+
+    def to_dict(self) -> dict[str, object]:
+        data = asdict(self)
+        if self.project is not None:
+            data["project"] = str(self.project)
+        return data
+
+
+@dataclass(frozen=True)
+class RuntimeEngineReport:
+    path: str
+    status: str
+    engine: RuntimeEngineName
+    executable: str | None
+    project: str | None
+    engine_version: str | None
+    load_time_ms: int | None
+    measured_fps: float | None
+    frame_count: int
+    measurement_duration_ms: int | None
+    memory_bytes: int | None
+    meshes: int
+    triangles: int
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "path": self.path,
+            "status": self.status,
+            "engine": self.engine,
+            "executable": self.executable,
+            "project": self.project,
+            "engine_version": self.engine_version,
+            "load_time_ms": self.load_time_ms,
+            "measured_fps": self.measured_fps,
+            "frame_count": self.frame_count,
+            "measurement_duration_ms": self.measurement_duration_ms,
+            "memory_bytes": self.memory_bytes,
+            "meshes": self.meshes,
+            "triangles": self.triangles,
+            "error": self.error,
+        }
+
+
 def measure_browser_runtime(path: str | Path, options: RuntimeBrowserOptions | None = None) -> RuntimeBrowserReport:
     opts = options or RuntimeBrowserOptions()
     asset_path = Path(path)
@@ -121,6 +191,95 @@ def measure_browser_runtime(path: str | Path, options: RuntimeBrowserOptions | N
     return _report_from_payload(asset_path, validation_stats, browser, payload)
 
 
+def measure_engine_runtime(path: str | Path, options: RuntimeEngineOptions) -> RuntimeEngineReport:
+    asset_path = Path(path)
+    if asset_path.suffix.lower() not in {".gltf", ".glb"}:
+        raise ValueError("engine runtime validation currently supports glTF/GLB outputs")
+    if not asset_path.exists():
+        raise FileNotFoundError(f"missing runtime asset: {asset_path}")
+
+    validation_stats = validate_gltf(asset_path)
+    executable = _engine_command(options)
+    project = None if options.project is None else Path(options.project)
+    if executable is None:
+        return _engine_unavailable_report(
+            asset_path,
+            validation_stats,
+            options,
+            "no configured engine executable found",
+            executable=None,
+            project=project,
+        )
+    if project is None:
+        return _engine_unavailable_report(
+            asset_path,
+            validation_stats,
+            options,
+            f"{options.engine} runtime measurement requires a harness project path",
+            executable=executable,
+            project=None,
+        )
+    if not project.exists():
+        return _engine_unavailable_report(
+            asset_path,
+            validation_stats,
+            options,
+            f"runtime harness project not found: {project}",
+            executable=executable,
+            project=project,
+        )
+
+    with tempfile.TemporaryDirectory(prefix=f"fascat-{options.engine}-runtime-") as directory:
+        report_path = Path(directory) / "runtime-report.json"
+        command = _engine_invocation(executable, project, asset_path, report_path, options)
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=options.timeout_seconds,
+            )
+        except subprocess.TimeoutExpired:
+            return _engine_failed_report(
+                asset_path,
+                validation_stats,
+                options,
+                executable=executable,
+                project=project,
+                error=f"{options.engine} runtime validation timed out",
+            )
+        payload = _load_engine_payload(report_path, completed.stdout)
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip().splitlines()
+        message = detail[-1] if detail else f"{options.engine} exited with status {completed.returncode}"
+        return _engine_failed_report(
+            asset_path,
+            validation_stats,
+            options,
+            executable=executable,
+            project=project,
+            error=message,
+        )
+    if payload is None:
+        return _engine_failed_report(
+            asset_path,
+            validation_stats,
+            options,
+            executable=executable,
+            project=project,
+            error=f"{options.engine} harness did not return runtime measurements",
+        )
+    return _engine_report_from_payload(
+        asset_path,
+        validation_stats,
+        options,
+        executable=executable,
+        project=project,
+        payload=payload,
+    )
+
+
 def _browser_command(options: RuntimeBrowserOptions) -> str | None:
     if options.browser:
         return options.browser
@@ -131,6 +290,77 @@ def _browser_command(options: RuntimeBrowserOptions) -> str | None:
         resolved = shutil.which(candidate)
         if resolved:
             return resolved
+    return None
+
+
+def _engine_command(options: RuntimeEngineOptions) -> str | None:
+    if options.executable:
+        return options.executable
+    for env_name in _ENGINE_ENV_VARS[options.engine]:
+        value = os.environ.get(env_name)
+        if value:
+            return value
+    for candidate in _ENGINE_CANDIDATES[options.engine]:
+        resolved = shutil.which(candidate)
+        if resolved:
+            return resolved
+    return None
+
+
+def _engine_invocation(
+    executable: str,
+    project: Path,
+    asset_path: Path,
+    report_path: Path,
+    options: RuntimeEngineOptions,
+) -> list[str]:
+    asset = str(asset_path.resolve())
+    report = str(report_path.resolve())
+    if options.engine == "unity":
+        return [
+            executable,
+            "-batchmode",
+            "-nographics",
+            "-quit",
+            "-projectPath",
+            str(project),
+            "-executeMethod",
+            "FascatRuntimeHarness.Run",
+            "-fascatAsset",
+            asset,
+            "-fascatReport",
+            report,
+            *options.extra_args,
+        ]
+    return [
+        executable,
+        str(project),
+        "-run=FascatRuntimeHarness",
+        f"-FascatAsset={asset}",
+        f"-FascatReport={report}",
+        "-unattended",
+        "-nosplash",
+        *options.extra_args,
+    ]
+
+
+def _load_engine_payload(report_path: Path, output: str) -> dict[str, object] | None:
+    if report_path.exists():
+        try:
+            loaded = json.loads(report_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return None
+        return cast(dict[str, object], loaded) if isinstance(loaded, dict) else None
+    for line in reversed(output.splitlines()):
+        stripped = line.strip()
+        if not stripped.startswith("{"):
+            continue
+        try:
+            loaded = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(loaded, dict):
+            return cast(dict[str, object], loaded)
     return None
 
 
@@ -227,6 +457,90 @@ def _failed_report(
         triangles=validation_stats["triangles"],
         workload_triangles=0,
         workload_scale=0.0,
+        error=error,
+    )
+
+
+def _engine_report_from_payload(
+    asset_path: Path,
+    validation_stats: dict[str, int],
+    options: RuntimeEngineOptions,
+    *,
+    executable: str,
+    project: Path,
+    payload: dict[str, object],
+) -> RuntimeEngineReport:
+    status = str(payload.get("status", "measured"))
+    error = payload.get("error")
+    engine_version = payload.get("engine_version")
+    return RuntimeEngineReport(
+        path=str(asset_path),
+        status=status,
+        engine=options.engine,
+        executable=executable,
+        project=str(project),
+        engine_version=str(engine_version) if engine_version is not None else None,
+        load_time_ms=_optional_int(payload.get("load_time_ms")),
+        measured_fps=_optional_float(payload.get("measured_fps")),
+        frame_count=_int(payload.get("frame_count"), 0),
+        measurement_duration_ms=_optional_int(payload.get("measurement_duration_ms")),
+        memory_bytes=_optional_int(payload.get("memory_bytes")),
+        meshes=_int(payload.get("meshes"), validation_stats["meshes"]),
+        triangles=_int(payload.get("triangles"), validation_stats["triangles"]),
+        error=str(error) if error is not None else None,
+    )
+
+
+def _engine_unavailable_report(
+    asset_path: Path,
+    validation_stats: dict[str, int],
+    options: RuntimeEngineOptions,
+    error: str,
+    *,
+    executable: str | None,
+    project: Path | None,
+) -> RuntimeEngineReport:
+    return RuntimeEngineReport(
+        path=str(asset_path),
+        status="unavailable",
+        engine=options.engine,
+        executable=executable,
+        project=None if project is None else str(project),
+        engine_version=None,
+        load_time_ms=None,
+        measured_fps=None,
+        frame_count=0,
+        measurement_duration_ms=None,
+        memory_bytes=None,
+        meshes=validation_stats["meshes"],
+        triangles=validation_stats["triangles"],
+        error=error,
+    )
+
+
+def _engine_failed_report(
+    asset_path: Path,
+    validation_stats: dict[str, int],
+    options: RuntimeEngineOptions,
+    *,
+    executable: str,
+    project: Path,
+    error: str,
+) -> RuntimeEngineReport:
+    return RuntimeEngineReport(
+        path=str(asset_path),
+        status="failed",
+        engine=options.engine,
+        executable=executable,
+        project=str(project),
+        engine_version=None,
+        load_time_ms=None,
+        measured_fps=None,
+        frame_count=0,
+        measurement_duration_ms=None,
+        memory_bytes=None,
+        meshes=validation_stats["meshes"],
+        triangles=validation_stats["triangles"],
         error=error,
     )
 

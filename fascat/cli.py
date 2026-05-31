@@ -64,7 +64,7 @@ from fascat.pipeline_file import PipelineSpec
 from fascat.profiles import by_name
 from fascat.profiles import from_file as profile_from_file
 from fascat.report import Report
-from fascat.runtime import RuntimeBrowserOptions, measure_browser_runtime
+from fascat.runtime import RuntimeBrowserOptions, RuntimeEngineOptions, measure_browser_runtime, measure_engine_runtime
 from fascat.visual import write_output_lod_switch_previews, write_output_preview
 
 DOCS_URL = "https://pavelsimo.github.io/fascat"
@@ -129,6 +129,11 @@ class ExportPreset(str, Enum):
     MOBILE = "mobile"
     VR = "vr"
     AR = "ar"
+
+
+class RuntimeEngineMode(str, Enum):
+    UNITY = "unity"
+    UNREAL = "unreal"
 
 
 class AxisMode(str, Enum):
@@ -2067,6 +2072,22 @@ def cmd_validate(
         float,
         typer.Option("--runtime-timeout", help="Browser runtime validation timeout in seconds."),
     ] = 15.0,
+    runtime_engine: Annotated[
+        RuntimeEngineMode | None,
+        typer.Option("--runtime-engine", help="Run optional Unity or Unreal runtime harness measurement."),
+    ] = None,
+    runtime_engine_command: Annotated[
+        str | None,
+        typer.Option("--runtime-engine-command", help="Unity or Unreal executable for --runtime-engine."),
+    ] = None,
+    runtime_engine_project: Annotated[
+        Path | None,
+        typer.Option("--runtime-engine-project", help="Unity project folder or Unreal .uproject with Fascat harness."),
+    ] = None,
+    runtime_engine_timeout: Annotated[
+        float,
+        typer.Option("--runtime-engine-timeout", help="Unity/Unreal runtime harness timeout in seconds."),
+    ] = 120.0,
     visual_preview: Annotated[
         Path | None,
         typer.Option("--visual-preview", help="Write a deterministic software preview PNG during validation."),
@@ -2110,6 +2131,10 @@ def cmd_validate(
         "runtime_browser_command": runtime_browser_command,
         "runtime_duration": runtime_duration,
         "runtime_timeout": runtime_timeout,
+        "runtime_engine": None if runtime_engine is None else runtime_engine.value,
+        "runtime_engine_command": runtime_engine_command,
+        "runtime_engine_project": str(runtime_engine_project) if runtime_engine_project else None,
+        "runtime_engine_timeout": runtime_engine_timeout,
         "visual_preview": str(visual_preview) if visual_preview else None,
         "lod_preview_dir": str(lod_preview_dir) if lod_preview_dir else None,
         "analysis_options": analyze_options.to_dict() if should_analyze else None,
@@ -2121,6 +2146,12 @@ def cmd_validate(
     should_analyze = should_analyze or where is not None
     payload["analysis_options"] = analyze_options.to_dict() if should_analyze else None
     _validate_export_output(output_path, ctx, payload)
+    if runtime_duration <= 0.0:
+        _fail(ctx, payload, "--runtime-duration must be greater than 0.", code=2)
+    if runtime_timeout <= 0.0:
+        _fail(ctx, payload, "--runtime-timeout must be greater than 0.", code=2)
+    if runtime_engine_timeout <= 0.0:
+        _fail(ctx, payload, "--runtime-engine-timeout must be greater than 0.", code=2)
     if _is_stdio(output_path) and (visual_preview is not None or lod_preview_dir is not None):
         _fail(ctx, payload, "Visual preview validation requires a file path, not stdin.", code=2)
     if state.dry_run:
@@ -2146,6 +2177,19 @@ def cmd_validate(
             if runtime_browser
             else None
         )
+        runtime_engine_report = (
+            measure_engine_runtime(
+                output_path,
+                RuntimeEngineOptions(
+                    engine=cast(Any, runtime_engine.value),
+                    executable=runtime_engine_command,
+                    project=runtime_engine_project,
+                    timeout_seconds=runtime_engine_timeout,
+                ),
+            )
+            if runtime_engine is not None
+            else None
+        )
         visual_preview_report = (
             write_output_preview(output_path, visual_preview) if visual_preview is not None else None
         )
@@ -2162,6 +2206,8 @@ def cmd_validate(
         json_payload["analysis"] = analysis.to_dict()
     if runtime_report is not None:
         json_payload["runtime_browser"] = runtime_report.to_dict()
+    if runtime_engine_report is not None:
+        json_payload["runtime_engine"] = runtime_engine_report.to_dict()
     if visual_preview_report is not None:
         json_payload["visual_preview"] = visual_preview_report.to_dict()
     if lod_preview_report is not None:

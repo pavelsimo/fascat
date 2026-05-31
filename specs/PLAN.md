@@ -51,7 +51,7 @@ writers, trimesh + numpy (mesh ops).
 | **Optimize** | decimation, quality target-error simplification, instance reconstruction, buffer optimization | sampled occlusion | weighted decimation, retopology, GPU occlusion |
 | **LOD** | real decimated mesh levels, occurrence-aware LOD metadata, far-LOD one-material bake policy, engine switch-distance validation, scene-level far proxy mesh | per-part and scene proxy bake policies | format-specific engine LOD export profiles beyond metadata |
 | **Export** | USD/USDZ, glTF/GLB (quantize + meshopt + Draco + KTX2/Basis), GLB size-ladder reports, named export presets, OBJ, STL, FBX, real baked texture images | — | — |
-| **Validation** | output validators, geometry analysis, profile budget estimates, optional headless browser/WebGL glTF runtime measurement, deterministic software preview PNGs and LOD contact sheets | browser harness uses a bounded triangle proxy workload; preview renderer is orthographic software shading | Unity/Unreal measured harnesses, full material/lighting renderer validation |
+| **Validation** | output validators, geometry analysis, profile budget estimates, optional headless browser/WebGL glTF runtime measurement, optional Unity/Unreal project-backed runtime harness drivers, deterministic software preview PNGs and LOD contact sheets | browser harness uses a bounded triangle proxy workload; Unity/Unreal harnesses require external project setup; preview renderer is orthographic software shading | packaged Unity/Unreal harness projects, full material/lighting renderer validation |
 
 ### A. Works end-to-end — real geometry
 
@@ -79,7 +79,7 @@ The remaining reportable gaps are now concentrated outside the core mesh pipelin
 - **Import enrichment**: explicit multi-root STEP path-list import exists with deterministic namespaces and per-member warnings, but external-reference graph resolution from a master STEP file is still open. Typed AP242 PMI and design variants are not implemented. Source texture extraction exists for referenced sidecar image files, but not for every vendor-specific CAD material-library container.
 - **Advanced CAD attributes**: intrinsic/conformal CAD UV solving and automatic material/metadata/curvature-driven tessellation criteria are still open.
 - **BREP cleanup**: same-domain face/edge cleanup and conservative coplanar overlap / z-fighting face cleanup exist; open-shell grouping before BREP healing is still open.
-- **Runtime validation**: reports include measured pipeline/write/validate timings and local memory/load/frame/FPS estimates, plus an optional headless browser/WebGL glTF load/FPS harness. Unity/Unreal measured harnesses and full renderer parity are still open.
+- **Runtime validation**: reports include measured pipeline/write/validate timings and local memory/load/frame/FPS estimates, plus optional headless browser/WebGL and Unity/Unreal project-backed glTF load/FPS harness drivers. Packaged engine projects and full renderer parity are still open.
 - **Visual validation**: deterministic before/after software preview PNGs and LOD switching contact sheets exist; full renderer screenshots and image-diff thresholds are still open.
 
 ### D. Intentional deferrals — see [Deferrals](#deferrals).
@@ -158,9 +158,9 @@ This is the master TODO list. Keep items in one of three states:
 **Validation (cross-cutting)**
 - [x] Measured pipeline/write/validate timings in profile budget reports. Done 2026-05-31.
 - [x] Runtime memory/load/frame/FPS budget reporting with local estimates. Done 2026-05-31.
-- [~] Runtime profiling: local measured timings and optional headless browser/WebGL glTF load/FPS measurements exist; Unity/Unreal and full-scene material/lighting render measurements are still open. Updated 2026-05-31.
+- [~] Runtime profiling: local measured timings, optional headless browser/WebGL glTF load/FPS measurements, and optional Unity/Unreal project-backed harness drivers exist; packaged engine projects and full-scene material/lighting render measurements are still open. Updated 2026-05-31.
 - [~] Visual before/after preview renders and LOD switching checks: deterministic software preview PNGs, output validation previews, and LOD contact sheets exist; full renderer screenshots and image-diff thresholds remain open. Updated 2026-05-31.
-- [~] Real Unity/Unreal/browser runtime load-time, memory, and FPS harness: browser/WebGL glTF harness exists with bounded triangle proxy workload; Unity/Unreal harnesses remain open. Updated 2026-05-31.
+- [~] Real Unity/Unreal/browser runtime load-time, memory, and FPS harness: browser/WebGL glTF harness exists with bounded triangle proxy workload; Unity/Unreal command drivers exist for configured Fascat runtime harness projects, but packaged engine projects remain open. Updated 2026-05-31.
 
 ## Principles
 

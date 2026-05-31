@@ -1161,6 +1161,15 @@ runtime = fc.measure_browser_runtime(
     options=fc.RuntimeBrowserOptions(duration_seconds=2.0),
 )
 
+unity_runtime = fc.measure_engine_runtime(
+    "motor.glb",
+    options=fc.RuntimeEngineOptions(
+        engine="unity",
+        executable="Unity",
+        project="FascatUnityHarness",
+    ),
+)
+
 preview = fc.write_output_preview("motor.glb", "motor-preview.png")
 ```
 
@@ -1173,6 +1182,10 @@ fascat validate motor.glb \
   --report quality-report.json
 
 fascat validate motor.glb --runtime-browser
+
+fascat validate motor.glb \
+  --runtime-engine unity \
+  --runtime-engine-project FascatUnityHarness
 
 fascat validate motor.glb \
   --visual-preview motor-preview.png \
@@ -1194,6 +1207,16 @@ reports measured load time, FPS, frame count, memory bytes, and workload scale.
 Set `FASCAT_BROWSER` or pass `--runtime-browser-command` when the browser is not
 on the default PATH. If no browser is available, the report returns
 `status="unavailable"` instead of substituting an estimate.
+
+`--runtime-engine unity` and `--runtime-engine unreal` are also available for
+glTF/GLB outputs when a local engine project contains a Fascat runtime harness.
+The CLI launches Unity with `FascatRuntimeHarness.Run` or Unreal with
+`-run=FascatRuntimeHarness`, passes the asset path and a JSON report path, and
+records measured load time, FPS, frame count, memory bytes, engine version, mesh
+count, and triangle count. Set `FASCAT_UNITY`, `UNITY_EDITOR`, `FASCAT_UNREAL`,
+or `UNREAL_EDITOR`, or pass `--runtime-engine-command`, when the engine
+executable is not on `PATH`. If the executable or harness project is missing,
+the engine report is marked unavailable.
 
 ## Inspecting assets
 

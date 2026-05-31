@@ -82,7 +82,14 @@ from fascat.pipeline import (
     write_usd,
 )
 from fascat.pipeline_file import PipelineSpec, PipelineStep
-from fascat.runtime import RuntimeBrowserOptions, RuntimeBrowserReport, measure_browser_runtime
+from fascat.runtime import (
+    RuntimeBrowserOptions,
+    RuntimeBrowserReport,
+    RuntimeEngineOptions,
+    RuntimeEngineReport,
+    measure_browser_runtime,
+    measure_engine_runtime,
+)
 from fascat.size_ladder import GltfSizeLadderReport, GltfSizeLadderVariant, measure_gltf_size_ladder
 from fascat.visual import (
     LodSwitchPreviewReport,
@@ -141,6 +148,8 @@ __all__ = [
     "RemoveOccludedOptions",
     "RuntimeBrowserOptions",
     "RuntimeBrowserReport",
+    "RuntimeEngineOptions",
+    "RuntimeEngineReport",
     "SceneOptimizeOptions",
     "ReplaceOptions",
     "SelectionMatch",
@@ -172,6 +181,7 @@ __all__ = [
     "merge_vertices",
     "measure_gltf_size_ladder",
     "measure_browser_runtime",
+    "measure_engine_runtime",
     "optimize",
     "optimize_scene",
     "process_textures",
