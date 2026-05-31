@@ -32,8 +32,8 @@ Dry-run JSON for `convert` includes `operation_diagnostics`, a list of planned o
 | Command | Description |
 |---------|-------------|
 | `fascat inspect input.step` | Inspect CAD assembly metadata and planned conversion inputs |
-| `fascat convert input.step [output.usdc]` | Convert STEP, IGES, or BREP CAD into OpenUSD, glTF, OBJ, or STL |
-| `fascat validate output.usdc` | Validate generated USD, glTF, OBJ, or STL output |
+| `fascat convert input.step [output.usdc]` | Convert STEP, IGES, or BREP CAD into OpenUSD, glTF, OBJ, STL, or FBX |
+| `fascat validate output.usdc` | Validate generated USD, glTF, OBJ, STL, or FBX output |
 | `fascat help [command]` | Show top-level or command-specific help |
 | `fascat version` | Print version and exit |
 
@@ -52,6 +52,7 @@ all listed formats are implemented.
 | glTF `.gltf`, `.glb` | Not imported | Supported | Preferred web/mobile runtime delivery |
 | OBJ `.obj` | Not imported | Supported | Mesh-only interchange output |
 | STL `.stl` | Not imported | Supported | Mesh-only manufacturing or inspection output |
+| FBX `.fbx` | Not imported | Supported | ASCII FBX DCC and engine handoff output |
 | Parasolid `.x_t`, `.x_b` | Not supported | Not supported | Native-kernel CAD import candidate, not in scope yet |
 | JT `.jt` | Not supported | Not supported | Visualization/CAD hybrid import candidate, not in scope yet |
 | CATIA, NX, SolidWorks, Inventor | Not supported | Not supported | Native CAD coverage is deferred |
@@ -225,6 +226,10 @@ the native source shape retained for tessellation and healing.
 | `--preserve-groups / --no-preserve-groups` | `true` | Preserve OBJ groups per occurrence |
 | `--stl-binary / --stl-ascii` | `true` | Write binary STL instead of ASCII STL |
 | `--stl-merge / --no-stl-merge` | `true` | Merge STL output into one triangle stream |
+| `--fbx-materials / --no-fbx-materials` | `true` | Write FBX material nodes and connections |
+| `--fbx-normals / --no-fbx-normals` | `true` | Write FBX normal layers |
+| `--fbx-tangents / --no-fbx-tangents` | `true` | Write FBX tangent layers when available |
+| `--fbx-uvs / --no-fbx-uvs` | `true` | Write FBX UV layers when available |
 | `--debug` | `false` | Require text `.usd` or `.usda` output for debugging |
 | `--report` | unset | Write a JSON conversion report sidecar |
 | `--force` | `false` | Overwrite an existing output file |
@@ -450,7 +455,7 @@ When the convert output argument is omitted for a file input, Fascat writes besi
 When output is `-`, USD bytes are reserved for stdout and progress/errors stay on stderr.
 
 Supported input suffixes are `.step`, `.stp`, `.igs`, `.iges`, and `.brep`.
-Supported output suffixes are `.usd`, `.usda`, `.usdc`, `.usdz`, `.gltf`, `.glb`, `.obj`, and `.stl`.
+Supported output suffixes are `.usd`, `.usda`, `.usdc`, `.usdz`, `.gltf`, `.glb`, `.obj`, `.stl`, and `.fbx`.
 
 `--debug` is only valid with `.usd` or `.usda` output. Binary `.usdc`, `.gltf`, and `.glb` output is rejected when debug mode is enabled.
 

@@ -7,7 +7,7 @@ The single planning document for Fascat. For the log of shipped work, see
 ## What Fascat Is
 
 A Python library and CLI that converts CAD (STEP, IGES, BREP) into realtime-ready OpenUSD,
-glTF/GLB, OBJ, and STL assets. The end-to-end V1 pipeline is implemented and produces
+glTF/GLB, OBJ, STL, and FBX assets. The end-to-end V1 pipeline is implemented and produces
 real geometry — not just diagnostics. The goal is solid **CAD → realtime 3D (RT3D)**
 basics, refined over time. Matching Unity's Asset Transformer 100% is explicitly a
 non-goal; Unity Asset Transformer is used as a reference checklist, not a target.
@@ -22,7 +22,7 @@ flowchart LR
     REP --> STG[Stage<br/>normals · UV · materials]:::mix
     STG --> OPT[Optimize<br/>decimate · occlude · instance]:::mix
     OPT --> LOD[LODs]:::ok
-    LOD --> EXP[Export<br/>USD · glTF · OBJ · STL]:::mix
+    LOD --> EXP[Export<br/>USD · glTF · OBJ · STL · FBX]:::mix
     classDef ok  fill:#d4edda,stroke:#28a745,color:#000;
     classDef mix fill:#fff3cd,stroke:#ffc107,color:#000;
     classDef ext fill:#e2e3e5,stroke:#6c757d,color:#000;
@@ -33,7 +33,7 @@ metadata-only sub-feature · ⚪ grey: external input.
 
 Backends: OCCT/OCP (CAD + tessellation + BREP healing), xatlas (UV unwrap),
 meshoptimizer / fast-simplification (decimation + meshopt compression), usd-core
-(USD), built-in glTF/OBJ/STL writers, trimesh + numpy (mesh ops).
+(USD), built-in glTF/OBJ/STL/FBX writers, trimesh + numpy (mesh ops).
 
 ## Status: Real vs. Gaps
 
@@ -48,7 +48,7 @@ meshoptimizer / fast-simplification (decimation + meshopt compression), usd-core
 | **Materials** | per-face colors + PBR factors preserved | — | raster textures, atlas packing, AO bake, material-library mapping |
 | **Optimize** | decimation, instance reconstruction, buffer optimization | sampled occlusion, quality→ratio decimation | error-bounded decimation, weighted decimation, retopology, GPU occlusion |
 | **LOD** | real decimated mesh levels | — | occurrence LOD groups, far-LOD bake-to-one-material, switching-distance validation |
-| **Export** | USD/USDZ, glTF/GLB (quantize + meshopt), OBJ, STL | — | FBX output, Draco, KTX2/Basis, real texture files, size-ladder reports, named presets |
+| **Export** | USD/USDZ, glTF/GLB (quantize + meshopt), OBJ, STL, FBX | — | Draco, KTX2/Basis, real texture files, size-ladder reports, named presets |
 
 ### A. Works end-to-end — real geometry
 
@@ -61,7 +61,7 @@ The basics are present and produce a valid RT3D asset:
 - **Stage** (`ops/stage.py`): normals, tangents, UV unwrap (**xatlas**), AABB/box UV projection, UV copy, material normalize-to-PBR, duplicate-material merge.
 - **Optimize** (`ops/optimize.py`): decimation (**meshoptimizer / fast-simplification**), instance reconstruction (real scene rewrite), buffer optimization.
 - **LODs** (`ops/lod.py`): real decimated mesh levels per part.
-- **Export** (`io/{usd,gltf,obj,stl}.py`): USD/USDZ (usd-core), glTF/GLB with real quantization + meshopt compression, OBJ, STL — all write valid geometry, hierarchy, transforms, and material factors.
+- **Export** (`io/{usd,gltf,obj,stl,fbx}.py`): USD/USDZ (usd-core), glTF/GLB with real quantization + meshopt compression, OBJ, STL, FBX — all write valid geometry, hierarchy, transforms, and material factors.
 
 ### B. Real but approximate — refine candidates
 
@@ -135,7 +135,7 @@ implement → test → document → commit → push → verify CI/docs.
 - Switching-distance validation + engine-specific LOD export profiles (Unity, Unreal).
 
 **Export**
-- **FBX output (`.fbx`)**: ASCII FBX 7.x writer for DCC / engine pipelines (Maya, 3ds Max, Unreal, Unity, Blender). Hand-written like the existing glTF / OBJ / STL writers — walks the same occurrence tree (`io/obj.py` `_occurrences` / `_transform_points` / `referenced_materials`) and emits the FBX object graph: `Geometry::` (vertices + `PolygonVertexIndex` polygon-end bit, normals, tangents, UV layers, per-face `LayerElementMaterial`), `Model::` nodes with hierarchy + transforms, `Material::` nodes, `GlobalSettings` unit / up-axis, and the `Connections` graph. PBR maps to legacy Phong — base color + opacity faithful; metallic / roughness approximated (optionally via Autodesk stingray-PBS properties), the same PBR-in-non-PBR limitation as OBJ/MTL. New `FbxExportOptions`, new `fascat/io/fbx.py` (`write_fbx` + `validate_fbx`), format dispatch in `pipeline.py` and `cli.py`. No new dependencies (hand-written ASCII); binary FBX deferred.
+- ~~**FBX output (`.fbx`)**: ASCII FBX 7.x writer for DCC / engine pipelines (Maya, 3ds Max, Unreal, Unity, Blender). Hand-written like the existing glTF / OBJ / STL writers — walks the same occurrence tree (`io/obj.py` `_occurrences` / `_transform_points` / `referenced_materials`) and emits the FBX object graph: `Geometry::` (vertices + `PolygonVertexIndex` polygon-end bit, normals, tangents, UV layers, per-face `LayerElementMaterial`), `Model::` nodes with hierarchy + transforms, `Material::` nodes, `GlobalSettings` unit / up-axis, and the `Connections` graph. PBR maps to legacy Phong — base color + opacity faithful; metallic / roughness approximated (optionally via Autodesk stingray-PBS properties), the same PBR-in-non-PBR limitation as OBJ/MTL. New `FbxExportOptions`, new `fascat/io/fbx.py` (`write_fbx` + `validate_fbx`), format dispatch in `pipeline.py` and `cli.py`. No new dependencies (hand-written ASCII); binary FBX deferred.~~ ✅ **done (2026-05-31)**
 - Real Draco encoder (or keep `draco=True` rejected).
 - Real KTX2/Basis texture output (after first-class images exist).
 - Baseline-vs-optimized + compressed-GLB size-ladder reports.

@@ -10,12 +10,13 @@ from typer.testing import CliRunner
 from fascat.analysis import analyze_output
 from fascat.asset import Asset, Node, Part
 from fascat.cli import app
+from fascat.io.fbx import validate_fbx
 from fascat.io.gltf import validate_gltf
 from fascat.io.obj import validate_obj
 from fascat.io.stl import validate_stl
 from fascat.material import Material
 from fascat.mesh import Mesh
-from fascat.options import GltfExportOptions, ObjExportOptions, StlExportOptions
+from fascat.options import FbxExportOptions, GltfExportOptions, ObjExportOptions, StlExportOptions
 
 runner = CliRunner()
 
@@ -358,6 +359,50 @@ def test_stl_export_writes_ascii_mesh(tmp_path) -> None:  # type: ignore[no-unty
     assert "vertex 1 0 0" in text
     assert text.endswith("endsolid fascat\n")
     assert validate_stl(output) == {"meshes": 1, "points": 3, "triangles": 1}
+
+
+def test_fbx_export_writes_ascii_scene_graph_and_layers(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    mesh = Mesh(
+        points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.asarray([[0, 1, 2]], dtype=int),
+        normals=np.asarray([[0, 0, 1], [0, 0, 1], [0, 0, 1]], dtype=float),
+        tangents=np.asarray([[1, 0, 0, 1], [1, 0, 0, 1], [1, 0, 0, 1]], dtype=float),
+        uvs={0: np.asarray([[0, 0], [1, 0], [0, 1]], dtype=float)},
+        material_indices=np.asarray([0], dtype=int),
+    )
+    transform = np.eye(4, dtype=float)
+    transform[0, 3] = 2.0
+    asset = Asset(
+        root=Node(
+            id="root", name="root", children=[Node(id="tri", name="Triangle", part_id="tri", transform=transform)]
+        ),
+        parts={"tri": Part(id="tri", name="Triangle", mesh=mesh, material_ids=["mat"])},
+        materials={"mat": Material(id="mat", name="Mat", base_color=(0.2, 0.4, 0.6, 0.75), metallic=0.5)},
+        units="metre",
+        meters_per_unit=1.0,
+        up_axis="Y",
+    )
+    output = tmp_path / "triangle.fbx"
+
+    asset.write_fbx(output, options=FbxExportOptions(file_size_budget_mb=0.000001))
+    text = output.read_text(encoding="utf-8")
+
+    assert validate_fbx(output) == {"meshes": 1, "points": 3, "triangles": 1}
+    assert "FBXVersion: 7400" in text
+    assert "Geometry: " in text
+    assert "Model::Triangle" in text
+    assert "Material::Mat" in text
+    assert "PolygonVertexIndex: *3" in text
+    assert "\ta: 0,1,-3" in text
+    assert "LayerElementNormal: 0" in text
+    assert "LayerElementTangent: 0" in text
+    assert "LayerElementUV: 0" in text
+    assert "LayerElementMaterial: 0" in text
+    assert 'P: "Lcl Translation", "Lcl Translation", "", "A",2,0,0' in text
+    assert 'P: "UpAxis", "int", "Integer", "",1' in text
+    assert 'P: "UnitScaleFactor", "double", "Number", "",100' in text
+    assert asset.report.steps[-1].options["format"] == "FBX"
+    assert "file size budget exceeded" in asset.report.warnings[-1]
 
 
 def test_cli_convert_accepts_runtime_export_options_during_dry_run() -> None:

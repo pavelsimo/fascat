@@ -544,6 +544,10 @@ def _validate_output(path: Path) -> dict[str, int]:
         from fascat.io.stl import validate_stl
 
         return validate_stl(path)
+    if suffix == ".fbx":
+        from fascat.io.fbx import validate_fbx
+
+        return validate_fbx(path)
     raise ValueError(f"unsupported export extension: {suffix or '<none>'}")
 
 

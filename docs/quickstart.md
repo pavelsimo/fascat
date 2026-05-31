@@ -141,6 +141,7 @@ fascat convert input.step output.glb \
 
 fascat convert input.step output.obj --obj-materials --write-mtl --force
 fascat convert input.step output.stl --stl-binary --force
+fascat convert input.step output.fbx --fbx-materials --fbx-uvs --force
 ```
 
 ## Validate output
@@ -148,6 +149,7 @@ fascat convert input.step output.stl --stl-binary --force
 ```bash
 fascat validate output.usdc
 fascat validate output.glb
+fascat validate output.fbx
 fascat validate output.glb --geometry-quality --report quality-report.json
 ```
 

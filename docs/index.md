@@ -1,13 +1,13 @@
 ---
 title: fascat
-description: convert CAD data into realtime-ready OpenUSD and glTF assets
+description: convert CAD data into realtime-ready OpenUSD, glTF, OBJ, STL, and FBX assets
 ---
 
-Fascat converts STEP, IGES, and OpenCASCADE BREP assets into realtime-ready OpenUSD and glTF assets while preserving hierarchy, materials, transforms, and repeated parts where the source format exposes them.
+Fascat converts STEP, IGES, and OpenCASCADE BREP assets into realtime-ready OpenUSD, glTF, OBJ, STL, and FBX assets while preserving hierarchy, materials, transforms, and repeated parts where the source format exposes them.
 
 ## Why fascat
 
-- **Focused** — V1 supports CAD import through STEP, IGES, and native BREP, with OpenUSD or glTF output
+- **Focused** — V1 supports CAD import through STEP, IGES, and native BREP, with OpenUSD, glTF, OBJ, STL, or FBX output
 - **Scriptable** — command results can be emitted as JSON for pipeline use
 - **Inspectable** — conversion reports expose options, warnings, timings, and mesh statistics
 - **Conservative** — lossy operations are explicit and controlled by profiles or flags

@@ -122,6 +122,7 @@ Core pipeline calls:
 | `asset.lods(options, where=None)` | `options` is `LODOptions`. `where` optionally scopes selected parts. | Generate lower-detail runtime meshes. |
 | `asset.write_usd(path, options=None)` | `path` ends in `.usd`, `.usda`, `.usdc`, or `.usdz`. `options` is `UsdExportOptions`. | Write OpenUSD output and append a write step to the report. |
 | `asset.write_gltf(path, options=None)` | `path` ends in `.gltf` or `.glb`. `options` is `GltfExportOptions`. | Write glTF 2.0 output and append a write step to the report. |
+| `asset.write_fbx(path, options=None)` | `path` ends in `.fbx`. `options` is `FbxExportOptions`. | Write ASCII FBX output and append a write step to the report. |
 
 ## Assembly filters
 
@@ -851,7 +852,7 @@ Conversion parameters:
 | Parameter | Meaning |
 |-----------|---------|
 | `input_path` | CAD input path ending in `.step`, `.stp`, `.igs`, `.iges`, or `.brep`. CLI stdin remains STEP-oriented because stdin has no suffix. |
-| `output_path` | Output path. Suffix selects USD, glTF, OBJ, or STL. |
+| `output_path` | Output path. Suffix selects USD, glTF, OBJ, STL, or FBX. |
 | `profile` | Profile name or `ConversionProfile` that supplies default tessellation, repair, stage, optimize, LOD, budget, and workflow-recipe metadata. |
 | `import_options` | `StepReadOptions` for STEP metadata and PMI import. |
 | `tessellation` | Overrides the profile tessellation step. |
@@ -867,7 +868,7 @@ Conversion parameters:
 | `progress` | Callback receiving `(step_name, stats)` after major conversion steps. |
 | `validate_output` | Reopen and validate generated output before returning. Defaults to `True`. |
 | `debug` | Prefer debuggable USDA conventions. Only valid for `.usd` or `.usda` outputs. |
-| `gltf_options`, `usd_options`, `obj_options`, `stl_options` | Format-specific write options. |
+| `gltf_options`, `usd_options`, `obj_options`, `stl_options`, `fbx_options` | Format-specific write options. |
 | `pipeline` | `PipelineSpec` loaded from TOML. When present, ordered pipeline steps drive the conversion. |
 | `where` | Optional `Filter` applied to scoped hierarchy, optimization, and LOD steps. |
 
@@ -902,7 +903,7 @@ pmi = "metadata"
 
 ## Runtime Export Options
 
-glTF and USD exports accept runtime delivery options, and OBJ/STL are available for mesh-only handoff workflows.
+glTF and USD exports accept runtime delivery options, and OBJ/STL/FBX are available for mesh and DCC handoff workflows.
 
 ```python
 asset.write_gltf(
@@ -927,11 +928,14 @@ asset.write_usd(
 
 asset.write_obj("motor.obj", options=fc.ObjExportOptions(materials=True, write_mtl=True))
 asset.write_stl("motor.stl", options=fc.StlExportOptions(binary=True, merge=True))
+asset.write_fbx("motor.fbx", options=fc.FbxExportOptions(materials=True, normals=True, uvs=True))
 ```
 
 `quantize=True` writes `KHR_mesh_quantization` accessors and composes the dequantization transform into referencing nodes. `meshopt=True` writes `EXT_meshopt_compression` bufferView payloads while keeping fallback buffer data for validators and loaders that ignore the extension. USDZ output is built by writing a temporary USD stage and packaging it as `.usdz`. Draco and texture compression are not implemented yet, so `draco=True` and `texture_compression="ktx2"` or `"basisu"` raise instead of silently writing uncompressed runtime payloads. While KTX2/Basis output is unavailable, `texture_fallback_format` records the PNG/JPEG fallback policy: `auto` chooses PNG for alpha-bearing texture sets and JPEG for color-only texture sets, while explicit `png` or `jpeg` records a forced fallback. `png_compression` and `jpeg_quality` are reported as policy settings; actual image transcoding still requires the future first-class image graph. glTF write report steps include `runtime_dependencies`, listing emitted extensions, required extensions, `extras.fascat` metadata, unsupported Draco/KTX2 outputs, expected runtime support, a `runtime_compatibility` matrix for Unity glTFast, web, mobile, and XR targets, and a `runtime_decision_matrix` that explains when quantization, meshopt, future Draco, future KTX2/Basis, and PNG/JPEG fallbacks are appropriate. The compatibility matrix records whether each extension is required, optional, not used, not written, or metadata-only, plus target-specific support and fallback notes. Write report steps also include output file size, estimated geometry/texture/metadata payload bytes, referenced/unused/written material counts, source/referenced/unused/duplicate-reference/written image counts, and file-size budget warnings when a budget is provided. glTF, USD, and OBJ exports write only referenced materials, leaving the in-memory asset unchanged. glTF also omits images referenced only by unused materials and reuses repeated embedded texture URIs as one image/texture resource.
 
 OBJ export writes vertex positions, normals, `f v//vn` face references, material assignments, and smoothing directives. Staged smooth normals export with smoothing enabled; flat, hard-edge, or generated face normals export with smoothing disabled.
+
+FBX export writes ASCII FBX 7.4 files with `Model`, `Geometry`, `Material`, `GlobalSettings`, and `Connections` sections. Geometry uses FBX polygon-end index bits, preserves hierarchy transforms, and can write normal, tangent, UV, and per-face material layers. PBR material factors are approximated through legacy Phong properties.
 
 Export option parameters:
 
@@ -956,6 +960,11 @@ Export option parameters:
 | `StlExportOptions` | `binary` | Write binary STL when `True`; ASCII STL when `False`. |
 | `StlExportOptions` | `merge` | Merge selected triangles into one STL stream. STL does not preserve hierarchy or materials. |
 | `StlExportOptions` | `file_size_budget_mb` | Add report warnings when the output exceeds this size. |
+| `FbxExportOptions` | `materials` | Write FBX material nodes, per-face material indices, and model-material connections. |
+| `FbxExportOptions` | `normals` | Write FBX normal layers. |
+| `FbxExportOptions` | `tangents` | Write FBX tangent layers when mesh tangents exist. |
+| `FbxExportOptions` | `uvs` | Write FBX UV layers when mesh UV channels exist. |
+| `FbxExportOptions` | `file_size_budget_mb` | Add report warnings when the output exceeds this size. |
 
 ## Profiles
 

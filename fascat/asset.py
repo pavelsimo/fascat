@@ -19,6 +19,7 @@ from fascat.options import (
     DecimateOptions,
     DeleteDegeneratePolygonsOptions,
     ExplodeOptions,
+    FbxExportOptions,
     GltfExportOptions,
     LODGeneratorOptions,
     LODOptions,
@@ -936,6 +937,24 @@ class Asset:
         timer = timed_step()
         with timer:
             write_stl(self, path, options=opts)
+        self.report.add_step(
+            "write",
+            options=step_options,
+            before=before,
+            after=_stats_with_file_size(self._report_stats(), path, opts.file_size_budget_mb, self),
+            duration=timer.duration,
+        )
+        self.report.finish(self._report_stats())
+
+    def write_fbx(self, path: str | Path, *, options: FbxExportOptions | None = None) -> None:
+        from fascat.io.fbx import write_fbx
+
+        opts = options or FbxExportOptions()
+        before = self._report_stats()
+        step_options: dict[str, object] = {"format": "FBX", **opts.to_dict()}
+        timer = timed_step()
+        with timer:
+            write_fbx(self, path, options=opts)
         self.report.add_step(
             "write",
             options=step_options,

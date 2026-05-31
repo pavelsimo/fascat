@@ -20,7 +20,7 @@ flowchart TD
     C --> D["Repaired meshes"]
     D --> E["Staged materials & UVs"]
     E --> F["Optimized LODs"]
-    F --> G["OpenUSD / glTF"]
+    F --> G["OpenUSD / glTF / OBJ / STL / FBX"]
 ```
 
 ## Installation

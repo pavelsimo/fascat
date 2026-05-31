@@ -21,6 +21,7 @@ from fascat import __version__
 from fascat.analysis import AnalysisReport, analyze_output
 from fascat.filter import Filter, FilterExpressionError
 from fascat.io.brep import BREP_SUFFIXES, read_brep
+from fascat.io.fbx import FBX_SUFFIXES
 from fascat.io.gltf import GLTF_SUFFIXES
 from fascat.io.iges import IGES_SUFFIXES, read_iges
 from fascat.io.obj import OBJ_SUFFIXES
@@ -36,6 +37,7 @@ from fascat.options import (
     DecimateOptions,
     DeleteDegeneratePolygonsOptions,
     ExplodeOptions,
+    FbxExportOptions,
     GltfExportOptions,
     LODGeneratorOptions,
     LODLevel,
@@ -69,7 +71,7 @@ rich_utils.MAX_WIDTH = 120
 STEP_SUFFIXES = {".step", ".stp"}
 CAD_SUFFIXES = STEP_SUFFIXES | IGES_SUFFIXES | BREP_SUFFIXES
 USD_SUFFIXES = {".usd", ".usda", ".usdc", ".usdz"}
-EXPORT_SUFFIXES = USD_SUFFIXES | GLTF_SUFFIXES | OBJ_SUFFIXES | STL_SUFFIXES
+EXPORT_SUFFIXES = USD_SUFFIXES | GLTF_SUFFIXES | OBJ_SUFFIXES | STL_SUFFIXES | FBX_SUFFIXES
 COMMAND_NAMES = ("inspect", "convert", "validate", "version", "help")
 GLOBAL_FLAG_ALIASES = {
     "--json",
@@ -1220,6 +1222,22 @@ def cmd_convert(
         bool,
         typer.Option("--stl-merge/--no-stl-merge", help="Merge STL output into one triangle stream."),
     ] = True,
+    fbx_materials: Annotated[
+        bool,
+        typer.Option("--fbx-materials/--no-fbx-materials", help="Write FBX material nodes and connections."),
+    ] = True,
+    fbx_normals: Annotated[
+        bool,
+        typer.Option("--fbx-normals/--no-fbx-normals", help="Write FBX normal layers."),
+    ] = True,
+    fbx_tangents: Annotated[
+        bool,
+        typer.Option("--fbx-tangents/--no-fbx-tangents", help="Write FBX tangent layers when available."),
+    ] = True,
+    fbx_uvs: Annotated[
+        bool,
+        typer.Option("--fbx-uvs/--no-fbx-uvs", help="Write FBX UV layers when available."),
+    ] = True,
     debug: Annotated[bool, typer.Option("--debug", help="Prefer debuggable USDA output conventions.")] = False,
     report: Annotated[Path | None, typer.Option("--report", help="Write a JSON conversion report sidecar.")] = None,
     force: Annotated[bool, typer.Option("--force", "-f", help="Overwrite an existing output file.")] = False,
@@ -1386,6 +1404,10 @@ def cmd_convert(
         "preserve_groups": preserve_groups,
         "stl_binary": stl_binary,
         "stl_merge": stl_merge,
+        "fbx_materials": fbx_materials,
+        "fbx_normals": fbx_normals,
+        "fbx_tangents": fbx_tangents,
+        "fbx_uvs": fbx_uvs,
         "debug": debug,
         "report": str(report) if report else None,
         "force": force,
@@ -1860,6 +1882,13 @@ def cmd_convert(
             file_size_budget_mb=file_size_budget_mb,
         )
         stl_options = StlExportOptions(binary=stl_binary, merge=stl_merge, file_size_budget_mb=file_size_budget_mb)
+        fbx_options = FbxExportOptions(
+            materials=fbx_materials,
+            normals=fbx_normals,
+            tangents=fbx_tangents,
+            uvs=fbx_uvs,
+            file_size_budget_mb=file_size_budget_mb,
+        )
         reporter = _stage_reporter(ctx, input_path, output_path)
         with reporter:
             asset = _convert_for_cli(
@@ -1891,6 +1920,7 @@ def cmd_convert(
                 usd_options=usd_options,
                 obj_options=obj_options,
                 stl_options=stl_options,
+                fbx_options=fbx_options,
             )
     except typer.Exit:
         raise
@@ -2555,7 +2585,7 @@ def _validate_export_output(path: Path, ctx: typer.Context, payload: dict[str, A
             ctx,
             payload,
             "Unsupported export extension: "
-            f"{path.suffix or '<none>'}. Use .usd, .usda, .usdc, .usdz, .gltf, .glb, .obj, or .stl.",
+            f"{path.suffix or '<none>'}. Use .usd, .usda, .usdc, .usdz, .gltf, .glb, .obj, .stl, or .fbx.",
             code=2,
         )
 
@@ -2629,6 +2659,7 @@ def _convert_for_cli(
     usd_options: UsdExportOptions | None,
     obj_options: ObjExportOptions | None,
     stl_options: StlExportOptions | None,
+    fbx_options: FbxExportOptions | None,
 ) -> Any:
     if _is_stdio(input_path):
         data = sys.stdin.buffer.read()
@@ -2664,6 +2695,7 @@ def _convert_for_cli(
                 usd_options,
                 obj_options,
                 stl_options,
+                fbx_options,
             )
     return _convert_output(
         input_path,
@@ -2694,6 +2726,7 @@ def _convert_for_cli(
         usd_options,
         obj_options,
         stl_options,
+        fbx_options,
     )
 
 
@@ -2726,6 +2759,7 @@ def _convert_output(
     usd_options: UsdExportOptions | None,
     obj_options: ObjExportOptions | None,
     stl_options: StlExportOptions | None,
+    fbx_options: FbxExportOptions | None,
 ) -> Any:
     if _is_stdio(output_path):
         import tempfile
@@ -2762,6 +2796,7 @@ def _convert_output(
                 usd_options=usd_options,
                 obj_options=obj_options,
                 stl_options=stl_options,
+                fbx_options=fbx_options,
             )
             stdout = click.get_binary_stream("stdout")
             stdout.write(Path(handle.name).read_bytes())
@@ -2796,6 +2831,7 @@ def _convert_output(
         usd_options=usd_options,
         obj_options=obj_options,
         stl_options=stl_options,
+        fbx_options=fbx_options,
     )
 
 

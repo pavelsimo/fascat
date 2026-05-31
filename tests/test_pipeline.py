@@ -1375,6 +1375,31 @@ def test_convert_reuses_stl_writer_validation_stats(monkeypatch, tmp_path: Path)
     assert steps["validate"].after["validated_triangles"] == 4
 
 
+def test_convert_reuses_fbx_writer_validation_stats(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.pipeline as pipeline
+
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
+
+    def fake_write_fbx(_asset: Asset, path: str | Path, *, options: object = None) -> dict[str, int]:
+        Path(path).write_text("; not parsed by this test\n", encoding="utf-8")
+        return {"meshes": 1, "points": 15, "triangles": 5}
+
+    monkeypatch.setattr(pipeline, "_write_fbx", fake_write_fbx)
+    monkeypatch.setattr(pipeline, "validate_fbx", lambda _path: pytest.fail("validation should stay in memory"))
+
+    converted = convert(
+        "input.step",
+        tmp_path / "output.fbx",
+        profile=_test_profile(),
+    )
+    steps = {step.name: step for step in converted.report.steps}
+
+    assert steps["write"].options["format"] == "FBX"
+    assert steps["validate"].after["validated_meshes"] == 1
+    assert steps["validate"].after["validated_points"] == 15
+    assert steps["validate"].after["validated_triangles"] == 5
+
+
 def test_convert_report_output_stats_include_lod_totals(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     import fascat.pipeline as pipeline
 

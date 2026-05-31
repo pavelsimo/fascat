@@ -955,6 +955,22 @@ class StlExportOptions:
 
 
 @dataclass(frozen=True)
+class FbxExportOptions:
+    materials: bool = True
+    normals: bool = True
+    tangents: bool = True
+    uvs: bool = True
+    file_size_budget_mb: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.file_size_budget_mb is not None and self.file_size_budget_mb <= 0.0:
+            raise ValueError("file_size_budget_mb must be greater than 0 when set")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class PlatformBudget:
     target_fps: int | None = None
     max_triangles: int | None = None

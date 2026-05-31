@@ -1,10 +1,11 @@
-"""Convert CAD data into realtime-ready OpenUSD and glTF assets."""
+"""Convert CAD data into realtime-ready OpenUSD, glTF, OBJ, STL, and FBX assets."""
 
 from fascat import profiles
 from fascat.analysis import AnalysisReport
 from fascat.asset import Asset, Node, Part
 from fascat.filter import Filter, FilterExpressionError, SelectionMatch, SelectionResult
 from fascat.io.brep import read_brep
+from fascat.io.fbx import validate_fbx
 from fascat.io.gltf import validate_gltf
 from fascat.io.iges import read_iges
 from fascat.io.step import read_step
@@ -22,6 +23,7 @@ from fascat.options import (
     DecimateOptions,
     DeleteDegeneratePolygonsOptions,
     ExplodeOptions,
+    FbxExportOptions,
     GltfExportOptions,
     IgesReadOptions,
     LODGeneratorOptions,
@@ -68,6 +70,7 @@ from fascat.pipeline import (
     stage,
     tessellate,
     validate_output,
+    write_fbx,
     write_gltf,
     write_obj,
     write_stl,
@@ -89,6 +92,7 @@ __all__ = [
     "DecimateOptions",
     "DeleteDegeneratePolygonsOptions",
     "ExplodeOptions",
+    "FbxExportOptions",
     "Filter",
     "FilterExpressionError",
     "GltfExportOptions",
@@ -152,10 +156,12 @@ __all__ = [
     "stage",
     "tessellate",
     "validate_gltf",
+    "validate_fbx",
     "validate_output",
     "validate_usd",
     "write_gltf",
     "write_obj",
     "write_stl",
+    "write_fbx",
     "write_usd",
 ]

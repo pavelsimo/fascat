@@ -501,6 +501,7 @@ def test_size_adaptive_tessellation_requires_bands() -> None:
         (lambda: fc.UsdExportOptions(package="zip"), "package"),
         (lambda: fc.ObjExportOptions(file_size_budget_mb=0), "file_size_budget_mb"),
         (lambda: fc.StlExportOptions(file_size_budget_mb=0), "file_size_budget_mb"),
+        (lambda: fc.FbxExportOptions(file_size_budget_mb=0), "file_size_budget_mb"),
     ],
 )
 def test_options_validate_bad_inputs(factory: object, message: str) -> None:

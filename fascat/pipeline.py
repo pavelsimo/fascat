@@ -10,6 +10,8 @@ from fascat.export_report import referenced_materials
 from fascat.export_report import stats_with_file_size as _stats_with_file_size
 from fascat.filter import Filter
 from fascat.io.brep import BREP_SUFFIXES, read_brep
+from fascat.io.fbx import FBX_SUFFIXES, validate_fbx
+from fascat.io.fbx import write_fbx_with_validation_stats as _write_fbx
 from fascat.io.gltf import GLTF_SUFFIXES, runtime_dependency_report, validate_gltf
 from fascat.io.gltf import write_gltf_with_validation as _write_gltf
 from fascat.io.iges import IGES_SUFFIXES, read_iges
@@ -31,6 +33,7 @@ from fascat.options import (
     DeleteDegeneratePolygonsOptions,
     ExplodeOptions,
     FaceOrientationStrategy,
+    FbxExportOptions,
     GltfExportOptions,
     LODGeneratorOptions,
     LODOptions,
@@ -61,7 +64,7 @@ if TYPE_CHECKING:
 
 USD_SUFFIXES = {".usd", ".usda", ".usdc", ".usdz"}
 CAD_SUFFIXES = {".step", ".stp"} | IGES_SUFFIXES | BREP_SUFFIXES
-ExportFormat = Literal["usd", "gltf", "obj", "stl"]
+ExportFormat = Literal["usd", "gltf", "obj", "stl", "fbx"]
 _LOAD_ESTIMATE_BYTES_PER_MS = 50_000
 _LOAD_ESTIMATE_VERTEX_BYTES = 32
 _LOAD_ESTIMATE_TRIANGLE_INDEX_BYTES = 12
@@ -102,6 +105,7 @@ def convert(
     usd_options: UsdExportOptions | None = None,
     obj_options: ObjExportOptions | None = None,
     stl_options: StlExportOptions | None = None,
+    fbx_options: FbxExportOptions | None = None,
     pipeline: PipelineSpec | None = None,
     where: Filter | None = None,
 ) -> Asset:
@@ -221,11 +225,14 @@ def convert(
         usd_options=usd_options,
         obj_options=obj_options,
         stl_options=stl_options,
+        fbx_options=fbx_options,
     )
     if output_format == "gltf":
         write_options["runtime_dependencies"] = runtime_dependency_report(asset, gltf_options)
     _add_texture_export_policy_report(asset, selected, output_format, gltf_options=gltf_options)
-    file_size_budget = _file_size_budget(output_format, gltf_options, usd_options, obj_options, stl_options)
+    file_size_budget = _file_size_budget(
+        output_format, gltf_options, usd_options, obj_options, stl_options, fbx_options
+    )
     write_timer = timed_step()
     written_validation_stats: dict[str, int] | None = None
     try:
@@ -239,6 +246,7 @@ def convert(
                 usd_options=usd_options,
                 obj_options=obj_options,
                 stl_options=stl_options,
+                fbx_options=fbx_options,
             )
     except Exception as exc:
         _record_failed_step(
@@ -1518,6 +1526,7 @@ def _file_size_budget(
     usd_options: UsdExportOptions | None,
     obj_options: ObjExportOptions | None,
     stl_options: StlExportOptions | None,
+    fbx_options: FbxExportOptions | None,
 ) -> float | None:
     if output_format == "gltf":
         return None if gltf_options is None else gltf_options.file_size_budget_mb
@@ -1525,7 +1534,9 @@ def _file_size_budget(
         return None if usd_options is None else usd_options.file_size_budget_mb
     if output_format == "obj":
         return None if obj_options is None else obj_options.file_size_budget_mb
-    return None if stl_options is None else stl_options.file_size_budget_mb
+    if output_format == "stl":
+        return None if stl_options is None else stl_options.file_size_budget_mb
+    return None if fbx_options is None else fbx_options.file_size_budget_mb
 
 
 def _with_gltf_metadata(
@@ -1582,6 +1593,10 @@ def write_stl(asset: Asset, path: str | Path, *, options: StlExportOptions | Non
     asset.write_stl(path, options=options)
 
 
+def write_fbx(asset: Asset, path: str | Path, *, options: FbxExportOptions | None = None) -> None:
+    asset.write_fbx(path, options=options)
+
+
 def validate_output(path: str | Path) -> dict[str, int]:
     output_format = _export_format(path)
     return _validate_output(path, output_format)
@@ -1601,6 +1616,8 @@ def _export_format(path: str | Path) -> ExportFormat:
         return "obj"
     if suffix in STL_SUFFIXES:
         return "stl"
+    if suffix in FBX_SUFFIXES:
+        return "fbx"
     raise ValueError(f"unsupported export extension: {suffix or '<none>'}")
 
 
@@ -1614,6 +1631,7 @@ def _write_output(
     usd_options: UsdExportOptions | None,
     obj_options: ObjExportOptions | None,
     stl_options: StlExportOptions | None,
+    fbx_options: FbxExportOptions | None,
 ) -> dict[str, int] | None:
     if output_format == "usd":
         return _write_usd(asset, path, debug=debug, options=_usd_options_for_path(path, usd_options))
@@ -1621,7 +1639,9 @@ def _write_output(
         return _write_gltf(asset, path, options=gltf_options)
     if output_format == "obj":
         return _write_obj(asset, path, options=obj_options)
-    return _write_stl(asset, path, options=stl_options)
+    if output_format == "stl":
+        return _write_stl(asset, path, options=stl_options)
+    return _write_fbx(asset, path, options=fbx_options)
 
 
 def _validate_output(path: str | Path, output_format: ExportFormat) -> dict[str, int]:
@@ -1631,7 +1651,9 @@ def _validate_output(path: str | Path, output_format: ExportFormat) -> dict[str,
         return validate_gltf(path)
     if output_format == "obj":
         return validate_obj(path)
-    return validate_stl(path)
+    if output_format == "stl":
+        return validate_stl(path)
+    return validate_fbx(path)
 
 
 def _usd_options_for_path(path: str | Path, options: UsdExportOptions | None) -> UsdExportOptions | None:
@@ -1656,6 +1678,7 @@ def _write_options(
     usd_options: UsdExportOptions | None,
     obj_options: ObjExportOptions | None,
     stl_options: StlExportOptions | None,
+    fbx_options: FbxExportOptions | None,
 ) -> dict[str, object]:
     if output_format == "usd":
         return {"format": "OpenUSD", "debug": debug, **(usd_options or UsdExportOptions()).to_dict()}
@@ -1663,7 +1686,9 @@ def _write_options(
         return {"format": "glTF", **(gltf_options or GltfExportOptions()).to_dict()}
     if output_format == "obj":
         return {"format": "OBJ", **(obj_options or ObjExportOptions()).to_dict()}
-    return {"format": "STL", **(stl_options or StlExportOptions()).to_dict()}
+    if output_format == "stl":
+        return {"format": "STL", **(stl_options or StlExportOptions()).to_dict()}
+    return {"format": "FBX", **(fbx_options or FbxExportOptions()).to_dict()}
 
 
 def _validate_options(output_format: ExportFormat) -> dict[str, object]:
