@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Literal
+from typing import Literal, cast
 
 UV0Mode = Literal["none", "box", "unwrap", "lightmap"]
 UV1Mode = Literal["none", "box", "unwrap", "lightmap", "copy_uv0"]
@@ -52,6 +52,7 @@ LODOutput = Literal["variants", "extras", "separate"]
 LODEngineProfile = Literal["generic", "unity", "unreal"]
 TextureCompression = Literal["ktx2", "basisu"]
 TextureFallbackFormat = Literal["auto", "png", "jpeg"]
+GltfExportPreset = Literal["desktop", "web", "mobile", "vr", "ar"]
 UsdPackageMode = Literal["default", "usdz"]
 MetadataExportMode = Literal["none", "summary", "full"]
 PmiExportMode = Literal["none", "summary", "metadata", "metadata_and_visuals", "full"]
@@ -947,6 +948,7 @@ class MetadataExportOptions:
 
 @dataclass(frozen=True)
 class GltfExportOptions:
+    preset: GltfExportPreset | None = None
     quantize: bool = False
     meshopt: bool = False
     draco: bool = False
@@ -955,6 +957,7 @@ class GltfExportOptions:
     png_compression: int = 6
     jpeg_quality: int = 85
     file_size_budget_mb: float | None = None
+    size_ladder: bool = False
     metadata: MetadataExportOptions = field(default_factory=MetadataExportOptions)
 
     def __post_init__(self) -> None:
@@ -964,6 +967,8 @@ class GltfExportOptions:
             else self.texture_fallback_format
         )
         object.__setattr__(self, "texture_fallback_format", fallback_format)
+        if self.preset not in {None, "desktop", "web", "mobile", "vr", "ar"}:
+            raise ValueError("preset must be one of: desktop, web, mobile, vr, ar")
         if self.texture_compression not in {None, "ktx2", "basisu"}:
             raise ValueError("texture_compression must be one of: ktx2, basisu")
         if self.texture_fallback_format not in {"auto", "png", "jpeg"}:
@@ -981,6 +986,100 @@ class GltfExportOptions:
 
     def to_dict(self) -> dict[str, object]:
         return {**asdict(self), "metadata": self.metadata.to_dict()}
+
+
+_GLTF_EXPORT_PRESET_OPTIONS: dict[GltfExportPreset, dict[str, object]] = {
+    "desktop": {
+        "quantize": True,
+        "meshopt": True,
+        "draco": False,
+        "texture_compression": "ktx2",
+        "texture_fallback_format": "auto",
+        "png_compression": 6,
+        "jpeg_quality": 88,
+    },
+    "web": {
+        "quantize": True,
+        "meshopt": True,
+        "draco": False,
+        "texture_compression": "ktx2",
+        "texture_fallback_format": "auto",
+        "png_compression": 9,
+        "jpeg_quality": 82,
+    },
+    "mobile": {
+        "quantize": True,
+        "meshopt": True,
+        "draco": False,
+        "texture_compression": "ktx2",
+        "texture_fallback_format": "auto",
+        "png_compression": 9,
+        "jpeg_quality": 78,
+    },
+    "vr": {
+        "quantize": True,
+        "meshopt": True,
+        "draco": False,
+        "texture_compression": "ktx2",
+        "texture_fallback_format": "auto",
+        "png_compression": 8,
+        "jpeg_quality": 84,
+    },
+    "ar": {
+        "quantize": True,
+        "meshopt": True,
+        "draco": False,
+        "texture_compression": "ktx2",
+        "texture_fallback_format": "auto",
+        "png_compression": 9,
+        "jpeg_quality": 76,
+    },
+}
+
+_GLTF_EXPORT_PRESET_TEXTURES: dict[GltfExportPreset, int] = {
+    "desktop": 4096,
+    "web": 2048,
+    "mobile": 1024,
+    "vr": 2048,
+    "ar": 1024,
+}
+
+
+def resolve_gltf_export_options(options: GltfExportOptions | None = None) -> GltfExportOptions:
+    opts = options or GltfExportOptions()
+    if opts.preset is None:
+        return opts
+    preset = _GLTF_EXPORT_PRESET_OPTIONS[opts.preset]
+    return GltfExportOptions(
+        preset=opts.preset,
+        quantize=bool(preset["quantize"]),
+        meshopt=bool(preset["meshopt"]),
+        draco=bool(preset["draco"]) or opts.draco,
+        texture_compression=opts.texture_compression or cast(TextureCompression, preset["texture_compression"]),
+        texture_fallback_format=(
+            opts.texture_fallback_format
+            if opts.texture_fallback_format != "auto"
+            else cast(TextureFallbackFormat, preset["texture_fallback_format"])
+        ),
+        png_compression=opts.png_compression if opts.png_compression != 6 else cast(int, preset["png_compression"]),
+        jpeg_quality=opts.jpeg_quality if opts.jpeg_quality != 85 else cast(int, preset["jpeg_quality"]),
+        file_size_budget_mb=opts.file_size_budget_mb,
+        size_ladder=opts.size_ladder,
+        metadata=opts.metadata,
+    )
+
+
+def gltf_export_preset_texture_options(options: GltfExportOptions | None) -> TextureProcessOptions | None:
+    opts = resolve_gltf_export_options(options)
+    if opts.preset is None:
+        return None
+    return TextureProcessOptions(
+        max_resolution=_GLTF_EXPORT_PRESET_TEXTURES[opts.preset],
+        dedupe=True,
+        fallback_format=opts.texture_fallback_format,
+        png_compression=opts.png_compression,
+        jpeg_quality=opts.jpeg_quality,
+    )
 
 
 @dataclass(frozen=True)

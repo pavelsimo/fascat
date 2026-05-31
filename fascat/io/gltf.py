@@ -20,7 +20,7 @@ from fascat.image import ImageResource
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.metadata import pmi_ids_by_part
-from fascat.options import GltfExportOptions, MetadataExportOptions
+from fascat.options import GltfExportOptions, MetadataExportOptions, resolve_gltf_export_options
 
 GLTF_SUFFIXES = {".gltf", ".glb"}
 BinaryPayload = bytes | bytearray | memoryview
@@ -169,7 +169,7 @@ def _write_gltf(
     options: GltfExportOptions | None,
     validate: bool,
 ) -> dict[str, int] | None:
-    opts = options or GltfExportOptions()
+    opts = resolve_gltf_export_options(options)
     output_path = Path(path)
     suffix = output_path.suffix.lower()
     if suffix not in GLTF_SUFFIXES:
@@ -194,7 +194,7 @@ def _write_gltf(
 
 
 def runtime_dependency_report(asset: Asset, options: GltfExportOptions | None = None) -> dict[str, object]:
-    opts = options or GltfExportOptions()
+    opts = resolve_gltf_export_options(options)
     extensions_used: list[str] = []
     extensions_required: list[str] = []
     expected_support: dict[str, str] = {

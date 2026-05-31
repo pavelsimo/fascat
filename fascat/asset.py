@@ -906,8 +906,10 @@ class Asset:
 
     def write_gltf(self, path: str | Path, *, options: GltfExportOptions | None = None) -> None:
         from fascat.io.gltf import runtime_dependency_report, write_gltf
+        from fascat.options import resolve_gltf_export_options
+        from fascat.size_ladder import measure_gltf_size_ladder
 
-        opts = options or GltfExportOptions()
+        opts = resolve_gltf_export_options(options)
         before = self._report_stats()
         step_options: dict[str, object] = {
             "format": "glTF",
@@ -937,6 +939,17 @@ class Asset:
             after=_stats_with_file_size(self._report_stats(), path, opts.file_size_budget_mb, self),
             duration=timer.duration,
         )
+        if opts.size_ladder:
+            size_ladder = measure_gltf_size_ladder(self, options=opts)
+            for warning in size_ladder.warnings:
+                self.report.add_warning(warning)
+            self.report.add_step(
+                "gltf_size_ladder",
+                options=size_ladder.to_step_options(),
+                before=before,
+                after=size_ladder.to_step_after(self._report_stats()),
+                warnings=list(size_ladder.warnings),
+            )
         self.report.finish(self._report_stats())
 
     def write_obj(self, path: str | Path, *, options: ObjExportOptions | None = None) -> None:

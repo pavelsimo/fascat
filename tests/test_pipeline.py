@@ -1292,6 +1292,7 @@ def test_convert_dispatches_gltf_writer_and_validator(monkeypatch, tmp_path: Pat
     runtime_dependencies = write_options.pop("runtime_dependencies")
     assert write_options == {
         "format": "glTF",
+        "preset": None,
         "quantize": False,
         "meshopt": False,
         "draco": False,
@@ -1300,12 +1301,66 @@ def test_convert_dispatches_gltf_writer_and_validator(monkeypatch, tmp_path: Pat
         "png_compression": 6,
         "jpeg_quality": 85,
         "file_size_budget_mb": None,
+        "size_ladder": False,
         "metadata": {"mode": "full", "pmi": "metadata"},
     }
     assert runtime_dependencies["extensions_used"] == []
     assert runtime_dependencies["extras"] == {"fascat": True, "metadata": "full", "pmi": "metadata"}
     assert steps["validate"].options == {"backend": "fascat-gltf"}
     assert steps["validate"].after["validated_triangles"] == 1
+
+
+def test_convert_applies_gltf_export_preset_to_write_and_texture_cleanup(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:  # type: ignore[no-untyped-def]
+    import fascat.pipeline as pipeline
+
+    asset = _triangle_asset()
+    written: dict[str, object] = {}
+
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: asset)
+
+    def fake_write_gltf(
+        written_asset: Asset,
+        path: str | Path,
+        *,
+        options: GltfExportOptions | None = None,
+    ) -> dict[str, int]:
+        written["path"] = str(path)
+        written["options"] = options
+        written["process_texture_steps"] = [
+            step.options for step in written_asset.report.steps if step.name == "process_textures"
+        ]
+        return {"meshes": 1, "points": 3, "triangles": 1}
+
+    monkeypatch.setattr(pipeline, "_write_gltf", fake_write_gltf)
+
+    converted = convert(
+        "input.step",
+        tmp_path / "output.glb",
+        profile=_test_profile(),
+        gltf_options=GltfExportOptions(preset="web"),
+    )
+
+    options = written["options"]
+    assert isinstance(options, GltfExportOptions)
+    assert options.preset == "web"
+    assert options.quantize is True
+    assert options.meshopt is True
+    assert options.texture_compression == "ktx2"
+    assert options.png_compression == 9
+    assert options.jpeg_quality == 82
+    assert written["process_texture_steps"] == [
+        {
+            "max_resolution": 2048,
+            "dedupe": True,
+            "fallback_format": "auto",
+            "png_compression": 9,
+            "jpeg_quality": 82,
+        }
+    ]
+    assert "workflow_summary" in {step.name for step in converted.report.steps}
 
 
 def test_convert_reuses_gltf_writer_validation_stats(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]

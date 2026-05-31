@@ -442,6 +442,7 @@ def test_asset_write_gltf_records_report_step(monkeypatch: pytest.MonkeyPatch, t
     runtime_dependencies = options.pop("runtime_dependencies")
     assert options == {
         "format": "glTF",
+        "preset": None,
         "quantize": False,
         "meshopt": False,
         "draco": False,
@@ -450,6 +451,7 @@ def test_asset_write_gltf_records_report_step(monkeypatch: pytest.MonkeyPatch, t
         "png_compression": 6,
         "jpeg_quality": 85,
         "file_size_budget_mb": None,
+        "size_ladder": False,
         "metadata": {"mode": "full", "pmi": "metadata"},
     }
     assert runtime_dependencies["extensions_used"] == []

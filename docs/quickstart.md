@@ -135,8 +135,10 @@ Use `.usda` or `.usd` with `--debug` when you want inspectable text output. Bina
 
 ```bash
 fascat convert input.step output.glb \
+  --export-preset web \
   --quantize \
   --meshopt \
+  --size-ladder \
   --file-size-budget-mb 50
 
 fascat convert input.step output.obj --obj-materials --write-mtl --force

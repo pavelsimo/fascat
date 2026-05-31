@@ -491,6 +491,7 @@ def test_size_adaptive_tessellation_requires_bands() -> None:
         (lambda: fc.LODOptions((0.5,), tiny_part_screen_size=-1.0), "tiny_part_screen_size"),
         (lambda: fc.GltfExportOptions(texture_compression="zip"), "texture_compression"),
         (lambda: fc.GltfExportOptions(texture_fallback_format="webp"), "texture_fallback_format"),
+        (lambda: fc.GltfExportOptions(preset="console"), "preset"),
         (lambda: fc.GltfExportOptions(png_compression=-1), "png_compression"),
         (lambda: fc.GltfExportOptions(png_compression=10), "png_compression"),
         (lambda: fc.GltfExportOptions(jpeg_quality=-1), "jpeg_quality"),

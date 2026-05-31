@@ -50,6 +50,8 @@ from fascat.options import (
     UsdExportOptions,
     WorkflowRecipe,
     WorkflowRecipeChoice,
+    gltf_export_preset_texture_options,
+    resolve_gltf_export_options,
 )
 from fascat.pipeline import (
     analyze,
@@ -81,6 +83,7 @@ from fascat.pipeline import (
 )
 from fascat.pipeline_file import PipelineSpec, PipelineStep
 from fascat.runtime import RuntimeBrowserOptions, RuntimeBrowserReport, measure_browser_runtime
+from fascat.size_ladder import GltfSizeLadderReport, GltfSizeLadderVariant, measure_gltf_size_ladder
 from fascat.visual import (
     LodSwitchPreviewReport,
     VisualComparisonReport,
@@ -111,6 +114,8 @@ __all__ = [
     "Filter",
     "FilterExpressionError",
     "GltfExportOptions",
+    "GltfSizeLadderReport",
+    "GltfSizeLadderVariant",
     "IgesReadOptions",
     "ImageResource",
     "LODGeneratorOptions",
@@ -165,6 +170,7 @@ __all__ = [
     "lods",
     "merge",
     "merge_vertices",
+    "measure_gltf_size_ladder",
     "measure_browser_runtime",
     "optimize",
     "optimize_scene",
@@ -178,6 +184,7 @@ __all__ = [
     "remove_holes",
     "remove_occluded",
     "replace",
+    "resolve_gltf_export_options",
     "run_lod_generators",
     "stage",
     "tessellate",
@@ -195,4 +202,5 @@ __all__ = [
     "write_output_lod_switch_previews",
     "write_output_preview",
     "write_preview",
+    "gltf_export_preset_texture_options",
 ]

@@ -123,6 +123,14 @@ class Profile(str, Enum):
     MIXED_REALITY = "mixed-reality"
 
 
+class ExportPreset(str, Enum):
+    DESKTOP = "desktop"
+    WEB = "web"
+    MOBILE = "mobile"
+    VR = "vr"
+    AR = "ar"
+
+
 class AxisMode(str, Enum):
     Y = "Y"
     Z = "Z"
@@ -1165,6 +1173,10 @@ def cmd_convert(
         bool,
         typer.Option("--preserve-silhouette", help="Protect faces on bounding-box silhouette extremes."),
     ] = False,
+    export_preset: Annotated[
+        ExportPreset | None,
+        typer.Option("--export-preset", help="glTF export preset: desktop, web, mobile, vr, or ar."),
+    ] = None,
     quantize: Annotated[
         bool,
         typer.Option("--quantize", help="Write glTF KHR_mesh_quantization accessors."),
@@ -1204,6 +1216,10 @@ def cmd_convert(
         float | None,
         typer.Option("--file-size-budget-mb", help="Warn in reports when output exceeds this size."),
     ] = None,
+    size_ladder: Annotated[
+        bool,
+        typer.Option("--size-ladder/--no-size-ladder", help="Measure baseline and compressed temporary GLB sizes."),
+    ] = False,
     obj_materials: Annotated[
         bool,
         typer.Option("--obj-materials/--no-obj-materials", help="Write OBJ material assignments."),
@@ -1392,6 +1408,7 @@ def cmd_convert(
         "preserve_small_parts": preserve_small_parts,
         "small_part_triangle_threshold": small_part_triangle_threshold,
         "preserve_silhouette": preserve_silhouette,
+        "export_preset": None if export_preset is None else export_preset.value,
         "quantize": quantize,
         "meshopt": meshopt,
         "draco": draco,
@@ -1401,6 +1418,7 @@ def cmd_convert(
         "jpeg_quality": jpeg_quality,
         "package": package.value,
         "file_size_budget_mb": file_size_budget_mb,
+        "size_ladder": size_ladder,
         "obj_materials": obj_materials,
         "write_mtl": write_mtl,
         "preserve_groups": preserve_groups,
@@ -1853,6 +1871,7 @@ def cmd_convert(
         )
         usd_package = "usdz" if (package == UsdPackage.USDZ or output_path.suffix.lower() == ".usdz") else "default"
         gltf_options = GltfExportOptions(
+            preset=None if export_preset is None else cast(Any, export_preset.value),
             quantize=quantize,
             meshopt=meshopt,
             draco=draco,
@@ -1861,6 +1880,7 @@ def cmd_convert(
             png_compression=png_compression,
             jpeg_quality=jpeg_quality,
             file_size_budget_mb=file_size_budget_mb,
+            size_ladder=size_ladder,
             metadata=export_metadata,
         )
         usd_options = UsdExportOptions(

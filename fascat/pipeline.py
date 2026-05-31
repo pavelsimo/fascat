@@ -56,9 +56,12 @@ from fascat.options import (
     UsdExportOptions,
     UV0Mode,
     UV1Mode,
+    gltf_export_preset_texture_options,
+    resolve_gltf_export_options,
 )
 from fascat.pipeline_file import PipelineSpec
 from fascat.report import timed_step
+from fascat.size_ladder import measure_gltf_size_ladder
 
 if TYPE_CHECKING:
     from fascat.analysis import AnalysisReport
@@ -118,6 +121,10 @@ def convert(
     output_suffix = Path(output_path).suffix.lower()
     if debug and (output_format != "usd" or (str(output_path) != "-" and output_suffix not in {".usd", ".usda"})):
         raise ValueError("--debug is only supported for .usd or .usda exports")
+    if output_format == "gltf":
+        gltf_options = resolve_gltf_export_options(gltf_options)
+    preset_texture_options = gltf_export_preset_texture_options(gltf_options) if output_format == "gltf" else None
+    manifest_process_textures = process_textures or preset_texture_options
     selected = profiles.by_name(profile) if isinstance(profile, str) else profile
     effective_import_options = import_options
     if effective_import_options is None and pipeline is not None:
@@ -152,6 +159,10 @@ def convert(
         if pipeline.export_metadata is not None:
             gltf_options = _with_gltf_metadata(gltf_options, pipeline.export_metadata)
             usd_options = _with_usd_metadata(usd_options, pipeline.export_metadata)
+        if preset_texture_options is not None:
+            asset = asset.process_textures(preset_texture_options)
+            if progress is not None:
+                progress("process_textures", asset.stats())
     else:
         tessellation_options = planned_tessellation
         if heal_brep is not None:
@@ -198,6 +209,10 @@ def convert(
                 progress("bake_materials", asset.stats())
         if process_textures is not None:
             asset = asset.process_textures(process_textures)
+            if progress is not None:
+                progress("process_textures", asset.stats())
+        elif preset_texture_options is not None:
+            asset = asset.process_textures(preset_texture_options)
             if progress is not None:
                 progress("process_textures", asset.stats())
         if remove_holes is not None:
@@ -274,6 +289,17 @@ def convert(
         after=_stats_with_file_size(_report_stats(asset), output_path, file_size_budget, asset),
         duration=write_timer.duration,
     )
+    if output_format == "gltf" and gltf_options is not None and gltf_options.size_ladder:
+        size_ladder = measure_gltf_size_ladder(asset, options=gltf_options)
+        for warning in size_ladder.warnings:
+            asset.report.add_warning(warning)
+        asset.report.add_step(
+            "gltf_size_ladder",
+            options=size_ladder.to_step_options(),
+            before=_report_stats(asset),
+            after=size_ladder.to_step_after(_report_stats(asset)),
+            warnings=list(size_ladder.warnings),
+        )
     if progress is not None:
         progress("write", asset.stats())
     if validate_output:
@@ -325,7 +351,7 @@ def convert(
         replace=replace,
         scene=scene,
         bake_materials=bake_materials,
-        process_textures=process_textures,
+        process_textures=manifest_process_textures,
         remove_holes=remove_holes,
         remove_occluded=remove_occluded,
         decimate=decimate,
@@ -1636,6 +1662,7 @@ def _with_gltf_metadata(
     if options is None:
         return GltfExportOptions(metadata=metadata)
     return GltfExportOptions(
+        preset=options.preset,
         quantize=options.quantize,
         meshopt=options.meshopt,
         draco=options.draco,
@@ -1644,6 +1671,7 @@ def _with_gltf_metadata(
         png_compression=options.png_compression,
         jpeg_quality=options.jpeg_quality,
         file_size_budget_mb=options.file_size_budget_mb,
+        size_ladder=options.size_ladder,
         metadata=metadata,
     )
 

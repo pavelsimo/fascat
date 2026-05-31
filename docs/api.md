@@ -923,6 +923,7 @@ glTF and USD exports accept runtime delivery options, and OBJ/STL/FBX are availa
 asset.write_gltf(
     "motor.glb",
     options=fc.GltfExportOptions(
+        preset="web",
         quantize=True,
         meshopt=True,
         draco=False,
@@ -931,6 +932,7 @@ asset.write_gltf(
         png_compression=6,
         jpeg_quality=85,
         file_size_budget_mb=50,
+        size_ladder=True,
         metadata=fc.MetadataExportOptions(mode="summary", pmi="metadata"),
     ),
 )
@@ -945,7 +947,7 @@ asset.write_stl("motor.stl", options=fc.StlExportOptions(binary=True, merge=True
 asset.write_fbx("motor.fbx", options=fc.FbxExportOptions(materials=True, normals=True, uvs=True))
 ```
 
-`quantize=True` writes `KHR_mesh_quantization` accessors and composes the dequantization transform into referencing nodes. `meshopt=True` writes `EXT_meshopt_compression` bufferView payloads while keeping fallback buffer data for validators and loaders that ignore the extension. `draco=True` runs the glTF Transform Draco encoder and writes required `KHR_draco_mesh_compression` payloads. `texture_compression="ktx2"` or `"basisu"` runs the KTX2/Basis encoder for referenced texture images and writes required `KHR_texture_basisu` payloads. USDZ output is built by writing a temporary USD stage and packaging it as `.usdz`. When KTX2/Basis compression is not requested, `texture_fallback_format` records the PNG/JPEG fallback policy: `auto` chooses PNG for alpha-bearing texture sets and JPEG for color-only texture sets, while explicit `png` or `jpeg` records a forced fallback. `png_compression` and `jpeg_quality` are reported as fallback policy settings. glTF write report steps include `runtime_dependencies`, listing emitted extensions, required extensions, `extras.fascat` metadata, not-written runtime extensions, expected runtime support, a `runtime_compatibility` matrix for Unity glTFast, web, mobile, and XR targets, and a `runtime_decision_matrix` that explains when quantization, meshopt, Draco, KTX2/Basis, and PNG/JPEG fallbacks are appropriate. The compatibility matrix records whether each extension is required, optional, not used, not written, or metadata-only, plus target-specific support and fallback notes. Write report steps also include output file size, estimated geometry/texture/metadata payload bytes, referenced/unused/written material counts, source/referenced/unused/duplicate-reference/written image counts, and file-size budget warnings when a budget is provided. glTF, USD, and OBJ exports write only referenced materials, leaving the in-memory asset unchanged. glTF also omits images referenced only by unused materials and reuses repeated embedded texture URIs as one image/texture resource.
+`preset="web"`, `"mobile"`, `"desktop"`, `"vr"`, or `"ar"` resolves to concrete glTF compression defaults and, during `fc.convert()`, runs texture resize/dedupe cleanup with the preset's texture cap before writing. `quantize=True` writes `KHR_mesh_quantization` accessors and composes the dequantization transform into referencing nodes. `meshopt=True` writes `EXT_meshopt_compression` bufferView payloads while keeping fallback buffer data for validators and loaders that ignore the extension. `draco=True` runs the glTF Transform Draco encoder and writes required `KHR_draco_mesh_compression` payloads. `texture_compression="ktx2"` or `"basisu"` runs the KTX2/Basis encoder for referenced texture images and writes required `KHR_texture_basisu` payloads. USDZ output is built by writing a temporary USD stage and packaging it as `.usdz`. When KTX2/Basis compression is not requested, `texture_fallback_format` records the PNG/JPEG fallback policy: `auto` chooses PNG for alpha-bearing texture sets and JPEG for color-only sets, while explicit `png` or `jpeg` records a forced fallback. `png_compression` and `jpeg_quality` are reported as fallback policy settings. glTF write report steps include `runtime_dependencies`, listing emitted extensions, required extensions, `extras.fascat` metadata, not-written runtime extensions, expected runtime support, a `runtime_compatibility` matrix for Unity glTFast, web, mobile, and XR targets, and a `runtime_decision_matrix` that explains when quantization, meshopt, Draco, KTX2/Basis, and PNG/JPEG fallbacks are appropriate. When `size_ladder=True`, direct writes and `fc.convert()` add a `gltf_size_ladder` report step that writes temporary GLB variants for baseline, quantized, meshopt, Draco, texture-compressed, and requested settings where available, then records measured bytes, baseline/requested/smallest sizes, and unavailable encoder warnings. Write report steps also include output file size, estimated geometry/texture/metadata payload bytes, referenced/unused/written material counts, source/referenced/unused/duplicate-reference/written image counts, and file-size budget warnings when a budget is provided. glTF, USD, and OBJ exports write only referenced materials, leaving the in-memory asset unchanged. glTF also omits images referenced only by unused materials and reuses repeated embedded texture URIs as one image/texture resource.
 
 OBJ export writes vertex positions, normals, `f v//vn` face references, material assignments, and smoothing directives. Staged smooth normals export with smoothing enabled; flat, hard-edge, or generated face normals export with smoothing disabled.
 
@@ -955,6 +957,7 @@ Export option parameters:
 
 | Option | Parameter | Meaning |
 |--------|-----------|---------|
+| `GltfExportOptions` | `preset` | Named glTF export preset: `desktop`, `web`, `mobile`, `vr`, or `ar`. Presets request quantization, meshopt, KTX2/Basis texture compression, fallback quality, and `fc.convert()` texture resize/dedupe cleanup. |
 | `GltfExportOptions` | `quantize` | Write `KHR_mesh_quantization` accessors and dequantization transforms. |
 | `GltfExportOptions` | `meshopt` | Write `EXT_meshopt_compression` payloads with fallback uncompressed data. |
 | `GltfExportOptions` | `draco` | Run Draco geometry compression and require `KHR_draco_mesh_compression` when mesh payloads are present. |
@@ -963,6 +966,7 @@ Export option parameters:
 | `GltfExportOptions` | `png_compression` | PNG fallback compression level, 0 through 9. |
 | `GltfExportOptions` | `jpeg_quality` | JPEG fallback quality, 0 through 100. Reports warn when explicit JPEG fallback would discard alpha-bearing texture data. |
 | `GltfExportOptions` | `file_size_budget_mb` | Add report warnings when the output exceeds this size. |
+| `GltfExportOptions` | `size_ladder` | Add a measured `gltf_size_ladder` report comparing temporary baseline, optimized, compressed, and requested GLB variants. |
 | `GltfExportOptions` | `metadata` | `MetadataExportOptions` controlling metadata and PMI in `extras.fascat`. |
 | `UsdExportOptions` | `package` | `default` writes normal USD. `usdz` writes a packaged `.usdz` file. |
 | `UsdExportOptions` | `file_size_budget_mb` | Add report warnings when the output exceeds this size. |

@@ -20,6 +20,7 @@ from fascat.io.stl import validate_stl
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.options import FbxExportOptions, GltfExportOptions, ObjExportOptions, StlExportOptions
+from fascat.size_ladder import measure_gltf_size_ladder
 
 runner = CliRunner()
 _PNG_1X1 = base64.b64decode(
@@ -40,6 +41,61 @@ def _asset() -> Asset:
         meters_per_unit=1.0,
         up_axis="Y",
     )
+
+
+def test_gltf_size_ladder_measures_baseline_and_requested_variants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fascat.io.gltf as gltf
+
+    asset = _asset()
+
+    def fake_write_gltf(_asset: Asset, path: str | Path, *, options: GltfExportOptions | None = None) -> None:
+        assert options is not None
+        size = 100
+        if options.quantize:
+            size -= 10
+        if options.meshopt:
+            size -= 20
+        if options.draco:
+            size -= 35
+        Path(path).write_bytes(bytes(size))
+
+    monkeypatch.setattr(gltf, "write_gltf", fake_write_gltf)
+
+    report = measure_gltf_size_ladder(asset, options=GltfExportOptions(quantize=True, meshopt=True))
+    after = report.to_step_after(asset.stats())
+    options = report.to_step_options()
+
+    assert [variant.name for variant in report.variants] == ["baseline", "quantized", "meshopt", "draco", "requested"]
+    assert after["size_ladder_baseline_bytes"] == 100
+    assert after["size_ladder_requested_bytes"] == 70
+    assert after["size_ladder_smallest_bytes"] == 65
+    assert after["size_ladder_best_savings_bytes"] == 35
+    assert options["artifact"] == "compressed_glb"
+    assert options["variants"][-1]["name"] == "requested"
+    assert options["variants"][-1]["savings_bytes"] == 30
+
+
+def test_asset_write_gltf_records_size_ladder_step(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import fascat.io.gltf as gltf
+
+    asset = _asset()
+
+    def fake_write_gltf(_asset: Asset, path: str | Path, *, options: GltfExportOptions | None = None) -> None:
+        Path(path).write_bytes(b"x" * (70 if options and options.quantize else 100))
+
+    monkeypatch.setattr(gltf, "write_gltf", fake_write_gltf)
+
+    asset.write_gltf(tmp_path / "triangle.glb", options=GltfExportOptions(quantize=True, size_ladder=True))
+
+    assert [step.name for step in asset.report.steps] == ["write", "gltf_size_ladder"]
+    ladder_step = asset.report.steps[-1]
+    assert ladder_step.after["size_ladder_baseline_bytes"] == 100
+    assert ladder_step.after["size_ladder_requested_bytes"] == 70
 
 
 def test_gltf_export_options_write_meshopt_extension_and_file_budget(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -495,6 +551,9 @@ def test_cli_convert_accepts_runtime_export_options_during_dry_run() -> None:
             "9",
             "--jpeg-quality",
             "70",
+            "--export-preset",
+            "web",
+            "--size-ladder",
             "--obj-materials",
             "--write-mtl",
             "--preserve-groups",
@@ -507,6 +566,8 @@ def test_cli_convert_accepts_runtime_export_options_during_dry_run() -> None:
     assert payload["quantize"] is True
     assert payload["meshopt"] is True
     assert payload["file_size_budget_mb"] == 50
+    assert payload["export_preset"] == "web"
+    assert payload["size_ladder"] is True
     assert payload["texture_fallback_format"] == "png"
     assert payload["png_compression"] == 9
     assert payload["jpeg_quality"] == 70

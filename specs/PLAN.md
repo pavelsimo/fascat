@@ -50,7 +50,7 @@ writers, trimesh + numpy (mesh ops).
 | **Materials** | per-face colors + PBR factors preserved, first-class image resources, raster material atlas baking, source image resize/dedupe/PNG-JPEG fallback processing | source texture sidecar extraction, CAD material-name PBR rule mapping, sampled AO bake | high-poly transfer, rich vendor material-library import |
 | **Optimize** | decimation, quality target-error simplification, instance reconstruction, buffer optimization | sampled occlusion | weighted decimation, retopology, GPU occlusion |
 | **LOD** | real decimated mesh levels, occurrence-aware LOD metadata, far-LOD one-material bake policy, engine switch-distance validation, scene-level far proxy mesh | per-part and scene proxy bake policies | format-specific engine LOD export profiles beyond metadata |
-| **Export** | USD/USDZ, glTF/GLB (quantize + meshopt + Draco + KTX2/Basis), OBJ, STL, FBX, real baked texture images | — | size-ladder reports, named presets |
+| **Export** | USD/USDZ, glTF/GLB (quantize + meshopt + Draco + KTX2/Basis), GLB size-ladder reports, named export presets, OBJ, STL, FBX, real baked texture images | — | — |
 | **Validation** | output validators, geometry analysis, profile budget estimates, optional headless browser/WebGL glTF runtime measurement, deterministic software preview PNGs and LOD contact sheets | browser harness uses a bounded triangle proxy workload; preview renderer is orthographic software shading | Unity/Unreal measured harnesses, full material/lighting renderer validation |
 
 ### A. Works end-to-end — real geometry
@@ -152,8 +152,8 @@ This is the master TODO list. Keep items in one of three states:
 - [x] FBX ASCII output. Done 2026-05-31.
 - [x] Real Draco encoder path. Done 2026-05-31.
 - [x] Real KTX2/Basis texture output. Done 2026-05-31.
-- [ ] Baseline-vs-optimized + compressed-GLB size-ladder reports.
-- [ ] Named web / mobile / desktop / VR / AR export presets that apply compression + resize + cleanup.
+- [x] Baseline-vs-optimized + compressed-GLB size-ladder reports. Done 2026-05-31.
+- [x] Named web / mobile / desktop / VR / AR export presets that apply compression + resize + cleanup. Done 2026-05-31.
 
 **Validation (cross-cutting)**
 - [x] Measured pipeline/write/validate timings in profile budget reports. Done 2026-05-31.

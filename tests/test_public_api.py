@@ -235,6 +235,7 @@ def test_functional_write_gltf_records_report_step(monkeypatch, tmp_path: Path) 
     runtime_dependencies = options.pop("runtime_dependencies")
     assert options == {
         "format": "glTF",
+        "preset": None,
         "quantize": False,
         "meshopt": False,
         "draco": False,
@@ -243,6 +244,7 @@ def test_functional_write_gltf_records_report_step(monkeypatch, tmp_path: Path) 
         "png_compression": 6,
         "jpeg_quality": 85,
         "file_size_budget_mb": None,
+        "size_ladder": False,
         "metadata": {"mode": "full", "pmi": "metadata"},
     }
     assert runtime_dependencies["extensions_used"] == []
