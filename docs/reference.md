@@ -100,6 +100,7 @@ the native source shape retained for tessellation and healing.
 | `--lod-drop-tiny-parts` | `false` | Omit tiny parts from lower LOD meshes |
 | `--lod-tiny-part-screen-size` | `2.0` | Screen-size threshold for tiny-part LOD omission |
 | `--validate-lods` | `false` | Validate generated LOD monotonicity |
+| `--jobs` | `1` | Worker count for independent per-part repair, staging, optimization, decimation, and LOD mesh work |
 | `--normals` | `smooth` | Normal generation mode: `none`, `smooth`, `hard-edges`, or `flat` |
 | `--normal-weighting` | `angle` | Normal averaging weights for smooth or hard-edge normals: `angle` or `area` |
 | `--preserve-face-boundaries` | `false` | Treat CAD face-group boundaries as hard normal edges |

@@ -101,6 +101,11 @@ asset.write_gltf("motor.glb")
 
 Pipeline operations return new `Asset` instances instead of mutating the previous asset. Write calls attach a final write step to the asset report.
 
+Mesh-heavy per-part operations accept `jobs` to fan out independent parts while applying results
+back in deterministic part order. `jobs=1` is the default; set a higher value on
+`RepairOptions`, `MergeVerticesOptions`, `StageOptions`, `OptimizeOptions`, `DecimateOptions`,
+`LODOptions`, or `LODGeneratorOptions` for larger multi-part assets.
+
 Core pipeline calls:
 
 | API | Parameters | Purpose |
@@ -448,10 +453,12 @@ Repair parameters:
 | `viewer_position` | Three-number viewer position required when either orientation policy is `viewer_standpoint`. Recorded in metadata and reports. |
 | `fill_small_holes` | Fill small mesh boundary loops as a fallback mesh repair step. |
 | `area_epsilon` | Area threshold used to classify degenerate triangles. |
+| `jobs` | Worker count for independent mesh-bearing parts. `1` keeps serial behavior. |
 
 Repair always records orientation policy metadata: `repair_face_orientation_strategy`, `repair_face_orientation_status`, `repair_normal_orientation_strategy`, `repair_normal_orientation_status`, and optional `repair_orientation_viewer_position`, so viewer-standpoint or source-trusted choices are visible even when the backend preserves source orientation. When `quality_report=True`, repair also records before/after counts for `repair_duplicate_polygons`, `repair_degenerate_triangles`, `repair_boundary_edges`, `repair_non_manifold_edges`, `repair_t_junctions`, and `repair_boundary_gaps`. Duplicate polygons are triangles that reference the same three vertices, regardless of winding. T-junction counts identify vertices that lie on another triangle edge without splitting that edge; non-zero counts after repair emit a warning because T-junction sewing is still not implemented. Boundary-gap counts identify nearby, unconnected boundary vertices within the repair tolerance; non-zero counts after repair warn because boundary stitching is also not implemented. With `quality_report=True`, repair also records orientability counts before and after winding normalization. The `repair` report step records `tolerance_policy`, including effective source/local units, declared target units, meter conversions, vertex merge tolerance in meters, degenerate area epsilon in square meters, and the status of vertex merge, degenerate-polygon cleanup, face orientation, normal orientation, quality diagnostics, T-junction sewing, boundary-gap stitching, and non-manifold edge cracking.
 
 Use `MergeVerticesOptions` when you want Unity-style vertex merge as a standalone pipeline step instead of the broad repair pass. `tolerance=0.0` merges exact duplicate positions; larger values merge Euclidean tolerance-close positions, including pairs that fall across spatial bucket boundaries. By default the operation keeps normals, tangents, UVs, and material-boundary signatures in the merge key so hard edges and UV seams are not collapsed accidentally. Set `preserve_normals=False`, `preserve_tangents=False`, or `preserve_uvs=False` to ignore and drop those attributes during merging. Default reports include `merge_vertices_removed`, `merge_vertices_degenerate_triangles_removed`, tolerance scale ratios against the part bounding-box diagonal and shortest mesh edge, warnings for high-risk tolerances, and a unit-aware `tolerance_policy`. Set `quality_report=True` (or `--merge-vertex-quality-report`) to add heavier same-position candidate counts, exact-duplicate, boundary, non-manifold, hard-edge, T-junction, and boundary-gap candidate counts, skipped merge reasons for normal, tangent, UV, and material-boundary protection, plus near-duplicate advisories for too-small tolerances.
+Use `jobs` on `MergeVerticesOptions` to process independent mesh-bearing parts concurrently.
 
 Use `DeleteDegeneratePolygonsOptions` when you want Unity-style degenerate
 polygon cleanup as a standalone, reproducible step. `area_epsilon` controls the
@@ -511,6 +518,7 @@ Optimization parameters:
 | `preserve_small_parts` | Leave small parts unsimplified instead of spending budget on them. |
 | `small_part_triangle_threshold` | Parts at or below this triangle count are treated as small when preservation is enabled. |
 | `preserve_silhouette` | Protect bounding-box silhouette extremes to reduce visible shape loss. |
+| `jobs` | Worker count for independent mesh-bearing parts. `1` keeps serial behavior. |
 
 ## Hard-Edge Normals And Tangents
 
@@ -615,6 +623,7 @@ Staging, UV, and material parameters:
 | `StageOptions` | `unwrap` | `UnwrapOptions` used when a UV channel uses `unwrap`. |
 | `StageOptions` | `atlas` | `AtlasOptions` used to record atlas layout and baking intent. |
 | `StageOptions` | `aabb_projection` | `AabbProjectionOptions` used when a UV channel uses `box` projection. |
+| `StageOptions` | `jobs` | Worker count for independent mesh-bearing parts. `1` keeps serial behavior. |
 | `AabbProjectionOptions` | `scope` | `local` projects each part against its own AABB; `shared` projects selected parts against one shared AABB. |
 | `AabbProjectionOptions` | `uv3d_size` | Optional real-world size per UV tile. When unset, coordinates are normalized to the chosen AABB axes. |
 | `AabbProjectionOptions` | `override_existing` | Replace existing destination-channel UVs during box projection. Set `False` to preserve existing UVs and record that choice. |
@@ -734,6 +743,7 @@ Optimization action parameters:
 | `DecimateOptions` | `uv_importance` | Texture-coordinate handling: `preserve_islands` keeps UVs, `preserve_seams` protects seam topology then drops UVs, and `ignore` strips UVs/tangents before decimation. |
 | `DecimateOptions` | `cleanup_attributes` | Pre-decimation cleanup for attribute streams that are not useful to simplification. `unused_uvs` removes empty, constant, or zero-area UV channels. `tangents` removes tangents before simplification. Reports record removed channels, removed tangent parts, preserved UV channels, and UV seam/island constraint status. |
 | `DecimateOptions` | `iterative_threshold` | Source-triangle threshold above which decimation inserts intermediate simplification passes before the final target and reports actual pass counts. |
+| `DecimateOptions` | `jobs` | Worker count for independent mesh-bearing parts. `1` keeps serial behavior. |
 | `RemoveHolesOptions` | `through`, `blind`, `surface` | Hole-type filters for boundary-loop classification. `through` matches paired aligned openings, `blind` matches open pocket mouths, and `surface` matches remaining surface openings. |
 | `RemoveHolesOptions` | `max_diameter` | Only fill detected open boundary loops at or below the measured planar-span diameter. |
 | `RemoveHolesOptions` | `prefer_brep` | Request BREP-level feature removal. Current implementation warns and uses mesh boundary classification and filling. |
@@ -750,6 +760,7 @@ Optimization action parameters:
 | `LODGeneratorOptions` | `validate` | Validate monotonic triangle, material, and draw-call counts after generation. |
 | `LODGeneratorOptions` | `output` | LOD representation: `variants`, `extras`, or `separate`. |
 | `LODGeneratorOptions` | `allow_non_monotonic` | Permit non-monotonic LODs without failing validation. |
+| `LODOptions` / `LODGeneratorOptions` | `jobs` | Worker count for independent mesh-bearing parts. `1` keeps serial behavior. |
 | `LODLevel` | `screen_coverage` | Screen fraction at which this LOD becomes appropriate. |
 | `LODLevel` | `target_ratio` | Fraction of source triangles to keep for this LOD. |
 | `LODOptions` / `LODGeneratorOptions` | report metadata | LOD steps record `lod_source_*`, `lod_added_*`, and `lod_chain_*` counts for vertices, triangles, and estimated mesh payload bytes, plus per-level vertex/triangle counts, simplification source, omitted tiny-part LOD counts, instance-reuse counts, material-merge counts, texture-bake counts, culling-granularity change counts, and LOD chain advisory counts/codes. |

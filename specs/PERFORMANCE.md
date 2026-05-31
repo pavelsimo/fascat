@@ -3,8 +3,8 @@
 A living checklist of performance issues in the fascat conversion pipeline
 (STEP → tessellate → repair → stage → optimize/decimate → LOD → export).
 
-Status: **partially fixed; remaining items still open.** We will work these one at a time. Each item has a
-category, severity, code location, why it is slow, and a fix direction (not a full solution).
+Status: **all tracked items fixed as of 2026-05-31.** Each item keeps its category, severity,
+original code location, why it was slow, and the resolution that closed it.
 
 > **Measure before fixing.** Use `make benchmark` or `scripts/benchmark.py` on a representative
 > CAD file first so effort lands on the real bottleneck rather than a guessed one.
@@ -29,7 +29,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 | ~~P12~~ | ~~Whole-mesh fingerprint/digest recomputed after every op~~ ✅ **done** | Memory        | Medium   |
 | ~~P13~~ | ~~Export binary buffer copied several times~~ ✅ **done** | Memory        | Medium   |
 | ~~P14~~ | ~~Default `validate_output` re-reads & re-parses the output~~ ✅ **done** | I/O           | Medium   |
-| P16 | Pipeline processes independent parts serially                   | Concurrency   | Medium   |
+| ~~P16~~ | ~~Pipeline processes independent parts serially~~ ✅ **done** | Concurrency   | Medium   |
 | ~~P17~~ | ~~No memoization of derived mesh topology across stages~~ ✅ **done** | System design | Medium   |
 | ~~P19~~ | ~~Metrics are heuristic estimates; no benchmark/profiling harness~~ ✅ **done** | Measurement   | High*    |
 
@@ -296,7 +296,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 
 ## Concurrency
 
-### P16 — The pipeline processes independent parts serially
+### P16 — The pipeline processes independent parts serially — ✅ done (2026-05-31)
 - **Where:** Per-part loops in `fascat/ops/optimize.py:39`, `fascat/ops/lod.py:36`,
   `fascat/ops/stage.py:51`, `fascat/ops/actions.py` (decimate), and `Asset.repair/merge_vertices`
   in `fascat/asset.py`. Only OCCT meshing sets `InParallel=True` (`fascat/ops/tessellate.py:192`).
@@ -304,6 +304,13 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   but run on one core; the per-part Python loops (P4) hold the GIL, so they don't overlap.
 - **Fix:** Parallelize per-part work — a process pool for CPU-bound stages (tessellate/decimate/
   LOD), thread pool where the work is NumPy/native (GIL-releasing) — with deterministic ordering.
+- **Resolution:** Repair, standalone vertex merge, staging, optimize, explicit decimate, ratio LOD,
+  and preset LOD generation now accept a `jobs` worker count. The implementation uses a shared
+  deterministic part-worker helper that runs independent mesh work concurrently and applies results
+  back in original part order, keeping warning/report ordering stable. Per-part result aggregation
+  is isolated from worker threads, and the shared mesh topology cache is protected by a lock for
+  concurrent reads/writes. The default remains `jobs=1` for existing CLI/API behavior; set
+  `jobs > 1` to fan out independent part work.
 
 ## System design
 

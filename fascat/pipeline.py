@@ -1726,6 +1726,7 @@ def repair(
     normal_orientation: NormalOrientationStrategy = "from_faces",
     viewer_position: tuple[float, float, float] | None = None,
     quality_report: bool = False,
+    jobs: int = 1,
     where: Filter | None = None,
 ) -> Asset:
     from fascat.options import RepairOptions
@@ -1737,6 +1738,7 @@ def repair(
             normal_orientation=normal_orientation,
             viewer_position=viewer_position,
             quality_report=quality_report,
+            jobs=jobs,
         ),
         where=where,
     )
@@ -1747,11 +1749,15 @@ def merge_vertices(
     *,
     options: MergeVerticesOptions | None = None,
     tolerance: float | None = None,
+    jobs: int = 1,
     where: Filter | None = None,
 ) -> Asset:
     if options is not None:
         return asset.merge_vertices(options, where=where)
-    return asset.merge_vertices(MergeVerticesOptions(tolerance=0.0 if tolerance is None else tolerance), where=where)
+    return asset.merge_vertices(
+        MergeVerticesOptions(tolerance=0.0 if tolerance is None else tolerance, jobs=jobs),
+        where=where,
+    )
 
 
 def delete_degenerate_polygons(
@@ -1804,6 +1810,7 @@ def stage(
     uv0: UV0Mode = "box",
     uv1: UV1Mode | None = None,
     normalize_uvs: tuple[int, ...] = (),
+    jobs: int = 1,
     where: Filter | None = None,
 ) -> Asset:
     return asset.stage(
@@ -1827,6 +1834,7 @@ def stage(
             uv0=uv0,
             uv1=uv1,
             normalize_uvs=normalize_uvs,
+            jobs=jobs,
         ),
         where=where,
     )
@@ -1848,6 +1856,7 @@ def optimize(
     preserve_small_parts: bool = False,
     small_part_triangle_threshold: int = 64,
     preserve_silhouette: bool = False,
+    jobs: int = 1,
     where: Filter | None = None,
 ) -> Asset:
     return asset.optimize(
@@ -1865,6 +1874,7 @@ def optimize(
             preserve_small_parts=preserve_small_parts,
             small_part_triangle_threshold=small_part_triangle_threshold,
             preserve_silhouette=preserve_silhouette,
+            jobs=jobs,
         ),
         where=where,
     )
@@ -1931,6 +1941,7 @@ def lods(
     drop_tiny_parts: bool = False,
     tiny_part_screen_size: float = 2.0,
     validate: bool = False,
+    jobs: int = 1,
     where: Filter | None = None,
 ) -> Asset:
     return asset.lods(
@@ -1942,6 +1953,7 @@ def lods(
             drop_tiny_parts=drop_tiny_parts,
             tiny_part_screen_size=tiny_part_screen_size,
             validate=validate,
+            jobs=jobs,
         ),
         where=where,
     )

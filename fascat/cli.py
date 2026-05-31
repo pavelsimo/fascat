@@ -1110,6 +1110,10 @@ def cmd_convert(
         bool,
         typer.Option("--validate-lods", help="Validate generated LOD monotonicity."),
     ] = False,
+    jobs: Annotated[
+        int,
+        typer.Option("--jobs", help="Worker count for independent per-part mesh operations."),
+    ] = 1,
     filters: Annotated[
         list[str] | None,
         typer.Option("--filter", help="Scope optimization and LOD work with selectors such as path=*/Fasteners/*."),
@@ -1356,6 +1360,7 @@ def cmd_convert(
         "lod_preset": lod_preset.value,
         "lod_screen_coverage": lod_screen_coverage,
         "validate_lods": validate_lods,
+        "jobs": jobs,
         "filters": filters or [],
         "exclude_filters": exclude_filters or [],
         "preserve_instances": preserve_instances,
@@ -1519,6 +1524,8 @@ def cmd_convert(
             )
     if lod_tiny_part_screen_size < 0.0:
         _fail(ctx, payload, "--lod-tiny-part-screen-size must be greater than or equal to 0.", code=2)
+    if jobs < 1:
+        _fail(ctx, payload, "--jobs must be greater than or equal to 1.", code=2)
     if texture_compression not in {None, "ktx2", "basisu"}:
         _fail(ctx, payload, "--texture-compression must be one of: ktx2, basisu.", code=2)
     if texture_compression is not None:
@@ -1548,6 +1555,7 @@ def cmd_convert(
         _fail(ctx, payload, "--quality-report must use a different path than --report.", code=2)
 
     profile_options = _profile_for_cli(profile, target_device_profile, ctx, payload)
+    profile_options = dataclass_replace(profile_options, repair=dataclass_replace(profile_options.repair, jobs=jobs))
     payload["profile"] = profile_options.name
     if target_device_profile is not None:
         payload["base_profile"] = profile.value
@@ -1609,6 +1617,7 @@ def cmd_convert(
                 preserve_small_parts=preserve_small_parts,
                 small_part_triangle_threshold=small_part_triangle_threshold,
                 preserve_silhouette=preserve_silhouette,
+                jobs=jobs,
             )
         stage_options = dataclass_replace(
             profile_options.stage,
@@ -1644,6 +1653,7 @@ def cmd_convert(
             uv0=uv0.value,
             uv1=cast(Any, uv1.value.replace("-", "_")),
             normalize_uvs=normalized_uv_channels,
+            jobs=jobs,
         )
         merge_vertices_options = (
             MergeVerticesOptions(
@@ -1655,6 +1665,7 @@ def cmd_convert(
                 delete_degenerate=delete_merge_vertex_degenerate,
                 quality_report=merge_vertex_quality_report,
                 area_epsilon=merge_vertex_area_epsilon,
+                jobs=jobs,
             )
             if merge_vertices
             else None
@@ -1779,6 +1790,7 @@ def cmd_convert(
                 budget_scope=budget_scope.value,
                 uv_importance=cast(Any, uv_importance.value.replace("-", "_")),
                 cleanup_attributes=cast(Any, cleanup_attributes),
+                jobs=jobs,
             )
             if decimate
             else None
@@ -1809,7 +1821,7 @@ def cmd_convert(
             else None
         )
         lod_generator_options = (
-            _lod_generator_options(lod_preset.value, lod_values, lod_coverages, validate_lods)
+            _lod_generator_options(lod_preset.value, lod_values, lod_coverages, validate_lods, jobs)
             if run_lod_generators
             else None
         )
@@ -1822,6 +1834,7 @@ def cmd_convert(
             lod_drop_tiny_parts,
             lod_tiny_part_screen_size,
             validate_lods,
+            jobs,
         )
         usd_package = "usdz" if (package == UsdPackage.USDZ or output_path.suffix.lower() == ".usdz") else "default"
         gltf_options = GltfExportOptions(
@@ -2293,10 +2306,11 @@ def _lod_generator_options(
     lod_values: list[float] | None,
     lod_coverages: list[float] | None,
     validate_lods: bool,
+    jobs: int,
 ) -> LODGeneratorOptions:
     if lod_values is None and lod_coverages is None:
-        return LODGeneratorOptions(preset=cast(Any, preset), validate=validate_lods)
-    default_levels = LODGeneratorOptions(preset=cast(Any, preset), validate=validate_lods).levels
+        return LODGeneratorOptions(preset=cast(Any, preset), validate=validate_lods, jobs=jobs)
+    default_levels = LODGeneratorOptions(preset=cast(Any, preset), validate=validate_lods, jobs=jobs).levels
     ratios = lod_values if lod_values is not None else [level.target_ratio for level in default_levels]
     if lod_coverages is None:
         if len(ratios) == len(default_levels):
@@ -2309,7 +2323,7 @@ def _lod_generator_options(
         LODLevel(screen_coverage=coverage, target_ratio=ratio)
         for coverage, ratio in zip(coverages, ratios, strict=True)
     )
-    return LODGeneratorOptions(preset=cast(Any, preset), levels=levels, validate=validate_lods)
+    return LODGeneratorOptions(preset=cast(Any, preset), levels=levels, validate=validate_lods, jobs=jobs)
 
 
 def _lod_options_for_cli(
@@ -2321,6 +2335,7 @@ def _lod_options_for_cli(
     lod_drop_tiny_parts: bool,
     lod_tiny_part_screen_size: float,
     validate_lods: bool,
+    jobs: int,
 ) -> LODOptions | None:
     ratios = tuple(lod_values) if lod_values is not None else None
     if ratios is None and profile_lods is not None:
@@ -2337,6 +2352,7 @@ def _lod_options_for_cli(
         drop_tiny_parts=lod_drop_tiny_parts,
         tiny_part_screen_size=lod_tiny_part_screen_size,
         validate=validate_lods,
+        jobs=jobs,
     )
 
 

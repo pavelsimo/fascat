@@ -11,6 +11,7 @@ from fascat.export_report import stats_with_file_size as _stats_with_file_size
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.metadata import Metadata, PmiAnnotation
+from fascat.ops.parallel import parallel_map
 from fascat.options import (
     AnalyzeOptions,
     BakeMaterialOptions,
@@ -175,6 +176,13 @@ class Part:
             "fingerprint": self.fingerprint,
             "lods": [mesh.to_dict() for mesh in self.lod_meshes],
         }
+
+
+@dataclass(frozen=True)
+class _MeshPartResult:
+    part_id: str
+    mesh: Mesh
+    fingerprint: str
 
 
 @dataclass
@@ -396,59 +404,22 @@ class Asset:
         repair_unit_metadata = _tolerance_policy_metadata("repair", tolerance_policy)
         with timed_step() as timer:
             asset = scope.asset.copy(keep_source=True)
-            for part in asset.parts.values():
-                if scope.selected_part_ids is not None and part.id not in scope.selected_part_ids:
-                    continue
-                if part.mesh is not None:
-                    part.mesh = part.mesh.repair(opts)
-                    part.mesh.metadata = {**part.mesh.metadata, **repair_unit_metadata}
-                    non_orientable_edges = _metadata_int(
-                        part.mesh.metadata.get("repair_non_orientable_edges_before_orientation"),
-                        0,
-                    )
-                    if non_orientable_edges:
-                        asset.report.add_warning(
-                            f"part {part.id} has {non_orientable_edges} non-orientable shared edge(s) "
-                            "before face orientation; Mobius-like topology cannot be fixed by winding normalization"
-                        )
-                    if part.mesh.metadata.get("repair_face_orientation_status") == "intent_not_implemented":
-                        asset.report.add_warning(
-                            f"part {part.id} requested {opts.face_orientation} face orientation, but the current "
-                            "mesh repair backend can only orient closed exterior components; source winding was preserved"
-                        )
-                    if part.mesh.metadata.get("repair_normal_orientation_status") == "intent_not_implemented":
-                        asset.report.add_warning(
-                            f"part {part.id} requested {opts.normal_orientation} normal orientation, but the current "
-                            "mesh repair backend generates normals from face orientation"
-                        )
-                    normal_orientation_status = part.mesh.metadata.get("repair_normal_orientation_status")
-                    if normal_orientation_status in {"generated_missing_source", "generated_after_face_orientation"}:
-                        asset.report.add_warning(
-                            f"part {part.id} requested {opts.normal_orientation} normal orientation, but compatible "
-                            "source normals were unavailable after mesh cleanup"
-                        )
-                    remaining_t_junctions = _metadata_int(part.mesh.metadata.get("repair_t_junctions_after"), 0)
-                    if remaining_t_junctions:
-                        asset.report.add_warning(
-                            f"part {part.id} has {remaining_t_junctions} T-junction(s) after mesh repair; "
-                            "T-junction sewing is not implemented"
-                        )
-                    remaining_boundary_gaps = _metadata_int(part.mesh.metadata.get("repair_boundary_gaps_after"), 0)
-                    if remaining_boundary_gaps:
-                        asset.report.add_warning(
-                            f"part {part.id} has {remaining_boundary_gaps} boundary gap(s) after mesh repair; "
-                            "boundary gap stitching is not implemented"
-                        )
-                    remaining_flipped_components = _metadata_int(
-                        part.mesh.metadata.get("repair_flipped_components_after_orientation"),
-                        0,
-                    )
-                    if remaining_flipped_components:
-                        asset.report.add_warning(
-                            f"part {part.id} has {remaining_flipped_components} flipped closed orientation "
-                            "component(s) after mesh repair; outward face orientation was not produced"
-                        )
-                    part.fingerprint = part.mesh.fingerprint()
+            part_ids = _mesh_part_ids(asset, scope.selected_part_ids)
+
+            def repair_part(part_id: str) -> _MeshPartResult:
+                part = asset.parts[part_id]
+                if part.mesh is None:
+                    raise AssertionError("selected repair part must have a mesh")
+                mesh = part.mesh.repair(opts)
+                mesh.metadata = {**mesh.metadata, **repair_unit_metadata}
+                return _MeshPartResult(part_id=part.id, mesh=mesh, fingerprint=mesh.fingerprint())
+
+            for repaired in parallel_map(part_ids, repair_part, jobs=opts.jobs):
+                part = asset.parts[repaired.part_id]
+                part.mesh = repaired.mesh
+                part.fingerprint = repaired.fingerprint
+                for warning in _repair_warnings(part, opts):
+                    asset.report.add_warning(warning)
         step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
             "repair",
@@ -482,16 +453,22 @@ class Asset:
         merge_unit_metadata = _tolerance_policy_metadata("merge_vertices", tolerance_policy)
         with timed_step() as timer:
             asset = scope.asset.copy(keep_source=True)
-            for part in asset.parts.values():
-                if scope.selected_part_ids is not None and part.id not in scope.selected_part_ids:
-                    continue
+            part_ids = _mesh_part_ids(asset, scope.selected_part_ids)
+
+            def merge_part_vertices(part_id: str) -> _MeshPartResult:
+                part = asset.parts[part_id]
                 if part.mesh is None:
-                    continue
-                part.mesh = part.mesh.merge_vertices(opts)
-                part.mesh.metadata = {**part.mesh.metadata, **merge_unit_metadata}
+                    raise AssertionError("selected merge_vertices part must have a mesh")
+                mesh = part.mesh.merge_vertices(opts)
+                mesh.metadata = {**mesh.metadata, **merge_unit_metadata}
+                return _MeshPartResult(part_id=part.id, mesh=mesh, fingerprint=mesh.fingerprint())
+
+            for merged in parallel_map(part_ids, merge_part_vertices, jobs=opts.jobs):
+                part = asset.parts[merged.part_id]
+                part.mesh = merged.mesh
+                part.fingerprint = merged.fingerprint
                 for warning in _merge_vertices_tolerance_warnings(part):
                     asset.report.add_warning(warning)
-                part.fingerprint = part.mesh.fingerprint()
         step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
             "merge_vertices",
@@ -1156,6 +1133,67 @@ def _metadata_int(value: object, default: int) -> int:
         except ValueError:
             return default
     return default
+
+
+def _mesh_part_ids(asset: Asset, selected_part_ids: set[str] | None) -> list[str]:
+    return [
+        part.id
+        for part in asset.parts.values()
+        if (selected_part_ids is None or part.id in selected_part_ids) and part.mesh is not None
+    ]
+
+
+def _repair_warnings(part: Part, options: RepairOptions) -> list[str]:
+    if part.mesh is None:
+        return []
+    warnings: list[str] = []
+    non_orientable_edges = _metadata_int(
+        part.mesh.metadata.get("repair_non_orientable_edges_before_orientation"),
+        0,
+    )
+    if non_orientable_edges:
+        warnings.append(
+            f"part {part.id} has {non_orientable_edges} non-orientable shared edge(s) "
+            "before face orientation; Mobius-like topology cannot be fixed by winding normalization"
+        )
+    if part.mesh.metadata.get("repair_face_orientation_status") == "intent_not_implemented":
+        warnings.append(
+            f"part {part.id} requested {options.face_orientation} face orientation, but the current "
+            "mesh repair backend can only orient closed exterior components; source winding was preserved"
+        )
+    if part.mesh.metadata.get("repair_normal_orientation_status") == "intent_not_implemented":
+        warnings.append(
+            f"part {part.id} requested {options.normal_orientation} normal orientation, but the current "
+            "mesh repair backend generates normals from face orientation"
+        )
+    normal_orientation_status = part.mesh.metadata.get("repair_normal_orientation_status")
+    if normal_orientation_status in {"generated_missing_source", "generated_after_face_orientation"}:
+        warnings.append(
+            f"part {part.id} requested {options.normal_orientation} normal orientation, but compatible "
+            "source normals were unavailable after mesh cleanup"
+        )
+    remaining_t_junctions = _metadata_int(part.mesh.metadata.get("repair_t_junctions_after"), 0)
+    if remaining_t_junctions:
+        warnings.append(
+            f"part {part.id} has {remaining_t_junctions} T-junction(s) after mesh repair; "
+            "T-junction sewing is not implemented"
+        )
+    remaining_boundary_gaps = _metadata_int(part.mesh.metadata.get("repair_boundary_gaps_after"), 0)
+    if remaining_boundary_gaps:
+        warnings.append(
+            f"part {part.id} has {remaining_boundary_gaps} boundary gap(s) after mesh repair; "
+            "boundary gap stitching is not implemented"
+        )
+    remaining_flipped_components = _metadata_int(
+        part.mesh.metadata.get("repair_flipped_components_after_orientation"),
+        0,
+    )
+    if remaining_flipped_components:
+        warnings.append(
+            f"part {part.id} has {remaining_flipped_components} flipped closed orientation "
+            "component(s) after mesh repair; outward face orientation was not produced"
+        )
+    return warnings
 
 
 def _format_metadata_float(value: object) -> str:

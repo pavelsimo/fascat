@@ -2,10 +2,20 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import dataclass
 
 from fascat.asset import Asset, Part
 from fascat.mesh import Mesh
+from fascat.ops.parallel import parallel_map
 from fascat.options import OptimizeOptions
+
+
+@dataclass(frozen=True)
+class _OptimizedPart:
+    part_id: str
+    mesh: Mesh
+    metadata: dict[str, object]
+    fingerprint: str
 
 
 def optimize_asset(asset: Asset, options: OptimizeOptions, *, selected_part_ids: set[str] | None = None) -> Asset:
@@ -36,44 +46,60 @@ def optimize_asset(asset: Asset, options: OptimizeOptions, *, selected_part_ids:
             result.report.add_warning(
                 "target_triangles is lower than the number of non-empty unique meshes; using one triangle per mesh"
             )
-    for part in result.parts.values():
-        if selected_part_ids is not None and part.id not in selected_part_ids:
-            continue
+    part_ids = [
+        part.id
+        for part in result.parts.values()
+        if (selected_part_ids is None or part.id in selected_part_ids) and part.mesh is not None
+    ]
+
+    def optimize_part(part_id: str) -> _OptimizedPart:
+        part = result.parts[part_id]
         if part.mesh is None:
-            continue
-        mesh = part.mesh
-        if options.simplify:
-            if _preserve_small_part(mesh, options):
-                part.metadata["simplification_preserved"] = "small_part"
-            else:
-                feature_counts = _feature_counts(mesh, options)
-                target = targets.get(part.id) if targets is not None else None
-                if _feature_preservation_enabled(options):
-                    mesh = mesh.simplify(
-                        target_triangles=target,
-                        ratio=None if target is not None else options.ratio,
-                        preserve_hard_edges=options.preserve_hard_edges,
-                        hard_edge_angle=options.hard_edge_angle,
-                        preserve_holes=options.preserve_holes,
-                        preserve_material_boundaries=options.preserve_material_boundaries,
-                        preserve_uv_seams=options.preserve_uv_seams,
-                        preserve_silhouette=options.preserve_silhouette,
-                    )
-                else:
-                    mesh = mesh.simplify(target_triangles=target, ratio=None if target is not None else options.ratio)
-                if feature_counts is not None:
-                    part.metadata["simplification_preserved_features"] = json.dumps(
-                        feature_counts,
-                        sort_keys=True,
-                    )
-                mesh.validate()
-        if options.optimize_buffers:
-            mesh = mesh.optimize_buffers()
-            mesh.validate()
-        mesh = mesh.repair()
-        part.mesh = mesh
-        part.fingerprint = mesh.fingerprint()
+            raise AssertionError("selected optimize part must have a mesh")
+        return _optimize_part(part, options, target=targets.get(part.id) if targets is not None else None)
+
+    for optimized in parallel_map(part_ids, optimize_part, jobs=options.jobs):
+        part = result.parts[optimized.part_id]
+        part.mesh = optimized.mesh
+        part.metadata = optimized.metadata
+        part.fingerprint = optimized.fingerprint
     return result
+
+
+def _optimize_part(part: Part, options: OptimizeOptions, *, target: int | None) -> _OptimizedPart:
+    if part.mesh is None:
+        raise AssertionError("optimized part must have a mesh")
+    metadata = dict(part.metadata)
+    mesh = part.mesh
+    if options.simplify:
+        if _preserve_small_part(mesh, options):
+            metadata["simplification_preserved"] = "small_part"
+        else:
+            feature_counts = _feature_counts(mesh, options)
+            if _feature_preservation_enabled(options):
+                mesh = mesh.simplify(
+                    target_triangles=target,
+                    ratio=None if target is not None else options.ratio,
+                    preserve_hard_edges=options.preserve_hard_edges,
+                    hard_edge_angle=options.hard_edge_angle,
+                    preserve_holes=options.preserve_holes,
+                    preserve_material_boundaries=options.preserve_material_boundaries,
+                    preserve_uv_seams=options.preserve_uv_seams,
+                    preserve_silhouette=options.preserve_silhouette,
+                )
+            else:
+                mesh = mesh.simplify(target_triangles=target, ratio=None if target is not None else options.ratio)
+            if feature_counts is not None:
+                metadata["simplification_preserved_features"] = json.dumps(
+                    feature_counts,
+                    sort_keys=True,
+                )
+            mesh.validate()
+    if options.optimize_buffers:
+        mesh = mesh.optimize_buffers()
+        mesh.validate()
+    mesh = mesh.repair()
+    return _OptimizedPart(part_id=part.id, mesh=mesh, metadata=metadata, fingerprint=mesh.fingerprint())
 
 
 def _duplicate_parts_per_occurrence(asset: Asset, *, selected_part_ids: set[str] | None = None) -> Asset:

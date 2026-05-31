@@ -1,37 +1,33 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from fascat.asset import Asset
 from fascat.material import Material
 from fascat.mesh import Mesh
+from fascat.ops.parallel import parallel_map
 from fascat.options import StageOptions
+from fascat.report import Report
+
+
+@dataclass(frozen=True)
+class _StagePartResult:
+    part_id: str
+    mesh: Mesh
+    fingerprint: str
+    uv_summary: dict[str, int]
+    tangent_summary: dict[str, int]
+    normal_summary: dict[str, int]
+    warnings: tuple[str, ...]
 
 
 def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[str] | None = None) -> Asset:
     result = asset.copy(keep_source=True)
-    uv_summary = {
-        "aabb_projection": 0,
-        "aabb_preserved_existing": 0,
-        "bake_missing_repack": 0,
-        "policy_intent": 0,
-        "forbid_overlapping_violations": 0,
-    }
-    tangent_summary = {
-        "generated": 0,
-        "regenerated": 0,
-        "dropped": 0,
-        "invalidated": 0,
-        "missing_uv0": 0,
-        "missing_uv_channel": 0,
-        "preserved": 0,
-    }
-    normal_summary = {
-        "generated": 0,
-        "regenerated": 0,
-        "preserved": 0,
-        "disabled": 0,
-    }
+    uv_summary = _empty_uv_summary()
+    tangent_summary = _empty_tangent_summary()
+    normal_summary = _empty_normal_summary()
     if options.uv1 in {"unwrap", "lightmap"}:
         _require_xatlas()
     if options.uv0 in {"unwrap", "lightmap"}:
@@ -48,82 +44,168 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
     _stage_materials(result, options, selected_part_ids=selected_part_ids)
     shared_aabb_bounds = _shared_aabb_projection_bounds(result, options, selected_part_ids)
 
-    for part in result.parts.values():
-        if selected_part_ids is not None and part.id not in selected_part_ids:
-            continue
+    part_ids = [
+        part.id
+        for part in result.parts.values()
+        if (selected_part_ids is None or part.id in selected_part_ids) and part.mesh is not None
+    ]
+
+    def stage_part(part_id: str) -> _StagePartResult:
+        part = result.parts[part_id]
         if part.mesh is None:
-            continue
-        mesh = part.mesh
-        had_tangents = mesh.tangents is not None
-        original_tangents = None if mesh.tangents is None else mesh.tangents.copy()
-        uv_modes: dict[int, str] = {}
-        edited_uv_channels: set[int] = set()
-        mesh = _stage_normals(result, part.id, mesh, options, normal_summary)
-        if options.uv0 == "box":
-            mesh, edited = _apply_aabb_projection(
-                result,
-                part.id,
-                mesh,
-                0,
-                options,
-                shared_bounds=shared_aabb_bounds,
-                uv_summary=uv_summary,
-            )
-            uv_modes[0] = "box" if edited else "existing"
-            if edited:
-                edited_uv_channels.add(0)
-        elif options.uv0 in {"unwrap", "lightmap"}:
-            mesh = _unwrap_uv(mesh, 0)
-            _tag_uv_metadata(mesh, 0, options.uv0, options)
-            uv_modes[0] = options.uv0
-            edited_uv_channels.add(0)
-        if options.uv1 == "box":
-            mesh, edited = _apply_aabb_projection(
-                result,
-                part.id,
-                mesh,
-                1,
-                options,
-                shared_bounds=shared_aabb_bounds,
-                uv_summary=uv_summary,
-            )
-            uv_modes[1] = "box" if edited else "existing"
-            if edited:
-                edited_uv_channels.add(1)
-        elif options.uv1 in {"unwrap", "lightmap"}:
-            mesh = _unwrap_uv(mesh, 1)
-            _tag_uv_metadata(mesh, 1, options.uv1, options)
-            uv_modes[1] = options.uv1
-            edited_uv_channels.add(1)
-        elif options.uv1 == "copy_uv0":
-            mesh = _copy_uv_channel(result, part.id, mesh, source=0, target=1)
-            if 1 in mesh.uvs:
-                _tag_uv_metadata(mesh, 1, "copy_uv0", options)
-                uv_modes[1] = "copy_uv0"
-                edited_uv_channels.add(1)
-        for channel in options.normalize_uvs:
-            mesh = _normalize_uv_channel(result, part.id, mesh, channel)
-            if channel in mesh.uvs:
-                edited_uv_channels.add(channel)
-        mesh = _stage_tangents(
-            result,
-            part.id,
-            mesh,
-            options,
-            had_tangents=had_tangents,
-            original_tangents=original_tangents,
-            edited_uv_channels=edited_uv_channels,
-            tangent_summary=tangent_summary,
-        )
-        if options.validate_normals:
-            mesh.validate_normals(require_tangents=options.tangents)
-        _tag_uv_layout_quality(result, part.id, mesh, uv_modes, options, uv_summary)
-        part.mesh = mesh
-        part.fingerprint = mesh.fingerprint()
+            raise AssertionError("selected stage part must have a mesh")
+        return _stage_part(result, part.id, part.mesh, options, shared_aabb_bounds)
+
+    for staged in parallel_map(part_ids, stage_part, jobs=options.jobs):
+        part = result.parts[staged.part_id]
+        part.mesh = staged.mesh
+        part.fingerprint = staged.fingerprint
+        _merge_summary(uv_summary, staged.uv_summary)
+        _merge_summary(tangent_summary, staged.tangent_summary)
+        _merge_summary(normal_summary, staged.normal_summary)
+        for warning in staged.warnings:
+            result.report.add_warning(warning)
     _tag_uv_summary(result, uv_summary)
     _tag_normal_summary(result, normal_summary)
     _tag_tangent_summary(result, tangent_summary)
     return result
+
+
+def _empty_uv_summary() -> dict[str, int]:
+    return {
+        "aabb_projection": 0,
+        "aabb_preserved_existing": 0,
+        "bake_missing_repack": 0,
+        "policy_intent": 0,
+        "forbid_overlapping_violations": 0,
+    }
+
+
+def _empty_tangent_summary() -> dict[str, int]:
+    return {
+        "generated": 0,
+        "regenerated": 0,
+        "dropped": 0,
+        "invalidated": 0,
+        "missing_uv0": 0,
+        "missing_uv_channel": 0,
+        "preserved": 0,
+    }
+
+
+def _empty_normal_summary() -> dict[str, int]:
+    return {
+        "generated": 0,
+        "regenerated": 0,
+        "preserved": 0,
+        "disabled": 0,
+    }
+
+
+def _merge_summary(total: dict[str, int], delta: dict[str, int]) -> None:
+    for key, value in delta.items():
+        total[key] = total.get(key, 0) + value
+
+
+def _stage_warning_asset(asset: Asset) -> Asset:
+    return Asset._adopt(
+        root=asset.root,
+        parts=asset.parts,
+        materials=asset.materials,
+        units=asset.units,
+        meters_per_unit=asset.meters_per_unit,
+        up_axis=asset.up_axis,
+        source_path=asset.source_path,
+        metadata=asset.metadata,
+        pmi=asset.pmi,
+        report=Report(),
+    )
+
+
+def _stage_part(
+    asset: Asset,
+    part_id: str,
+    mesh: Mesh,
+    options: StageOptions,
+    shared_aabb_bounds: tuple[np.ndarray, np.ndarray] | None,
+) -> _StagePartResult:
+    local_asset = _stage_warning_asset(asset)
+    uv_summary = _empty_uv_summary()
+    tangent_summary = _empty_tangent_summary()
+    normal_summary = _empty_normal_summary()
+    had_tangents = mesh.tangents is not None
+    original_tangents = None if mesh.tangents is None else mesh.tangents.copy()
+    uv_modes: dict[int, str] = {}
+    edited_uv_channels: set[int] = set()
+    mesh = _stage_normals(local_asset, part_id, mesh, options, normal_summary)
+    if options.uv0 == "box":
+        mesh, edited = _apply_aabb_projection(
+            local_asset,
+            part_id,
+            mesh,
+            0,
+            options,
+            shared_bounds=shared_aabb_bounds,
+            uv_summary=uv_summary,
+        )
+        uv_modes[0] = "box" if edited else "existing"
+        if edited:
+            edited_uv_channels.add(0)
+    elif options.uv0 in {"unwrap", "lightmap"}:
+        mesh = _unwrap_uv(mesh, 0)
+        _tag_uv_metadata(mesh, 0, options.uv0, options)
+        uv_modes[0] = options.uv0
+        edited_uv_channels.add(0)
+    if options.uv1 == "box":
+        mesh, edited = _apply_aabb_projection(
+            local_asset,
+            part_id,
+            mesh,
+            1,
+            options,
+            shared_bounds=shared_aabb_bounds,
+            uv_summary=uv_summary,
+        )
+        uv_modes[1] = "box" if edited else "existing"
+        if edited:
+            edited_uv_channels.add(1)
+    elif options.uv1 in {"unwrap", "lightmap"}:
+        mesh = _unwrap_uv(mesh, 1)
+        _tag_uv_metadata(mesh, 1, options.uv1, options)
+        uv_modes[1] = options.uv1
+        edited_uv_channels.add(1)
+    elif options.uv1 == "copy_uv0":
+        mesh = _copy_uv_channel(local_asset, part_id, mesh, source=0, target=1)
+        if 1 in mesh.uvs:
+            _tag_uv_metadata(mesh, 1, "copy_uv0", options)
+            uv_modes[1] = "copy_uv0"
+            edited_uv_channels.add(1)
+    for channel in options.normalize_uvs:
+        mesh = _normalize_uv_channel(local_asset, part_id, mesh, channel)
+        if channel in mesh.uvs:
+            edited_uv_channels.add(channel)
+    mesh = _stage_tangents(
+        local_asset,
+        part_id,
+        mesh,
+        options,
+        had_tangents=had_tangents,
+        original_tangents=original_tangents,
+        edited_uv_channels=edited_uv_channels,
+        tangent_summary=tangent_summary,
+    )
+    if options.validate_normals:
+        mesh.validate_normals(require_tangents=options.tangents)
+    _tag_uv_layout_quality(local_asset, part_id, mesh, uv_modes, options, uv_summary)
+    return _StagePartResult(
+        part_id=part_id,
+        mesh=mesh,
+        fingerprint=mesh.fingerprint(),
+        uv_summary=uv_summary,
+        tangent_summary=tangent_summary,
+        normal_summary=normal_summary,
+        warnings=tuple(local_asset.report.warnings),
+    )
 
 
 def _stage_normals(asset: Asset, part_id: str, mesh: Mesh, options: StageOptions, summary: dict[str, int]) -> Mesh:

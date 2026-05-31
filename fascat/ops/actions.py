@@ -14,6 +14,7 @@ from numpy.typing import NDArray
 from fascat.asset import Asset, Node, Part
 from fascat.material import Material
 from fascat.mesh import Mesh
+from fascat.ops.parallel import parallel_map
 from fascat.options import (
     BakeMaterialOptions,
     DecimateOptions,
@@ -130,37 +131,18 @@ def decimate_asset(
     _warn_aggressive_lod0_decimation(result, source_meshes, options)
     if options.criterion == "quality":
         result.report.add_warning(_quality_decimation_warning())
-    for part in result.parts.values():
-        if selected_part_ids is not None and part.id not in selected_part_ids:
-            continue
-        if part.mesh is None:
-            continue
-        target = options.target_triangles
-        if target is not None:
-            target = min(target, part.mesh.triangle_count)
-        target_budget = target if target is not None else _ratio_target(part.mesh, ratio)
-        if target_budget is not None:
-            part_targets[part.id] = target_budget
-        mesh, counts = _simplify_mesh_for_decimation(
-            part.mesh,
-            options,
-            target_triangles=target,
-            ratio=None if target is not None else ratio,
-        )
-        pass_counts[part.id] = counts
-        mesh = mesh.optimize_buffers().repair()
-        if target_budget is not None and mesh.triangle_count > target_budget:
-            mesh = _sample_mesh_faces(mesh, target_budget).compute_normals()
-        mesh = _finalize_decimated_mesh_uvs(mesh, options)
-        mesh.metadata = {
-            **mesh.metadata,
-            "decimate_criterion": options.criterion,
-            "decimate_budget_scope": options.budget_scope,
-            "decimate_uv_importance": options.uv_importance,
-        }
-        mesh.validate()
-        part.mesh = mesh
-        part.fingerprint = mesh.fingerprint()
+    part_ids = _selected_mesh_part_id_list(result, selected_part_ids)
+
+    def decimate_part(part_id: str) -> _DecimatedPart:
+        return _decimate_part_budget(result.parts[part_id], options, ratio)
+
+    for decimated in parallel_map(part_ids, decimate_part, jobs=options.jobs):
+        part = result.parts[decimated.part_id]
+        part.mesh = decimated.mesh
+        part.fingerprint = decimated.fingerprint
+        pass_counts[part.id] = decimated.pass_count
+        if decimated.target_budget is not None:
+            part_targets[part.id] = decimated.target_budget
     _annotate_decimation_result(
         result,
         source_meshes,
@@ -316,7 +298,7 @@ def run_lod_generators_asset(
     screen_coverage = tuple(level.screen_coverage for level in options.levels)
     result = build_lods(
         asset,
-        LODOptions(ratios=ratios, screen_coverage=screen_coverage),
+        LODOptions(ratios=ratios, screen_coverage=screen_coverage, jobs=options.jobs),
         selected_part_ids=selected_part_ids,
     )
     coverage = ",".join(f"{level.screen_coverage:.9g}" for level in options.levels)
@@ -352,6 +334,15 @@ class _DecimationMetrics:
     triangle_reduction: float
     max_vertex_error: float
     mean_vertex_error: float
+
+
+@dataclass(frozen=True)
+class _DecimatedPart:
+    part_id: str
+    mesh: Mesh
+    fingerprint: str
+    pass_count: _DecimationPassCount
+    target_budget: int | None
 
 
 @dataclass(frozen=True)
@@ -430,6 +421,76 @@ def _selected_mesh_part_ids(asset: Asset, selected_part_ids: set[str] | None) ->
         for part in asset.parts.values()
         if (selected_part_ids is None or part.id in selected_part_ids) and part.mesh is not None
     }
+
+
+def _selected_mesh_part_id_list(asset: Asset, selected_part_ids: set[str] | None) -> list[str]:
+    return [
+        part.id
+        for part in asset.parts.values()
+        if (selected_part_ids is None or part.id in selected_part_ids) and part.mesh is not None
+    ]
+
+
+def _decimate_selection_part(
+    part: Part,
+    options: DecimateOptions,
+    *,
+    target: int | None,
+    ratio: float | None,
+) -> _DecimatedPart:
+    if part.mesh is None:
+        raise AssertionError("selected decimation part must have a mesh")
+    target_budget = target if target is not None else _ratio_target(part.mesh, ratio)
+    mesh, counts = _simplify_mesh_for_decimation(
+        part.mesh,
+        options,
+        target_triangles=target,
+        ratio=None if target is not None else ratio,
+    )
+    mesh.validate()
+    mesh = mesh.optimize_buffers()
+    mesh.validate()
+    mesh = mesh.repair()
+    return _DecimatedPart(
+        part_id=part.id,
+        mesh=mesh,
+        fingerprint=mesh.fingerprint(),
+        pass_count=counts,
+        target_budget=target_budget,
+    )
+
+
+def _decimate_part_budget(part: Part, options: DecimateOptions, ratio: float | None) -> _DecimatedPart:
+    if part.mesh is None:
+        raise AssertionError("selected decimation part must have a mesh")
+    target = options.target_triangles
+    if target is not None:
+        target = min(target, part.mesh.triangle_count)
+    target_budget = target if target is not None else _ratio_target(part.mesh, ratio)
+    mesh, counts = _simplify_mesh_for_decimation(
+        part.mesh,
+        options,
+        target_triangles=target,
+        ratio=None if target is not None else ratio,
+    )
+    mesh = mesh.optimize_buffers().repair()
+    if target_budget is not None and mesh.triangle_count > target_budget:
+        mesh = _sample_mesh_faces(mesh, target_budget).compute_normals()
+    mesh = _finalize_decimated_mesh_uvs(mesh, options)
+    mesh.metadata = {
+        **mesh.metadata,
+        "decimate_criterion": options.criterion,
+        "decimate_budget_scope": options.budget_scope,
+        "decimate_uv_importance": options.uv_importance,
+    }
+    mesh.validate()
+    return _DecimatedPart(
+        part_id=part.id,
+        mesh=mesh,
+        fingerprint=mesh.fingerprint(),
+        pass_count=counts,
+        target_budget=target_budget,
+    )
 
 
 def _baked_material(
@@ -640,28 +701,24 @@ def _decimate_selection_budget(
     ratio = _decimate_ratio(options)
     pass_counts: dict[str, _DecimationPassCount] = {}
     part_targets: dict[str, int] = {}
-    for part in result.parts.values():
-        if selected_part_ids is not None and part.id not in selected_part_ids:
-            continue
-        if part.mesh is None:
-            continue
-        target = targets.get(part.id) if targets is not None else None
-        target_budget = target if target is not None else _ratio_target(part.mesh, ratio)
-        if target_budget is not None:
-            part_targets[part.id] = target_budget
-        mesh, counts = _simplify_mesh_for_decimation(
-            part.mesh,
+    part_ids = _selected_mesh_part_id_list(result, selected_part_ids)
+
+    def decimate_part(part_id: str) -> _DecimatedPart:
+        part = result.parts[part_id]
+        return _decimate_selection_part(
+            part,
             options,
-            target_triangles=target,
-            ratio=None if target is not None else ratio,
+            target=targets.get(part.id) if targets is not None else None,
+            ratio=ratio,
         )
-        pass_counts[part.id] = counts
-        mesh.validate()
-        mesh = mesh.optimize_buffers()
-        mesh.validate()
-        mesh = mesh.repair()
-        part.mesh = mesh
-        part.fingerprint = mesh.fingerprint()
+
+    for decimated in parallel_map(part_ids, decimate_part, jobs=options.jobs):
+        part = result.parts[decimated.part_id]
+        part.mesh = decimated.mesh
+        part.fingerprint = decimated.fingerprint
+        pass_counts[part.id] = decimated.pass_count
+        if decimated.target_budget is not None:
+            part_targets[part.id] = decimated.target_budget
     return result, pass_counts, part_targets
 
 

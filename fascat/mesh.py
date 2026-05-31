@@ -5,6 +5,7 @@ import math
 from collections import OrderedDict, defaultdict, deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from threading import Lock
 from typing import Any, TypeVar, cast
 
 import numpy as np
@@ -33,6 +34,7 @@ _GLOBAL_MESH_CACHE_NAMES = {
     "undirected_edges_and_counts",
 }
 _GLOBAL_MESH_CACHE: OrderedDict[tuple[str, tuple[object, ...]], object] = OrderedDict()
+_GLOBAL_MESH_CACHE_LOCK = Lock()
 _MISSING_CACHE_VALUE = object()
 
 
@@ -2678,11 +2680,12 @@ def _global_cache_value(name: str, token: tuple[object, ...]) -> object:
     key = _global_cache_key(name, token)
     if key is None:
         return _MISSING_CACHE_VALUE
-    try:
-        value = _GLOBAL_MESH_CACHE.pop(key)
-    except KeyError:
-        return _MISSING_CACHE_VALUE
-    _GLOBAL_MESH_CACHE[key] = value
+    with _GLOBAL_MESH_CACHE_LOCK:
+        try:
+            value = _GLOBAL_MESH_CACHE.pop(key)
+        except KeyError:
+            return _MISSING_CACHE_VALUE
+        _GLOBAL_MESH_CACHE[key] = value
     return _clone_cache_value(value)
 
 
@@ -2690,10 +2693,12 @@ def _store_global_cache_value(name: str, token: tuple[object, ...], value: objec
     key = _global_cache_key(name, token)
     if key is None:
         return
-    _GLOBAL_MESH_CACHE[key] = _clone_cache_value(value)
-    _GLOBAL_MESH_CACHE.move_to_end(key)
-    while len(_GLOBAL_MESH_CACHE) > _GLOBAL_MESH_CACHE_MAX_ENTRIES:
-        _GLOBAL_MESH_CACHE.popitem(last=False)
+    stored = _clone_cache_value(value)
+    with _GLOBAL_MESH_CACHE_LOCK:
+        _GLOBAL_MESH_CACHE[key] = stored
+        _GLOBAL_MESH_CACHE.move_to_end(key)
+        while len(_GLOBAL_MESH_CACHE) > _GLOBAL_MESH_CACHE_MAX_ENTRIES:
+            _GLOBAL_MESH_CACHE.popitem(last=False)
 
 
 def _clone_cache_value(value: object) -> object:

@@ -845,6 +845,7 @@ def _repair_options(values: dict[str, object]) -> RepairOptions:
         viewer_position=_float3(values.get("viewer_position")) if values.get("viewer_position") is not None else None,
         fill_small_holes=bool(values.get("fill_small_holes", False)),
         area_epsilon=_as_float(values.get("area_epsilon", 1e-12)),
+        jobs=_as_int(values.get("jobs", 1)),
     )
 
 
@@ -858,6 +859,7 @@ def _merge_vertices_options(values: dict[str, object]) -> MergeVerticesOptions:
         delete_degenerate=bool(values.get("delete_degenerate", True)),
         quality_report=bool(values.get("quality_report", False)),
         area_epsilon=_as_float(values.get("area_epsilon", 1e-12)),
+        jobs=_as_int(values.get("jobs", 1)),
     )
 
 
@@ -917,6 +919,7 @@ def _stage_options(values: dict[str, object]) -> StageOptions:
         uv0=cast(Any, _literal(values.get("uv0", "box"))),
         uv1=cast(Any, _literal(values.get("uv1"))),
         normalize_uvs=_int_list(values.get("normalize_uvs", [])),
+        jobs=_as_int(values.get("jobs", 1)),
     )
 
 
@@ -994,6 +997,7 @@ def _decimate_options(values: dict[str, object]) -> DecimateOptions:
             Any,
             tuple(_literal(item) for item in _string_list(values.get("cleanup_attributes", []))),
         ),
+        jobs=_as_int(values.get("jobs", 1)),
     )
 
 
@@ -1028,6 +1032,7 @@ def _lod_generator_options(values: dict[str, object]) -> LODGeneratorOptions:
         validate=bool(values.get("validate", True)),
         output=cast(Any, values.get("output", "variants")),
         allow_non_monotonic=bool(values.get("allow_non_monotonic", False)),
+        jobs=_as_int(values.get("jobs", 1)),
     )
 
 
@@ -1041,6 +1046,7 @@ def _lod_options(values: dict[str, object]) -> LODOptions:
         drop_tiny_parts=bool(values.get("drop_tiny_parts", False)),
         tiny_part_screen_size=_as_float(values.get("tiny_part_screen_size", 2.0)),
         validate=bool(values.get("validate", False)),
+        jobs=_as_int(values.get("jobs", 1)),
     )
 
 
@@ -1059,6 +1065,7 @@ def _optimize_options(values: dict[str, object]) -> OptimizeOptions:
         preserve_small_parts=bool(values.get("preserve_small_parts", False)),
         small_part_triangle_threshold=_as_int(values.get("small_part_triangle_threshold", 64)),
         preserve_silhouette=bool(values.get("preserve_silhouette", False)),
+        jobs=_as_int(values.get("jobs", 1)),
     )
 
 

@@ -111,6 +111,11 @@ def _normalize_float3(value: object, field_name: str) -> tuple[float, float, flo
     return (float(value[0]), float(value[1]), float(value[2]))
 
 
+def _validate_jobs(jobs: int) -> None:
+    if jobs < 1:
+        raise ValueError("jobs must be greater than or equal to 1")
+
+
 @dataclass(frozen=True)
 class TessellationOptions:
     sag: float = 0.1
@@ -167,12 +172,14 @@ class RepairOptions:
     viewer_position: tuple[float, float, float] | None = None
     fill_small_holes: bool = False
     area_epsilon: float = 1e-12
+    jobs: int = 1
 
     def __post_init__(self) -> None:
         if self.tolerance < 0.0:
             raise ValueError("repair tolerance must be greater than or equal to 0")
         if self.area_epsilon < 0.0:
             raise ValueError("area_epsilon must be greater than or equal to 0")
+        _validate_jobs(self.jobs)
         if self.face_orientation not in {
             "exterior",
             "single_sided_open_shell",
@@ -213,12 +220,14 @@ class MergeVerticesOptions:
     delete_degenerate: bool = True
     quality_report: bool = False
     area_epsilon: float = 1e-12
+    jobs: int = 1
 
     def __post_init__(self) -> None:
         if self.tolerance < 0.0:
             raise ValueError("merge vertices tolerance must be greater than or equal to 0")
         if self.area_epsilon < 0.0:
             raise ValueError("area_epsilon must be greater than or equal to 0")
+        _validate_jobs(self.jobs)
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -396,6 +405,7 @@ class StageOptions:
     uv0: UV0Mode | None = "box"
     uv1: UV1Mode | None = None
     normalize_uvs: tuple[int, ...] = ()
+    jobs: int = 1
 
     def __post_init__(self) -> None:
         if self.uv0 is None:
@@ -424,6 +434,7 @@ class StageOptions:
             raise ValueError("uv1 must be one of: none, box, unwrap, lightmap, copy_uv0")
         if any(channel < 0 for channel in self.normalize_uvs):
             raise ValueError("normalize_uvs values must be greater than or equal to 0")
+        _validate_jobs(self.jobs)
 
     def to_dict(self) -> dict[str, object]:
         return {**asdict(self), "normalize_uvs": list(self.normalize_uvs)}
@@ -444,6 +455,7 @@ class OptimizeOptions:
     preserve_small_parts: bool = False
     small_part_triangle_threshold: int = 64
     preserve_silhouette: bool = False
+    jobs: int = 1
 
     def __post_init__(self) -> None:
         if self.target_triangles is not None and self.target_triangles <= 0:
@@ -454,6 +466,7 @@ class OptimizeOptions:
             raise ValueError("hard_edge_angle must be greater than 0 and no more than 180")
         if self.small_part_triangle_threshold < 0:
             raise ValueError("small_part_triangle_threshold must be greater than or equal to 0")
+        _validate_jobs(self.jobs)
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -468,6 +481,7 @@ class LODOptions:
     drop_tiny_parts: bool = False
     tiny_part_screen_size: float = 2.0
     validate: bool = False
+    jobs: int = 1
 
     def __post_init__(self) -> None:
         ratios = tuple(float(ratio) for ratio in self.ratios)
@@ -491,6 +505,7 @@ class LODOptions:
                 raise ValueError("screen_coverage values must be sorted from highest to lowest")
         if self.tiny_part_screen_size < 0.0:
             raise ValueError("tiny_part_screen_size must be greater than or equal to 0")
+        _validate_jobs(self.jobs)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -501,6 +516,7 @@ class LODOptions:
             "drop_tiny_parts": self.drop_tiny_parts,
             "tiny_part_screen_size": self.tiny_part_screen_size,
             "validate": self.validate,
+            "jobs": self.jobs,
         }
 
 
@@ -663,6 +679,7 @@ class DecimateOptions:
     uv_importance: DecimateUVImportance = "preserve_islands"
     cleanup_attributes: tuple[DecimateCleanupAttribute, ...] = ()
     iterative_threshold: int = 1_000_000
+    jobs: int = 1
 
     def __post_init__(self) -> None:
         cleanup_attributes = tuple(str(item).replace("-", "_") for item in self.cleanup_attributes)
@@ -675,6 +692,7 @@ class DecimateOptions:
             raise ValueError("target_ratio must be greater than 0 and less than 1 when set")
         if self.iterative_threshold <= 0:
             raise ValueError("iterative_threshold must be greater than 0")
+        _validate_jobs(self.jobs)
         for name, value in {
             "surface_tolerance": self.surface_tolerance,
             "line_tolerance": self.line_tolerance,
@@ -764,6 +782,7 @@ class LODGeneratorOptions:
     validate: bool = True
     output: LODOutput = "variants"
     allow_non_monotonic: bool = False
+    jobs: int = 1
 
     def __post_init__(self) -> None:
         if self.preset not in {"desktop", "web", "mobile", "vr"}:
@@ -780,6 +799,7 @@ class LODGeneratorOptions:
             raise ValueError("LOD target ratios must be sorted from highest to lowest detail")
         if self.output not in {"variants", "extras", "separate"}:
             raise ValueError("output must be one of: variants, extras, separate")
+        _validate_jobs(self.jobs)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -788,6 +808,7 @@ class LODGeneratorOptions:
             "validate": self.validate,
             "output": self.output,
             "allow_non_monotonic": self.allow_non_monotonic,
+            "jobs": self.jobs,
         }
 
 

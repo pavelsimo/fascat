@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 
 import numpy as np
 
-from fascat.asset import Asset
+from fascat.asset import Asset, Part
 from fascat.mesh import Mesh
+from fascat.ops.parallel import parallel_map
 from fascat.options import LODOptions
 
 _RECOMMENDED_MAX_LOD_LEVELS = 4
@@ -13,6 +15,27 @@ _CLOSE_VIEW_LOD1_MIN_RATIO = 0.4
 _CLOSE_VIEW_LOD2_MIN_RATIO = 0.2
 _FAR_LOD_RATIO_THRESHOLD = 0.15
 _FAR_LOD_SCREEN_COVERAGE_THRESHOLD = 0.1
+
+
+@dataclass(frozen=True)
+class _LodPartResult:
+    part_id: str
+    lod_meshes: list[Mesh]
+    metadata: dict[str, object]
+    warnings: tuple[str, ...] = ()
+    generated: bool = False
+    skipped: bool = False
+    source_vertices: int = 0
+    source_triangles: int = 0
+    source_mesh_bytes: int = 0
+    added_vertices: int = 0
+    added_triangles: int = 0
+    added_mesh_bytes: int = 0
+    omitted_tiny_parts: int = 0
+    reused_instance_levels: int = 0
+    material_merged_levels: int = 0
+    texture_baked_levels: int = 0
+    culling_changed_levels: int = 0
 
 
 def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str] | None = None) -> Asset:
@@ -33,143 +56,36 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
     material_merged_levels = 0
     texture_baked_levels = 0
     culling_changed_levels = 0
-    for part in result.parts.values():
-        if selected_part_ids is not None and part.id not in selected_part_ids:
-            continue
-        part.lod_meshes = []
-        if part.mesh is None:
-            skipped_parts += 1
-            part.metadata["lod_status"] = "skipped_no_mesh"
-            result.report.add_warning(f"LOD generation skipped part without tessellated mesh: {part.name}")
-            continue
-        generated_parts += 1
-        part_occurrences = occurrence_counts.get(part.id, 0)
-        previous_count = part.mesh.triangle_count
-        diagonal = _mesh_diagonal(part.mesh)
-        part_source_vertices = part.mesh.vertex_count
-        part_source_triangles = part.mesh.triangle_count
-        part_source_bytes = _mesh_payload_bytes(part.mesh)
-        part_lod_vertices = 0
-        part_lod_triangles = 0
-        part_lod_bytes = 0
-        part_omitted_tiny = 0
-        part_reused_instance_levels = 0
-        part_material_merged_levels = 0
-        part_texture_baked_levels = 0
-        part_culling_changed_levels = 0
-        previous_mesh = part.mesh
-        level_instance_reuse: list[str] = []
-        level_material_merge: list[str] = []
-        level_texture_bake: list[str] = []
-        level_culling_granularity: list[str] = []
-        level_policy_advisory_values: list[str] = []
-        level_simplification_sources: list[str] = []
-        for index, ratio in enumerate(options.ratios):
-            coverage = screen_coverage[index]
-            simplification_source = "source" if index == 0 else "previous"
-            policy_metadata = _level_policy_metadata(
-                part_occurrences=part_occurrences,
-                culling_granularity="omitted_tiny_part"
-                if options.drop_tiny_parts and diagonal * coverage < options.tiny_part_screen_size
-                else "part",
-                policy_advisory=level_policy_advisories[index],
-            )
-            level_instance_reuse.append(policy_metadata["lod_instance_reuse"])
-            level_material_merge.append(policy_metadata["lod_material_merge"])
-            level_texture_bake.append(policy_metadata["lod_texture_bake"])
-            level_culling_granularity.append(policy_metadata["lod_culling_granularity"])
-            level_policy_advisory_values.append(policy_metadata["lod_policy_advisory"])
-            if policy_metadata["lod_instance_reuse"] == "preserved":
-                part_reused_instance_levels += 1
-            if policy_metadata["lod_material_merge"] == "merged":
-                part_material_merged_levels += 1
-            if policy_metadata["lod_texture_bake"] == "baked":
-                part_texture_baked_levels += 1
-            if policy_metadata["lod_culling_granularity"] != "part":
-                part_culling_changed_levels += 1
-            if options.drop_tiny_parts and diagonal * coverage < options.tiny_part_screen_size:
-                lod = _empty_lod(part.mesh)
-                lod.metadata = {
-                    **lod.metadata,
-                    "lod_ratio": f"{ratio:.9g}",
-                    "lod_screen_coverage": f"{coverage:.9g}",
-                    "lod_omitted": "tiny_part",
-                    "lod_simplification_source": simplification_source,
-                    **policy_metadata,
-                }
-                part.lod_meshes.append(lod)
-                previous_count = 0
-                previous_mesh = lod
-                part_omitted_tiny += 1
-                level_simplification_sources.append(simplification_source)
-                continue
+    part_ids = [part.id for part in result.parts.values() if selected_part_ids is None or part.id in selected_part_ids]
 
-            lod = previous_mesh.simplify(target_triangles=_target_lod_triangles(part_source_triangles, ratio))
-            if lod.triangle_count > previous_count:
-                lod = lod.simplify(target_triangles=previous_count)
-            lod.metadata = {
-                **lod.metadata,
-                "lod_ratio": f"{ratio:.9g}",
-                "lod_screen_coverage": f"{coverage:.9g}",
-                "lod_mode": options.mode,
-                "lod_per_part_budget": str(options.per_part_budget).lower(),
-                "lod_simplification_source": simplification_source,
-                **policy_metadata,
-            }
-            lod.validate()
-            previous_count = lod.triangle_count
-            previous_mesh = lod
-            part.lod_meshes.append(lod)
-            part_lod_vertices += lod.vertex_count
-            part_lod_triangles += lod.triangle_count
-            part_lod_bytes += _mesh_payload_bytes(lod)
-            level_simplification_sources.append(simplification_source)
-        source_vertices += part_source_vertices
-        source_triangles += part_source_triangles
-        source_mesh_bytes += part_source_bytes
-        added_vertices += part_lod_vertices
-        added_triangles += part_lod_triangles
-        added_mesh_bytes += part_lod_bytes
-        omitted_tiny_parts += part_omitted_tiny
-        reused_instance_levels += part_reused_instance_levels
-        material_merged_levels += part_material_merged_levels
-        texture_baked_levels += part_texture_baked_levels
-        culling_changed_levels += part_culling_changed_levels
-        level_vertices = ",".join(str(mesh.vertex_count) for mesh in part.lod_meshes)
-        level_triangles = ",".join(str(mesh.triangle_count) for mesh in part.lod_meshes)
-        part.metadata = {
-            **part.metadata,
-            "lod_ratios": ",".join(f"{ratio:.9g}" for ratio in options.ratios),
-            "lod_screen_coverage": ",".join(f"{value:.9g}" for value in screen_coverage),
-            "lod_mode": options.mode,
-            "lod_per_part_budget": str(options.per_part_budget).lower(),
-            "lod_drop_tiny_parts": str(options.drop_tiny_parts).lower(),
-            "lod_occurrences": str(part_occurrences),
-            "lod_source_vertices": str(part_source_vertices),
-            "lod_source_triangles": str(part_source_triangles),
-            "lod_source_mesh_bytes": str(part_source_bytes),
-            "lod_added_vertices": str(part_lod_vertices),
-            "lod_added_triangles": str(part_lod_triangles),
-            "lod_added_mesh_bytes": str(part_lod_bytes),
-            "lod_chain_vertices": str(part_source_vertices + part_lod_vertices),
-            "lod_chain_triangles": str(part_source_triangles + part_lod_triangles),
-            "lod_chain_mesh_bytes": str(part_source_bytes + part_lod_bytes),
-            "lod_level_vertices": level_vertices,
-            "lod_level_triangles": level_triangles,
-            "lod_omitted_tiny_part_meshes": str(part_omitted_tiny),
-            "lod_triangle_multiplier": _ratio_text(part_source_triangles + part_lod_triangles, part_source_triangles),
-            "lod_mesh_byte_multiplier": _ratio_text(part_source_bytes + part_lod_bytes, part_source_bytes),
-            "lod_level_instance_reuse": ",".join(level_instance_reuse),
-            "lod_level_material_merge": ",".join(level_material_merge),
-            "lod_level_texture_bake": ",".join(level_texture_bake),
-            "lod_level_culling_granularity": ",".join(level_culling_granularity),
-            "lod_level_policy_advisory": ",".join(level_policy_advisory_values),
-            "lod_level_simplification_source": ",".join(level_simplification_sources),
-            "lod_reused_instance_levels": str(part_reused_instance_levels),
-            "lod_material_merged_levels": str(part_material_merged_levels),
-            "lod_texture_baked_levels": str(part_texture_baked_levels),
-            "lod_culling_changed_levels": str(part_culling_changed_levels),
-        }
+    def build_part(part_id: str) -> _LodPartResult:
+        return _build_part_lods(
+            result.parts[part_id],
+            options,
+            screen_coverage,
+            level_policy_advisories,
+            part_occurrences=occurrence_counts.get(part_id, 0),
+        )
+
+    for built in parallel_map(part_ids, build_part, jobs=options.jobs):
+        part = result.parts[built.part_id]
+        part.lod_meshes = built.lod_meshes
+        part.metadata = built.metadata
+        for warning in built.warnings:
+            result.report.add_warning(warning)
+        generated_parts += int(built.generated)
+        skipped_parts += int(built.skipped)
+        source_vertices += built.source_vertices
+        source_triangles += built.source_triangles
+        source_mesh_bytes += built.source_mesh_bytes
+        added_vertices += built.added_vertices
+        added_triangles += built.added_triangles
+        added_mesh_bytes += built.added_mesh_bytes
+        omitted_tiny_parts += built.omitted_tiny_parts
+        reused_instance_levels += built.reused_instance_levels
+        material_merged_levels += built.material_merged_levels
+        texture_baked_levels += built.texture_baked_levels
+        culling_changed_levels += built.culling_changed_levels
     result.metadata["lod_mode"] = options.mode
     result.metadata["lod_screen_coverage"] = ",".join(f"{value:.9g}" for value in screen_coverage)
     result.metadata["lod_generated_parts"] = str(generated_parts)
@@ -201,6 +117,160 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
     if options.validate:
         _validate_lods(result, selected_part_ids=selected_part_ids)
     return result
+
+
+def _build_part_lods(
+    part: Part,
+    options: LODOptions,
+    screen_coverage: tuple[float, ...],
+    level_policy_advisories: tuple[str, ...],
+    *,
+    part_occurrences: int,
+) -> _LodPartResult:
+    if part.mesh is None:
+        return _LodPartResult(
+            part_id=part.id,
+            lod_meshes=[],
+            metadata={**part.metadata, "lod_status": "skipped_no_mesh"},
+            warnings=(f"LOD generation skipped part without tessellated mesh: {part.name}",),
+            skipped=True,
+        )
+
+    mesh = part.mesh
+    previous_count = mesh.triangle_count
+    diagonal = _mesh_diagonal(mesh)
+    part_source_vertices = mesh.vertex_count
+    part_source_triangles = mesh.triangle_count
+    part_source_bytes = _mesh_payload_bytes(mesh)
+    part_lod_vertices = 0
+    part_lod_triangles = 0
+    part_lod_bytes = 0
+    part_omitted_tiny = 0
+    part_reused_instance_levels = 0
+    part_material_merged_levels = 0
+    part_texture_baked_levels = 0
+    part_culling_changed_levels = 0
+    previous_mesh = mesh
+    lod_meshes: list[Mesh] = []
+    level_instance_reuse: list[str] = []
+    level_material_merge: list[str] = []
+    level_texture_bake: list[str] = []
+    level_culling_granularity: list[str] = []
+    level_policy_advisory_values: list[str] = []
+    level_simplification_sources: list[str] = []
+    for index, ratio in enumerate(options.ratios):
+        coverage = screen_coverage[index]
+        simplification_source = "source" if index == 0 else "previous"
+        policy_metadata = _level_policy_metadata(
+            part_occurrences=part_occurrences,
+            culling_granularity="omitted_tiny_part"
+            if options.drop_tiny_parts and diagonal * coverage < options.tiny_part_screen_size
+            else "part",
+            policy_advisory=level_policy_advisories[index],
+        )
+        level_instance_reuse.append(policy_metadata["lod_instance_reuse"])
+        level_material_merge.append(policy_metadata["lod_material_merge"])
+        level_texture_bake.append(policy_metadata["lod_texture_bake"])
+        level_culling_granularity.append(policy_metadata["lod_culling_granularity"])
+        level_policy_advisory_values.append(policy_metadata["lod_policy_advisory"])
+        if policy_metadata["lod_instance_reuse"] == "preserved":
+            part_reused_instance_levels += 1
+        if policy_metadata["lod_material_merge"] == "merged":
+            part_material_merged_levels += 1
+        if policy_metadata["lod_texture_bake"] == "baked":
+            part_texture_baked_levels += 1
+        if policy_metadata["lod_culling_granularity"] != "part":
+            part_culling_changed_levels += 1
+        if options.drop_tiny_parts and diagonal * coverage < options.tiny_part_screen_size:
+            lod = _empty_lod(mesh)
+            lod.metadata = {
+                **lod.metadata,
+                "lod_ratio": f"{ratio:.9g}",
+                "lod_screen_coverage": f"{coverage:.9g}",
+                "lod_omitted": "tiny_part",
+                "lod_simplification_source": simplification_source,
+                **policy_metadata,
+            }
+            lod_meshes.append(lod)
+            previous_count = 0
+            previous_mesh = lod
+            part_omitted_tiny += 1
+            level_simplification_sources.append(simplification_source)
+            continue
+
+        lod = previous_mesh.simplify(target_triangles=_target_lod_triangles(part_source_triangles, ratio))
+        if lod.triangle_count > previous_count:
+            lod = lod.simplify(target_triangles=previous_count)
+        lod.metadata = {
+            **lod.metadata,
+            "lod_ratio": f"{ratio:.9g}",
+            "lod_screen_coverage": f"{coverage:.9g}",
+            "lod_mode": options.mode,
+            "lod_per_part_budget": str(options.per_part_budget).lower(),
+            "lod_simplification_source": simplification_source,
+            **policy_metadata,
+        }
+        lod.validate()
+        previous_count = lod.triangle_count
+        previous_mesh = lod
+        lod_meshes.append(lod)
+        part_lod_vertices += lod.vertex_count
+        part_lod_triangles += lod.triangle_count
+        part_lod_bytes += _mesh_payload_bytes(lod)
+        level_simplification_sources.append(simplification_source)
+
+    level_vertices = ",".join(str(mesh.vertex_count) for mesh in lod_meshes)
+    level_triangles = ",".join(str(mesh.triangle_count) for mesh in lod_meshes)
+    metadata = {
+        **part.metadata,
+        "lod_ratios": ",".join(f"{ratio:.9g}" for ratio in options.ratios),
+        "lod_screen_coverage": ",".join(f"{value:.9g}" for value in screen_coverage),
+        "lod_mode": options.mode,
+        "lod_per_part_budget": str(options.per_part_budget).lower(),
+        "lod_drop_tiny_parts": str(options.drop_tiny_parts).lower(),
+        "lod_occurrences": str(part_occurrences),
+        "lod_source_vertices": str(part_source_vertices),
+        "lod_source_triangles": str(part_source_triangles),
+        "lod_source_mesh_bytes": str(part_source_bytes),
+        "lod_added_vertices": str(part_lod_vertices),
+        "lod_added_triangles": str(part_lod_triangles),
+        "lod_added_mesh_bytes": str(part_lod_bytes),
+        "lod_chain_vertices": str(part_source_vertices + part_lod_vertices),
+        "lod_chain_triangles": str(part_source_triangles + part_lod_triangles),
+        "lod_chain_mesh_bytes": str(part_source_bytes + part_lod_bytes),
+        "lod_level_vertices": level_vertices,
+        "lod_level_triangles": level_triangles,
+        "lod_omitted_tiny_part_meshes": str(part_omitted_tiny),
+        "lod_triangle_multiplier": _ratio_text(part_source_triangles + part_lod_triangles, part_source_triangles),
+        "lod_mesh_byte_multiplier": _ratio_text(part_source_bytes + part_lod_bytes, part_source_bytes),
+        "lod_level_instance_reuse": ",".join(level_instance_reuse),
+        "lod_level_material_merge": ",".join(level_material_merge),
+        "lod_level_texture_bake": ",".join(level_texture_bake),
+        "lod_level_culling_granularity": ",".join(level_culling_granularity),
+        "lod_level_policy_advisory": ",".join(level_policy_advisory_values),
+        "lod_level_simplification_source": ",".join(level_simplification_sources),
+        "lod_reused_instance_levels": str(part_reused_instance_levels),
+        "lod_material_merged_levels": str(part_material_merged_levels),
+        "lod_texture_baked_levels": str(part_texture_baked_levels),
+        "lod_culling_changed_levels": str(part_culling_changed_levels),
+    }
+    return _LodPartResult(
+        part_id=part.id,
+        lod_meshes=lod_meshes,
+        metadata=metadata,
+        generated=True,
+        source_vertices=part_source_vertices,
+        source_triangles=part_source_triangles,
+        source_mesh_bytes=part_source_bytes,
+        added_vertices=part_lod_vertices,
+        added_triangles=part_lod_triangles,
+        added_mesh_bytes=part_lod_bytes,
+        omitted_tiny_parts=part_omitted_tiny,
+        reused_instance_levels=part_reused_instance_levels,
+        material_merged_levels=part_material_merged_levels,
+        texture_baked_levels=part_texture_baked_levels,
+        culling_changed_levels=part_culling_changed_levels,
+    )
 
 
 def _occurrence_counts_by_part(asset: Asset) -> dict[str, int]:
