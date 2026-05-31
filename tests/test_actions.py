@@ -293,7 +293,9 @@ def test_bake_materials_merges_selected_material_slots() -> None:
         },
     )
 
-    baked = asset.bake_materials(BakeMaterialOptions(force_uv_generation=True, bake=("base_color", "opacity")))
+    baked = asset.bake_materials(
+        BakeMaterialOptions(maps_resolution=64, force_uv_generation=True, bake=("base_color", "opacity"))
+    )
     part = baked.parts["panel"]
 
     assert baked.material_count == 1
@@ -304,10 +306,15 @@ def test_bake_materials_merges_selected_material_slots() -> None:
     assert (
         baked.materials["baked_material"].metadata["baked_texture_base_color_uri"].startswith("data:image/png;base64,")
     )
-    assert baked.materials["baked_material"].metadata["baked_texture_resolution"] == "2048"
+    assert baked.materials["baked_material"].metadata["baked_texture_base_color_image"] == "baked_base_color"
+    assert baked.materials["baked_material"].metadata["baked_texture_kind"] == "raster_atlas"
+    assert baked.materials["baked_material"].metadata["baked_texture_resolution"] == "64"
+    assert baked.images["baked_base_color"].width == 64
+    assert baked.images["baked_base_color"].height == 64
+    assert baked.metadata["baked_image_count"] == "1"
     assert baked.report.steps[-1].before["draw_calls"] == 2
     assert baked.report.steps[-1].after["draw_calls"] == 1
-    assert "constant embedded texture maps" in baked.report.steps[-1].warnings[0]
+    assert baked.report.steps[-1].warnings == []
 
 
 def test_decimate_uses_selection_budget() -> None:
@@ -490,27 +497,30 @@ def test_quality_decimate_records_measured_error_metrics() -> None:
     part = decimated.parts["body"]
     target_strategy = decimated.report.steps[-1].options["target_strategy"]
     assert target_strategy["kind"] == "quality_error"
-    assert target_strategy["source"] == "quality_tolerance_heuristic"
-    assert target_strategy["workflow"] == "fascat_quality_error_approximation"
+    assert target_strategy["source"] == "meshoptimizer_target_error"
+    assert target_strategy["workflow"] == "meshoptimizer_error_bounded_simplification"
     assert target_strategy["surface_tolerance"] == 0.25
     assert target_strategy["line_tolerance"] == 0.1
     assert target_strategy["uv_tolerance"] == 0.05
-    assert target_strategy["quality_mapping"] == "tolerance_to_ratio_heuristic"
-    assert target_strategy["quality_bound_status"] == "measured_not_enforced"
-    assert target_strategy["quality_bound_enforced"] is False
+    assert target_strategy["quality_error_bound"] == 0.25
+    assert target_strategy["quality_bound_status"] == "enforced"
+    assert target_strategy["quality_bound_enforced"] is True
     assert part.metadata["decimate_criterion"] == "quality"
     assert part.metadata["decimate_target_strategy"] == "quality_error"
-    assert part.metadata["decimate_target_strategy_source"] == "quality_tolerance_heuristic"
-    assert part.metadata["decimate_effective_keep_ratio"] == "0.75"
-    assert part.metadata["decimate_quality_mapping"] == "tolerance_to_ratio_heuristic"
+    assert part.metadata["decimate_target_strategy_source"] == "meshoptimizer_target_error"
+    assert part.metadata["decimate_target_strategy_workflow"] == "meshoptimizer_error_bounded_simplification"
+    assert part.metadata["decimate_quality_bound_status"] == "enforced"
+    assert part.metadata["decimate_quality_bound_enforced"] == "true"
+    assert part.metadata["decimate_quality_error_bound"] == "0.25"
     assert part.metadata["decimate_source_triangles"] == "8"
-    assert int(part.metadata["decimate_output_triangles"]) < 8
-    assert float(part.metadata["decimate_triangle_reduction"]) > 0.0
+    assert int(part.metadata["decimate_output_triangles"]) <= 8
+    assert float(part.metadata["decimate_triangle_reduction"]) >= 0.0
     assert decimated.metadata["decimate_budget_allocation"] == "per_part"
     assert decimated.metadata["decimate_target_strategy"] == "quality_error"
-    assert decimated.metadata["decimate_effective_keep_ratio"] == "0.75"
-    assert decimated.metadata["decimate_quality_bound_status"] == "measured_not_enforced"
-    assert "measured vertex error" in decimated.report.steps[-1].warnings[0]
+    assert decimated.metadata["decimate_quality_bound_status"] == "enforced"
+    assert decimated.metadata["decimate_quality_bound_enforced"] == "true"
+    assert decimated.metadata["decimate_quality_error_bound"] == "0.25"
+    assert decimated.report.steps[-1].warnings == []
 
 
 def test_decimate_uv_importance_controls_texture_coordinate_cleanup() -> None:
@@ -984,7 +994,7 @@ def test_cli_convert_accepts_optimization_action_options_during_dry_run() -> Non
     assert payload["lod_per_part_budget"] is True
     assert payload["lod_drop_tiny_parts"] is True
     diagnostics = {item["operation"]: item for item in payload["operation_diagnostics"]}
-    assert diagnostics["bake_materials"]["level"] == "approximate"
+    assert diagnostics["bake_materials"]["level"] == "exact"
     assert diagnostics["remove_holes"]["level"] == "approximate"
     assert diagnostics["remove_occluded"]["level"] == "approximate"
     assert diagnostics["decimate"]["level"] == "exact"

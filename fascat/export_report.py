@@ -16,6 +16,14 @@ _TEXTURE_URI_METADATA_KEYS = (
     "baked_texture_occlusion_uri",
     "baked_texture_emissive_uri",
 )
+_TEXTURE_IMAGE_METADATA_KEYS = (
+    "baked_texture_base_color_image",
+    "baked_texture_metallic_roughness_image",
+    "baked_texture_normal_image",
+    "baked_texture_occlusion_image",
+    "baked_texture_emissive_image",
+)
+_TEXTURE_METADATA_KEY_PAIRS = tuple(zip(_TEXTURE_IMAGE_METADATA_KEYS, _TEXTURE_URI_METADATA_KEYS, strict=True))
 
 
 def stats_with_file_size(
@@ -64,17 +72,17 @@ def export_material_counts(asset: Any) -> dict[str, int]:
 
 
 def export_image_counts(asset: Any) -> dict[str, int]:
-    source_uris = _texture_data_uris(asset.materials.values())
-    referenced_uris = _texture_data_uris(referenced_materials(asset).values())
-    source_unique = set(source_uris)
-    referenced_unique = set(referenced_uris)
+    source_refs = _texture_refs(asset, asset.materials.values())
+    referenced_refs = _texture_refs(asset, referenced_materials(asset).values())
+    source_unique = _source_image_ids(asset) | set(source_refs)
+    referenced_unique = set(referenced_refs)
     return {
-        "export_source_image_count": len(source_unique),
-        "export_source_image_reference_count": len(source_uris),
+        "export_source_image_count": len(_source_image_ids(asset) | source_unique),
+        "export_source_image_reference_count": len(source_refs),
         "export_referenced_image_count": len(referenced_unique),
-        "export_referenced_image_reference_count": len(referenced_uris),
+        "export_referenced_image_reference_count": len(referenced_refs),
         "export_unused_image_count": len(source_unique - referenced_unique),
-        "export_duplicate_image_reference_count": max(0, len(referenced_uris) - len(referenced_unique)),
+        "export_duplicate_image_reference_count": max(0, len(referenced_refs) - len(referenced_unique)),
         "export_written_image_count": len(referenced_unique),
     }
 
@@ -128,17 +136,35 @@ def _mesh_payload_bytes(mesh: Mesh) -> int:
 
 
 def _texture_bytes(asset: Any) -> int:
-    return sum(_data_uri_payload_bytes(uri) for uri in set(_texture_data_uris(referenced_materials(asset).values())))
+    return sum(
+        _texture_ref_payload_bytes(asset, ref)
+        for ref in set(_texture_refs(asset, referenced_materials(asset).values()))
+    )
 
 
-def _texture_data_uris(materials: Iterable[Any]) -> list[str]:
-    uris: list[str] = []
+def _texture_refs(asset: Any, materials: Iterable[Any]) -> list[str]:
+    refs: list[str] = []
     for material in materials:
-        for key in _TEXTURE_URI_METADATA_KEYS:
-            value = material.metadata.get(key)
-            if isinstance(value, str) and value.startswith("data:image/"):
-                uris.append(value)
-    return uris
+        for image_key, uri_key in _TEXTURE_METADATA_KEY_PAIRS:
+            value = material.metadata.get(image_key)
+            if isinstance(value, str) and value in getattr(asset, "images", {}):
+                refs.append(f"image:{value}")
+                continue
+            uri = material.metadata.get(uri_key)
+            if isinstance(uri, str) and uri.startswith("data:image/"):
+                refs.append(f"uri:{uri}")
+    return refs
+
+
+def _source_image_ids(asset: Any) -> set[str]:
+    return {f"image:{image_id}" for image_id in getattr(asset, "images", {})}
+
+
+def _texture_ref_payload_bytes(asset: Any, ref: str) -> int:
+    if ref.startswith("image:"):
+        image = getattr(asset, "images", {}).get(ref.removeprefix("image:"))
+        return 0 if image is None else len(image.data)
+    return _data_uri_payload_bytes(ref.removeprefix("uri:"))
 
 
 def _data_uri_payload_bytes(value: str) -> int:
@@ -201,4 +227,5 @@ def _metadata_bytes(asset: Any) -> int:
 
 
 def _export_metadata(metadata: dict[str, object]) -> dict[str, object]:
-    return {key: value for key, value in metadata.items() if key not in _TEXTURE_URI_METADATA_KEYS}
+    hidden = {*_TEXTURE_URI_METADATA_KEYS, *_TEXTURE_IMAGE_METADATA_KEYS}
+    return {key: value for key, value in metadata.items() if key not in hidden}

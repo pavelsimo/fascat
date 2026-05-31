@@ -28,6 +28,7 @@ dependencies = [
     "fast-simplification>=0.1",
     "meshoptimizer>=0.2.30a0,<0.3",
     "numpy>=1.24",
+    "pillow>=10.0",
     "trimesh>=4.0",
     "typer>=0.15",
     "typing-extensions>=4.8",

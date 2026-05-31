@@ -8,6 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from fascat.export_report import stats_with_file_size as _stats_with_file_size
+from fascat.image import ImageResource
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.metadata import Metadata, PmiAnnotation
@@ -191,6 +192,7 @@ class Asset:
     root: Node
     parts: dict[str, Part] = field(default_factory=dict)
     materials: dict[str, Material] = field(default_factory=dict)
+    images: dict[str, ImageResource] = field(default_factory=dict)
     units: str = "millimetre"
     meters_per_unit: float = 0.001
     up_axis: Literal["Y", "Z"] = "Z"
@@ -203,6 +205,7 @@ class Asset:
         self.root = self.root.copy()
         self.parts = {part_id: part.copy(keep_source=True) for part_id, part in self.parts.items()}
         self.materials = {material_id: material.copy() for material_id, material in self.materials.items()}
+        self.images = {image_id: image.copy() for image_id, image in self.images.items()}
         self.metadata = dict(self.metadata)
         self.pmi = [annotation for annotation in self.pmi]
         self.report = self.report.copy()
@@ -214,6 +217,7 @@ class Asset:
         root: Node,
         parts: dict[str, Part],
         materials: dict[str, Material],
+        images: dict[str, ImageResource],
         units: str,
         meters_per_unit: float,
         up_axis: Literal["Y", "Z"],
@@ -226,6 +230,7 @@ class Asset:
         asset.root = root
         asset.parts = parts
         asset.materials = materials
+        asset.images = images
         asset.units = units
         asset.meters_per_unit = meters_per_unit
         asset.up_axis = up_axis
@@ -309,6 +314,7 @@ class Asset:
             root=self.root.copy(),
             parts={part_id: part.copy(keep_source=keep_source) for part_id, part in self.parts.items()},
             materials={material_id: material.copy() for material_id, material in self.materials.items()},
+            images={image_id: image.copy() for image_id, image in self.images.items()},
             units=self.units,
             meters_per_unit=self.meters_per_unit,
             up_axis=self.up_axis,
@@ -334,6 +340,7 @@ class Asset:
             "parts": len(self.parts),
             "occurrences": sum(1 for node in nodes if node.part_id is not None),
             "materials": len(self.materials),
+            "images": len(self.images),
             "vertices": sum(part.mesh.vertex_count for part in mesh_parts if part.mesh is not None),
             "triangles": sum(part.mesh.triangle_count for part in mesh_parts if part.mesh is not None),
         }
@@ -974,6 +981,7 @@ class Asset:
             "root": self.root.to_dict(),
             "parts": {part_id: part.to_dict() for part_id, part in self.parts.items()},
             "materials": {material_id: material.to_dict() for material_id, material in self.materials.items()},
+            "images": {image_id: image.to_dict() for image_id, image in self.images.items()},
             "metadata": dict(self.metadata),
             "pmi": [annotation.to_dict() for annotation in self.pmi],
             "report": self.report.to_dict(),
@@ -1457,6 +1465,11 @@ def _stage_report_stats(asset: Asset) -> dict[str, int]:
     if "stage_bake_uv_channels_missing_repack" in asset.metadata:
         stats["stage_bake_uv_channels_missing_repack"] = _metadata_int(
             asset.metadata["stage_bake_uv_channels_missing_repack"],
+            0,
+        )
+    if "stage_bake_uv_channels_repacked" in asset.metadata:
+        stats["stage_bake_uv_channels_repacked"] = _metadata_int(
+            asset.metadata["stage_bake_uv_channels_repacked"],
             0,
         )
     if "stage_uv_policy_intent_channels" in asset.metadata:

@@ -980,7 +980,7 @@ def cmd_convert(
     ] = 0.0,
     bake_materials: Annotated[
         bool,
-        typer.Option("--bake-materials", help="Create a shared baked material with constant embedded textures."),
+        typer.Option("--bake-materials", help="Create a shared baked material with raster atlas textures."),
     ] = False,
     maps_resolution: Annotated[
         int,
@@ -1173,17 +1173,17 @@ def cmd_convert(
     ] = False,
     draco: Annotated[
         bool,
-        typer.Option("--draco", help="Unsupported until a Draco encoder backend is integrated."),
+        typer.Option("--draco", help="Compress glTF geometry with KHR_draco_mesh_compression."),
     ] = False,
     texture_compression: Annotated[
         str | None,
-        typer.Option("--texture-compression", help="Unsupported until a KTX2/Basis encoder backend is integrated."),
+        typer.Option("--texture-compression", help="Compress glTF textures with KTX2/Basis: ktx2 or basisu."),
     ] = None,
     texture_fallback_format: Annotated[
         str,
         typer.Option(
             "--texture-fallback-format",
-            help="Fallback texture format while KTX2/Basis output is unavailable: auto, png, or jpeg.",
+            help="Fallback texture format when KTX2/Basis compression is not requested: auto, png, or jpeg.",
         ),
     ] = "auto",
     png_compression: Annotated[
@@ -1550,13 +1550,6 @@ def cmd_convert(
         _fail(ctx, payload, "--jobs must be greater than or equal to 1.", code=2)
     if texture_compression not in {None, "ktx2", "basisu"}:
         _fail(ctx, payload, "--texture-compression must be one of: ktx2, basisu.", code=2)
-    if texture_compression is not None:
-        _fail(
-            ctx,
-            payload,
-            "--texture-compression is not supported because no KTX2/Basis encoder backend is integrated.",
-            code=2,
-        )
     texture_fallback_format = texture_fallback_format.replace("-", "_")
     payload["texture_fallback_format"] = texture_fallback_format
     if texture_fallback_format not in {"auto", "png", "jpeg"}:
@@ -1565,8 +1558,6 @@ def cmd_convert(
         _fail(ctx, payload, "--png-compression must be between 0 and 9.", code=2)
     if jpeg_quality < 0 or jpeg_quality > 100:
         _fail(ctx, payload, "--jpeg-quality must be between 0 and 100.", code=2)
-    if draco:
-        _fail(ctx, payload, "--draco is not supported because no Draco encoder backend is integrated.", code=2)
     if file_size_budget_mb is not None and file_size_budget_mb <= 0.0:
         _fail(ctx, payload, "--file-size-budget-mb must be greater than 0.", code=2)
     if package == UsdPackage.USDZ and not _is_stdio(output_path) and output_path.suffix.lower() != ".usdz":
@@ -2227,8 +2218,8 @@ def _convert_operation_diagnostics(payload: dict[str, Any]) -> list[dict[str, st
     if payload["bake_materials"]:
         add(
             "bake_materials",
-            "approximate",
-            "material baking emits constant embedded texture maps from material factors, not rasterized source textures",
+            "exact",
+            "material baking rasterizes selected material maps into first-class atlas images",
         )
     if payload["remove_holes"]:
         add(
@@ -2246,8 +2237,8 @@ def _convert_operation_diagnostics(payload: dict[str, Any]) -> list[dict[str, st
         if payload["decimate_criterion"] == "quality":
             add(
                 "decimate",
-                "approximate",
-                "quality decimation maps tolerances to a target ratio and reports measured vertex error; bounds are not enforced",
+                "exact",
+                "quality decimation passes tolerance-derived target error bounds to the simplification backend",
             )
         else:
             add("decimate", "exact", "target decimation applies the requested triangle budget or ratio")

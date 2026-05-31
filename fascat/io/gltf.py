@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import base64
 import json
+import shutil
 import struct
+import subprocess
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,6 +16,7 @@ from numpy.typing import NDArray
 
 from fascat.asset import Asset, Node, Part
 from fascat.export_report import referenced_materials
+from fascat.image import ImageResource
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.metadata import pmi_ids_by_part
@@ -49,10 +53,15 @@ _RUNTIME_MATRIX_EXTENSIONS = (
     _FASCAT_EXTRAS,
 )
 _BAKED_TEXTURE_METADATA_KEYS = (
+    "baked_texture_base_color_image",
     "baked_texture_base_color_uri",
+    "baked_texture_metallic_roughness_image",
     "baked_texture_metallic_roughness_uri",
+    "baked_texture_normal_image",
     "baked_texture_normal_uri",
+    "baked_texture_occlusion_image",
     "baked_texture_occlusion_uri",
+    "baked_texture_emissive_image",
     "baked_texture_emissive_uri",
 )
 
@@ -85,8 +94,8 @@ _RUNTIME_TARGETS = {
             _KHR_MESH_QUANTIZATION: "loader must support quantized accessors when this required extension is emitted",
             _EXT_MESHOPT_COMPRESSION: "optional; decoder support enables compressed bufferView payloads",
             _MSFT_LOD: "optional handoff metadata; map to engine LOD groups during import if the loader ignores it",
-            _KHR_DRACO_MESH_COMPRESSION: "future encoder output must be matched with a Draco-capable loader",
-            _KHR_TEXTURE_BASISU: "future KTX2/Basis output must be matched with a texture-transcoding loader",
+            _KHR_DRACO_MESH_COMPRESSION: "Draco output must be matched with a Draco-capable loader",
+            _KHR_TEXTURE_BASISU: "KTX2/Basis output must be matched with a texture-transcoding loader",
             _FASCAT_EXTRAS: "safe metadata channel for custom Unity import scripts",
         },
     ),
@@ -100,8 +109,8 @@ _RUNTIME_TARGETS = {
             _KHR_MESH_QUANTIZATION: "requires a quantization-capable glTF loader",
             _EXT_MESHOPT_COMPRESSION: "optional; fallback buffer data remains available to generic loaders",
             _MSFT_LOD: "optional; app code may need to interpret LOD metadata",
-            _KHR_DRACO_MESH_COMPRESSION: "future encoder output must be paired with a Draco decoder",
-            _KHR_TEXTURE_BASISU: "future texture output should use KTX2/Basis with PNG/JPEG fallbacks when needed",
+            _KHR_DRACO_MESH_COMPRESSION: "Draco output must be paired with a Draco decoder",
+            _KHR_TEXTURE_BASISU: "KTX2/Basis texture output should be kept with PNG/JPEG fallbacks when needed",
             _FASCAT_EXTRAS: "generic web loaders may ignore Fascat extras",
         },
     ),
@@ -115,8 +124,8 @@ _RUNTIME_TARGETS = {
             _KHR_MESH_QUANTIZATION: "use when loader support and precision loss are validated on target devices",
             _EXT_MESHOPT_COMPRESSION: "optional; fallback buffers trade larger files for broader compatibility",
             _MSFT_LOD: "optional; app or engine integration should author native runtime LOD groups",
-            _KHR_DRACO_MESH_COMPRESSION: "future encoder output must account for mobile decode cost",
-            _KHR_TEXTURE_BASISU: "future KTX2/Basis output should honor mobile texture budget presets",
+            _KHR_DRACO_MESH_COMPRESSION: "Draco output must account for mobile decode cost",
+            _KHR_TEXTURE_BASISU: "KTX2/Basis output should honor mobile texture budget presets",
             _FASCAT_EXTRAS: "safe to preserve for diagnostics; ignored by normal rendering paths",
         },
     ),
@@ -130,8 +139,8 @@ _RUNTIME_TARGETS = {
             _KHR_MESH_QUANTIZATION: "requires loader support and visual validation for close-view CAD edges",
             _EXT_MESHOPT_COMPRESSION: "optional; fallback buffers avoid hard dependency on decoder setup",
             _MSFT_LOD: "optional; convert to engine-native LOD groups for reliable runtime switching",
-            _KHR_DRACO_MESH_COMPRESSION: "future encoder output must be tested for headset decode latency",
-            _KHR_TEXTURE_BASISU: "future KTX2/Basis output should be profiled against XR texture-memory budgets",
+            _KHR_DRACO_MESH_COMPRESSION: "Draco output must be tested for headset decode latency",
+            _KHR_TEXTURE_BASISU: "KTX2/Basis output should be profiled against XR texture-memory budgets",
             _FASCAT_EXTRAS: "metadata can drive custom XR import or validation tools",
         },
     ),
@@ -172,6 +181,9 @@ def _write_gltf(
     if opts.meshopt:
         binary = _apply_meshopt_compression(document, binary)
     validation_stats = validate_gltf_document(document, binary) if validate else None
+    if opts.draco or opts.texture_compression is not None:
+        _write_gltf_with_external_compression(document, binary, output_path, opts)
+        return validation_stats
     if suffix == ".gltf":
         _embed_binary_uri(document, binary)
     if suffix == ".glb":
@@ -189,6 +201,7 @@ def runtime_dependency_report(asset: Asset, options: GltfExportOptions | None = 
         _FASCAT_EXTRAS: "optional glTF extras; generic loaders may ignore Fascat metadata",
     }
     has_meshes = _has_exportable_meshes(asset)
+    has_textures = _has_exportable_textures(asset)
     if has_meshes and opts.quantize:
         extensions_used.append(_KHR_MESH_QUANTIZATION)
         extensions_required.append(_KHR_MESH_QUANTIZATION)
@@ -198,6 +211,14 @@ def runtime_dependency_report(asset: Asset, options: GltfExportOptions | None = 
         expected_support[_EXT_MESHOPT_COMPRESSION] = (
             "optional extension with fallback buffer data; decoder support enables compressed payload use"
         )
+    if has_meshes and opts.draco:
+        extensions_used.append(_KHR_DRACO_MESH_COMPRESSION)
+        extensions_required.append(_KHR_DRACO_MESH_COMPRESSION)
+        expected_support[_KHR_DRACO_MESH_COMPRESSION] = "required extension; runtime loader must support Draco decoding"
+    if has_textures and opts.texture_compression is not None:
+        extensions_used.append(_KHR_TEXTURE_BASISU)
+        extensions_required.append(_KHR_TEXTURE_BASISU)
+        expected_support[_KHR_TEXTURE_BASISU] = "required texture extension; runtime loader must support KTX2/Basis"
     if _has_exportable_lods(asset):
         extensions_used.append(_MSFT_LOD)
         expected_support[_MSFT_LOD] = "optional extension; runtimes without support can load LOD0 only"
@@ -219,11 +240,22 @@ def runtime_dependency_report(asset: Asset, options: GltfExportOptions | None = 
             opts,
             extensions_used=extensions_used,
         ),
-        "not_written": {
-            _KHR_DRACO_MESH_COMPRESSION: "unsupported; draco=True is rejected before export",
-            _KHR_TEXTURE_BASISU: "unsupported; texture_compression is rejected before export",
-        },
+        "not_written": _not_written_extensions(opts, has_meshes=has_meshes, has_textures=has_textures),
     }
+
+
+def _not_written_extensions(
+    options: GltfExportOptions,
+    *,
+    has_meshes: bool,
+    has_textures: bool,
+) -> dict[str, str]:
+    missing: dict[str, str] = {}
+    if not (has_meshes and options.draco):
+        missing[_KHR_DRACO_MESH_COMPRESSION] = "not requested or no mesh payload"
+    if not (has_textures and options.texture_compression is not None):
+        missing[_KHR_TEXTURE_BASISU] = "not requested or no texture payload"
+    return missing
 
 
 def _runtime_compatibility_matrix(
@@ -276,7 +308,7 @@ def _runtime_extension_fallback(extension: str) -> str:
     if extension == _MSFT_LOD:
         return "LOD0 remains loadable when the runtime ignores MSFT_lod"
     if extension in {_KHR_DRACO_MESH_COMPRESSION, _KHR_TEXTURE_BASISU}:
-        return "not written by Fascat yet; requests are rejected before export"
+        return "requires a runtime decoder/transcoder when emitted"
     return "generic loaders may ignore Fascat extras without breaking geometry"
 
 
@@ -316,31 +348,47 @@ def _runtime_decision_matrix(
                 "best_for": "web and mobile delivery where fast decode and broad fallback compatibility matter",
                 "tradeoff": "fallback buffer data increases written file size but keeps generic loaders usable",
                 "recommendation": (
-                    "prefer meshopt over future Draco when decode speed and fallback compatibility matter"
+                    "prefer meshopt over Draco when decode speed and fallback compatibility matter"
                     if not options.meshopt
                     else "keep fallback validation enabled for runtimes that ignore meshopt payloads"
                 ),
             },
             "draco": {
                 "extension": _KHR_DRACO_MESH_COMPRESSION,
-                "state": "unsupported",
+                "state": _method_state(
+                    enabled=options.draco and has_meshes,
+                    available=has_meshes,
+                    enabled_state="enabled_required",
+                ),
                 "best_for": "smallest geometry payloads when a Draco-capable loader and decode budget are proven",
                 "tradeoff": "requires decoder setup and can add noticeable startup/decode cost on mobile or XR",
-                "recommendation": "not selectable until Fascat integrates a reliable Draco encoder backend",
+                "recommendation": (
+                    "validate Draco decode cost in the target runtime"
+                    if options.draco
+                    else "use when smallest geometry downloads matter more than decode speed"
+                ),
             },
         },
         "textures": {
             "ktx2_basisu": {
                 "extension": _KHR_TEXTURE_BASISU,
-                "state": "unsupported",
-                "best_for": "GPU texture delivery on web, mobile, and XR after real image assets exist",
+                "state": _method_state(
+                    enabled=options.texture_compression is not None and has_textures,
+                    available=has_textures,
+                    enabled_state="enabled_required",
+                ),
+                "best_for": "GPU texture delivery on web, mobile, and XR when referenced images are present",
                 "tradeoff": "requires texture transcoding support and target-specific quality settings",
-                "recommendation": "not selectable until Fascat has a first-class image graph and KTX2/Basis encoder",
+                "recommendation": (
+                    "profile KTX2/Basis transcode quality and memory on target devices"
+                    if options.texture_compression is not None
+                    else "enable when GPU-native texture delivery is more important than broad fallback simplicity"
+                ),
             },
             "png_jpeg_fallbacks": {
                 "extension": None,
                 "state": "source_textures_present" if has_textures else "no_texture_payload",
-                "best_for": "broad compatibility when KTX2/Basis is unavailable or unsupported by the runtime",
+                "best_for": "broad compatibility when KTX2/Basis is not requested or unsupported by the runtime",
                 "tradeoff": "larger downloads and texture memory than GPU-native compressed textures",
                 "fallback_format": options.texture_fallback_format,
                 "resolved_format": fallback_policy["resolved_format"],
@@ -360,21 +408,21 @@ def _runtime_decision_matrix(
             "unity_gltfast": {
                 "preferred_container": "glb",
                 "geometry": "use quantization or meshopt only after confirming installed glTFast extension support",
-                "textures": "prefer KTX2/Basis later, with PNG/JPEG fallbacks for unsupported projects",
+                "textures": "prefer KTX2/Basis with PNG/JPEG fallbacks for unsupported projects",
             },
             "web": {
                 "preferred_container": "glb",
                 "geometry": "prefer meshopt for fast browser decode; use Draco only when smallest download matters more",
-                "textures": "prefer KTX2/Basis later, while keeping PNG/JPEG fallbacks for loader coverage",
+                "textures": "prefer KTX2/Basis while keeping PNG/JPEG fallbacks for loader coverage",
             },
             "mobile": {
                 "preferred_container": "glb",
-                "geometry": "prefer meshopt or quantization after device tests; treat future Draco decode cost carefully",
-                "textures": "use KTX2/Basis later with profile texture limits and PNG/JPEG fallbacks as needed",
+                "geometry": "prefer meshopt or quantization after device tests; treat Draco decode cost carefully",
+                "textures": "use KTX2/Basis with profile texture limits and PNG/JPEG fallbacks as needed",
             },
             "xr": {
                 "preferred_container": "glb",
-                "geometry": "prefer predictable meshopt/quantization paths over decode-heavy future Draco payloads",
+                "geometry": "prefer predictable meshopt/quantization paths over decode-heavy Draco payloads",
                 "textures": "profile KTX2/Basis transcoding and memory before removing PNG/JPEG fallbacks",
             },
         },
@@ -607,6 +655,7 @@ def _build_document(
     material_indices = _write_materials(
         referenced_materials(asset),
         metadata_options,
+        asset.images,
         images,
         textures,
         texture_indices_by_uri,
@@ -693,6 +742,7 @@ def _build_document(
 def _write_materials(
     materials: dict[str, Material],
     metadata_options: MetadataExportOptions,
+    image_resources: dict[str, ImageResource],
     images: list[dict[str, object]],
     textures: list[dict[str, object]],
     texture_indices_by_uri: dict[str, int],
@@ -710,7 +760,7 @@ def _write_materials(
             },
             "extras": {"fascat": fascat_extras},
         }
-        _add_baked_textures(gltf_material, material, images, textures, texture_indices_by_uri)
+        _add_baked_textures(gltf_material, material, image_resources, images, textures, texture_indices_by_uri)
         if material.opacity < 1.0 or material.base_color[3] < 1.0:
             gltf_material["alphaMode"] = "BLEND"
         gltf_material["_fascat_index"] = index
@@ -721,12 +771,18 @@ def _write_materials(
 def _add_baked_textures(
     gltf_material: dict[str, Any],
     material: Material,
+    image_resources: dict[str, ImageResource],
     images: list[dict[str, object]],
     textures: list[dict[str, object]],
     texture_indices_by_uri: dict[str, int],
 ) -> None:
     pbr = cast(dict[str, Any], gltf_material["pbrMetallicRoughness"])
-    base_color_uri = _metadata_uri(material, "baked_texture_base_color_uri")
+    base_color_uri = _metadata_image_uri(
+        material,
+        "baked_texture_base_color_image",
+        "baked_texture_base_color_uri",
+        image_resources,
+    )
     if base_color_uri is not None:
         pbr["baseColorTexture"] = {
             "index": _append_image_texture(
@@ -737,7 +793,12 @@ def _add_baked_textures(
                 base_color_uri,
             )
         }
-    metallic_roughness_uri = _metadata_uri(material, "baked_texture_metallic_roughness_uri")
+    metallic_roughness_uri = _metadata_image_uri(
+        material,
+        "baked_texture_metallic_roughness_image",
+        "baked_texture_metallic_roughness_uri",
+        image_resources,
+    )
     if metallic_roughness_uri is not None:
         pbr["metallicRoughnessTexture"] = {
             "index": _append_image_texture(
@@ -748,7 +809,9 @@ def _add_baked_textures(
                 metallic_roughness_uri,
             )
         }
-    normal_uri = _metadata_uri(material, "baked_texture_normal_uri")
+    normal_uri = _metadata_image_uri(
+        material, "baked_texture_normal_image", "baked_texture_normal_uri", image_resources
+    )
     if normal_uri is not None:
         gltf_material["normalTexture"] = {
             "index": _append_image_texture(
@@ -759,7 +822,12 @@ def _add_baked_textures(
                 normal_uri,
             )
         }
-    occlusion_uri = _metadata_uri(material, "baked_texture_occlusion_uri")
+    occlusion_uri = _metadata_image_uri(
+        material,
+        "baked_texture_occlusion_image",
+        "baked_texture_occlusion_uri",
+        image_resources,
+    )
     if occlusion_uri is not None:
         gltf_material["occlusionTexture"] = {
             "index": _append_image_texture(
@@ -770,7 +838,12 @@ def _add_baked_textures(
                 occlusion_uri,
             )
         }
-    emissive_uri = _metadata_uri(material, "baked_texture_emissive_uri")
+    emissive_uri = _metadata_image_uri(
+        material,
+        "baked_texture_emissive_image",
+        "baked_texture_emissive_uri",
+        image_resources,
+    )
     if emissive_uri is not None:
         gltf_material["emissiveTexture"] = {
             "index": _append_image_texture(
@@ -800,8 +873,18 @@ def _append_image_texture(
     return texture_index
 
 
-def _metadata_uri(material: Material, key: str) -> str | None:
-    value = material.metadata.get(key)
+def _metadata_image_uri(
+    material: Material,
+    image_key: str,
+    uri_key: str,
+    image_resources: dict[str, ImageResource],
+) -> str | None:
+    image_id = material.metadata.get(image_key)
+    if isinstance(image_id, str):
+        image = image_resources.get(image_id)
+        if image is not None:
+            return image.data_uri()
+    value = material.metadata.get(uri_key)
     return value if isinstance(value, str) and value.startswith("data:image/") else None
 
 
@@ -1027,6 +1110,117 @@ def _apply_export_options(document: dict[str, Any], options: GltfExportOptions) 
         compression["draco"] = True
     if compression:
         fascat_extras["compression"] = compression
+
+
+def _write_gltf_with_external_compression(
+    document: dict[str, Any],
+    binary: BinaryPayload,
+    output_path: Path,
+    options: GltfExportOptions,
+) -> None:
+    with tempfile.TemporaryDirectory(prefix="fascat-gltf-") as directory:
+        workdir = Path(directory)
+        current = workdir / "source.glb"
+        current.write_bytes(_pack_glb(document, binary))
+        if options.draco:
+            draco_output = workdir / "draco.glb"
+            _run_gltf_transform(("draco", str(current), str(draco_output)))
+            current = draco_output
+        if options.texture_compression is not None:
+            texture_output = workdir / "textures.glb"
+            _run_ktx2_transform(current, texture_output, mode=options.texture_compression)
+            current = texture_output
+        if output_path.suffix.lower() == ".glb":
+            shutil.copyfile(current, output_path)
+            return
+        _run_gltf_transform(("copy", str(current), str(output_path)))
+
+
+def _run_gltf_transform(arguments: Sequence[str]) -> None:
+    command = _gltf_transform_command()
+    completed = subprocess.run(
+        [*command, *arguments],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        details = (completed.stderr or completed.stdout).strip()
+        raise RuntimeError(f"glTF Transform {' '.join(arguments[:1])} failed: {details}")
+
+
+def _run_ktx2_transform(input_path: Path, output_path: Path, *, mode: str) -> None:
+    npm = shutil.which("npm")
+    node = shutil.which("node")
+    if npm is None or node is None:
+        raise RuntimeError("KTX2/Basis export requires npm and node to run the ktx2 encoder")
+    with tempfile.TemporaryDirectory(prefix="fascat-ktx2-") as directory:
+        workdir = Path(directory)
+        script = workdir / "encode-ktx2.mjs"
+        script.write_text(_KTX2_TRANSFORM_SCRIPT, encoding="utf-8")
+        install = subprocess.run(
+            [
+                npm,
+                "install",
+                "--silent",
+                "@gltf-transform/core@^4.3.0",
+                "@gltf-transform/extensions@^4.3.0",
+                "ktx2-encoder@^0.5.3",
+                "sharp@^0.34.0",
+            ],
+            cwd=workdir,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if install.returncode != 0:
+            details = (install.stderr or install.stdout).strip()
+            raise RuntimeError(f"KTX2 encoder dependencies failed to install: {details}")
+        completed = subprocess.run(
+            [node, str(script), str(input_path), str(output_path), mode],
+            cwd=workdir,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0:
+            details = (completed.stderr or completed.stdout).strip()
+            raise RuntimeError(f"KTX2/Basis texture compression failed: {details}")
+
+
+_KTX2_TRANSFORM_SCRIPT = """
+import { NodeIO } from '@gltf-transform/core';
+import { KHRTextureBasisu } from '@gltf-transform/extensions';
+import { ktx2 } from 'ktx2-encoder/gltf-transform';
+import sharp from 'sharp';
+
+const [input, output, mode] = process.argv.slice(2);
+const imageDecoder = async (buffer) => {
+  const { data, info } = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  return { width: info.width, height: info.height, data: new Uint8Array(data) };
+};
+const io = new NodeIO().registerExtensions([KHRTextureBasisu]);
+const document = await io.read(input);
+await document.transform(
+  ktx2({
+    isUASTC: mode === 'ktx2',
+    isKTX2File: true,
+    generateMipmap: true,
+    imageDecoder,
+  })
+);
+await io.write(output, document);
+""".strip()
+
+
+def _gltf_transform_command() -> list[str]:
+    local = shutil.which("gltf-transform")
+    if local is not None:
+        return [local]
+    npx = shutil.which("npx")
+    if npx is not None:
+        return [npx, "--yes", "@gltf-transform/cli"]
+    raise RuntimeError("Draco/KTX2 export requires glTF Transform CLI or npx")
 
 
 def _apply_meshopt_compression(document: dict[str, Any], binary: BinaryPayload) -> bytearray:

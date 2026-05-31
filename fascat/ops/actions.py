@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import io as pyio
 import math
 import struct
 import zlib
@@ -10,8 +11,10 @@ from typing import cast
 
 import numpy as np
 from numpy.typing import NDArray
+from PIL import Image
 
 from fascat.asset import Asset, Node, Part
+from fascat.image import ImageResource
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.ops.parallel import parallel_map
@@ -42,13 +45,10 @@ def bake_materials_asset(
     selected_part_ids: set[str] | None = None,
 ) -> Asset:
     result = asset.copy(keep_source=True)
-    part_ids = _selected_mesh_part_ids(result, selected_part_ids)
+    part_ids = sorted(_selected_mesh_part_ids(result, selected_part_ids))
     if not part_ids:
         result.report.add_warning("bake_materials matched no mesh-bearing parts")
         return result
-    result.report.add_warning(
-        "bake_materials emits constant embedded texture maps from material factors; raster texture baking is not implemented"
-    )
 
     source_material_ids = sorted(
         {
@@ -58,8 +58,10 @@ def bake_materials_asset(
             if material_id in result.materials
         }
     )
+    _prepare_bake_atlas(result, part_ids, options)
+    image_ids = _bake_texture_images(result, part_ids, options)
     baked_id = _unique_material_id(result.materials, "baked_material")
-    baked = _baked_material(result, baked_id, source_material_ids, options)
+    baked = _baked_material(result, baked_id, source_material_ids, options, image_ids)
     result.materials[baked.id] = baked
 
     for part_id in part_ids:
@@ -67,8 +69,6 @@ def bake_materials_asset(
         if part.mesh is None:
             continue
         mesh = part.mesh
-        if options.force_uv_generation or options.uv_channel not in mesh.uvs:
-            mesh = mesh.box_uv(options.uv_channel)
         mesh.metadata = {
             **mesh.metadata,
             "baked_material": baked.id,
@@ -90,6 +90,7 @@ def bake_materials_asset(
 
     if options.merge_output:
         _drop_unreferenced_materials(result)
+    result.metadata["baked_image_count"] = str(len(image_ids))
     result.metadata["baked_material_count"] = "1"
     result.metadata["baked_source_material_count"] = str(len(source_material_ids))
     return result
@@ -112,8 +113,6 @@ def decimate_asset(
             selected_part_ids=selected_part_ids,
         )
         _warn_aggressive_lod0_decimation(result, source_meshes, options)
-        if options.criterion == "quality":
-            result.report.add_warning(_quality_decimation_warning())
         _enforce_triangle_budget(result, options, selected_part_ids=selected_part_ids)
         _finalize_decimation_uv_importance(result, options, selected_part_ids=selected_part_ids)
         _annotate_decimation_result(
@@ -129,8 +128,6 @@ def decimate_asset(
     result = working_asset.copy(keep_source=True)
     ratio = _decimate_ratio(options)
     _warn_aggressive_lod0_decimation(result, source_meshes, options)
-    if options.criterion == "quality":
-        result.report.add_warning(_quality_decimation_warning())
     part_ids = _selected_mesh_part_id_list(result, selected_part_ids)
 
     def decimate_part(part_id: str) -> _DecimatedPart:
@@ -493,11 +490,367 @@ def _decimate_part_budget(part: Part, options: DecimateOptions, ratio: float | N
     )
 
 
+def _prepare_bake_atlas(asset: Asset, part_ids: list[str], options: BakeMaterialOptions) -> None:
+    rects = _atlas_rects(part_ids, options)
+    for part_id in part_ids:
+        part = asset.parts[part_id]
+        if part.mesh is None:
+            continue
+        mesh = part.mesh
+        if options.force_uv_generation or options.uv_channel not in mesh.uvs:
+            try:
+                mesh = mesh.unwrap_uv(
+                    options.uv_channel,
+                    padding=options.padding,
+                    resolution=options.maps_resolution,
+                )
+            except RuntimeError:
+                asset.report.add_warning(
+                    f"part {part_id} could not use xatlas for bake UVs; falling back to AABB projection"
+                )
+                mesh = mesh.box_uv(options.uv_channel)
+        else:
+            mesh = mesh.copy()
+        mesh = _pack_mesh_uvs_into_rect(mesh, options.uv_channel, rects[part_id], options)
+        part.mesh = mesh
+        part.fingerprint = mesh.fingerprint()
+
+
+def _atlas_rects(part_ids: list[str], options: BakeMaterialOptions) -> dict[str, tuple[float, float, float, float]]:
+    count = max(1, len(part_ids))
+    columns = int(math.ceil(math.sqrt(count)))
+    rows = int(math.ceil(count / columns))
+    cell_width = 1.0 / columns
+    cell_height = 1.0 / rows
+    margin = min(0.45 * min(cell_width, cell_height), options.padding / max(1.0, float(options.maps_resolution)))
+    rects: dict[str, tuple[float, float, float, float]] = {}
+    for index, part_id in enumerate(part_ids):
+        column = index % columns
+        row = index // columns
+        u0 = column * cell_width + margin
+        v0 = row * cell_height + margin
+        u1 = (column + 1) * cell_width - margin
+        v1 = (row + 1) * cell_height - margin
+        if u1 <= u0:
+            center = (column + 0.5) * cell_width
+            u0 = u1 = center
+        if v1 <= v0:
+            center = (row + 0.5) * cell_height
+            v0 = v1 = center
+        rects[part_id] = (u0, v0, u1, v1)
+    return rects
+
+
+def _pack_mesh_uvs_into_rect(
+    mesh: Mesh,
+    channel: int,
+    rect: tuple[float, float, float, float],
+    options: BakeMaterialOptions,
+) -> Mesh:
+    if channel not in mesh.uvs:
+        return mesh
+    result = mesh.copy()
+    uv = result.uvs[channel]
+    if uv.size:
+        mins = uv.min(axis=0)
+        maxs = uv.max(axis=0)
+        span = maxs - mins
+        span[span == 0.0] = 1.0
+        normalized = (uv - mins) / span
+        u0, v0, u1, v1 = rect
+        result.uvs[channel] = np.column_stack(
+            (
+                u0 + normalized[:, 0] * (u1 - u0),
+                v0 + normalized[:, 1] * (v1 - v0),
+            )
+        ).astype(np.float64)
+    prefix = f"uv{channel}"
+    result.metadata[f"{prefix}_atlas_pack_status"] = "packed"
+    result.metadata[f"{prefix}_atlas_rect"] = ",".join(f"{value:.9g}" for value in rect)
+    result.metadata[f"{prefix}_atlas_padding_pixels"] = str(options.padding)
+    result.metadata[f"{prefix}_atlas_resolution"] = str(options.maps_resolution)
+    result.metadata[f"{prefix}_padding_status"] = "applied" if options.padding else "not_requested"
+    result.tangents = None
+    return result
+
+
+def _bake_texture_images(asset: Asset, part_ids: list[str], options: BakeMaterialOptions) -> dict[str, str]:
+    maps = {str(item) for item in options.bake}
+    image_ids: dict[str, str] = {}
+    requests: list[tuple[str, str]] = []
+    if {"base_color", "opacity"} & maps:
+        requests.append(("base_color", "base_color"))
+    if {"metallic", "roughness"} & maps:
+        requests.append(("metallic_roughness", "metallic_roughness"))
+    if "normal" in maps:
+        requests.append(("normal", "normal"))
+    if "ao" in maps:
+        requests.append(("occlusion", "ao"))
+    if "emissive" in maps:
+        requests.append(("emissive", "emissive"))
+
+    for texture_name, kind in requests:
+        pixels = _raster_bake_map(asset, part_ids, options, kind)
+        data = _png_bytes(pixels)
+        image_id = _unique_image_id(asset.images, f"baked_{texture_name}")
+        asset.images[image_id] = ImageResource(
+            id=image_id,
+            name=f"Baked {texture_name.replace('_', ' ').title()}",
+            mime_type="image/png",
+            data=data,
+            width=options.maps_resolution,
+            height=options.maps_resolution,
+            metadata={
+                "baked": "true",
+                "baked_map": texture_name,
+                "baked_uv_channel": str(options.uv_channel),
+                "baked_padding": str(options.padding),
+            },
+        )
+        image_ids[texture_name] = image_id
+    return image_ids
+
+
+def _raster_bake_map(asset: Asset, part_ids: list[str], options: BakeMaterialOptions, kind: str) -> NDArray[np.uint8]:
+    size = int(options.maps_resolution)
+    pixels = np.empty((size, size, 4), dtype=np.uint8)
+    pixels[:, :] = _default_bake_pixel(kind)
+    filled = np.zeros((size, size), dtype=bool)
+    for part_id in part_ids:
+        part = asset.parts[part_id]
+        mesh = part.mesh
+        if mesh is None or options.uv_channel not in mesh.uvs:
+            continue
+        face_values = _face_bake_values(asset, part, mesh, kind)
+        uv = np.clip(mesh.uvs[options.uv_channel], 0.0, 1.0)
+        for face_index, face in enumerate(mesh.faces.astype(int)):
+            _rasterize_triangle(pixels, filled, uv[face], face_values[face_index])
+    if options.padding:
+        _dilate_padding(pixels, filled, options.padding)
+    return pixels
+
+
+def _default_bake_pixel(kind: str) -> NDArray[np.uint8]:
+    defaults = {
+        "base_color": (255, 255, 255, 0),
+        "metallic_roughness": (255, 128, 0, 255),
+        "normal": (128, 128, 255, 255),
+        "ao": (255, 255, 255, 255),
+        "emissive": (0, 0, 0, 255),
+    }
+    return np.asarray(defaults[kind], dtype=np.uint8)
+
+
+def _face_bake_values(asset: Asset, part: Part, mesh: Mesh, kind: str) -> NDArray[np.uint8]:
+    if kind == "normal":
+        normals = _bake_face_normals(mesh)
+        encoded = np.clip((normals * 0.5 + 0.5) * 255.0, 0, 255).round().astype(np.uint8)
+        alpha = np.full((mesh.triangle_count, 1), 255, dtype=np.uint8)
+        return cast(NDArray[np.uint8], np.hstack((encoded, alpha)))
+    if kind == "ao":
+        ao = _face_ambient_occlusion(mesh)
+        values = np.clip(ao[:, None] * 255.0, 0, 255).round().astype(np.uint8)
+        alpha = np.full((mesh.triangle_count, 1), 255, dtype=np.uint8)
+        return cast(NDArray[np.uint8], np.hstack((np.repeat(values, 3, axis=1), alpha)))
+
+    result = np.empty((mesh.triangle_count, 4), dtype=np.uint8)
+    for face_index in range(mesh.triangle_count):
+        material = _face_material(asset, part, mesh, face_index)
+        if kind == "base_color":
+            color = material.base_color if material is not None else (1.0, 1.0, 1.0, 1.0)
+            opacity = material.opacity if material is not None else color[3]
+            values = (color[0], color[1], color[2], min(color[3], opacity))
+        elif kind == "metallic_roughness":
+            metallic = 0.0 if material is None else material.metallic
+            roughness = 0.5 if material is None else material.roughness
+            values = (1.0, roughness, metallic, 1.0)
+        else:
+            values = _emissive_color(material)
+        result[face_index] = np.asarray([_color_byte(value) for value in values], dtype=np.uint8)
+    return result
+
+
+def _face_material(asset: Asset, part: Part, mesh: Mesh, face_index: int) -> Material | None:
+    if not part.material_ids:
+        return None
+    material_index = 0
+    if mesh.material_indices is not None and face_index < mesh.material_indices.shape[0]:
+        material_index = int(mesh.material_indices[face_index])
+    if material_index < 0 or material_index >= len(part.material_ids):
+        return None
+    return asset.materials.get(part.material_ids[material_index])
+
+
+def _emissive_color(material: Material | None) -> tuple[float, float, float, float]:
+    if material is None:
+        return (0.0, 0.0, 0.0, 1.0)
+    value = material.metadata.get("emissive_color")
+    if isinstance(value, str):
+        pieces = [piece.strip() for piece in value.split(",")]
+        if len(pieces) >= 3:
+            try:
+                return (float(pieces[0]), float(pieces[1]), float(pieces[2]), 1.0)
+            except ValueError:
+                pass
+    return (0.0, 0.0, 0.0, 1.0)
+
+
+def _bake_face_normals(mesh: Mesh) -> FloatArray:
+    if mesh.triangle_count == 0:
+        return np.empty((0, 3), dtype=np.float64)
+    triangles = mesh.points[mesh.faces]
+    normals = np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])
+    lengths = np.linalg.norm(normals, axis=1)
+    valid = lengths > 0.0
+    normals[valid] = normals[valid] / lengths[valid, None]
+    normals[~valid] = np.asarray([0.0, 0.0, 1.0], dtype=np.float64)
+    return normals
+
+
+def _face_ambient_occlusion(mesh: Mesh) -> FloatArray:
+    if mesh.triangle_count == 0:
+        return np.empty(0, dtype=np.float64)
+    triangles = mesh.points[mesh.faces]
+    centroids = triangles.mean(axis=1)
+    normals = _bake_face_normals(mesh)
+    directions = np.asarray(
+        [
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, -1.0],
+            [1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0],
+        ],
+        dtype=np.float64,
+    )
+    mins, maxs = mesh.bounds()
+    ray_length = max(float(np.linalg.norm(maxs - mins)), 1.0) * 2.0
+    epsilon = ray_length * 1e-6
+    values = np.ones(mesh.triangle_count, dtype=np.float64)
+    for face_index, (centroid, normal) in enumerate(zip(centroids, normals, strict=True)):
+        hits = 0
+        tested = 0
+        origin = centroid + normal * epsilon
+        for direction in directions:
+            if float(np.dot(direction, normal)) <= 0.0:
+                continue
+            tested += 1
+            if _ray_hits_mesh(origin, direction, mesh.points, mesh.faces, ignore_face=face_index, max_t=ray_length):
+                hits += 1
+        values[face_index] = 1.0 if tested == 0 else 1.0 - (hits / tested)
+    return values
+
+
+def _ray_hits_mesh(
+    origin: FloatArray,
+    direction: FloatArray,
+    points: FloatArray,
+    faces: IntArray,
+    *,
+    ignore_face: int,
+    max_t: float,
+) -> bool:
+    triangles = points[faces]
+    for face_index, triangle in enumerate(triangles):
+        if face_index == ignore_face:
+            continue
+        hit = _ray_triangle_t(origin, direction, triangle)
+        if hit is not None and 1e-8 < hit < max_t:
+            return True
+    return False
+
+
+def _ray_triangle_t(origin: FloatArray, direction: FloatArray, triangle: FloatArray) -> float | None:
+    edge1 = triangle[1] - triangle[0]
+    edge2 = triangle[2] - triangle[0]
+    h = np.cross(direction, edge2)
+    determinant = float(np.dot(edge1, h))
+    if abs(determinant) <= 1e-12:
+        return None
+    inv_det = 1.0 / determinant
+    s = origin - triangle[0]
+    u = inv_det * float(np.dot(s, h))
+    if u < 0.0 or u > 1.0:
+        return None
+    q = np.cross(s, edge1)
+    v = inv_det * float(np.dot(direction, q))
+    if v < 0.0 or u + v > 1.0:
+        return None
+    t = inv_det * float(np.dot(edge2, q))
+    return t if t > 0.0 else None
+
+
+def _rasterize_triangle(
+    pixels: NDArray[np.uint8],
+    filled: NDArray[np.bool_],
+    triangle_uv: FloatArray,
+    color: NDArray[np.uint8],
+) -> None:
+    size = pixels.shape[0]
+    x = triangle_uv[:, 0] * (size - 1)
+    y = (1.0 - triangle_uv[:, 1]) * (size - 1)
+    min_x = max(0, int(math.floor(float(np.min(x)))))
+    max_x = min(size - 1, int(math.ceil(float(np.max(x)))))
+    min_y = max(0, int(math.floor(float(np.min(y)))))
+    max_y = min(size - 1, int(math.ceil(float(np.max(y)))))
+    if max_x < min_x or max_y < min_y:
+        return
+    p0 = np.asarray([x[0], y[0]], dtype=np.float64)
+    p1 = np.asarray([x[1], y[1]], dtype=np.float64)
+    p2 = np.asarray([x[2], y[2]], dtype=np.float64)
+    denom = (p1[1] - p2[1]) * (p0[0] - p2[0]) + (p2[0] - p1[0]) * (p0[1] - p2[1])
+    if abs(float(denom)) <= 1e-12:
+        return
+    xs = np.arange(min_x, max_x + 1, dtype=np.float64) + 0.5
+    ys = np.arange(min_y, max_y + 1, dtype=np.float64) + 0.5
+    grid_x, grid_y = np.meshgrid(xs, ys)
+    w0 = ((p1[1] - p2[1]) * (grid_x - p2[0]) + (p2[0] - p1[0]) * (grid_y - p2[1])) / denom
+    w1 = ((p2[1] - p0[1]) * (grid_x - p2[0]) + (p0[0] - p2[0]) * (grid_y - p2[1])) / denom
+    w2 = 1.0 - w0 - w1
+    mask = (w0 >= -1e-9) & (w1 >= -1e-9) & (w2 >= -1e-9)
+    if not np.any(mask):
+        return
+    region = pixels[min_y : max_y + 1, min_x : max_x + 1]
+    region[mask] = color
+    filled_region = filled[min_y : max_y + 1, min_x : max_x + 1]
+    filled_region[mask] = True
+
+
+def _dilate_padding(pixels: NDArray[np.uint8], filled: NDArray[np.bool_], iterations: int) -> None:
+    for _index in range(iterations):
+        candidates = np.zeros_like(filled)
+        candidates[1:, :] |= filled[:-1, :]
+        candidates[:-1, :] |= filled[1:, :]
+        candidates[:, 1:] |= filled[:, :-1]
+        candidates[:, :-1] |= filled[:, 1:]
+        candidates &= ~filled
+        if not np.any(candidates):
+            return
+        new_pixels = pixels.copy()
+        for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            source_y = slice(max(0, -dy), pixels.shape[0] - max(0, dy))
+            source_x = slice(max(0, -dx), pixels.shape[1] - max(0, dx))
+            target_y = slice(max(0, dy), pixels.shape[0] - max(0, -dy))
+            target_x = slice(max(0, dx), pixels.shape[1] - max(0, -dx))
+            target_mask = candidates[target_y, target_x] & filled[source_y, source_x]
+            new_pixels[target_y, target_x][target_mask] = pixels[source_y, source_x][target_mask]
+        pixels[:] = new_pixels
+        filled |= candidates
+
+
+def _png_bytes(pixels: NDArray[np.uint8]) -> bytes:
+    buffer = pyio.BytesIO()
+    Image.fromarray(np.ascontiguousarray(pixels), mode="RGBA").save(buffer, format="PNG", optimize=False)
+    return buffer.getvalue()
+
+
 def _baked_material(
     asset: Asset,
     material_id: str,
     source_material_ids: list[str],
     options: BakeMaterialOptions,
+    image_ids: dict[str, str],
 ) -> Material:
     materials = [asset.materials[material_id] for material_id in source_material_ids if material_id in asset.materials]
     if not materials:
@@ -511,17 +864,16 @@ def _baked_material(
         metallic = float(np.mean([material.metallic for material in materials]))
         roughness = float(np.mean([material.roughness for material in materials]))
         opacity = float(np.mean([material.opacity for material in materials]))
-    maps = {str(item) for item in options.bake}
     metadata: dict[str, object] = {
         "baked": "true",
         "baked_maps": ",".join(options.bake),
         "maps_resolution": str(options.maps_resolution),
         "padding": str(options.padding),
         "source_material_ids": ",".join(source_material_ids),
-        "baked_texture_kind": "constant",
+        "baked_texture_kind": "raster_atlas",
         "baked_texture_resolution": str(options.maps_resolution),
     }
-    metadata.update(_baked_texture_metadata(base_color, metallic, roughness, maps))
+    metadata.update(_baked_texture_metadata(asset, image_ids))
     return Material(
         id=material_id,
         name="Baked Material",
@@ -533,23 +885,12 @@ def _baked_material(
     )
 
 
-def _baked_texture_metadata(
-    base_color: tuple[float, float, float, float],
-    metallic: float,
-    roughness: float,
-    maps: set[str],
-) -> dict[str, str]:
+def _baked_texture_metadata(asset: Asset, image_ids: dict[str, str]) -> dict[str, str]:
     metadata: dict[str, str] = {}
-    if {"base_color", "opacity"} & maps:
-        metadata["baked_texture_base_color_uri"] = _solid_png_data_uri(base_color)
-    if {"metallic", "roughness"} & maps:
-        metadata["baked_texture_metallic_roughness_uri"] = _solid_png_data_uri((1.0, roughness, metallic, 1.0))
-    if "normal" in maps:
-        metadata["baked_texture_normal_uri"] = _solid_png_data_uri((0.5, 0.5, 1.0, 1.0))
-    if "ao" in maps:
-        metadata["baked_texture_occlusion_uri"] = _solid_png_data_uri((1.0, 1.0, 1.0, 1.0))
-    if "emissive" in maps:
-        metadata["baked_texture_emissive_uri"] = _solid_png_data_uri((0.0, 0.0, 0.0, 1.0))
+    for texture_name, image_id in image_ids.items():
+        image = asset.images[image_id]
+        metadata[f"baked_texture_{texture_name}_image"] = image_id
+        metadata[f"baked_texture_{texture_name}_uri"] = image.data_uri()
     return metadata
 
 
@@ -581,8 +922,7 @@ def _decimate_ratio(options: DecimateOptions) -> float | None:
     if options.target_ratio is not None:
         return options.target_ratio
     if options.criterion == "quality":
-        tolerance = max(options.surface_tolerance or 0.0, options.line_tolerance or 0.0, options.uv_tolerance or 0.0)
-        return max(0.1, min(0.95, 1.0 - tolerance))
+        return None
     return 0.5
 
 
@@ -601,8 +941,8 @@ def _decimation_target_strategy(source_meshes: dict[str, Mesh], options: Decimat
         "target_triangles": options.target_triangles,
         "target_ratio": options.target_ratio,
         "effective_keep_ratio": effective_ratio,
-        "quality_bound_enforced": False,
-        "quality_bound_status": "measured_not_enforced" if kind == "quality_error" else "not_applicable",
+        "quality_bound_enforced": kind == "quality_error",
+        "quality_bound_status": "enforced" if kind == "quality_error" else "not_applicable",
     }
     if kind == "quality_error":
         strategy.update(
@@ -610,7 +950,7 @@ def _decimation_target_strategy(source_meshes: dict[str, Mesh], options: Decimat
                 "surface_tolerance": options.surface_tolerance,
                 "line_tolerance": options.line_tolerance,
                 "uv_tolerance": options.uv_tolerance,
-                "quality_mapping": "tolerance_to_ratio_heuristic",
+                "quality_error_bound": _quality_error_bound(options),
             }
         )
     return strategy
@@ -622,7 +962,7 @@ def _decimation_target_strategy_kind(options: DecimateOptions) -> tuple[str, str
     if options.target_ratio is not None:
         return "target_ratio", "explicit_target_ratio", "unity_target_ratio"
     if options.criterion == "quality":
-        return "quality_error", "quality_tolerance_heuristic", "fascat_quality_error_approximation"
+        return "quality_error", "meshoptimizer_target_error", "meshoptimizer_error_bounded_simplification"
     return "target_ratio", "default_target_ratio", "unity_target_ratio"
 
 
@@ -639,8 +979,8 @@ def _decimation_target_strategy_metadata(strategy: dict[str, object]) -> dict[st
         value = strategy.get(key)
         if value is not None:
             metadata[f"decimate_{key}"] = _format_metadata_value(value)
-    if strategy.get("quality_mapping") is not None:
-        metadata["decimate_quality_mapping"] = str(strategy["quality_mapping"])
+    if strategy.get("quality_error_bound") is not None:
+        metadata["decimate_quality_error_bound"] = _format_metadata_value(strategy["quality_error_bound"])
     return metadata
 
 
@@ -732,6 +1072,8 @@ def _simplify_mesh_for_decimation(
     final_target = target_triangles
     if final_target is None and ratio is not None:
         final_target = _ratio_target(mesh, ratio)
+    if final_target is None and options.criterion == "quality":
+        return _simplify_mesh_error_bounded(mesh, options)
     if final_target is None:
         return mesh.copy(), _DecimationPassCount()
 
@@ -770,6 +1112,7 @@ def _simplify_mesh_for_decimation(
 def _simplify_decimation_once(mesh: Mesh, options: DecimateOptions, target_triangles: int) -> Mesh:
     return mesh.simplify(
         target_triangles=target_triangles,
+        target_error=_quality_error_bound(options) if options.criterion == "quality" else None,
         preserve_hard_edges=True,
         hard_edge_angle=options.normal_tolerance,
         preserve_holes=options.protect_topology,
@@ -777,6 +1120,25 @@ def _simplify_decimation_once(mesh: Mesh, options: DecimateOptions, target_trian
         preserve_uv_seams=_preserve_uv_seams(options),
         preserve_silhouette=options.protect_topology,
     )
+
+
+def _simplify_mesh_error_bounded(mesh: Mesh, options: DecimateOptions) -> tuple[Mesh, _DecimationPassCount]:
+    simplified = mesh.simplify(
+        target_error=_quality_error_bound(options),
+        preserve_hard_edges=True,
+        hard_edge_angle=options.normal_tolerance,
+        preserve_holes=options.protect_topology,
+        preserve_material_boundaries=True,
+        preserve_uv_seams=_preserve_uv_seams(options),
+        preserve_silhouette=options.protect_topology,
+    )
+    passes = 1 if simplified.triangle_count < mesh.triangle_count else 0
+    return simplified, _DecimationPassCount(simplification_passes=passes, iterative_passes=0)
+
+
+def _quality_error_bound(options: DecimateOptions) -> float:
+    tolerances = [value for value in (options.surface_tolerance, options.line_tolerance, options.uv_tolerance) if value]
+    return max(tolerances) if tolerances else 0.01
 
 
 def _finalize_decimation_uv_importance(
@@ -2282,6 +2644,15 @@ def _unique_material_id(materials: dict[str, Material], base: str) -> str:
     candidate = base
     suffix = 2
     while candidate in materials:
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    return candidate
+
+
+def _unique_image_id(images: dict[str, ImageResource], base: str) -> str:
+    candidate = base
+    suffix = 2
+    while candidate in images:
         candidate = f"{base}_{suffix}"
         suffix += 1
     return candidate

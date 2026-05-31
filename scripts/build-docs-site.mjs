@@ -731,6 +731,7 @@ const sections = [
   ["Guides",      ["format-guidelines.md"]],
   ["Reference",   ["reference.md"]],
 ];
+const optionalDocs = new Set(["format-guidelines.md"]);
 
 const LABELS = {
   "index":      "Home",
@@ -746,18 +747,26 @@ function fileToLabel(filename) {
     .replace(/\b\w/g, c => c.toUpperCase());
 }
 
-const pages = sections.flatMap(([, files]) =>
-  files.map(f => ({ slug: basename(f, ".md"), label: fileToLabel(f), file: f }))
-);
+const pages = [];
+for (const [, files] of sections) {
+  for (const file of files) {
+    const filePath = join(SRC, file);
+    if (!existsSync(filePath)) {
+      if (optionalDocs.has(file)) {
+        console.warn(`  SKIP: optional docs/${file} not found`);
+        continue;
+      }
+      console.error(`  ERROR: docs/${file} not found — check sections array`);
+      process.exit(1);
+    }
+    pages.push({ slug: basename(file, ".md"), label: fileToLabel(file), file });
+  }
+}
 
 // ── Build ─────────────────────────────────────────────────────────────────────
 
 for(const {slug,label,file} of pages) {
   const filePath = join(SRC, file);
-  if (!existsSync(filePath)) {
-    console.error(`  ERROR: docs/${file} not found — check sections array`);
-    process.exit(1);
-  }
   const src    = readFileSync(filePath,"utf8");
   const {html,toc} = parse(src);
   const output = renderPage({

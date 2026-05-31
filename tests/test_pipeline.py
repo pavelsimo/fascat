@@ -1067,13 +1067,13 @@ def test_convert_report_includes_preflight_checklist(monkeypatch, tmp_path: Path
     checks = {item["code"]: item for item in preflight.options["checks"]}  # type: ignore[index]
 
     assert preflight.name == "preflight"
-    assert preflight.after["preflight_checks_warning"] == 5
+    assert preflight.after["preflight_checks_warning"] == 4
     assert checks["brep_patches_retained"]["status"] == "warning"
     assert checks["orientation_not_planned"]["status"] == "warning"
     assert checks["tangents_without_uv0"]["status"] == "warning"
     assert checks["ao_bake_without_uv1"]["status"] == "warning"
-    assert checks["texture_compression_backend_missing"]["status"] == "warning"
-    assert preflight.warnings == converted.report.warnings[:5]
+    assert checks["texture_compression_not_requested"]["status"] == "info"
+    assert preflight.warnings == converted.report.warnings[:4]
 
 
 def test_convert_report_includes_workflow_summary(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
@@ -1112,9 +1112,9 @@ def test_convert_report_includes_workflow_summary(monkeypatch, tmp_path: Path) -
     assert summary_step.after["workflow_stages_total"] == 10
     assert summary_step.after["workflow_stages_run"] == 7
     assert summary_step.after["workflow_stages_skipped"] == 3
-    assert summary_step.after["workflow_stages_approximate"] == 1
+    assert summary_step.after["workflow_stages_approximate"] == 0
     assert stages["uv_preparation"]["status"] == "run"
-    assert stages["material_baking"]["level"] == "approximate"
+    assert stages["material_baking"]["level"] == "exact"
     assert stages["lod_generation"]["status"] == "run"
     assert stages["export_compression"]["status"] == "skipped"
 
@@ -1564,7 +1564,7 @@ def test_convert_reports_texture_export_policy_before_write(monkeypatch, tmp_pat
     assert policy_step.options == {
         "profile": "texture-cap",
         "output_format": "gltf",
-        "texture_compression": "unsupported",
+        "texture_compression": "not_requested",
         "preferred_compressed_format": "KTX2/Basis",
         "fallback_texture_format": "PNG/JPEG",
         "texture_fallback_format": "auto",
@@ -1587,7 +1587,8 @@ def test_convert_reports_texture_export_policy_before_write(monkeypatch, tmp_pat
     assert policy_step.after["texture_policy_resize_estimated_savings_bytes"] == 25_165_824
     assert policy_step.after["texture_policy_memory_budget_bytes"] == 64_000_000
     assert policy_step.after["texture_policy_memory_over_budget_bytes"] == 0
-    assert policy_step.after["texture_policy_ktx2_basisu_supported"] == 0
+    assert policy_step.after["texture_policy_ktx2_basisu_supported"] == 1
+    assert policy_step.after["texture_policy_ktx2_basisu_requested"] == 0
     assert policy_step.after["texture_policy_png_jpeg_fallback_required"] == 1
     assert policy_step.after["texture_policy_fallback_png_compression"] == 6
     assert policy_step.after["texture_policy_fallback_jpeg_quality"] == 85
@@ -1704,10 +1705,10 @@ def test_convert_report_records_workflow_recipe(monkeypatch, tmp_path: Path) -> 
     assert recipe_step.after["workflow_recipe_choices_total"] == 14
     assert recipe_step.after["workflow_recipe_choices_honored"] == 8
     assert recipe_step.after["workflow_recipe_choices_disabled"] == 4
-    assert recipe_step.after["workflow_recipe_choices_metadata_only"] == 1
-    assert recipe_step.after["workflow_recipe_choices_unsupported"] == 1
+    assert recipe_step.after["workflow_recipe_choices_metadata_only"] == 2
+    assert recipe_step.after["workflow_recipe_choices_unsupported"] == 0
     choices = {choice["setting"]: choice for choice in recipe_step.options["recipe"]["choices"]}
-    assert choices["texture_compression"]["status"] == "unsupported"
+    assert choices["texture_compression"]["status"] == "metadata_only"
     assert choices["gltf_geometry_compression"]["status"] == "metadata_only"
 
 

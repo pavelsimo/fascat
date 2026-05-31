@@ -31,9 +31,11 @@ flowchart LR
 **Legend** — 🟢 green: fully real · 🟡 amber: real core with an approximate or
 metadata-only sub-feature · ⚪ grey: external input.
 
-Backends: OCCT/OCP (CAD + tessellation + BREP healing), xatlas (UV unwrap),
-meshoptimizer / fast-simplification (decimation + meshopt compression), usd-core
-(USD), built-in glTF/OBJ/STL/FBX writers, trimesh + numpy (mesh ops).
+Backends: OCCT/OCP (CAD + tessellation + BREP healing), xatlas (UV unwrap
+and packing), meshoptimizer / fast-simplification (decimation + meshopt
+compression), Pillow (raster texture baking), glTF Transform + ktx2-encoder
+(Draco and KTX2/Basis export), usd-core (USD), built-in glTF/OBJ/STL/FBX
+writers, trimesh + numpy (mesh ops).
 
 ## Status: Real vs. Gaps
 
@@ -44,11 +46,11 @@ meshoptimizer / fast-simplification (decimation + meshopt compression), usd-core
 | **Import** | STEP hierarchy, transforms, colors, metadata, units, repeated-part instances; IGES XDE hierarchy/material import; native BREP single-shape import | — | typed PMI, multi-file/multi-root, design variants, other non-STEP formats |
 | **Tessellate** | sag / angle / min-edge / curvature-adaptive meshing | — | CAD-derived UVs, tessellation-time tangents, free-edge geometry output |
 | **Repair / Heal** | vertex merge, dedup, degenerate cleanup, winding fix, small-hole fill, normals; BREP fix-edge / sew | mesh-level hole removal | T-junction sewing, gap stitching, non-manifold cracking, sliver removal, viewer/open-shell orientation |
-| **Stage / UV** | normals, tangents, xatlas unwrap, AABB UV, UV copy, material PBR normalize / merge | — | bake-domain repack + padding, island merge / align, seam graph, backend-enforced solver |
-| **Materials** | per-face colors + PBR factors preserved | — | raster textures, atlas packing, AO bake, material-library mapping |
-| **Optimize** | decimation, instance reconstruction, buffer optimization | sampled occlusion, quality→ratio decimation | error-bounded decimation, weighted decimation, retopology, GPU occlusion |
+| **Stage / UV** | normals, tangents, xatlas unwrap + bake-domain packing/padding, AABB UV, UV copy, material PBR normalize / merge | solver policy intent | island merge / align, seam graph, backend-enforced solver controls |
+| **Materials** | per-face colors + PBR factors preserved, first-class image resources, raster material atlas baking | sampled AO bake | source texture resampling/dedupe, material-library mapping, high-poly transfer |
+| **Optimize** | decimation, quality target-error simplification, instance reconstruction, buffer optimization | sampled occlusion | weighted decimation, retopology, GPU occlusion |
 | **LOD** | real decimated mesh levels | — | occurrence LOD groups, far-LOD bake-to-one-material, switching-distance validation |
-| **Export** | USD/USDZ, glTF/GLB (quantize + meshopt), OBJ, STL, FBX | — | Draco, KTX2/Basis, real texture files, size-ladder reports, named presets |
+| **Export** | USD/USDZ, glTF/GLB (quantize + meshopt + Draco + KTX2/Basis), OBJ, STL, FBX, real baked texture images | — | size-ladder reports, named presets |
 
 ### A. Works end-to-end — real geometry
 
@@ -58,23 +60,21 @@ The basics are present and produce a valid RT3D asset:
 - **Tessellate** (`ops/tessellate.py`, OCCT `BRepMesh`): `sag`, `angle`, `min_edge_length`, `curvature_adaptive`, `preserve_boundaries` all change the real mesh.
 - **Repair — mesh** (`mesh.py`): vertex merge (Euclidean union-find), duplicate / degenerate face removal, winding fix (trimesh + inward-shell flip), small-hole fill, normal generation.
 - **Heal — BREP** (`ops/heal.py`): `fix_edges`, `unify_tolerances`, `sew_faces` via OCCT `ShapeFix` / `BRepBuilderAPI_Sewing`.
-- **Stage** (`ops/stage.py`): normals, tangents, UV unwrap (**xatlas**), AABB/box UV projection, UV copy, material normalize-to-PBR, duplicate-material merge.
-- **Optimize** (`ops/optimize.py`): decimation (**meshoptimizer / fast-simplification**), instance reconstruction (real scene rewrite), buffer optimization.
+- **Stage** (`ops/stage.py`): normals, tangents, UV unwrap/repack/padding (**xatlas**), AABB/box UV projection, UV copy, material normalize-to-PBR, duplicate-material merge.
+- **Materials** (`ops/actions.py`, `image.py`): material bake creates first-class PNG images and raster atlas maps for base color, opacity, metallic/roughness, normal, AO, and emissive.
+- **Optimize** (`ops/optimize.py`, `ops/actions.py`): decimation (**meshoptimizer / fast-simplification**) including quality target-error bounds, instance reconstruction (real scene rewrite), buffer optimization.
 - **LODs** (`ops/lod.py`): real decimated mesh levels per part.
-- **Export** (`io/{usd,gltf,obj,stl,fbx}.py`): USD/USDZ (usd-core), glTF/GLB with real quantization + meshopt compression, OBJ, STL, FBX — all write valid geometry, hierarchy, transforms, and material factors.
+- **Export** (`io/{usd,gltf,obj,stl,fbx}.py`): USD/USDZ (usd-core), glTF/GLB with real quantization, meshopt, Draco, and KTX2/Basis paths, OBJ, STL, FBX — all write valid geometry, hierarchy, transforms, material factors, and referenced baked textures.
 
 ### B. Real but approximate — refine candidates
 
 - **Occlusion removal** (`ops/actions.py`): real sampled visibility rays with CPU BVH acceleration; no GPU/raster backend, so thin occluders are imprecise.
 - **Hole removal** (`actions.py:190,194`): mesh boundary classification + fill only; closed BREP feature removal not implemented.
-- **Decimation `criterion="quality"`**: maps tolerance → target ratio; not true geometric-error-bounded simplification.
 
 ### C. Metadata-only / not implemented — the genuine gaps
 
-These exist as options/reports but do **not** change geometry yet:
+The remaining reportable gaps are concentrated in repair/orientation backends:
 
-- **Material / texture baking** (`actions.py:46`): emits constant embedded factor maps only — "raster texture baking is not implemented". No real base-color/normal/roughness/AO images, no real atlas packing. *(Largest fake-but-exists feature.)*
-- **UV bake-domain padding/repack** (`stage.py:588`): `padding_status = "metadata_only"`; unwrap runs but no repack/padding pass for lightmap/AO/material-bake UVs.
 - **Repair topology backends** (`asset.py:311-313`, `754-755`): T-junction sewing, boundary-gap stitching, non-manifold edge cracking all `"not_implemented"` — counted and reported, never fixed.
 - **Orientation strategies** (`asset.py:1155-1163`): viewer-standpoint / open-shell / unstitched-group orientation is `"intent_not_implemented"`; only closed-exterior winding is enforced.
 - **Sliver-face removal** (`ops/heal.py`): reported, not performed.
@@ -109,20 +109,21 @@ implement → test → document → commit → push → verify CI/docs.
 - Open-shell grouping before BREP healing; standalone face/normal-orientation + patch-cleanup expert operations.
 
 **Stage / UV**
-- Real UV repack + padding for bake domains (UV1 / lightmap).
+- ~~Real UV repack + padding for bake domains (UV1 / lightmap).~~ ✅ **done (2026-05-31)**
 - UV island merge + alignment for tileable UV0; seam segmentation + lines-of-interest seam graph.
 - Backend-enforced solver (conformal / isometric) and seam / overlap policies (currently intent-only).
 - Topology-only connectivity vertex merge with split render attributes (connect topology while preserving hard-edge / UV / material seams).
 
 **Materials & textures**
-- Real raster texture baking: base color, roughness, metallic, normal, AO, emissive.
-- Real atlas packing (reuse xatlas UVs); first-class image resources (resize, dedupe real files, PNG/JPEG fallback applied to real files).
+- ~~Real raster texture baking: base color, roughness, metallic, normal, AO, emissive.~~ ✅ **done (2026-05-31)**
+- ~~Real atlas packing (reuse xatlas UVs); first-class image resources.~~ ✅ **done (2026-05-31)**
+- Image resize/dedupe passes and PNG/JPEG fallback conversion policy applied to imported real source files.
 - AO bake to texture and/or vertex colors → feed decimation weights.
 - Material-library import + CAD-material-to-PBR mapping tables + mapping diagnostics.
 - High-poly → proxy normal-map baking.
 
 **Optimize**
-- Geometric-error-bounded simplification (replace quality-heuristic → ratio mapping).
+- ~~Geometric-error-bounded simplification (replace quality-heuristic → ratio mapping).~~ ✅ **done (2026-05-31)**
 - AO / user-painted vertex weights as simplification constraints; vertex-color/weight cleanup.
 - Occlusion: optional raster/GPU backend; standard vs advanced params.
 - Loose / precise + symmetry / mirror-aware instance reconstruction.
@@ -136,8 +137,8 @@ implement → test → document → commit → push → verify CI/docs.
 
 **Export**
 - ~~**FBX output (`.fbx`)**: ASCII FBX 7.x writer for DCC / engine pipelines (Maya, 3ds Max, Unreal, Unity, Blender). Hand-written like the existing glTF / OBJ / STL writers — walks the same occurrence tree (`io/obj.py` `_occurrences` / `_transform_points` / `referenced_materials`) and emits the FBX object graph: `Geometry::` (vertices + `PolygonVertexIndex` polygon-end bit, normals, tangents, UV layers, per-face `LayerElementMaterial`), `Model::` nodes with hierarchy + transforms, `Material::` nodes, `GlobalSettings` unit / up-axis, and the `Connections` graph. PBR maps to legacy Phong — base color + opacity faithful; metallic / roughness approximated (optionally via Autodesk stingray-PBS properties), the same PBR-in-non-PBR limitation as OBJ/MTL. New `FbxExportOptions`, new `fascat/io/fbx.py` (`write_fbx` + `validate_fbx`), format dispatch in `pipeline.py` and `cli.py`. No new dependencies (hand-written ASCII); binary FBX deferred.~~ ✅ **done (2026-05-31)**
-- Real Draco encoder (or keep `draco=True` rejected).
-- Real KTX2/Basis texture output (after first-class images exist).
+- ~~Real Draco encoder (or keep `draco=True` rejected).~~ ✅ **done (2026-05-31)**
+- ~~Real KTX2/Basis texture output (after first-class images exist).~~ ✅ **done (2026-05-31)**
 - Baseline-vs-optimized + compressed-GLB size-ladder reports.
 - Named web / mobile / desktop / VR / AR export presets that actually apply compression + resize + cleanup.
 
@@ -158,7 +159,6 @@ implement → test → document → commit → push → verify CI/docs.
 
 Intentionally out of scope until a user need changes the priority:
 
-- **Draco** and **KTX2/Basis** compression — rejected with a clear error until a reliable encoder backend exists.
 - Non-STEP CAD formats beyond the supported IGES and native BREP paths: Parasolid, JT, CATIA, NX, SolidWorks, IFC, 3MF, QIF.
 - Animation / skinning / morph targets / animated GLB passthrough.
 - Convex decomposition and physics proxy generation.

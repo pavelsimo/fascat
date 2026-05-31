@@ -597,12 +597,28 @@ def _export_preflight_checks(
             ),
         ]
 
-    geometry_compression = gltf_options is not None and (gltf_options.quantize or gltf_options.meshopt)
-    texture_message = (
-        "baked textures are planned for glTF export, but KTX2/Basis output is unavailable and requests are rejected"
-        if bake_planned
-        else "KTX2/Basis texture output is unavailable; no texture-producing bake step is planned"
+    geometry_compression = gltf_options is not None and (
+        gltf_options.quantize or gltf_options.meshopt or gltf_options.draco
     )
+    texture_compression_requested = gltf_options is not None and gltf_options.texture_compression is not None
+    if texture_compression_requested and bake_planned:
+        texture_code = "texture_compression_planned"
+        texture_status = "ok"
+        texture_message = "KTX2/Basis texture compression is planned for the glTF texture payload"
+    elif texture_compression_requested:
+        texture_code = "texture_compression_without_texture_payload"
+        texture_status = "info"
+        texture_message = "KTX2/Basis texture compression was requested, but no texture-producing bake step is planned"
+    elif bake_planned:
+        texture_code = "texture_compression_not_requested"
+        texture_status = "info"
+        texture_message = (
+            "baked textures are planned for glTF export; request --texture-compression for KTX2/Basis output"
+        )
+    else:
+        texture_code = "texture_compression_not_requested"
+        texture_status = "info"
+        texture_message = "KTX2/Basis texture compression is available when a texture payload is requested"
     return [
         _preflight_item(
             code="gltf_geometry_compression_planned"
@@ -616,8 +632,8 @@ def _export_preflight_checks(
             else "glTF export has no runtime geometry compression requested",
         ),
         _preflight_item(
-            code="texture_compression_backend_missing",
-            status="warning" if bake_planned else "info",
+            code=texture_code,
+            status=texture_status,
             stage="export",
             operation="write",
             message=texture_message,
@@ -807,17 +823,20 @@ def _add_texture_export_policy_report(
         }
     )
 
+    texture_compression = gltf_fallback_options.texture_compression if output_format == "gltf" else None
     options: dict[str, object] = {
         "profile": profile.name,
         "output_format": output_format,
-        "texture_compression": "unsupported",
+        "texture_compression": texture_compression
+        or ("not_requested" if output_format == "gltf" else "not_applicable"),
         "preferred_compressed_format": "KTX2/Basis" if output_format == "gltf" else None,
         "fallback_texture_format": fallback_label if output_format == "gltf" else "format-specific",
     }
     warnings: list[str] = []
     if output_format == "gltf":
-        after["texture_policy_ktx2_basisu_supported"] = 0
-        after["texture_policy_png_jpeg_fallback_required"] = 1
+        after["texture_policy_ktx2_basisu_supported"] = 1
+        after["texture_policy_ktx2_basisu_requested"] = 1 if texture_compression is not None else 0
+        after["texture_policy_png_jpeg_fallback_required"] = 0 if texture_compression is not None else 1
         after["texture_policy_fallback_png_compression"] = gltf_fallback_options.png_compression
         after["texture_policy_fallback_jpeg_quality"] = gltf_fallback_options.jpeg_quality
         after["texture_policy_fallback_auto"] = 1 if gltf_fallback_options.texture_fallback_format == "auto" else 0
@@ -832,12 +851,12 @@ def _add_texture_export_policy_report(
                 ),
             }
         )
-        if fallback_stats.get("texture_policy_jpeg_alpha_risk_sets", 0) > 0:
+        if texture_compression is None and fallback_stats.get("texture_policy_jpeg_alpha_risk_sets", 0) > 0:
             warnings.append(
                 "texture export policy for "
                 f"{profile.name}: JPEG fallback would discard transparency for "
                 f"{fallback_stats['texture_policy_jpeg_alpha_risk_sets']} referenced texture set(s); "
-                "use auto or png fallback until first-class image conversion can split alpha maps"
+                "use auto or png fallback, or request KTX2/Basis compression for the glTF texture payload"
             )
 
     max_resolution = None if budget is None else budget.max_texture_resolution
@@ -1230,9 +1249,9 @@ def _workflow_summary_stages(
     add(
         "material_baking",
         "run" if "bake_materials" in steps else "skipped",
-        "approximate" if "bake_materials" in steps else "not_applicable",
+        "exact" if "bake_materials" in steps else "not_applicable",
         "bake_materials",
-        "material baking emitted constant embedded texture maps"
+        "material baking emitted raster atlas textures"
         if "bake_materials" in steps
         else "material baking was not requested",
     )
@@ -1347,6 +1366,10 @@ def _export_compression_ops(output_format: ExportFormat, write_options: dict[str
         result.append("KHR_mesh_quantization")
     if bool(write_options.get("meshopt")):
         result.append("EXT_meshopt_compression")
+    if bool(write_options.get("draco")):
+        result.append("KHR_draco_mesh_compression")
+    if write_options.get("texture_compression") is not None:
+        result.append("KHR_texture_basisu")
     return result
 
 

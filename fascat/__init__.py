@@ -4,6 +4,7 @@ from fascat import profiles
 from fascat.analysis import AnalysisReport
 from fascat.asset import Asset, Node, Part
 from fascat.filter import Filter, FilterExpressionError, SelectionMatch, SelectionResult
+from fascat.image import ImageResource
 from fascat.io.brep import read_brep
 from fascat.io.fbx import validate_fbx
 from fascat.io.gltf import validate_gltf
@@ -97,6 +98,7 @@ __all__ = [
     "FilterExpressionError",
     "GltfExportOptions",
     "IgesReadOptions",
+    "ImageResource",
     "LODGeneratorOptions",
     "LODLevel",
     "LODOptions",

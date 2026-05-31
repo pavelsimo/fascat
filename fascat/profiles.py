@@ -154,9 +154,9 @@ def _realtime_recipe(
             _choice(
                 "export",
                 "texture_compression",
-                "KTX2/Basis",
-                "unsupported",
-                "no KTX2/Basis encoder is integrated yet",
+                "KTX2/Basis when requested",
+                "metadata_only",
+                "profile records compatibility guidance; CLI/Python export options still request compression",
             ),
             _choice("export", "xr_runtime_budget", xr, "honored" if xr else "disabled"),
         ),

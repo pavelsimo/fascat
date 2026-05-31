@@ -75,6 +75,7 @@ def _empty_uv_summary() -> dict[str, int]:
     return {
         "aabb_projection": 0,
         "aabb_preserved_existing": 0,
+        "bake_repacked": 0,
         "bake_missing_repack": 0,
         "policy_intent": 0,
         "forbid_overlapping_violations": 0,
@@ -112,6 +113,7 @@ def _stage_warning_asset(asset: Asset) -> Asset:
         root=asset.root,
         parts=asset.parts,
         materials=asset.materials,
+        images=asset.images,
         units=asset.units,
         meters_per_unit=asset.meters_per_unit,
         up_axis=asset.up_axis,
@@ -152,7 +154,7 @@ def _stage_part(
         if edited:
             edited_uv_channels.add(0)
     elif options.uv0 in {"unwrap", "lightmap"}:
-        mesh = _unwrap_uv(mesh, 0)
+        mesh = _unwrap_uv(mesh, 0, options)
         _tag_uv_metadata(mesh, 0, options.uv0, options)
         uv_modes[0] = options.uv0
         edited_uv_channels.add(0)
@@ -170,7 +172,7 @@ def _stage_part(
         if edited:
             edited_uv_channels.add(1)
     elif options.uv1 in {"unwrap", "lightmap"}:
-        mesh = _unwrap_uv(mesh, 1)
+        mesh = _unwrap_uv(mesh, 1, options)
         _tag_uv_metadata(mesh, 1, options.uv1, options)
         uv_modes[1] = options.uv1
         edited_uv_channels.add(1)
@@ -656,13 +658,16 @@ def _tag_uv_layout_quality(
                 )
             continue
         if mode in {"unwrap", "lightmap"}:
-            uv_summary["bake_missing_repack"] += 1
-            mesh.metadata[f"{prefix}_pack_status"] = "missing_repack"
-            mesh.metadata[f"{prefix}_padding_status"] = "metadata_only"
-            asset.report.add_warning(
-                f"part {part_id} {prefix} was unwrapped for baking, but no UV repack/padding backend ran; "
-                "repack into 0..1 with padding before AO, lightmap, or material baking"
-            )
+            if mesh.metadata.get(f"{prefix}_pack_status") == "packed":
+                uv_summary["bake_repacked"] += 1
+            else:
+                uv_summary["bake_missing_repack"] += 1
+                mesh.metadata[f"{prefix}_pack_status"] = "missing_repack"
+                mesh.metadata[f"{prefix}_padding_status"] = "metadata_only"
+                asset.report.add_warning(
+                    f"part {part_id} {prefix} was unwrapped for baking, but no UV repack/padding backend ran; "
+                    "repack into 0..1 with padding before AO, lightmap, or material baking"
+                )
         problems = _uv_bake_warning_problems(stats)
         if problems:
             asset.report.add_warning(
@@ -750,6 +755,9 @@ def _tag_uv_summary(asset: Asset, uv_summary: dict[str, int]) -> None:
     missing = uv_summary["bake_missing_repack"]
     if missing:
         asset.metadata["stage_bake_uv_channels_missing_repack"] = str(missing)
+    repacked = uv_summary["bake_repacked"]
+    if repacked:
+        asset.metadata["stage_bake_uv_channels_repacked"] = str(repacked)
     policy_intent = uv_summary["policy_intent"]
     if policy_intent:
         asset.metadata["stage_uv_policy_intent_channels"] = str(policy_intent)
@@ -763,6 +771,8 @@ def _uv_workflow_steps(mesh: Mesh, prefix: str, mode: str) -> str:
         steps = ["aabb_project" if mesh.metadata.get(f"{prefix}_projection") == "aabb" else "project"]
     elif mode in {"unwrap", "lightmap"}:
         steps = ["unwrap"]
+        if mesh.metadata.get(f"{prefix}_pack_status") == "packed":
+            steps.extend(["repack", "pad"])
     elif mode == "copy_uv0":
         steps = ["copy"]
     else:
@@ -833,5 +843,6 @@ def _require_xatlas() -> None:
         raise RuntimeError("UV unwrap requires the optional xatlas dependency") from exc
 
 
-def _unwrap_uv(mesh: Mesh, channel: int) -> Mesh:
-    return mesh.unwrap_uv(channel)
+def _unwrap_uv(mesh: Mesh, channel: int, options: StageOptions) -> Mesh:
+    resolution = options.atlas.max_size if options.atlas.enabled else 0
+    return mesh.unwrap_uv(channel, padding=options.unwrap.padding, resolution=resolution)

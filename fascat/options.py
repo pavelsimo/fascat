@@ -898,10 +898,6 @@ class GltfExportOptions:
             raise ValueError("jpeg_quality must be an integer between 0 and 100")
         if self.jpeg_quality < 0 or self.jpeg_quality > 100:
             raise ValueError("jpeg_quality must be between 0 and 100")
-        if self.texture_compression is not None:
-            raise ValueError("texture compression is not supported because no KTX2/Basis encoder backend is integrated")
-        if self.draco:
-            raise ValueError("draco compression is not supported because no Draco encoder backend is integrated")
         if self.file_size_budget_mb is not None and self.file_size_budget_mb <= 0.0:
             raise ValueError("file_size_budget_mb must be greater than 0 when set")
 

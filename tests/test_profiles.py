@@ -259,7 +259,7 @@ def test_builtin_profiles_expose_unity_workflow_recipes() -> None:
     assert web_recipe is not None
     choices = {choice.setting: choice for choice in web_recipe.choices}
     assert choices["sag_and_angle"].value == {"sag": 0.2, "angle": 20.0}
-    assert choices["texture_compression"].status == "unsupported"
+    assert choices["texture_compression"].status == "metadata_only"
     assert choices["gltf_geometry_compression"].status == "metadata_only"
 
 
@@ -490,13 +490,11 @@ def test_size_adaptive_tessellation_requires_bands() -> None:
         (lambda: fc.LODOptions((0.5,), screen_coverage=(0.5, 0.25)), "one value per LOD"),
         (lambda: fc.LODOptions((0.5,), tiny_part_screen_size=-1.0), "tiny_part_screen_size"),
         (lambda: fc.GltfExportOptions(texture_compression="zip"), "texture_compression"),
-        (lambda: fc.GltfExportOptions(texture_compression="ktx2"), "texture compression is not supported"),
         (lambda: fc.GltfExportOptions(texture_fallback_format="webp"), "texture_fallback_format"),
         (lambda: fc.GltfExportOptions(png_compression=-1), "png_compression"),
         (lambda: fc.GltfExportOptions(png_compression=10), "png_compression"),
         (lambda: fc.GltfExportOptions(jpeg_quality=-1), "jpeg_quality"),
         (lambda: fc.GltfExportOptions(jpeg_quality=101), "jpeg_quality"),
-        (lambda: fc.GltfExportOptions(draco=True), "draco compression is not supported"),
         (lambda: fc.GltfExportOptions(file_size_budget_mb=0), "file_size_budget_mb"),
         (lambda: fc.UsdExportOptions(package="zip"), "package"),
         (lambda: fc.ObjExportOptions(file_size_budget_mb=0), "file_size_budget_mb"),

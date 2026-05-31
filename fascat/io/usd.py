@@ -10,26 +10,35 @@ import numpy as np
 
 from fascat.asset import Asset, Node, Part
 from fascat.export_report import referenced_materials
+from fascat.image import ImageResource
 from fascat.material import Material
 from fascat.metadata import pmi_ids_by_part
 from fascat.options import MetadataExportOptions, UsdExportOptions
 
 _BAKED_TEXTURE_BINDINGS = (
     (
+        "baked_texture_base_color_image",
         "baked_texture_base_color_uri",
         "BaseColorTexture",
         (("diffuseColor", "rgb"), ("opacity", "a")),
         "sRGB",
     ),
     (
+        "baked_texture_metallic_roughness_image",
         "baked_texture_metallic_roughness_uri",
         "MetallicRoughnessTexture",
         (("roughness", "g"), ("metallic", "b")),
         "raw",
     ),
-    ("baked_texture_normal_uri", "NormalTexture", (("normal", "rgb"),), "raw"),
-    ("baked_texture_occlusion_uri", "OcclusionTexture", (("occlusion", "r"),), "raw"),
-    ("baked_texture_emissive_uri", "EmissiveTexture", (("emissiveColor", "rgb"),), "sRGB"),
+    ("baked_texture_normal_image", "baked_texture_normal_uri", "NormalTexture", (("normal", "rgb"),), "raw"),
+    ("baked_texture_occlusion_image", "baked_texture_occlusion_uri", "OcclusionTexture", (("occlusion", "r"),), "raw"),
+    (
+        "baked_texture_emissive_image",
+        "baked_texture_emissive_uri",
+        "EmissiveTexture",
+        (("emissiveColor", "rgb"),),
+        "sRGB",
+    ),
 )
 
 
@@ -133,7 +142,7 @@ def _write_usd_stage(
         scene.GetPrim().SetCustomDataByKey("fascat:pmiCount", len(asset.pmi))
     scene.GetPrim().SetCustomDataByKey("fascat:exportOptions", _custom_data(opts.to_dict()))
 
-    material_paths = _write_materials(stage, referenced_materials(asset), opts.metadata)
+    material_paths = _write_materials(stage, referenced_materials(asset), asset.images, opts.metadata)
     pmi_by_part = _pmi_by_part(asset) if opts.metadata.pmi != "none" else {}
     prototype_paths = _write_prototypes(stage, asset.parts, asset.materials, material_paths, pmi_by_part, opts.metadata)
     occurrence_counts = _part_occurrence_counts(asset.root)
@@ -247,6 +256,7 @@ def _validate_lod_variants(root_prim: Any, Usd: Any, UsdGeom: Any) -> None:
 def _write_materials(
     stage: Any,
     materials: dict[str, Material],
+    images: dict[str, ImageResource],
     metadata_options: MetadataExportOptions,
 ) -> dict[str, str]:
     from pxr import Gf, Sdf, UsdShade
@@ -265,7 +275,7 @@ def _write_materials(
         shader.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(float(material.opacity))
         shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(float(material.metallic))
         shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(float(material.roughness))
-        _add_baked_texture_bindings(stage, material_path, material, shader, Sdf, UsdShade)
+        _add_baked_texture_bindings(stage, material_path, material, images, shader, Sdf, UsdShade)
         usd_material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
         paths[material.id] = material_path
     return paths
@@ -275,13 +285,14 @@ def _add_baked_texture_bindings(
     stage: Any,
     material_path: str,
     material: Material,
+    images: dict[str, ImageResource],
     surface_shader: Any,
     Sdf: Any,
     UsdShade: Any,
 ) -> None:
     st_reader = None
-    for metadata_key, shader_name, connections, color_space in _BAKED_TEXTURE_BINDINGS:
-        uri = _metadata_image_uri(material, metadata_key)
+    for image_key, uri_key, shader_name, connections, color_space in _BAKED_TEXTURE_BINDINGS:
+        uri = _metadata_image_uri(material, image_key, uri_key, images)
         if uri is None:
             continue
         if st_reader is None:
@@ -326,8 +337,18 @@ def _surface_input(surface_shader: Any, name: str, Sdf: Any) -> Any:
     return surface_shader.CreateInput(name, value_type)
 
 
-def _metadata_image_uri(material: Material, key: str) -> str | None:
-    value = material.metadata.get(key)
+def _metadata_image_uri(
+    material: Material,
+    image_key: str,
+    uri_key: str,
+    images: dict[str, ImageResource],
+) -> str | None:
+    image_id = material.metadata.get(image_key)
+    if isinstance(image_id, str):
+        image = images.get(image_id)
+        if image is not None:
+            return image.data_uri()
+    value = material.metadata.get(uri_key)
     return value if isinstance(value, str) and value.startswith("data:image/") else None
 
 

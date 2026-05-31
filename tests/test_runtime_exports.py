@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 import json
 import struct
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -10,6 +12,7 @@ from typer.testing import CliRunner
 from fascat.analysis import analyze_output
 from fascat.asset import Asset, Node, Part
 from fascat.cli import app
+from fascat.image import ImageResource
 from fascat.io.fbx import validate_fbx
 from fascat.io.gltf import validate_gltf
 from fascat.io.obj import validate_obj
@@ -19,6 +22,9 @@ from fascat.mesh import Mesh
 from fascat.options import FbxExportOptions, GltfExportOptions, ObjExportOptions, StlExportOptions
 
 runner = CliRunner()
+_PNG_1X1 = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+)
 
 
 def _asset() -> Asset:
@@ -81,7 +87,7 @@ def test_gltf_export_options_write_meshopt_extension_and_file_budget(tmp_path) -
     geometry_policy = decision_matrix["geometry"]
     assert geometry_policy["quantization"]["state"] == "enabled_required"
     assert geometry_policy["meshopt"]["state"] == "enabled_optional"
-    assert geometry_policy["draco"]["state"] == "unsupported"
+    assert geometry_policy["draco"]["state"] == "available_not_requested"
     assert "prefer meshopt" in decision_matrix["targets"]["web"]["geometry"]
     assert asset.report.steps[-1].after["file_size_bytes"] > 0
     assert asset.report.steps[-1].after["export_estimated_geometry_bytes"] == 96
@@ -186,6 +192,31 @@ def test_gltf_export_deduplicates_referenced_texture_images_and_reports_counts(t
     assert after["export_estimated_texture_bytes"] == 3
 
 
+def test_gltf_export_writes_first_class_image_resources(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    asset = _asset()
+    asset.images["paint_base_color"] = ImageResource(
+        id="paint_base_color",
+        name="Paint Base Color",
+        mime_type="image/png",
+        data=_PNG_1X1,
+        width=1,
+        height=1,
+    )
+    asset.materials["mat"].metadata["baked_texture_base_color_image"] = "paint_base_color"
+    output = tmp_path / "first_class_image.gltf"
+
+    asset.write_gltf(output)
+    document = json.loads(output.read_text(encoding="utf-8"))
+    after = asset.report.steps[-1].after
+
+    assert document["images"][0]["uri"].startswith("data:image/png;base64,")
+    assert document["materials"][0]["pbrMetallicRoughness"]["baseColorTexture"]["index"] == 0
+    assert after["export_source_image_count"] == 1
+    assert after["export_referenced_image_count"] == 1
+    assert after["export_written_image_count"] == 1
+    assert after["export_estimated_texture_bytes"] == len(_PNG_1X1)
+
+
 def test_write_report_estimates_geometry_texture_and_metadata_payloads(tmp_path) -> None:  # type: ignore[no-untyped-def]
     asset = _asset()
     asset.metadata["asset_note"] = "qa"
@@ -215,7 +246,7 @@ def test_write_report_estimates_geometry_texture_and_metadata_payloads(tmp_path)
     assert after["export_duplicate_image_reference_count"] == 0
     assert after["export_written_image_count"] == 1
     texture_policy = runtime_dependencies["runtime_decision_matrix"]["textures"]
-    assert texture_policy["ktx2_basisu"]["state"] == "unsupported"
+    assert texture_policy["ktx2_basisu"]["state"] == "available_not_requested"
     assert texture_policy["png_jpeg_fallbacks"]["state"] == "source_textures_present"
     assert texture_policy["png_jpeg_fallbacks"]["fallback_format"] == "auto"
     assert texture_policy["png_jpeg_fallbacks"]["resolved_format"] == "PNG/JPEG"
@@ -251,6 +282,46 @@ def test_gltf_runtime_texture_fallback_reports_alpha_risk(tmp_path) -> None:  # 
     assert "avoid JPEG fallback" in fallback_policy["recommendation"]
 
 
+def test_gltf_write_invokes_draco_and_ktx2_export_backends(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.io.gltf as gltf
+
+    asset = _asset()
+    asset.images["paint_base_color"] = ImageResource(
+        id="paint_base_color",
+        name="Paint Base Color",
+        mime_type="image/png",
+        data=_PNG_1X1,
+        width=1,
+        height=1,
+    )
+    asset.materials["mat"].metadata["baked_texture_base_color_image"] = "paint_base_color"
+    calls: list[tuple[str, ...]] = []
+
+    def fake_ktx2_transform(input_path, output_path, *, mode):  # type: ignore[no-untyped-def]
+        calls.append(("ktx2", str(input_path), str(output_path), mode))
+        output_path.write_bytes(input_path.read_bytes())
+
+    def fake_draco_transform(arguments):  # type: ignore[no-untyped-def]
+        calls.append(tuple(str(item) for item in arguments))
+        input_path = Path(arguments[1])
+        output_path = Path(arguments[2])
+        output_path.write_bytes(input_path.read_bytes())
+
+    monkeypatch.setattr(gltf, "_run_gltf_transform", fake_draco_transform)
+    monkeypatch.setattr(gltf, "_run_ktx2_transform", fake_ktx2_transform)
+    output = tmp_path / "compressed.glb"
+
+    asset.write_gltf(output, options=GltfExportOptions(draco=True, texture_compression="ktx2"))
+    runtime_dependencies = asset.report.steps[-1].options["runtime_dependencies"]
+
+    assert calls[0][0] == "draco"
+    assert calls[1][0] == "ktx2"
+    assert calls[1][3] == "ktx2"
+    assert output.read_bytes().startswith(b"glTF")
+    assert runtime_dependencies["extensions_used"] == ["KHR_draco_mesh_compression", "KHR_texture_basisu"]
+    assert runtime_dependencies["extensions_required"] == ["KHR_draco_mesh_compression", "KHR_texture_basisu"]
+
+
 def test_gltf_write_reports_lod_and_metadata_runtime_dependencies(tmp_path) -> None:  # type: ignore[no-untyped-def]
     asset = _asset()
     part = asset.parts["tri"]
@@ -268,8 +339,8 @@ def test_gltf_write_reports_lod_and_metadata_runtime_dependencies(tmp_path) -> N
     assert runtime_dependencies["extensions_required"] == ["KHR_mesh_quantization"]
     assert runtime_dependencies["extras"] == {"fascat": True, "metadata": "full", "pmi": "metadata"}
     assert "extras.fascat" in runtime_dependencies["expected_runtime_support"]
-    assert runtime_dependencies["not_written"]["KHR_draco_mesh_compression"].startswith("unsupported")
-    assert runtime_dependencies["not_written"]["KHR_texture_basisu"].startswith("unsupported")
+    assert runtime_dependencies["not_written"]["KHR_draco_mesh_compression"] == "not requested or no mesh payload"
+    assert runtime_dependencies["not_written"]["KHR_texture_basisu"] == "not requested or no texture payload"
     unity_extensions = runtime_dependencies["runtime_compatibility"]["unity_gltfast"]["extensions"]
     assert unity_extensions["MSFT_lod"]["state"] == "optional"
     assert unity_extensions["EXT_meshopt_compression"]["state"] == "not_used"
@@ -441,7 +512,7 @@ def test_cli_convert_accepts_runtime_export_options_during_dry_run() -> None:
     assert payload["jpeg_quality"] == 70
 
 
-def test_cli_convert_rejects_unsupported_draco_option_during_dry_run() -> None:
+def test_cli_convert_accepts_draco_option_during_dry_run() -> None:
     result = runner.invoke(
         app,
         [
@@ -454,12 +525,12 @@ def test_cli_convert_rejects_unsupported_draco_option_during_dry_run() -> None:
         ],
     )
 
-    assert result.exit_code == 2
+    assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert "draco" in payload["error"]
+    assert payload["draco"] is True
 
 
-def test_cli_convert_rejects_unsupported_texture_compression_during_dry_run() -> None:
+def test_cli_convert_accepts_texture_compression_during_dry_run() -> None:
     result = runner.invoke(
         app,
         [
@@ -473,9 +544,9 @@ def test_cli_convert_rejects_unsupported_texture_compression_during_dry_run() ->
         ],
     )
 
-    assert result.exit_code == 2
+    assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert "texture-compression" in payload["error"]
+    assert payload["texture_compression"] == "ktx2"
 
 
 def test_cli_validate_writes_geometry_quality_report(tmp_path) -> None:  # type: ignore[no-untyped-def]

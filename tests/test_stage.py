@@ -775,7 +775,7 @@ def test_stage_records_forbid_overlapping_policy_for_tileable_uv0() -> None:
 
 
 @pytest.mark.requires_xatlas
-def test_stage_warns_when_bake_uv_is_unwrapped_without_repack() -> None:
+def test_stage_repacks_and_pads_unwrapped_bake_uvs() -> None:
     pytest.importorskip("xatlas")
     mesh = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
@@ -792,9 +792,10 @@ def test_stage_warns_when_bake_uv_is_unwrapped_without_repack() -> None:
 
     assert staged_mesh is not None
     assert staged_mesh.metadata["uv1_domain"] == "bake"
-    assert staged_mesh.metadata["uv1_workflow_steps"] == "unwrap,validate"
-    assert staged_mesh.metadata["uv1_pack_status"] == "missing_repack"
-    assert staged_mesh.metadata["uv1_padding_status"] == "metadata_only"
-    assert staged.metadata["stage_bake_uv_channels_missing_repack"] == "1"
-    assert staged.report.steps[-1].after["stage_bake_uv_channels_missing_repack"] == 1
-    assert any("no UV repack/padding backend ran" in warning for warning in warnings)
+    assert staged_mesh.metadata["uv1_workflow_steps"] == "unwrap,repack,pad,validate"
+    assert staged_mesh.metadata["uv1_pack_status"] == "packed"
+    assert staged_mesh.metadata["uv1_padding_status"] == "applied"
+    assert staged_mesh.metadata["uv1_pack_padding"] == "6"
+    assert staged.metadata["stage_bake_uv_channels_repacked"] == "1"
+    assert staged.report.steps[-1].after["stage_bake_uv_channels_repacked"] == 1
+    assert warnings == []

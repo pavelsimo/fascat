@@ -1745,7 +1745,7 @@ class Mesh:
             "mean_edge_length_distortion": mean_edge_distortion,
         }
 
-    def unwrap_uv(self, channel: int = 0) -> Mesh:
+    def unwrap_uv(self, channel: int = 0, *, padding: int = 0, resolution: int = 0) -> Mesh:
         try:
             import xatlas
         except ImportError as exc:
@@ -1757,11 +1757,17 @@ class Mesh:
             mesh.tangents = None
             return mesh
 
-        vertex_mapping, faces, uvs = xatlas.parametrize(
+        atlas = xatlas.Atlas()
+        atlas.add_mesh(
             self.points.astype(np.float32),
             self.faces.astype(np.uint32),
             None if self.normals is None else self.normals.astype(np.float32),
         )
+        pack_options = xatlas.PackOptions()
+        pack_options.padding = int(max(0, padding))
+        pack_options.resolution = int(max(0, resolution))
+        atlas.generate(pack_options=pack_options)
+        vertex_mapping, faces, uvs = atlas.get_mesh(0)
         mapping = np.asarray(vertex_mapping, dtype=np.int64)
         mesh = Mesh(
             points=self.points[mapping].copy(),
@@ -1771,7 +1777,17 @@ class Mesh:
             uvs={**{key: values[mapping].copy() for key, values in self.uvs.items() if key != channel}},
             material_indices=None if self.material_indices is None else self.material_indices.copy(),
             face_groups={name: values.copy() for name, values in self.face_groups.items()},
-            metadata={**self.metadata, f"uv{channel}": "xatlas"},
+            metadata={
+                **self.metadata,
+                f"uv{channel}": "xatlas",
+                f"uv{channel}_pack_status": "packed",
+                f"uv{channel}_padding_status": "applied" if padding else "not_requested",
+                f"uv{channel}_pack_padding": str(int(max(0, padding))),
+                f"uv{channel}_pack_resolution": str(int(max(0, resolution))),
+                f"uv{channel}_pack_width": str(int(atlas.width)),
+                f"uv{channel}_pack_height": str(int(atlas.height)),
+                f"uv{channel}_pack_utilization": f"{float(atlas.utilization):.9g}",
+            },
         )
         mesh.uvs[channel] = np.asarray(uvs, dtype=np.float64)
         mesh.validate()
@@ -1782,6 +1798,7 @@ class Mesh:
         *,
         target_triangles: int | None = None,
         ratio: float | None = None,
+        target_error: float | None = None,
         preserve_hard_edges: bool = False,
         hard_edge_angle: float = 30.0,
         preserve_holes: bool = False,
@@ -1793,11 +1810,15 @@ class Mesh:
             return self.copy()
         if target_triangles is None:
             if ratio is None:
-                return self.copy()
-            target_triangles = max(1, int(round(self.triangle_count * ratio)))
+                if target_error is None:
+                    return self.copy()
+                target_triangles = 1
+            else:
+                target_triangles = max(1, int(round(self.triangle_count * ratio)))
         target_triangles = max(1, min(int(target_triangles), self.triangle_count))
-        if target_triangles >= self.triangle_count:
+        if target_triangles >= self.triangle_count and target_error is None:
             return self.copy()
+        error_bound = None if target_error is None else max(0.0, float(target_error))
 
         if any(
             (
@@ -1830,12 +1851,15 @@ class Mesh:
 
             indices = np.ascontiguousarray(self.faces.reshape(-1), dtype=np.uint32)
             destination = np.empty_like(indices)
+            result_error = np.zeros(1, dtype=np.float32)
             index_count = meshoptimizer.simplify(
                 destination,
                 indices,
                 np.ascontiguousarray(self.points.astype(np.float32)),
                 vertex_count=self.vertex_count,
                 target_index_count=target_triangles * 3,
+                target_error=0.01 if error_bound is None else error_bound,
+                result_error=result_error,
             )
             simplified_indices = np.asarray(destination[:index_count], dtype=np.int64)
             if simplified_indices.size < 3:
@@ -1845,6 +1869,14 @@ class Mesh:
             mesh.faces = simplified_indices[: face_count * 3].reshape((-1, 3))
             mesh.material_indices = self._assign_materials_by_nearest_centroid(mesh.points, mesh.faces)
             mesh = mesh.remove_unreferenced_vertices().compute_normals()
+            if error_bound is not None:
+                measured_error = float(result_error[0])
+                mesh.metadata = {
+                    **mesh.metadata,
+                    "simplify_error_bound": f"{error_bound:.9g}",
+                    "simplify_result_error": f"{measured_error:.9g}",
+                    "simplify_error_bound_status": "enforced" if measured_error <= error_bound + 1e-9 else "exceeded",
+                }
             mesh.validate()
             return mesh
         except Exception:
