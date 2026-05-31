@@ -110,7 +110,9 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   walking per-vertex face sets and appending vertices one corner at a time. `collapse_short_edges()`
   now filters short-edge candidates with one vectorized length pass and averages merged vertex
   components with `np.bincount`, so the union loop only visits edges that can actually collapse.
-  The remaining Python loops in subdivide and skinny-triangle cleanup are still open.
+  `subdivide_long_edges()` and `improve_skinny_triangles()` now compute per-iteration edge lengths,
+  longest edges, and aspect ratios in bulk; their remaining Python work is the variable-output
+  face-splitting assembly.
 
 ### P5 — Edge / adjacency maps rebuilt from `.tolist()` repeatedly — ✅ done (2026-05-31)
 - **Where:** `fascat/mesh.py:1886` (`_edge_faces_map`), `:2255` (`_undirected_edges_and_counts`),

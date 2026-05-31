@@ -1429,26 +1429,33 @@ class Mesh:
 
         changed = True
         iterations = 0
+        edge_pairs = np.asarray([[0, 1], [1, 2], [2, 0]], dtype=np.int64)
         while changed and iterations < 32:
             changed = False
             iterations += 1
+            point_array = np.asarray(points, dtype=np.float64)
+            face_array = np.asarray(faces, dtype=np.int64)
+            triangles = point_array[face_array]
+            edge_lengths = np.linalg.norm(
+                triangles[:, edge_pairs[:, 1]] - triangles[:, edge_pairs[:, 0]],
+                axis=2,
+            )
+            longest_by_face = np.argmax(edge_lengths, axis=1)
+            longest_lengths = edge_lengths[np.arange(face_array.shape[0]), longest_by_face]
             next_faces: list[list[int]] = []
             next_materials: list[int] = []
             for face_index, face in enumerate(faces):
-                triangle = np.asarray([points[index] for index in face], dtype=np.float64)
-                edge_pairs = ((0, 1), (1, 2), (2, 0))
-                lengths = [float(np.linalg.norm(triangle[b] - triangle[a])) for a, b in edge_pairs]
-                longest = int(np.argmax(lengths))
-                if lengths[longest] <= max_edge_length:
+                longest = int(longest_by_face[face_index])
+                if float(longest_lengths[face_index]) <= max_edge_length:
                     next_faces.append(face)
                     if material_indices is not None:
                         next_materials.append(material_indices[face_index])
                     continue
                 changed = True
                 a_corner, b_corner = edge_pairs[longest]
-                c_corner = next(corner for corner in range(3) if corner not in {a_corner, b_corner})
-                a = face[a_corner]
-                b = face[b_corner]
+                c_corner = int(3 - a_corner - b_corner)
+                a = face[int(a_corner)]
+                b = face[int(b_corner)]
                 c = face[c_corner]
                 midpoint = ((np.asarray(points[a]) + np.asarray(points[b])) * 0.5).tolist()
                 midpoint_index = len(points)
@@ -1553,27 +1560,36 @@ class Mesh:
         points = mesh.points.tolist()
         faces: list[list[int]] = mesh.faces.astype(int).tolist()
         material_indices = None if mesh.material_indices is None else mesh.material_indices.astype(int).tolist()
+        edge_pairs = np.asarray([[0, 1], [1, 2], [2, 0]], dtype=np.int64)
 
         for _iteration in range(max_iterations):
             changed = False
             boundary_edges = _boundary_edges_from_faces(faces) if preserve_boundaries else set()
+            point_array = np.asarray(points, dtype=np.float64)
+            face_array = np.asarray(faces, dtype=np.int64)
+            triangles = point_array[face_array]
+            edge_lengths = np.linalg.norm(
+                triangles[:, edge_pairs[:, 1]] - triangles[:, edge_pairs[:, 0]],
+                axis=2,
+            )
+            shortest_lengths = edge_lengths.min(axis=1)
+            longest_lengths = edge_lengths.max(axis=1)
+            aspect_ratios = np.zeros(face_array.shape[0], dtype=np.float64)
+            valid = shortest_lengths > 0.0
+            aspect_ratios[valid] = longest_lengths[valid] / shortest_lengths[valid]
+            longest_by_face = np.argmax(edge_lengths, axis=1)
             next_faces: list[list[int]] = []
             next_materials: list[int] = []
             for face_index, face in enumerate(faces):
-                triangle = np.asarray([points[index] for index in face], dtype=np.float64)
-                edge_pairs = ((0, 1), (1, 2), (2, 0))
-                lengths = [float(np.linalg.norm(triangle[b] - triangle[a])) for a, b in edge_pairs]
-                shortest = min(lengths)
-                longest = max(lengths)
-                if shortest <= 0.0 or longest / shortest <= max_aspect_ratio:
+                if shortest_lengths[face_index] <= 0.0 or aspect_ratios[face_index] <= max_aspect_ratio:
                     next_faces.append(face)
                     if material_indices is not None:
                         next_materials.append(material_indices[face_index])
                     continue
-                longest_index = int(np.argmax(lengths))
+                longest_index = int(longest_by_face[face_index])
                 a_corner, b_corner = edge_pairs[longest_index]
-                a = face[a_corner]
-                b = face[b_corner]
+                a = face[int(a_corner)]
+                b = face[int(b_corner)]
                 edge = (min(a, b), max(a, b))
                 if edge in boundary_edges:
                     next_faces.append(face)
@@ -1581,7 +1597,7 @@ class Mesh:
                         next_materials.append(material_indices[face_index])
                     continue
                 changed = True
-                c_corner = next(corner for corner in range(3) if corner not in {a_corner, b_corner})
+                c_corner = int(3 - a_corner - b_corner)
                 c = face[c_corner]
                 midpoint = ((np.asarray(points[a]) + np.asarray(points[b])) * 0.5).tolist()
                 midpoint_index = len(points)
