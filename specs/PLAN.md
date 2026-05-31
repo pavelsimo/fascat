@@ -47,23 +47,23 @@ writers, trimesh + numpy (mesh ops).
 | **Tessellate** | sag / angle / min-edge / curvature-adaptive meshing, CAD UV extraction/projected fallback, tessellation-time tangents, free-edge geometry metadata | CAD UV projection fallback | intrinsic/conformal CAD UV solver, auto per-part tessellation criteria |
 | **Repair / Heal** | vertex merge, dedup, degenerate cleanup, winding fix, small-hole fill, normals; mesh T-junction sewing, boundary-gap stitching, non-manifold cracking, sliver removal, viewer/open-shell orientation; BREP fix-edge / sew | mesh-level hole removal, open-shell component orientation | BREP duplicate-face cleanup, tolerance overlap / z-fighting cleanup, non-orientable strip cracking |
 | **Stage / UV** | normals, tangents, xatlas unwrap + bake-domain packing/padding, AABB UV, UV copy, material PBR normalize / merge | solver policy intent | island merge / align, seam graph, backend-enforced solver controls |
-| **Materials** | per-face colors + PBR factors preserved, first-class image resources, raster material atlas baking, source image resize/dedupe/PNG-JPEG fallback processing | sampled AO bake | material-library mapping, high-poly transfer, source-file texture extraction during CAD import |
+| **Materials** | per-face colors + PBR factors preserved, first-class image resources, raster material atlas baking, source image resize/dedupe/PNG-JPEG fallback processing | source texture sidecar extraction, CAD material-name PBR rule mapping, sampled AO bake | high-poly transfer, rich vendor material-library import |
 | **Optimize** | decimation, quality target-error simplification, instance reconstruction, buffer optimization | sampled occlusion | weighted decimation, retopology, GPU occlusion |
-| **LOD** | real decimated mesh levels, occurrence-aware LOD metadata, far-LOD one-material bake policy, engine switch-distance validation | per-part far bake | scene-level one mesh / one draw call far proxy |
+| **LOD** | real decimated mesh levels, occurrence-aware LOD metadata, far-LOD one-material bake policy, engine switch-distance validation, scene-level far proxy mesh | per-part and scene proxy bake policies | format-specific engine LOD export profiles beyond metadata |
 | **Export** | USD/USDZ, glTF/GLB (quantize + meshopt + Draco + KTX2/Basis), OBJ, STL, FBX, real baked texture images | — | size-ladder reports, named presets |
 
 ### A. Works end-to-end — real geometry
 
 The basics are present and produce a valid RT3D asset:
 
-- **Import** (`io/step.py`, `io/iges.py`, `io/brep.py`, OCCT/OCP): STEP geometry, STEP/IGES assembly hierarchy where exposed, transforms, colors, metadata, units, repeated-part instances, native BREP single-shape import, source-space normalization.
+- **Import** (`io/step.py`, `io/iges.py`, `io/brep.py`, OCCT/OCP): STEP geometry, STEP/IGES assembly hierarchy where exposed, transforms, colors, metadata, units, repeated-part instances, native BREP single-shape import, source-space normalization, sidecar source texture reference extraction, and first-pass CAD material-name PBR mapping.
 - **Tessellate** (`ops/tessellate.py`, OCCT `BRepMesh`): `sag`, `angle`, `min_edge_length`, `curvature_adaptive`, `preserve_boundaries`, CAD UV extraction/projected fallback, tessellation-time tangents, and free-edge geometry metadata all change or annotate the real mesh.
 - **Repair — mesh** (`mesh.py`): vertex merge (Euclidean union-find), duplicate / degenerate face removal, T-junction sewing, boundary-gap stitching, non-manifold edge cracking, sliver-face removal, winding fix (trimesh + inward-shell flip), viewer/open-shell orientation, small-hole fill, normal generation.
 - **Heal — BREP** (`ops/heal.py`): `fix_edges`, `unify_tolerances`, `sew_faces` via OCCT `ShapeFix` / `BRepBuilderAPI_Sewing`.
 - **Stage** (`ops/stage.py`): normals, tangents, UV unwrap/repack/padding (**xatlas**), AABB/box UV projection, UV copy, material normalize-to-PBR, duplicate-material merge.
-- **Materials** (`ops/actions.py`, `ops/textures.py`, `image.py`): material bake creates first-class PNG images and raster atlas maps for base color, opacity, metallic/roughness, normal, AO, and emissive; texture processing resizes, dedupes, and applies PNG/JPEG fallback policy to first-class images.
+- **Materials** (`ops/actions.py`, `ops/textures.py`, `image.py`): material bake creates first-class PNG images and raster atlas maps for base color, opacity, metallic/roughness, normal, AO, and emissive; texture processing resizes, dedupes, and applies PNG/JPEG fallback policy to first-class images; imported source textures can bind to material texture slots for glTF/USD export.
 - **Optimize** (`ops/optimize.py`, `ops/actions.py`): decimation (**meshoptimizer / fast-simplification**) including quality target-error bounds, instance reconstruction (real scene rewrite), buffer optimization.
-- **LODs** (`ops/lod.py`): real decimated mesh levels per part, occurrence-aware reuse metadata, far-level one-material bake policy, and engine-specific switch-distance metadata.
+- **LODs** (`ops/lod.py`): real decimated mesh levels per part, occurrence-aware reuse metadata, far-level one-material bake policy, optional scene-level far proxy mesh, and engine-specific switch-distance metadata.
 - **Export** (`io/{usd,gltf,obj,stl,fbx}.py`): USD/USDZ (usd-core), glTF/GLB with real quantization, meshopt, Draco, and KTX2/Basis paths, OBJ, STL, FBX — all write valid geometry, hierarchy, transforms, material factors, and referenced baked textures.
 
 ### B. Real but approximate — refine candidates
@@ -75,7 +75,7 @@ The basics are present and produce a valid RT3D asset:
 
 The remaining reportable gaps are now concentrated outside the core mesh pipeline:
 
-- **Import enrichment**: typed AP242 PMI, design variants, true multi-file/multi-root import, and source-file texture extraction are not implemented.
+- **Import enrichment**: typed AP242 PMI, design variants, and true multi-file/multi-root import are not implemented. Source texture extraction exists for referenced sidecar image files, but not for every vendor-specific CAD material-library container.
 - **Advanced CAD attributes**: intrinsic/conformal CAD UV solving and automatic material/metadata/curvature-driven tessellation criteria are still open.
 - **BREP cleanup**: duplicate-face cleanup, tolerance overlap / z-fighting cleanup, and open-shell grouping before BREP healing are still open.
 - **Runtime validation**: reports include measured pipeline/write/validate timings and local memory/load/frame/FPS estimates, but no real Unity/Unreal/browser runtime harness exists yet.
@@ -127,9 +127,9 @@ This is the master TODO list. Keep items in one of three states:
 - [x] Real raster texture baking: base color, roughness, metallic, normal, AO, emissive. Done 2026-05-31.
 - [x] Real atlas packing with first-class image resources. Done 2026-05-31.
 - [x] Image resize/dedupe passes and PNG/JPEG fallback conversion policy for first-class images. Done 2026-05-31.
-- [~] Source texture pipeline: processing exists, but CAD import still does not extract external source texture files.
+- [~] Source texture pipeline: CAD import now extracts referenced sidecar PNG/JPEG/KTX2 files and binds semantic slots, but vendor-specific embedded material-library containers are still partial. Updated 2026-05-31.
 - [ ] AO bake to texture and/or vertex colors feeding decimation weights.
-- [ ] Material-library import + CAD-material-to-PBR mapping tables + diagnostics.
+- [~] Material-library import + CAD-material-to-PBR mapping tables + diagnostics: XDE visual material values and common CAD material-name rules are mapped to PBR factors; rich vendor material libraries are still open. Updated 2026-05-31.
 - [ ] High-poly → proxy normal-map baking.
 
 **Optimize**
@@ -144,7 +144,7 @@ This is the master TODO list. Keep items in one of three states:
 - [x] Far-LOD one-material bake policy per part. Done 2026-05-31.
 - [x] Switching-distance validation + generic/Unity/Unreal distance profiles. Done 2026-05-31.
 - [~] Per-LOD material / texture-resolution / culling policy: material bake and culling metadata exist, texture-resolution policy is still advisory.
-- [ ] Scene-level far proxy as one mesh / one material / one draw call.
+- [x] Scene-level far proxy as one mesh / one material / one draw call, with glTF root LOD metadata. Done 2026-05-31.
 - [ ] Format-specific engine LOD export profiles beyond metadata.
 
 **Export**

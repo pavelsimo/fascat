@@ -341,6 +341,52 @@ def test_lods_can_bake_far_level_material_policy() -> None:
     assert with_lods.metadata["lod_texture_baked_levels"] == "1"
 
 
+def test_lods_can_build_scene_level_far_proxy() -> None:
+    translate = np.eye(4, dtype=float)
+    translate[0, 3] = 2.0
+    mesh = _triangle_mesh()
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="node_a", name="Node A", part_id="a"),
+                Node(id="node_b", name="Node B", part_id="b", transform=translate),
+            ],
+        ),
+        parts={
+            "a": Part(id="a", name="A", mesh=mesh),
+            "b": Part(id="b", name="B", mesh=mesh),
+        },
+    )
+
+    with_lods = asset.lods(
+        LODOptions(
+            ratios=(0.5, 0.1),
+            screen_coverage=(0.5, 0.05),
+            far_lod_bake=True,
+            scene_far_proxy=True,
+        )
+    )
+    proxy = with_lods.parts[str(with_lods.metadata["lod_scene_far_proxy_part_id"])]
+    step = with_lods.report.steps[-1]
+
+    assert with_lods.metadata["lod_scene_far_proxy"] == "created"
+    assert with_lods.metadata["lod_scene_far_proxy_draw_calls"] == "1"
+    assert with_lods.metadata["lod_scene_far_proxy_source_parts"] == "2"
+    assert with_lods.metadata["lod_scene_far_proxy_source_occurrences"] == "2"
+    assert proxy.material_ids == [with_lods.metadata["lod_scene_far_proxy_material_id"]]
+    assert proxy.mesh is not None
+    assert proxy.mesh.triangle_count == 2
+    assert proxy.mesh.material_indices is not None
+    assert proxy.mesh.material_indices.tolist() == [0, 0]
+    assert proxy.mesh.metadata["lod_material_merge"] == "scene_merged"
+    assert proxy.mesh.metadata["lod_texture_bake"] == "scene_baked"
+    assert proxy.mesh.points[:, 0].max() == pytest.approx(3.0)
+    assert step.after["lod_scene_far_proxy_draw_calls"] == 1
+    assert step.after["lod_scene_far_proxy_triangles"] == 2
+
+
 def test_lods_warn_when_selected_parts_have_no_mesh() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),

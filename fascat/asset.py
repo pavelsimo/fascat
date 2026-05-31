@@ -1309,6 +1309,11 @@ def _lod_report_stats(asset: Asset) -> dict[str, int]:
         "lod_texture_baked_levels",
         "lod_culling_changed_levels",
         "lod_advisory_count",
+        "lod_scene_far_proxy_vertices",
+        "lod_scene_far_proxy_triangles",
+        "lod_scene_far_proxy_draw_calls",
+        "lod_scene_far_proxy_source_parts",
+        "lod_scene_far_proxy_source_occurrences",
     ):
         if key in asset.metadata:
             stats[key] = _metadata_int(asset.metadata[key], 0)

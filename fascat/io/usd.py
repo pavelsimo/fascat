@@ -19,6 +19,8 @@ _BAKED_TEXTURE_BINDINGS = (
     (
         "baked_texture_base_color_image",
         "baked_texture_base_color_uri",
+        "source_texture_base_color_image",
+        "source_texture_base_color_uri",
         "BaseColorTexture",
         (("diffuseColor", "rgb"), ("opacity", "a")),
         "sRGB",
@@ -26,15 +28,35 @@ _BAKED_TEXTURE_BINDINGS = (
     (
         "baked_texture_metallic_roughness_image",
         "baked_texture_metallic_roughness_uri",
+        "source_texture_metallic_roughness_image",
+        "source_texture_metallic_roughness_uri",
         "MetallicRoughnessTexture",
         (("roughness", "g"), ("metallic", "b")),
         "raw",
     ),
-    ("baked_texture_normal_image", "baked_texture_normal_uri", "NormalTexture", (("normal", "rgb"),), "raw"),
-    ("baked_texture_occlusion_image", "baked_texture_occlusion_uri", "OcclusionTexture", (("occlusion", "r"),), "raw"),
+    (
+        "baked_texture_normal_image",
+        "baked_texture_normal_uri",
+        "source_texture_normal_image",
+        "source_texture_normal_uri",
+        "NormalTexture",
+        (("normal", "rgb"),),
+        "raw",
+    ),
+    (
+        "baked_texture_occlusion_image",
+        "baked_texture_occlusion_uri",
+        "source_texture_occlusion_image",
+        "source_texture_occlusion_uri",
+        "OcclusionTexture",
+        (("occlusion", "r"),),
+        "raw",
+    ),
     (
         "baked_texture_emissive_image",
         "baked_texture_emissive_uri",
+        "source_texture_emissive_image",
+        "source_texture_emissive_uri",
         "EmissiveTexture",
         (("emissiveColor", "rgb"),),
         "sRGB",
@@ -291,8 +313,23 @@ def _add_baked_texture_bindings(
     UsdShade: Any,
 ) -> None:
     st_reader = None
-    for image_key, uri_key, shader_name, connections, color_space in _BAKED_TEXTURE_BINDINGS:
-        uri = _metadata_image_uri(material, image_key, uri_key, images)
+    for (
+        image_key,
+        uri_key,
+        fallback_image_key,
+        fallback_uri_key,
+        shader_name,
+        connections,
+        color_space,
+    ) in _BAKED_TEXTURE_BINDINGS:
+        uri = _metadata_image_uri(
+            material,
+            image_key,
+            uri_key,
+            images,
+            fallback_image_key=fallback_image_key,
+            fallback_uri_key=fallback_uri_key,
+        )
         if uri is None:
             continue
         if st_reader is None:
@@ -342,14 +379,25 @@ def _metadata_image_uri(
     image_key: str,
     uri_key: str,
     images: dict[str, ImageResource],
+    *,
+    fallback_image_key: str | None = None,
+    fallback_uri_key: str | None = None,
 ) -> str | None:
-    image_id = material.metadata.get(image_key)
-    if isinstance(image_id, str):
-        image = images.get(image_id)
-        if image is not None:
-            return image.data_uri()
-    value = material.metadata.get(uri_key)
-    return value if isinstance(value, str) and value.startswith("data:image/") else None
+    for key in (image_key, fallback_image_key):
+        if key is None:
+            continue
+        image_id = material.metadata.get(key)
+        if isinstance(image_id, str):
+            image = images.get(image_id)
+            if image is not None:
+                return image.data_uri()
+    for key in (uri_key, fallback_uri_key):
+        if key is None:
+            continue
+        value = material.metadata.get(key)
+        if isinstance(value, str) and value.startswith("data:image/"):
+            return value
+    return None
 
 
 def _write_prototypes(

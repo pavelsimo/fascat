@@ -72,6 +72,9 @@ _IMPORT_KEYS = frozenset(
         "design_variants",
         "existing_meshes",
         "multi_file",
+        "source_textures",
+        "source_texture_search_paths",
+        "material_library_mapping",
         "delete_free_vertices",
         "delete_lines",
         "source_units",
@@ -301,7 +304,9 @@ _LOD_KEYS = frozenset(
         "tiny_part_screen_size",
         "engine_profile",
         "far_lod_bake",
+        "scene_far_proxy",
         "validate",
+        "jobs",
     }
 )
 _STEP_OPTION_KEYS = {
@@ -641,6 +646,9 @@ def _import_options(value: object, location: _TomlLocation | None = None) -> Ste
             design_variants=bool(value.get("design_variants", False)),
             existing_meshes=bool(value.get("existing_meshes", True)),
             multi_file=bool(value.get("multi_file", False)),
+            source_textures=bool(value.get("source_textures", True)),
+            source_texture_search_paths=cast(Any, value.get("source_texture_search_paths", ())),
+            material_library_mapping=bool(value.get("material_library_mapping", True)),
             delete_free_vertices=bool(value.get("delete_free_vertices", False)),
             delete_lines=bool(value.get("delete_lines", False)),
             source_units=cast(str | None, value.get("source_units")),
@@ -1081,6 +1089,7 @@ def _lod_options(values: dict[str, object]) -> LODOptions:
         tiny_part_screen_size=_as_float(values.get("tiny_part_screen_size", 2.0)),
         engine_profile=cast(Any, values.get("engine_profile", "generic")),
         far_lod_bake=bool(values.get("far_lod_bake", False)),
+        scene_far_proxy=bool(values.get("scene_far_proxy", False)),
         validate=bool(values.get("validate", False)),
         jobs=_as_int(values.get("jobs", 1)),
     )

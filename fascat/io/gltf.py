@@ -700,6 +700,7 @@ def _build_document(
 
     nodes: list[dict[str, Any]] = []
     root_node = _append_node(nodes, asset.root, part_meshes, part_lods, export_space, metadata_options, quantization)
+    _attach_scene_far_proxy_lod(nodes, root_node, asset, part_meshes)
     binary = builder.data
     buffers: list[dict[str, object]] = [{"byteLength": len(binary)}]
 
@@ -782,6 +783,8 @@ def _add_baked_textures(
         "baked_texture_base_color_image",
         "baked_texture_base_color_uri",
         image_resources,
+        fallback_image_key="source_texture_base_color_image",
+        fallback_uri_key="source_texture_base_color_uri",
     )
     if base_color_uri is not None:
         pbr["baseColorTexture"] = {
@@ -798,6 +801,8 @@ def _add_baked_textures(
         "baked_texture_metallic_roughness_image",
         "baked_texture_metallic_roughness_uri",
         image_resources,
+        fallback_image_key="source_texture_metallic_roughness_image",
+        fallback_uri_key="source_texture_metallic_roughness_uri",
     )
     if metallic_roughness_uri is not None:
         pbr["metallicRoughnessTexture"] = {
@@ -810,7 +815,12 @@ def _add_baked_textures(
             )
         }
     normal_uri = _metadata_image_uri(
-        material, "baked_texture_normal_image", "baked_texture_normal_uri", image_resources
+        material,
+        "baked_texture_normal_image",
+        "baked_texture_normal_uri",
+        image_resources,
+        fallback_image_key="source_texture_normal_image",
+        fallback_uri_key="source_texture_normal_uri",
     )
     if normal_uri is not None:
         gltf_material["normalTexture"] = {
@@ -827,6 +837,8 @@ def _add_baked_textures(
         "baked_texture_occlusion_image",
         "baked_texture_occlusion_uri",
         image_resources,
+        fallback_image_key="source_texture_occlusion_image",
+        fallback_uri_key="source_texture_occlusion_uri",
     )
     if occlusion_uri is not None:
         gltf_material["occlusionTexture"] = {
@@ -843,6 +855,8 @@ def _add_baked_textures(
         "baked_texture_emissive_image",
         "baked_texture_emissive_uri",
         image_resources,
+        fallback_image_key="source_texture_emissive_image",
+        fallback_uri_key="source_texture_emissive_uri",
     )
     if emissive_uri is not None:
         gltf_material["emissiveTexture"] = {
@@ -878,14 +892,25 @@ def _metadata_image_uri(
     image_key: str,
     uri_key: str,
     image_resources: dict[str, ImageResource],
+    *,
+    fallback_image_key: str | None = None,
+    fallback_uri_key: str | None = None,
 ) -> str | None:
-    image_id = material.metadata.get(image_key)
-    if isinstance(image_id, str):
-        image = image_resources.get(image_id)
-        if image is not None:
-            return image.data_uri()
-    value = material.metadata.get(uri_key)
-    return value if isinstance(value, str) and value.startswith("data:image/") else None
+    for key in (image_key, fallback_image_key):
+        if key is None:
+            continue
+        image_id = material.metadata.get(key)
+        if isinstance(image_id, str):
+            image = image_resources.get(image_id)
+            if image is not None:
+                return image.data_uri()
+    for key in (uri_key, fallback_uri_key):
+        if key is None:
+            continue
+        value = material.metadata.get(key)
+        if isinstance(value, str) and value.startswith("data:image/"):
+            return value
+    return None
 
 
 def _asset_metadata_extras(asset: Asset, options: MetadataExportOptions) -> dict[str, object]:
@@ -1463,6 +1488,49 @@ def _append_lod_node(
         gltf_node["matrix"] = transform.T.reshape(-1).astype(float).tolist()
     nodes.append(gltf_node)
     return len(nodes) - 1
+
+
+def _attach_scene_far_proxy_lod(
+    nodes: list[dict[str, Any]],
+    root_node: int,
+    asset: Asset,
+    part_meshes: dict[str, int],
+) -> None:
+    proxy_part_id = asset.metadata.get("lod_scene_far_proxy_part_id")
+    if not isinstance(proxy_part_id, str):
+        return
+    proxy_mesh_index = part_meshes.get(proxy_part_id)
+    if proxy_mesh_index is None:
+        return
+    proxy_part = asset.parts.get(proxy_part_id)
+    if proxy_part is None or proxy_part.mesh is None:
+        return
+    try:
+        level = int(str(proxy_part.mesh.metadata.get("lod_level", 1)))
+    except ValueError:
+        level = 1
+    proxy_node: dict[str, Any] = {
+        "name": "Scene_far_proxy",
+        "mesh": proxy_mesh_index,
+        "extras": {
+            "fascat": {
+                "nodeId": "scene_far_proxy",
+                "lod": level,
+                "sceneFarProxy": True,
+                "sourcePartId": proxy_part_id,
+            }
+        },
+    }
+    nodes.append(proxy_node)
+    proxy_node_index = len(nodes) - 1
+    root = nodes[root_node]
+    root.setdefault("extensions", {})[_MSFT_LOD] = {"ids": [proxy_node_index]}
+    fascat_extras = root.setdefault("extras", {}).setdefault("fascat", {})
+    fascat_extras["sceneFarProxyMeshIndex"] = proxy_mesh_index
+    fascat_extras["sceneFarProxyPartId"] = proxy_part_id
+    coverage = _metadata_float(proxy_part.mesh.metadata.get("lod_screen_coverage"))
+    if isinstance(coverage, float):
+        root["extras"]["MSFT_screencoverage"] = [coverage]
 
 
 def _node_transform(

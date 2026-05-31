@@ -46,7 +46,7 @@ def _read_iges_path(source: Path, *, source_identity: str, options: IgesReadOpti
 
     cleanup = _step._ImportCleanupStats()
     with timed_step() as timer:
-        document, shape_tool, color_tool = _read_xde_document(source, options)
+        document, shape_tool, color_tool, vis_material_tool = _read_xde_document(source, options)
         space = _step._space_normalization("millimetre", 0.001, options)
         free_labels = _step._free_shape_labels(shape_tool)
         root = Node(
@@ -70,6 +70,7 @@ def _read_iges_path(source: Path, *, source_identity: str, options: IgesReadOpti
                     source_identity,
                     shape_tool,
                     color_tool,
+                    vis_material_tool,
                     parts,
                     part_index,
                     materials,
@@ -77,12 +78,15 @@ def _read_iges_path(source: Path, *, source_identity: str, options: IgesReadOpti
                     cleanup,
                 )
             )
+        source_textures = _step._extract_source_textures(source, source_identity, options)
+        texture_binding_summary = _step._attach_source_textures_to_materials(materials, source_textures.images)
 
     report = Report(source_path=str(source))
     asset = Asset(
         root=root,
         parts=parts,
         materials=materials,
+        images=source_textures.images,
         units=space.target_units,
         meters_per_unit=space.target_meters_per_unit,
         up_axis=cast(Any, space.target_up_axis),
@@ -95,6 +99,11 @@ def _read_iges_path(source: Path, *, source_identity: str, options: IgesReadOpti
     loaded_representations = _step._loaded_representation_report(asset)
     if asset.metadata:
         asset.metadata["import_representation_summary"] = loaded_representations["summary"]
+        asset.metadata["source_texture_import"] = source_textures.summary
+        asset.metadata["source_texture_bindings"] = texture_binding_summary
+    import_warnings = source_textures.warnings
+    for warning in import_warnings:
+        asset.report.add_warning(warning)
     asset.report.add_step(
         "import",
         options={
@@ -104,17 +113,20 @@ def _read_iges_path(source: Path, *, source_identity: str, options: IgesReadOpti
             "metadata_count": _step._metadata_count(asset),
             "cleanup": cleanup.to_dict(),
             "space_normalization": space.metadata(),
+            "source_textures": source_textures.summary,
+            "source_texture_bindings": texture_binding_summary,
             "loaded_representations": loaded_representations,
         },
         before={"nodes": 0, "parts": 0, "occurrences": 0, "materials": 0, "vertices": 0, "triangles": 0},
         after=asset.stats(),
         duration=timer.duration,
+        warnings=import_warnings,
     )
     _ = document
     return asset
 
 
-def _read_xde_document(path: Path, options: IgesReadOptions) -> tuple[Any, Any, Any]:
+def _read_xde_document(path: Path, options: IgesReadOptions) -> tuple[Any, Any, Any, Any]:
     try:
         from OCP.IFSelect import IFSelect_RetDone
         from OCP.IGESCAFControl import IGESCAFControl_Reader
@@ -140,7 +152,8 @@ def _read_xde_document(path: Path, options: IgesReadOptions) -> tuple[Any, Any, 
         raise RuntimeError(f"failed to transfer IGES data into XDE document: {path}")
     shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
     color_tool = XCAFDoc_DocumentTool.ColorTool_s(document.Main())
-    return document, shape_tool, color_tool
+    vis_material_tool = XCAFDoc_DocumentTool.VisMaterialTool_s(document.Main())
+    return document, shape_tool, color_tool, vis_material_tool
 
 
 def _asset_metadata(
@@ -157,6 +170,8 @@ def _asset_metadata(
         _step._StepHeaderInfo(),
         cleanup,
         space,
+        source_texture_summary=None,
+        texture_binding_summary=None,
     )
     if metadata:
         metadata["format"] = "IGES"

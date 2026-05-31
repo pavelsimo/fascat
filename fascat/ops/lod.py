@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import numpy as np
 
-from fascat.asset import Asset, Part
+from fascat.asset import Asset, Node, Part
+from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.ops.parallel import parallel_map
 from fascat.options import LODOptions
@@ -87,9 +89,17 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
         material_merged_levels += built.material_merged_levels
         texture_baked_levels += built.texture_baked_levels
         culling_changed_levels += built.culling_changed_levels
+    scene_proxy = (
+        _build_scene_far_proxy(result, options, selected_part_ids=selected_part_ids)
+        if options.scene_far_proxy
+        else None
+    )
     result.metadata["lod_mode"] = options.mode
     result.metadata["lod_engine_profile"] = options.engine_profile
     result.metadata["lod_far_lod_bake"] = str(options.far_lod_bake).lower()
+    result.metadata["lod_scene_far_proxy"] = (
+        "created" if scene_proxy is not None else "no_meshes" if options.scene_far_proxy else "not_requested"
+    )
     result.metadata["lod_screen_coverage"] = ",".join(f"{value:.9g}" for value in screen_coverage)
     result.metadata["lod_generated_parts"] = str(generated_parts)
     result.metadata["lod_skipped_no_mesh_parts"] = str(skipped_parts)
@@ -110,6 +120,8 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
     result.metadata["lod_texture_baked_levels"] = str(texture_baked_levels)
     result.metadata["lod_culling_changed_levels"] = str(culling_changed_levels)
     result.metadata["lod_level_policy_advisory"] = ",".join(level_policy_advisories)
+    if scene_proxy is not None:
+        result.metadata.update(scene_proxy)
     if generated_parts:
         _record_lod_chain_advisories(result, options, screen_coverage)
     else:
@@ -299,6 +311,119 @@ def _occurrence_counts_by_part(asset: Asset) -> dict[str, int]:
             continue
         counts[node.part_id] = counts.get(node.part_id, 0) + 1
     return counts
+
+
+def _build_scene_far_proxy(
+    asset: Asset,
+    options: LODOptions,
+    *,
+    selected_part_ids: set[str] | None,
+) -> dict[str, object] | None:
+    occurrences = _world_part_occurrences(asset, selected_part_ids)
+    points: list[np.ndarray] = []
+    faces: list[np.ndarray] = []
+    offset = 0
+    source_parts: set[str] = set()
+    source_occurrences = 0
+    for part, world_transform in occurrences:
+        if not part.lod_meshes:
+            continue
+        mesh = part.lod_meshes[-1]
+        if mesh.vertex_count == 0 or mesh.triangle_count == 0:
+            continue
+        transformed_points = _transform_points(mesh.points, world_transform)
+        points.append(transformed_points)
+        faces.append(mesh.faces.astype(np.int64, copy=True) + offset)
+        offset += mesh.vertex_count
+        source_parts.add(part.id)
+        source_occurrences += 1
+    if not points or not faces:
+        return None
+
+    material_id = _unique_id("lod_scene_far_proxy_material", asset.materials)
+    part_id = _unique_id("lod_scene_far_proxy", asset.parts)
+    merged_points = np.vstack(points).astype(np.float64)
+    merged_faces = np.vstack(faces).astype(np.int64)
+    material_indices = np.zeros(merged_faces.shape[0], dtype=np.int64)
+    screen_coverage = _screen_coverage(options)
+    proxy_metadata: dict[str, object] = {
+        "lod_scene_far_proxy": "true",
+        "lod_level": str(len(options.ratios)),
+        "lod_ratio": f"{options.ratios[-1]:.9g}",
+        "lod_screen_coverage": f"{screen_coverage[-1]:.9g}",
+        "lod_source_parts": str(len(source_parts)),
+        "lod_source_occurrences": str(source_occurrences),
+        "lod_material_merge": "scene_merged",
+        "lod_texture_bake": "scene_baked" if options.far_lod_bake else "not_run",
+        "lod_draw_calls": "1",
+    }
+    proxy_mesh = Mesh(
+        points=merged_points,
+        faces=merged_faces,
+        material_indices=material_indices,
+        metadata=proxy_metadata,
+    )
+    proxy_mesh.validate()
+    asset.materials[material_id] = Material(
+        id=material_id,
+        name="Scene far proxy material",
+        base_color=(0.7, 0.7, 0.7, 1.0),
+        roughness=0.6,
+        metadata={
+            "lod_scene_far_proxy": "true",
+            "lod_material_merge": "scene_merged",
+            "lod_source_material_policy": "one_material",
+        },
+    )
+    asset.parts[part_id] = Part(
+        id=part_id,
+        name="Scene Far Proxy",
+        mesh=proxy_mesh,
+        material_ids=[material_id],
+        metadata=proxy_metadata,
+        fingerprint=proxy_mesh.fingerprint(),
+    )
+    return {
+        "lod_scene_far_proxy_part_id": part_id,
+        "lod_scene_far_proxy_material_id": material_id,
+        "lod_scene_far_proxy_vertices": str(proxy_mesh.vertex_count),
+        "lod_scene_far_proxy_triangles": str(proxy_mesh.triangle_count),
+        "lod_scene_far_proxy_draw_calls": "1",
+        "lod_scene_far_proxy_source_parts": str(len(source_parts)),
+        "lod_scene_far_proxy_source_occurrences": str(source_occurrences),
+    }
+
+
+def _world_part_occurrences(asset: Asset, selected_part_ids: set[str] | None) -> list[tuple[Part, np.ndarray]]:
+    occurrences: list[tuple[Part, np.ndarray]] = []
+
+    def walk(node: Node, world: np.ndarray) -> None:
+        current = world @ node.transform
+        if node.part_id is not None and (selected_part_ids is None or node.part_id in selected_part_ids):
+            part = asset.parts.get(node.part_id)
+            if part is not None:
+                occurrences.append((part, current))
+        for child in node.children:
+            walk(child, current)
+
+    walk(asset.root, np.eye(4, dtype=np.float64))
+    return occurrences
+
+
+def _transform_points(points: np.ndarray, transform: np.ndarray) -> np.ndarray:
+    if points.shape[0] == 0:
+        return np.asarray(points.copy(), dtype=np.float64)
+    homogeneous = np.column_stack([points, np.ones(points.shape[0], dtype=np.float64)])
+    return np.asarray((transform @ homogeneous.T).T[:, :3], dtype=np.float64)
+
+
+def _unique_id(base: str, values: Mapping[str, object]) -> str:
+    if base not in values:
+        return base
+    index = 1
+    while f"{base}_{index}" in values:
+        index += 1
+    return f"{base}_{index}"
 
 
 def _level_policy_metadata(

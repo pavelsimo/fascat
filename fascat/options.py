@@ -109,6 +109,21 @@ def _normalize_string_tuple(value: object, field_name: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(items))
 
 
+def _normalize_path_tuple(value: object, field_name: str) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value,)
+    if value is None:
+        return ()
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"{field_name} must be a string or sequence of strings")
+    items: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"{field_name} values must be non-empty strings")
+        items.append(item.strip())
+    return tuple(dict.fromkeys(items))
+
+
 def _normalize_float3(value: object, field_name: str) -> tuple[float, float, float]:
     if isinstance(value, str) or not isinstance(value, (list, tuple)) or len(value) != 3:
         raise ValueError(f"{field_name} must be a sequence of three numeric values")
@@ -271,6 +286,9 @@ class StepReadOptions:
     design_variants: bool = False
     existing_meshes: bool = True
     multi_file: bool = False
+    source_textures: bool = True
+    source_texture_search_paths: tuple[str, ...] = ()
+    material_library_mapping: bool = True
     delete_free_vertices: bool = False
     delete_lines: bool = False
     source_units: str | None = None
@@ -295,9 +313,16 @@ class StepReadOptions:
             raise ValueError("source_handedness must be one of: right, left")
         if self.target_handedness not in {None, "right", "left"}:
             raise ValueError("target_handedness must be one of: right, left")
+        object.__setattr__(
+            self,
+            "source_texture_search_paths",
+            _normalize_path_tuple(self.source_texture_search_paths, "source_texture_search_paths"),
+        )
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        data = asdict(self)
+        data["source_texture_search_paths"] = list(self.source_texture_search_paths)
+        return data
 
 
 @dataclass(frozen=True)
@@ -496,6 +521,7 @@ class LODOptions:
     tiny_part_screen_size: float = 2.0
     engine_profile: LODEngineProfile = "generic"
     far_lod_bake: bool = False
+    scene_far_proxy: bool = False
     validate: bool = False
     jobs: int = 1
 
@@ -535,6 +561,7 @@ class LODOptions:
             "tiny_part_screen_size": self.tiny_part_screen_size,
             "engine_profile": self.engine_profile,
             "far_lod_bake": self.far_lod_bake,
+            "scene_far_proxy": self.scene_far_proxy,
             "validate": self.validate,
             "jobs": self.jobs,
         }

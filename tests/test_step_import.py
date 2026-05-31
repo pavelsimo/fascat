@@ -4,11 +4,17 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from PIL import Image
 
 import fascat as fc
 from fascat.io.step import (
+    _apply_material_library_mapping,
+    _attach_source_textures_to_materials,
+    _CadMaterialSpec,
     _canonical_part_id,
     _cleanup_action,
+    _color_material_spec,
+    _extract_source_textures,
     _import_decisions,
     _import_warnings,
     _ImportCleanupStats,
@@ -158,6 +164,8 @@ def test_step_import_decisions_report_requested_effective_states() -> None:
     assert decisions["pmi"]["state"] == "unsupported"
     assert decisions["design_variants"]["state"] == "unsupported"
     assert decisions["multi_file"]["state"] == "unsupported"
+    assert decisions["source_textures"]["state"] == "honored"
+    assert decisions["material_library_mapping"]["state"] == "honored"
     assert decisions["delete_free_vertices"]["state"] == "honored"
     assert decisions["delete_free_vertices"]["counts"] == {"deleted_parts": 0, "deleted_vertices": 0}
     assert decisions["delete_lines"]["counts"] == {
@@ -166,6 +174,60 @@ def test_step_import_decisions_report_requested_effective_states() -> None:
         "deleted_vertices": 4,
     }
     assert decisions["space_normalization"]["state"] == "honored"
+
+
+def test_step_source_texture_extraction_loads_sidecar_images_and_binds_single_material(tmp_path: Path) -> None:
+    texture = tmp_path / "panel_baseColor.png"
+    Image.new("RGBA", (4, 2), (128, 64, 32, 255)).save(texture)
+    source = tmp_path / "panel.step"
+    source.write_text(
+        "ISO-10303-21;\nDATA;\n#1=EXTERNAL_REFERENCE('panel_baseColor.png');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    extraction = _extract_source_textures(source, "panel.step", StepReadOptions())
+    material = fc.Material(id="paint", name="Paint", base_color=(1.0, 1.0, 1.0, 1.0))
+    summary = _attach_source_textures_to_materials({"paint": material}, extraction.images)
+
+    image = next(iter(extraction.images.values()))
+    assert extraction.summary == {"references": 1, "resolved": 1, "missing": 0, "unsupported": 0, "unreadable": 0}
+    assert image.mime_type == "image/png"
+    assert (image.width, image.height) == (4, 2)
+    assert image.metadata["source_texture_slot"] == "base_color"
+    assert material.metadata["source_texture_base_color_image"] == image.id
+    assert material.metadata["source_texture_slots"] == "base_color"
+    assert summary == {"bound_images": 1, "bound_materials": 1, "unbound_images": 0}
+
+
+def test_step_source_texture_extraction_reports_missing_references(tmp_path: Path) -> None:
+    source = tmp_path / "panel.step"
+    source.write_text(
+        "ISO-10303-21;\nDATA;\n#1=EXTERNAL_REFERENCE('missing_normal.jpg');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    extraction = _extract_source_textures(source, "panel.step", StepReadOptions())
+
+    assert extraction.images == {}
+    assert extraction.summary == {"references": 1, "resolved": 0, "missing": 1, "unsupported": 0, "unreadable": 0}
+    assert extraction.warnings == ["source texture reference could not be resolved: missing_normal.jpg"]
+
+
+def test_material_library_mapping_applies_known_cad_material_rules() -> None:
+    spec = _color_material_spec((0.75, 0.75, 0.75, 1.0))
+    steel = _apply_material_library_mapping(
+        _CadMaterialSpec(
+            name="Stainless Steel 304",
+            base_color=spec.base_color,
+            metadata=(("cad_material_source", "xde_visual_material"),),
+        ),
+        StepReadOptions(),
+    )
+
+    assert steel.metallic == pytest.approx(1.0)
+    assert steel.roughness == pytest.approx(0.32)
+    assert steel.metadata_dict()["pbr_mapping_status"] == "library_rule"
+    assert steel.metadata_dict()["cad_material_mapping_rule"] == "stainless"
 
 
 def test_loaded_representation_report_lists_parts_and_deleted_nodes() -> None:

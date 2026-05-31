@@ -600,7 +600,11 @@ def test_asset_operation_reports_include_options_and_before_after_counts() -> No
             "per_part_budget",
             "drop_tiny_parts",
             "tiny_part_screen_size",
+            "engine_profile",
+            "far_lod_bake",
+            "scene_far_proxy",
             "validate",
+            "jobs",
         },
         "explode": {"mode", "metadata", "remove_empty_nodes"},
         "replace": {"mode", "preserve_transform", "metadata", "proxy_mesh", "external_path"},
@@ -1173,6 +1177,9 @@ pmi = false
 design_variants = true
 existing_meshes = false
 multi_file = true
+source_textures = true
+source_texture_search_paths = ["textures", "shared/textures"]
+material_library_mapping = false
 delete_free_vertices = true
 delete_lines = true
 source_units = "millimetre"
@@ -1215,6 +1222,9 @@ op = "repair"
     assert import_options.design_variants is True
     assert import_options.existing_meshes is False
     assert import_options.multi_file is True
+    assert import_options.source_textures is True
+    assert import_options.source_texture_search_paths == ("textures", "shared/textures")
+    assert import_options.material_library_mapping is False
     assert import_options.delete_free_vertices is True
     assert import_options.delete_lines is True
     assert import_options.source_units == "millimetre"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import struct
 import sys
@@ -12,10 +13,11 @@ import numpy as np
 import pytest
 
 from fascat.asset import Asset, Node, Part
+from fascat.image import ImageResource
 from fascat.io.gltf import _apply_meshopt_compression, validate_gltf, write_gltf
 from fascat.material import Material
 from fascat.mesh import Mesh
-from fascat.options import BakeMaterialOptions
+from fascat.options import BakeMaterialOptions, LODOptions
 
 
 def _asset_with_materials_and_lods() -> Asset:
@@ -181,6 +183,55 @@ def test_glb_export_writes_embedded_baked_material_textures(tmp_path: Path) -> N
     assert material["normalTexture"]["index"] == 2
     assert material["occlusionTexture"]["index"] == 3
     assert material["emissiveTexture"]["index"] == 4
+
+
+def test_glb_export_uses_source_texture_image_bindings(tmp_path: Path) -> None:
+    from PIL import Image
+
+    output = tmp_path / "source-texture.glb"
+    buffer = io.BytesIO()
+    Image.new("RGB", (2, 2), (200, 100, 50)).save(buffer, format="PNG")
+    asset = _asset_with_materials_and_lods()
+    image = ImageResource(
+        id="panel_base",
+        name="panel_baseColor.png",
+        mime_type="image/png",
+        data=buffer.getvalue(),
+        width=2,
+        height=2,
+    )
+    asset.images[image.id] = image
+    asset.materials["red"].metadata["source_texture_base_color_image"] = image.id
+
+    write_gltf(asset, output)
+
+    document, _binary = _read_glb(output)
+    material = document["materials"][0]
+    assert material["pbrMetallicRoughness"]["baseColorTexture"]["index"] == 0
+    assert document["images"][0]["uri"].startswith("data:image/png;base64,")
+
+
+def test_glb_export_attaches_scene_far_proxy_as_root_lod(tmp_path: Path) -> None:
+    output = tmp_path / "scene-proxy.glb"
+    asset = _asset_with_materials_and_lods().lods(
+        LODOptions(
+            ratios=(0.5,),
+            screen_coverage=(0.05,),
+            scene_far_proxy=True,
+        )
+    )
+
+    write_gltf(asset, output)
+
+    document, _binary = _read_glb(output)
+    root = document["nodes"][document["scenes"][0]["nodes"][0]]
+    proxy_node_index = root["extensions"]["MSFT_lod"]["ids"][0]
+    proxy_node = document["nodes"][proxy_node_index]
+    assert root["extras"]["fascat"]["sceneFarProxyPartId"] == asset.metadata["lod_scene_far_proxy_part_id"]
+    assert root["extras"]["MSFT_screencoverage"] == [0.05]
+    assert proxy_node["extras"]["fascat"]["sceneFarProxy"] is True
+    assert proxy_node["mesh"] == root["extras"]["fascat"]["sceneFarProxyMeshIndex"]
+    assert "MSFT_lod" in document["extensionsUsed"]
 
 
 def test_glb_export_preserves_normals_and_tangent_handedness(tmp_path: Path) -> None:
