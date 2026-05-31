@@ -9,6 +9,10 @@ using UnityEngine;
 
 public static class FascatRuntimeHarness
 {
+    const int PreviewWidth = 800;
+    const int PreviewHeight = 600;
+    const int PreviewBenchmarkFrames = 30;
+
     public static void Run()
     {
         string assetPath = Arg("-fascatAsset");
@@ -51,14 +55,17 @@ public static class FascatRuntimeHarness
         }
 
         stopwatch.Stop();
+        long measurementDurationMs = renderResult.BenchmarkTimeMs >= 0
+            ? renderResult.BenchmarkTimeMs
+            : stopwatch.ElapsedMilliseconds;
         JObject payload = new JObject
         {
             ["status"] = status,
             ["engine_version"] = Application.unityVersion,
             ["load_time_ms"] = stopwatch.ElapsedMilliseconds,
-            ["measured_fps"] = JValue.CreateNull(),
+            ["measured_fps"] = renderResult.MeasuredFps >= 0.0 ? new JValue(renderResult.MeasuredFps) : JValue.CreateNull(),
             ["frame_count"] = frameCount,
-            ["measurement_duration_ms"] = stopwatch.ElapsedMilliseconds,
+            ["measurement_duration_ms"] = measurementDurationMs,
             ["memory_bytes"] = memoryBytes,
             ["meshes"] = meshes,
             ["triangles"] = triangles,
@@ -148,26 +155,34 @@ public static class FascatRuntimeHarness
             light = CreateLight(bounds);
             RenderSettings.ambientLight = new Color(0.35f, 0.35f, 0.35f, 1.0f);
 
-            const int width = 800;
-            const int height = 600;
-            renderTexture = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
+            renderTexture = new RenderTexture(PreviewWidth, PreviewHeight, 24, RenderTextureFormat.ARGB32);
             renderTexture.Create();
             camera.targetTexture = renderTexture;
             camera.Render();
 
+            var renderStopwatch = Stopwatch.StartNew();
+            for (int frame = 0; frame < PreviewBenchmarkFrames; frame++)
+            {
+                camera.Render();
+            }
+            renderStopwatch.Stop();
+
             RenderTexture.active = renderTexture;
-            image = new Texture2D(width, height, TextureFormat.RGBA32, false);
-            image.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+            image = new Texture2D(PreviewWidth, PreviewHeight, TextureFormat.RGBA32, false);
+            image.ReadPixels(new Rect(0, 0, PreviewWidth, PreviewHeight), 0, 0);
             image.Apply();
             File.WriteAllBytes(previewPath, image.EncodeToPNG());
             stopwatch.Stop();
+            long benchmarkTimeMs = Math.Max(renderStopwatch.ElapsedMilliseconds, 1);
 
             return new RenderResult
             {
                 Status = "rendered",
                 Error = "",
                 RenderTimeMs = stopwatch.ElapsedMilliseconds,
-                RenderedFrames = 1
+                RenderedFrames = PreviewBenchmarkFrames,
+                BenchmarkTimeMs = benchmarkTimeMs,
+                MeasuredFps = PreviewBenchmarkFrames * 1000.0 / benchmarkTimeMs
             };
         }
         catch (Exception exception)
@@ -178,7 +193,9 @@ public static class FascatRuntimeHarness
                 Status = "failed",
                 Error = exception.Message,
                 RenderTimeMs = stopwatch.ElapsedMilliseconds,
-                RenderedFrames = 0
+                RenderedFrames = 0,
+                BenchmarkTimeMs = -1,
+                MeasuredFps = -1.0
             };
         }
         finally
@@ -376,6 +393,8 @@ public static class FascatRuntimeHarness
         public string Error;
         public long RenderTimeMs;
         public int RenderedFrames;
+        public long BenchmarkTimeMs;
+        public double MeasuredFps;
 
         public static RenderResult NotRequested()
         {
@@ -384,7 +403,9 @@ public static class FascatRuntimeHarness
                 Status = "not_requested",
                 Error = "",
                 RenderTimeMs = -1,
-                RenderedFrames = 0
+                RenderedFrames = 0,
+                BenchmarkTimeMs = -1,
+                MeasuredFps = -1.0
             };
         }
 
@@ -395,7 +416,9 @@ public static class FascatRuntimeHarness
                 Status = "failed",
                 Error = error,
                 RenderTimeMs = renderTimeMs,
-                RenderedFrames = 0
+                RenderedFrames = 0,
+                BenchmarkTimeMs = -1,
+                MeasuredFps = -1.0
             };
         }
     }

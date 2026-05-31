@@ -323,6 +323,9 @@ def test_copy_engine_runtime_harness_writes_unity_template(tmp_path: Path) -> No
     assert "InstantiateMainSceneAsync" in harness
     assert "RenderTexture" in harness
     assert "EncodeToPNG" in harness
+    assert "PreviewBenchmarkFrames = 30" in harness
+    assert "measured_fps" in harness
+    assert "MeasuredFps" in harness
 
 
 def test_copy_engine_runtime_harness_writes_unreal_template(tmp_path: Path) -> None:

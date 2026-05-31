@@ -2150,7 +2150,7 @@ def cmd_validate(
         Path | None,
         typer.Option(
             "--runtime-engine-preview",
-            help="Preview PNG path requested from a custom Unity/Unreal runtime harness.",
+            help="Preview PNG path requested from a Unity/Unreal runtime harness.",
         ),
     ] = None,
     runtime_engine_timeout: Annotated[
