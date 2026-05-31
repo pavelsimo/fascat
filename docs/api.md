@@ -1170,12 +1170,13 @@ runtime = fc.measure_browser_runtime(
     options=fc.RuntimeBrowserOptions(duration_seconds=2.0),
 )
 
+unity_project = fc.copy_engine_runtime_harness("unity", "FascatUnityHarness")
 unity_runtime = fc.measure_engine_runtime(
     "motor.glb",
     options=fc.RuntimeEngineOptions(
         engine="unity",
         executable="Unity",
-        project="FascatUnityHarness",
+        project=unity_project,
     ),
 )
 
@@ -1191,6 +1192,9 @@ fascat validate motor.glb \
   --report quality-report.json
 
 fascat validate motor.glb --runtime-browser
+
+fascat validate motor.glb \
+  --runtime-engine unity
 
 fascat validate motor.glb \
   --runtime-engine unity \
@@ -1220,14 +1224,21 @@ on the default PATH. If no browser is available, the report returns
 `status="unavailable"` instead of substituting an estimate.
 
 `--runtime-engine unity` and `--runtime-engine unreal` are also available for
-glTF/GLB outputs when a local engine project contains a Fascat runtime harness.
-The CLI launches Unity with `FascatRuntimeHarness.Run` or Unreal with
+glTF/GLB outputs. When `--runtime-engine-project` is omitted, Fascat copies a
+packaged Unity or Unreal harness template into a temporary directory and runs
+that project. Use `fc.copy_engine_runtime_harness("unity", path)` or
+`fc.copy_engine_runtime_harness("unreal", path)` when you want an editable,
+persistent harness project; the Unreal helper returns the copied `.uproject`
+path. The CLI launches Unity with `FascatRuntimeHarness.Run` or Unreal with
 `-run=FascatRuntimeHarness`, passes the asset path and a JSON report path, and
-records measured load time, FPS, frame count, memory bytes, engine version, mesh
-count, and triangle count. Set `FASCAT_UNITY`, `UNITY_EDITOR`, `FASCAT_UNREAL`,
+records engine-process load/parse time, frame count, memory bytes, engine
+version, mesh count, and triangle count. The packaged templates validate the
+engine command contract and glTF/GLB file parsing; full scene instantiation,
+renderer screenshots, material/lighting checks, and true rendered FPS remain
+custom-harness territory. Set `FASCAT_UNITY`, `UNITY_EDITOR`, `FASCAT_UNREAL`,
 or `UNREAL_EDITOR`, or pass `--runtime-engine-command`, when the engine
-executable is not on `PATH`. If the executable or harness project is missing,
-the engine report is marked unavailable.
+executable is not on `PATH`. If the executable is missing, or an explicitly
+supplied harness project is missing, the engine report is marked unavailable.
 
 ## Inspecting assets
 

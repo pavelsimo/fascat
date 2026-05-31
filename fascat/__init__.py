@@ -87,6 +87,7 @@ from fascat.runtime import (
     RuntimeBrowserReport,
     RuntimeEngineOptions,
     RuntimeEngineReport,
+    copy_engine_runtime_harness,
     measure_browser_runtime,
     measure_engine_runtime,
 )
@@ -178,6 +179,7 @@ __all__ = [
     "bake_materials",
     "compare_images",
     "convert",
+    "copy_engine_runtime_harness",
     "decimate",
     "delete_degenerate_polygons",
     "explode",

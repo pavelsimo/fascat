@@ -7,9 +7,11 @@ import re
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
+from importlib import resources
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal, Protocol, cast
 
 from fascat.io.gltf import validate_gltf
 
@@ -31,6 +33,17 @@ _ENGINE_CANDIDATES: dict[RuntimeEngineName, tuple[str, ...]] = {
     "unity": ("Unity", "unity", "unity-editor"),
     "unreal": ("UnrealEditor-Cmd", "UnrealEditor", "UE4Editor-Cmd", "UE4Editor"),
 }
+
+
+class _ResourceNode(Protocol):
+    @property
+    def name(self) -> str: ...
+
+    def iterdir(self) -> Iterable[_ResourceNode]: ...
+
+    def is_dir(self) -> bool: ...
+
+    def read_bytes(self) -> bytes: ...
 
 
 @dataclass(frozen=True)
@@ -210,16 +223,7 @@ def measure_engine_runtime(path: str | Path, options: RuntimeEngineOptions) -> R
             executable=None,
             project=project,
         )
-    if project is None:
-        return _engine_unavailable_report(
-            asset_path,
-            validation_stats,
-            options,
-            f"{options.engine} runtime measurement requires a harness project path",
-            executable=executable,
-            project=None,
-        )
-    if not project.exists():
+    if project is not None and not project.exists():
         return _engine_unavailable_report(
             asset_path,
             validation_stats,
@@ -230,6 +234,18 @@ def measure_engine_runtime(path: str | Path, options: RuntimeEngineOptions) -> R
         )
 
     with tempfile.TemporaryDirectory(prefix=f"fascat-{options.engine}-runtime-") as directory:
+        if project is None:
+            try:
+                project = _copy_packaged_engine_harness(options.engine, Path(directory) / "harness")
+            except OSError as exc:
+                return _engine_unavailable_report(
+                    asset_path,
+                    validation_stats,
+                    options,
+                    f"packaged {options.engine} runtime harness could not be prepared: {exc}",
+                    executable=executable,
+                    project=None,
+                )
         report_path = Path(directory) / "runtime-report.json"
         command = _engine_invocation(executable, project, asset_path, report_path, options)
         try:
@@ -278,6 +294,34 @@ def measure_engine_runtime(path: str | Path, options: RuntimeEngineOptions) -> R
         project=project,
         payload=payload,
     )
+
+
+def copy_engine_runtime_harness(engine: RuntimeEngineName, destination: str | Path) -> Path:
+    """Copy the packaged Unity or Unreal runtime harness template to a project path."""
+
+    if engine not in {"unity", "unreal"}:
+        raise ValueError("runtime engine must be one of: unity, unreal")
+    return _copy_packaged_engine_harness(engine, Path(destination))
+
+
+def _copy_packaged_engine_harness(engine: RuntimeEngineName, destination: Path) -> Path:
+    template = resources.files("fascat").joinpath("runtime_harnesses").joinpath(engine)
+    if not template.is_dir():
+        raise FileNotFoundError(f"packaged {engine} runtime harness template is missing")
+    _copy_resource_tree(template, destination)
+    if engine == "unreal":
+        return destination / "FascatUnrealHarness.uproject"
+    return destination
+
+
+def _copy_resource_tree(source: _ResourceNode, destination: Path) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    for child in source.iterdir():
+        target = destination / child.name
+        if child.is_dir():
+            _copy_resource_tree(child, target)
+        else:
+            target.write_bytes(child.read_bytes())
 
 
 def _browser_command(options: RuntimeBrowserOptions) -> str | None:

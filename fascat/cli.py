@@ -2109,7 +2109,10 @@ def cmd_validate(
     ] = None,
     runtime_engine_project: Annotated[
         Path | None,
-        typer.Option("--runtime-engine-project", help="Unity project folder or Unreal .uproject with Fascat harness."),
+        typer.Option(
+            "--runtime-engine-project",
+            help="Custom Unity project folder or Unreal .uproject with Fascat harness.",
+        ),
     ] = None,
     runtime_engine_timeout: Annotated[
         float,
