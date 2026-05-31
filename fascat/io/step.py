@@ -50,6 +50,8 @@ _UNIT_NAMES = {
 }
 _SOURCE_TEXTURE_SUFFIXES = {".png", ".jpg", ".jpeg", ".ktx2"}
 _SOURCE_TEXTURE_REF_RE = re.compile(r"'([^']+\.(?:png|jpe?g|ktx2)(?:[#?][^']*)?)'", re.IGNORECASE)
+_STEP_SUFFIXES = {".step", ".stp"}
+_STEP_EXTERNAL_REF_RE = re.compile(r"'([^']+\.(?:step|stp)(?:[#?][^']*)?)'", re.IGNORECASE)
 _GENERIC_MATERIAL_TOKENS = {"cad", "color", "material", "mat", "texture", "map", "source"}
 _TEXTURE_SLOT_TOKENS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("metallic_roughness", ("metallicroughness", "metalrough", "metallic_roughness", "orm")),
@@ -99,6 +101,59 @@ class _StepMemberImport:
     source: Path
     namespace: str
     asset: Asset
+
+
+@dataclass(frozen=True)
+class _StepExternalReferenceRecord:
+    source: Path
+    reference: str
+    status: str
+    resolved: Path | None = None
+    reason: str = ""
+
+    def to_dict(self) -> dict[str, object]:
+        data: dict[str, object] = {
+            "source": str(self.source),
+            "reference": self.reference,
+            "status": self.status,
+        }
+        if self.resolved is not None:
+            data["resolved"] = str(self.resolved)
+        if self.reason:
+            data["reason"] = self.reason
+        return data
+
+
+@dataclass(frozen=True)
+class _StepExternalReferenceGraph:
+    root: Path
+    sources: list[Path]
+    records: list[_StepExternalReferenceRecord]
+    warnings: list[str]
+
+    @property
+    def has_references(self) -> bool:
+        return bool(self.records)
+
+    def summary(self) -> dict[str, int]:
+        resolved_sources = {str(source.resolve()) for source in self.sources[1:]}
+        return {
+            "references": len(self.records),
+            "resolved": sum(1 for record in self.records if record.status == "resolved"),
+            "missing": sum(1 for record in self.records if record.status == "missing"),
+            "unsupported": sum(1 for record in self.records if record.status == "unsupported"),
+            "sources": len(self.sources),
+            "resolved_sources": len(resolved_sources),
+        }
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "root": str(self.root),
+            "sources": [str(source) for source in self.sources],
+            "summary": self.summary(),
+            "references": [record.to_dict() for record in self.records],
+            "warnings": list(self.warnings),
+        }
 
 
 @dataclass(frozen=True)
@@ -218,7 +273,10 @@ class _SpaceNormalization:
 
 def read_step(path: str | Path, *, options: StepReadOptions | None = None) -> Asset:
     source = Path(path)
-    return _read_step_path(source, source_identity=str(source.resolve()), options=options or StepReadOptions())
+    opts = options or StepReadOptions()
+    if opts.multi_file:
+        return _read_step_with_external_references(source, opts)
+    return _read_step_path(source, source_identity=str(source.resolve()), options=opts)
 
 
 def read_step_many(
@@ -226,6 +284,16 @@ def read_step_many(
     *,
     options: StepReadOptions | None = None,
     continue_on_error: bool = False,
+) -> Asset:
+    return _read_step_many(paths, options=options, continue_on_error=continue_on_error, reference_graph=None)
+
+
+def _read_step_many(
+    paths: Iterable[str | Path],
+    *,
+    options: StepReadOptions | None = None,
+    continue_on_error: bool = False,
+    reference_graph: _StepExternalReferenceGraph | None = None,
 ) -> Asset:
     sources = [Path(path) for path in paths]
     if not sources:
@@ -276,13 +344,128 @@ def read_step_many(
         sources=sources,
         duration=timer.duration,
         warnings=warnings,
+        reference_graph=reference_graph,
     )
+
+
+def _read_step_with_external_references(source: Path, options: StepReadOptions) -> Asset:
+    graph = _resolve_step_external_reference_graph(source)
+    member_options = replace(options, multi_file=False)
+    if len(graph.sources) > 1:
+        return _read_step_many(graph.sources, options=options, reference_graph=graph)
+
+    asset = _read_step_path(source, source_identity=str(source.resolve()), options=member_options)
+    _attach_step_external_reference_graph(asset, graph, options)
+    return asset
+
+
+def _resolve_step_external_reference_graph(source: Path) -> _StepExternalReferenceGraph:
+    root = source
+    sources = [root]
+    seen_sources = {str(root.resolve())}
+    records: list[_StepExternalReferenceRecord] = []
+    warnings: list[str] = []
+    queue = [root]
+
+    while queue:
+        current = queue.pop(0)
+        for reference in _step_external_references(current):
+            cleaned, unsupported_reason = _clean_step_external_reference(reference)
+            if cleaned is None:
+                records.append(
+                    _StepExternalReferenceRecord(
+                        source=current,
+                        reference=reference,
+                        status="unsupported",
+                        reason=unsupported_reason or "unsupported external STEP reference",
+                    )
+                )
+                warnings.append(
+                    f"STEP external reference is unsupported: {reference} "
+                    f"(referenced by {current}; {unsupported_reason})"
+                )
+                continue
+
+            resolved = _resolve_step_external_reference(cleaned, current)
+            if resolved is None:
+                records.append(
+                    _StepExternalReferenceRecord(
+                        source=current,
+                        reference=reference,
+                        status="missing",
+                        reason="not found relative to the referencing STEP file",
+                    )
+                )
+                warnings.append(f"STEP external reference could not be resolved: {reference} (referenced by {current})")
+                continue
+
+            records.append(
+                _StepExternalReferenceRecord(
+                    source=current,
+                    reference=reference,
+                    status="resolved",
+                    resolved=resolved,
+                )
+            )
+            resolved_key = str(resolved.resolve())
+            if resolved_key in seen_sources:
+                continue
+            seen_sources.add(resolved_key)
+            sources.append(resolved)
+            queue.append(resolved)
+
+    return _StepExternalReferenceGraph(root=root, sources=sources, records=records, warnings=warnings)
+
+
+def _step_external_references(source: Path) -> list[str]:
+    text = source.read_text(encoding="utf-8", errors="ignore")
+    references: list[str] = []
+    seen: set[str] = set()
+    for match in _STEP_EXTERNAL_REF_RE.finditer(text):
+        reference = match.group(1).replace("''", "'").strip()
+        if not reference or reference in seen:
+            continue
+        seen.add(reference)
+        references.append(reference)
+    return references
+
+
+def _clean_step_external_reference(reference: str) -> tuple[str | None, str | None]:
+    value = reference.replace("''", "'").strip().strip('"<>')
+    parsed = urlparse(value)
+    if parsed.scheme and not _looks_like_windows_path(value):
+        if parsed.scheme.lower() != "file":
+            return None, f"unsupported URI scheme: {parsed.scheme}"
+        value = unquote(parsed.path)
+    else:
+        value = unquote(value.split("#", 1)[0].split("?", 1)[0])
+    value = value.strip()
+    if not value:
+        return None, "empty path"
+    if Path(value).suffix.lower() not in _STEP_SUFFIXES:
+        return None, "unsupported file extension"
+    return value, None
+
+
+def _looks_like_windows_path(value: str) -> bool:
+    return len(value) >= 3 and value[1] == ":" and value[0].isalpha() and value[2] in {"\\", "/"}
+
+
+def _resolve_step_external_reference(reference: str, source: Path) -> Path | None:
+    candidate = Path(reference)
+    candidates = [candidate] if candidate.is_absolute() else [source.parent / candidate]
+    if not candidate.is_absolute() and candidate.name != str(candidate):
+        candidates.append(source.parent / candidate.name)
+    for item in candidates:
+        if item.exists() and item.is_file() and item.suffix.lower() in _STEP_SUFFIXES:
+            return item.resolve()
+    return None
 
 
 def _read_step_path(source: Path, *, source_identity: str, options: StepReadOptions) -> Asset:
     if not source.exists():
         raise FileNotFoundError(f"missing STEP file: {source}")
-    if source.suffix.lower() not in {".step", ".stp"}:
+    if source.suffix.lower() not in _STEP_SUFFIXES:
         raise ValueError(f"unsupported STEP extension: {source.suffix or '<none>'}")
 
     header_info = _step_header_info(source)
@@ -410,6 +593,7 @@ def _merge_step_member_assets(
     sources: list[Path],
     duration: float,
     warnings: list[str],
+    reference_graph: _StepExternalReferenceGraph | None = None,
 ) -> Asset:
     target_units = members[0].asset.units
     target_meters_per_unit = members[0].asset.meters_per_unit
@@ -471,17 +655,38 @@ def _merge_step_member_assets(
         )
 
     member_records = sorted([*member_records, *failed_members], key=lambda item: cast(int, item["index"]))
+    if reference_graph is not None:
+        warnings.extend(warning for warning in reference_graph.warnings if warning not in warnings)
     source_identity = _multi_file_source_identity(sources)
+    import_decisions = _multi_file_import_decisions(
+        options,
+        len(members),
+        len(failed_members),
+        reference_graph=reference_graph,
+    )
+    root_metadata: Metadata = {
+        "source": "multi-file STEP import",
+        "source_identity": source_identity,
+        "multi_file": "true",
+        "multi_file_member_count": str(len(members)),
+    }
+    if reference_graph is not None:
+        root_metadata.update(
+            {
+                "source": str(reference_graph.root),
+                "external_reference_graph": "true",
+                "external_reference_root": str(reference_graph.root),
+            }
+        )
     root = Node(
         id=_stable_id("node", f"{source_identity}:root"),
-        name="multi-file STEP assembly",
+        name=(
+            f"{reference_graph.root.stem} external-reference STEP assembly"
+            if reference_graph is not None
+            else "multi-file STEP assembly"
+        ),
         children=root_children,
-        metadata={
-            "source": "multi-file STEP import",
-            "source_identity": source_identity,
-            "multi_file": "true",
-            "multi_file_member_count": str(len(members)),
-        },
+        metadata=root_metadata,
     )
     report = Report(source_path=None)
     asset = Asset(
@@ -500,6 +705,7 @@ def _merge_step_member_assets(
             target_units=target_units,
             target_meters_per_unit=target_meters_per_unit,
             target_up_axis=target_up_axis,
+            reference_graph=reference_graph,
         ),
         pmi=pmi,
         report=report,
@@ -517,7 +723,8 @@ def _merge_step_member_assets(
             "member_count": len(members),
             "failed_member_count": len(failed_members),
             "members": member_records,
-            "import_decisions": _multi_file_import_decisions(options, len(members), len(failed_members)),
+            "import_decisions": import_decisions,
+            **({"external_reference_graph": reference_graph.to_dict()} if reference_graph is not None else {}),
         },
         before={"nodes": 0, "parts": 0, "occurrences": 0, "materials": 0, "vertices": 0, "triangles": 0},
         after=asset.stats(),
@@ -525,7 +732,7 @@ def _merge_step_member_assets(
         warnings=warnings,
     )
     if asset.metadata:
-        asset.metadata["import_decisions"] = _multi_file_import_decisions(options, len(members), len(failed_members))
+        asset.metadata["import_decisions"] = import_decisions
     return asset
 
 
@@ -720,10 +927,11 @@ def _multi_file_asset_metadata(
     target_units: str,
     target_meters_per_unit: float,
     target_up_axis: str,
+    reference_graph: _StepExternalReferenceGraph | None = None,
 ) -> Metadata:
     if not options.metadata:
         return {}
-    return {
+    metadata: Metadata = {
         "source": "multi-file STEP import",
         "source_identity": source_identity,
         "units": target_units,
@@ -736,13 +944,28 @@ def _multi_file_asset_metadata(
             "members": members,
         },
     }
+    if reference_graph is not None:
+        metadata["source"] = str(reference_graph.root)
+        metadata["external_reference_graph"] = reference_graph.to_dict()
+    return metadata
 
 
 def _multi_file_import_decisions(
     options: StepReadOptions,
     member_count: int,
     failed_member_count: int,
+    *,
+    reference_graph: _StepExternalReferenceGraph | None = None,
 ) -> dict[str, object]:
+    if reference_graph is not None:
+        return {
+            "multi_file": _external_reference_import_decision(
+                options,
+                reference_graph,
+                member_count=member_count,
+                failed_member_count=failed_member_count,
+            )
+        }
     return {
         "multi_file": _import_decision(
             requested=True,
@@ -755,6 +978,80 @@ def _multi_file_import_decisions(
             counts={"members": member_count, "failed_members": failed_member_count},
         )
     }
+
+
+def _external_reference_import_decision(
+    options: StepReadOptions,
+    graph: _StepExternalReferenceGraph,
+    *,
+    member_count: int,
+    failed_member_count: int,
+) -> dict[str, object]:
+    summary = graph.summary()
+    missing_or_unsupported = summary["missing"] + summary["unsupported"]
+    if failed_member_count:
+        state = "approximated"
+    elif missing_or_unsupported:
+        state = "missing_sources"
+    else:
+        state = "honored"
+    detail = (
+        "external STEP references were resolved from quoted STEP path records and imported as deterministic namespaces"
+        if summary["references"]
+        else "no external STEP references were found in the master STEP file"
+    )
+    return _import_decision(
+        requested=options.multi_file,
+        effective=summary["resolved_sources"] > 0,
+        state=state,
+        detail=detail,
+        counts={
+            "members": member_count,
+            "failed_members": failed_member_count,
+            **summary,
+        },
+    )
+
+
+def _attach_step_external_reference_graph(
+    asset: Asset,
+    graph: _StepExternalReferenceGraph,
+    options: StepReadOptions,
+) -> None:
+    decision = _external_reference_import_decision(
+        options,
+        graph,
+        member_count=1,
+        failed_member_count=0,
+    )
+    graph_data = graph.to_dict()
+    if asset.metadata:
+        asset.metadata["external_reference_graph"] = graph_data
+        metadata_options = asset.metadata.get("metadata_options")
+        if isinstance(metadata_options, dict):
+            metadata_options["multi_file"] = True
+        import_decisions = asset.metadata.get("import_decisions")
+        if isinstance(import_decisions, dict):
+            import_decisions["multi_file"] = decision
+    for step in asset.report.steps:
+        if step.name != "import":
+            continue
+        read_options = step.options.get("read_options")
+        if isinstance(read_options, dict):
+            read_options["multi_file"] = True
+        import_decisions = step.options.get("import_decisions")
+        if isinstance(import_decisions, dict):
+            import_decisions["multi_file"] = decision
+        else:
+            step.options["import_decisions"] = {"multi_file": decision}
+        step.options["external_reference_graph"] = graph_data
+        for warning in graph.warnings:
+            if warning not in step.warnings:
+                step.warnings.append(warning)
+        break
+    for warning in graph.warnings:
+        if warning not in asset.report.warnings:
+            asset.report.add_warning(warning)
 
 
 def _multi_file_namespace(index: int, source: Path) -> str:

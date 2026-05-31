@@ -110,7 +110,7 @@ Core pipeline calls:
 
 | API | Parameters | Purpose |
 |-----|------------|---------|
-| `fc.read_step(path, options=None)` | `path` is a STEP file path or `-` for stdin. `options` is `StepReadOptions`. | Import STEP assembly hierarchy, metadata, materials, and source BREP handles when the backend exposes them. |
+| `fc.read_step(path, options=None)` | `path` is a STEP file path or `-` for stdin. `options` is `StepReadOptions`. | Import STEP assembly hierarchy, metadata, materials, and source BREP handles when the backend exposes them. With `StepReadOptions(multi_file=True)`, quoted external `.step` / `.stp` references are recursively resolved from a master file and imported through deterministic member namespaces. |
 | `fc.read_step_many(paths, options=None, continue_on_error=False)` | `paths` is an ordered list of `.step` / `.stp` files. | Import explicit multi-root STEP members into deterministic per-file namespaces, prefix member warnings, and preserve each member as a top-level root. |
 | `fc.read_iges(path, options=None)` | `path` ends in `.igs` or `.iges`. `options` is `IgesReadOptions`. | Import IGES geometry through the same OCP/XDE hierarchy, transform, color, and material path used by STEP. |
 | `fc.read_brep(path, options=None)` | `path` ends in `.brep`. `options` is `BrepReadOptions`. | Import a native OpenCASCADE BREP file as one root occurrence and one source-shape part. |
@@ -296,7 +296,9 @@ STEP and IGES import can scan source-file string references for sidecar PNG, JPE
 
 STEP import reports also include `import_decisions`, which records each import toggle as requested, effective, and `honored`, `approximated`, `unsupported`, `disabled`, `not_present`, or `backend_default`. The same report step includes `loaded_representations`, a per-part list of BREP, construction-point, construction-line, or empty-shape inputs plus deleted construction-only nodes and source topology counts.
 
-Use `fc.read_step_many([...])`, `fc.convert([...], "out.glb")`, or `fascat convert root-a.step out.glb --input root-b.step` when an assembly is delivered as several root STEP files rather than one file. Fascat imports each member through the normal STEP path, namespaces nodes, parts, materials, images, and PMI IDs with a deterministic member prefix, keeps each member root under a shared multi-file root node, and prefixes warnings with the member index and path. `continue_on_error=True` keeps successfully imported members and records failed members in the import report. This does not yet resolve external-reference graphs from inside one master STEP file.
+Use `fc.read_step_many([...])`, `fc.convert([...], "out.glb")`, or `fascat convert root-a.step out.glb --input root-b.step` when an assembly is delivered as several root STEP files rather than one file. Fascat imports each member through the normal STEP path, namespaces nodes, parts, materials, images, and PMI IDs with a deterministic member prefix, keeps each member root under a shared multi-file root node, and prefixes warnings with the member index and path. `continue_on_error=True` keeps successfully imported members and records failed members in the import report.
+
+For a single master STEP, pass `StepReadOptions(multi_file=True)` or use `--multi-file-import`. Fascat scans quoted `.step` and `.stp` path records, resolves them relative to the referencing file, follows nested references once per resolved source, and imports the master plus resolved references through the same deterministic namespace merge. The import report includes `external_reference_graph` with resolved, missing, unsupported, and source counts; missing references produce warnings instead of being silently dropped. This is graph-level loading, not deep reconstruction of every vendor-specific placement semantic encoded around the external reference.
 
 Metadata and PMI parameters:
 
@@ -310,7 +312,7 @@ Metadata and PMI parameters:
 | `StepReadOptions` | `pmi` | Import typed PMI records when the backend exposes them; AP242 PMI markers are reported when typed import is unavailable. |
 | `StepReadOptions` | `design_variants` | Request STEP design variant import. Current backend support is limited and reports a warning when requested variants cannot be loaded. |
 | `StepReadOptions` | `existing_meshes` | Prefer existing tessellation payloads from the source file when the importer exposes them. Tessellation `reuse_existing_meshes` still controls whether loaded meshes are retessellated later. |
-| `StepReadOptions` | `multi_file` | Request multi-file STEP assembly import intent. `read_step_many()` honors explicit member lists; single-path imports still report a warning instead of silently claiming external references were loaded. |
+| `StepReadOptions` | `multi_file` | Request multi-file STEP assembly import. `read_step_many()` honors explicit member lists; single-path STEP imports recursively resolve quoted external `.step` / `.stp` references and report the `external_reference_graph`. |
 | `StepReadOptions` | `source_textures` | Scan STEP/IGES source text for referenced sidecar PNG/JPEG/KTX2 texture files, load resolved files into `asset.images`, and report resolved/missing/unreadable counts. |
 | `StepReadOptions` | `source_texture_search_paths` | Extra directories used to resolve relative source texture references in addition to the CAD file directory. |
 | `StepReadOptions` | `material_library_mapping` | Apply deterministic CAD material-name mapping rules to PBR metallic, roughness, opacity, and default color values when source visual material names are available. |

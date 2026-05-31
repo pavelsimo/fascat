@@ -22,6 +22,7 @@ from fascat.io.step import (
     _loaded_representation,
     _loaded_representation_report,
     _material_binding_plan,
+    _resolve_step_external_reference_graph,
     _shape_fingerprint,
     _ShapeTopologyCounts,
     _space_normalization,
@@ -333,6 +334,130 @@ def test_read_step_many_can_continue_after_member_failure(
 
     with pytest.raises(RuntimeError, match="boom"):
         read_step_many([tmp_path / "good.step", tmp_path / "bad.step"])
+
+
+def test_read_step_multi_file_resolves_master_external_reference_graph(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    master = tmp_path / "master.step"
+    child = tmp_path / "parts" / "child.stp"
+    child.parent.mkdir()
+    master.write_text(
+        "ISO-10303-21;\nDATA;\n#1=EXTERNAL_REFERENCE('parts/child.stp');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    child.write_text("ISO-10303-21;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n", encoding="utf-8")
+    calls: list[tuple[Path, bool]] = []
+
+    def fake_read_step_path(source: Path, *, source_identity: str, options: StepReadOptions) -> fc.Asset:
+        calls.append((source, options.multi_file))
+        report = Report(source_path=str(source))
+        report.add_step(
+            "import",
+            options={
+                "format": "STEP",
+                "read_options": options.to_dict(),
+                "import_decisions": {"multi_file": {"state": "disabled"}},
+            },
+        )
+        return fc.Asset(
+            root=fc.Node(
+                id="root",
+                name=source.stem,
+                children=[fc.Node(id="occurrence", name=source.stem, part_id="part")],
+            ),
+            parts={"part": fc.Part(id="part", name=source.stem.title())},
+            metadata={"source": str(source), "import_decisions": {}},
+            report=report,
+        )
+
+    monkeypatch.setattr(step_io, "_read_step_path", fake_read_step_path)
+
+    asset = fc.read_step(master, options=StepReadOptions(multi_file=True))
+
+    assert calls == [(master, False), (child.resolve(), False)]
+    assert asset.stats()["parts"] == 2
+    assert asset.root.metadata["external_reference_graph"] == "true"
+    assert asset.metadata["external_reference_graph"]["summary"] == {
+        "references": 1,
+        "resolved": 1,
+        "missing": 0,
+        "unsupported": 0,
+        "sources": 2,
+        "resolved_sources": 1,
+    }
+    import_options = asset.report.steps[0].options
+    assert import_options["external_reference_graph"]["summary"]["resolved_sources"] == 1
+    assert import_options["import_decisions"]["multi_file"]["state"] == "honored"
+    assert import_options["import_decisions"]["multi_file"]["effective"] is True
+
+
+def test_read_step_multi_file_reports_missing_master_external_references(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    master = tmp_path / "master.step"
+    master.write_text(
+        "ISO-10303-21;\nDATA;\n#1=EXTERNAL_REFERENCE('missing.step');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    calls: list[tuple[Path, bool]] = []
+
+    def fake_read_step_path(source: Path, *, source_identity: str, options: StepReadOptions) -> fc.Asset:
+        _ = source_identity
+        calls.append((source, options.multi_file))
+        report = Report(source_path=str(source))
+        report.add_step("import", options={"read_options": options.to_dict(), "import_decisions": {}})
+        return fc.Asset(
+            root=fc.Node(id="root", name=source.stem),
+            metadata={"import_decisions": {}},
+            report=report,
+        )
+
+    monkeypatch.setattr(step_io, "_read_step_path", fake_read_step_path)
+
+    asset = fc.read_step(master, options=StepReadOptions(multi_file=True))
+
+    assert calls == [(master, False)]
+    assert asset.metadata["external_reference_graph"]["summary"]["missing"] == 1
+    assert asset.metadata["import_decisions"]["multi_file"]["state"] == "missing_sources"
+    assert asset.report.steps[0].options["read_options"]["multi_file"] is True
+    assert "missing.step" in asset.report.warnings[0]
+
+
+def test_external_step_reference_graph_resolves_nested_references_once(tmp_path: Path) -> None:
+    master = tmp_path / "master.step"
+    child = tmp_path / "child.step"
+    leaf = tmp_path / "leaf.stp"
+    master.write_text(
+        "ISO-10303-21;\nDATA;\n"
+        "#1=DOCUMENT_FILE('child.step');\n"
+        "#2=DOCUMENT_FILE('missing.step');\n"
+        "ENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    child.write_text(
+        "ISO-10303-21;\nDATA;\n"
+        "#1=DOCUMENT_FILE('leaf.stp');\n"
+        "#2=DOCUMENT_FILE('master.step');\n"
+        "ENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    leaf.write_text("ISO-10303-21;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n", encoding="utf-8")
+
+    graph = _resolve_step_external_reference_graph(master)
+
+    assert graph.sources == [master, child.resolve(), leaf.resolve()]
+    assert graph.summary() == {
+        "references": 4,
+        "resolved": 3,
+        "missing": 1,
+        "unsupported": 0,
+        "sources": 3,
+        "resolved_sources": 2,
+    }
+    assert any("missing.step" in warning for warning in graph.warnings)
 
 
 def test_material_library_mapping_applies_known_cad_material_rules() -> None:

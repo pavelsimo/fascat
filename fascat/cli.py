@@ -400,7 +400,7 @@ def cmd_inspect(
         bool,
         typer.Option(
             "--multi-file-import/--single-file-import",
-            help="Request multi-file STEP assembly reference resolution when supported.",
+            help="Resolve quoted external STEP references from a master STEP file.",
         ),
     ] = False,
     delete_free_vertices: Annotated[
@@ -908,7 +908,7 @@ def cmd_convert(
         bool,
         typer.Option(
             "--multi-file-import/--single-file-import",
-            help="Request multi-file STEP assembly reference resolution when supported.",
+            help="Resolve quoted external STEP references from a master STEP file.",
         ),
     ] = False,
     delete_free_vertices: Annotated[
