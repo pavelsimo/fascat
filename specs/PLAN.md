@@ -95,7 +95,7 @@ This is the master TODO list. Keep items in one of three states:
 **Import**
 - [x] IGES input (`.igs`, `.iges`) with XDE hierarchy/material import. Done 2026-05-31.
 - [x] Native BREP input (`.brep`) as a single-shape source. Done 2026-05-31.
-- [~] True multi-file/multi-root import with deterministic namespaces and per-member warnings: explicit STEP path lists are supported in Python APIs and `convert([...], output)`; external-reference graph resolution from one master STEP and CLI multi-input remain open. Updated 2026-05-31.
+- [~] True multi-file/multi-root import with deterministic namespaces and per-member warnings: explicit STEP path lists are supported in Python APIs, `convert([...], output)`, and CLI `convert root-a.step out.glb --input root-b.step`; external-reference graph resolution from one master STEP remains open. Updated 2026-05-31.
 - [ ] Typed AP242 PMI extraction plus optional visual annotation geometry.
 - [ ] Design-variant import.
 - [ ] Mixed BREP construction-curve policy: delete / preserve metadata / tessellate tubes.

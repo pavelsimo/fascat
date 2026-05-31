@@ -296,7 +296,7 @@ STEP and IGES import can scan source-file string references for sidecar PNG, JPE
 
 STEP import reports also include `import_decisions`, which records each import toggle as requested, effective, and `honored`, `approximated`, `unsupported`, `disabled`, `not_present`, or `backend_default`. The same report step includes `loaded_representations`, a per-part list of BREP, construction-point, construction-line, or empty-shape inputs plus deleted construction-only nodes and source topology counts.
 
-Use `fc.read_step_many([...])` or `fc.convert([...], "out.glb")` when an assembly is delivered as several root STEP files rather than one file. Fascat imports each member through the normal STEP path, namespaces nodes, parts, materials, images, and PMI IDs with a deterministic member prefix, keeps each member root under a shared multi-file root node, and prefixes warnings with the member index and path. `continue_on_error=True` keeps successfully imported members and records failed members in the import report. This does not yet resolve external-reference graphs from inside one master STEP file.
+Use `fc.read_step_many([...])`, `fc.convert([...], "out.glb")`, or `fascat convert root-a.step out.glb --input root-b.step` when an assembly is delivered as several root STEP files rather than one file. Fascat imports each member through the normal STEP path, namespaces nodes, parts, materials, images, and PMI IDs with a deterministic member prefix, keeps each member root under a shared multi-file root node, and prefixes warnings with the member index and path. `continue_on_error=True` keeps successfully imported members and records failed members in the import report. This does not yet resolve external-reference graphs from inside one master STEP file.
 
 Metadata and PMI parameters:
 
@@ -869,7 +869,7 @@ Conversion parameters:
 
 | Parameter | Meaning |
 |-----------|---------|
-| `input_path` | CAD input path ending in `.step`, `.stp`, `.igs`, `.iges`, or `.brep`; Python callers may pass a sequence of STEP paths for explicit multi-root import. CLI stdin remains STEP-oriented because stdin has no suffix. |
+| `input_path` | CAD input path ending in `.step`, `.stp`, `.igs`, `.iges`, or `.brep`; Python callers may pass a sequence of STEP paths for explicit multi-root import, and the CLI accepts repeated `--input` STEP roots. CLI stdin remains STEP-oriented because stdin has no suffix. |
 | `output_path` | Output path. Suffix selects USD, glTF, OBJ, STL, or FBX. |
 | `profile` | Profile name or `ConversionProfile` that supplies default tessellation, repair, stage, optimize, LOD, budget, and workflow-recipe metadata. |
 | `import_options` | `StepReadOptions` for STEP metadata and PMI import. |

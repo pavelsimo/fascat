@@ -78,6 +78,7 @@ the native source shape retained for tessellation and healing.
 | `--profile` | `realtime-desktop` | Conversion profile: `inspect-only`, `realtime-desktop`, `realtime-web`, `realtime-mobile`, `virtual-reality`, `augmented-reality`, or `mixed-reality` |
 | `--target-device-profile` | unset | TOML or JSON target-device budget overlay for the selected profile |
 | `--pipeline` | unset | TOML pipeline file with named filters and ordered conversion steps |
+| `--input` | unset | Additional STEP root input for explicit multi-root conversion; may be passed more than once |
 | `--sag` | profile value | CAD tessellation sag tolerance |
 | `--sag-ratio` | unset | Relative CAD tessellation sag ratio; enables explicit relative deflection when set |
 | `--angle` | profile value | CAD tessellation angle tolerance in degrees |

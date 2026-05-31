@@ -639,6 +639,62 @@ def test_convert_dry_run_accepts_non_step_cad_inputs(input_name: str) -> None:
     assert payload["output"] == output_name
 
 
+def test_convert_dry_run_accepts_extra_step_inputs() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "--dry-run",
+            "convert",
+            "root-a.step",
+            "assembly.glb",
+            "--input",
+            "root-b.step",
+            "--input",
+            "root-c.stp",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["input"] == ["root-a.step", "root-b.step", "root-c.stp"]
+    assert payload["extra_inputs"] == ["root-b.step", "root-c.stp"]
+
+
+def test_convert_rejects_non_step_extra_inputs() -> None:
+    result = runner.invoke(
+        app,
+        ["--dry-run", "convert", "root-a.step", "assembly.glb", "--input", "legacy.iges"],
+    )
+
+    assert result.exit_code == 2
+    assert "multi-root CLI import currently supports only STEP" in result.output
+
+
+def test_convert_passes_extra_step_inputs_to_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import fascat as fc
+    import fascat.cli as cli
+
+    input_a = tmp_path / "root-a.step"
+    input_b = tmp_path / "root-b.step"
+    output = tmp_path / "assembly.glb"
+    input_a.write_text("ISO-10303-21;", encoding="utf-8")
+    input_b.write_text("ISO-10303-21;", encoding="utf-8")
+    asset = fc.Asset(root=fc.Node(id="root", name="root"))
+    captured: dict[str, object] = {}
+
+    def fake_convert(input_path: object, *_args: object, **_kwargs: object) -> fc.Asset:
+        captured["input_path"] = input_path
+        return asset
+
+    monkeypatch.setattr(cli, "_convert_for_cli", fake_convert)
+
+    result = runner.invoke(app, ["convert", str(input_a), str(output), "--input", str(input_b)])
+
+    assert result.exit_code == 0, result.output
+    assert captured["input_path"] == [input_a, input_b]
+
+
 def test_convert_dry_run_reports_pipeline_advisories(tmp_path: Path) -> None:
     pipeline_file = tmp_path / "bad-order.toml"
     pipeline_file.write_text(

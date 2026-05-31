@@ -605,6 +605,10 @@ def cmd_convert(
             allow_dash=True,
         ),
     ] = None,
+    extra_inputs: Annotated[
+        list[Path] | None,
+        typer.Option("--input", help="Additional STEP root input for explicit multi-root conversion."),
+    ] = None,
     profile: Annotated[Profile, typer.Option("--profile", help="Conversion profile.")] = Profile.REALTIME_DESKTOP,
     target_device_profile: Annotated[
         Path | None,
@@ -1295,9 +1299,11 @@ def cmd_convert(
 ) -> None:
     """Convert a CAD file into a realtime-ready OpenUSD or glTF asset."""
     state = _state(ctx)
+    input_paths = [input_path, *(extra_inputs or [])]
     payload: dict[str, Any] = {
         "command": "convert",
-        "input": str(input_path),
+        "input": str(input_path) if len(input_paths) == 1 else [str(path) for path in input_paths],
+        "extra_inputs": [str(path) for path in input_paths[1:]],
         "output": str(output_path) if output_path is not None else None,
         "profile": profile.value,
         "base_profile": None,
@@ -1494,7 +1500,13 @@ def cmd_convert(
     payload["decimate_cleanup_attributes"] = list(cleanup_attributes)
     payload["lod_screen_coverage"] = lod_coverages
     payload["normalize_uvs"] = list(normalized_uv_channels)
-    _validate_cad_input(input_path, ctx, payload)
+    for path in input_paths:
+        _validate_cad_input(path, ctx, payload)
+    if len(input_paths) > 1:
+        if any(_is_stdio(path) for path in input_paths):
+            _fail(ctx, payload, "Explicit multi-root CLI import does not support stdin.", code=2)
+        if any(path.suffix.lower() not in STEP_SUFFIXES for path in input_paths):
+            _fail(ctx, payload, "Explicit multi-root CLI import currently supports only STEP inputs.", code=2)
     output_path = _resolve_convert_output(input_path, output_path, ctx, payload)
     payload["output"] = str(output_path)
     _validate_export_output(output_path, ctx, payload)
@@ -1642,10 +1654,12 @@ def cmd_convert(
 
     payload["operation_diagnostics"] = _convert_operation_diagnostics(payload)
     if state.dry_run:
-        _emit(ctx, payload, f"Would convert {input_path} to {output_path} with profile {profile_options.name}.")
+        input_label = ", ".join(str(path) for path in input_paths)
+        _emit(ctx, payload, f"Would convert {input_label} to {output_path} with profile {profile_options.name}.")
         return
 
-    _require_existing_file(input_path, "input", ctx, payload)
+    for path in input_paths:
+        _require_existing_file(path, "input", ctx, payload)
     if not _is_stdio(output_path) and output_path.exists() and not force:
         _fail(ctx, payload, f"Output already exists: {output_path}. Pass --force to overwrite.")
 
@@ -1942,9 +1956,10 @@ def cmd_convert(
             file_size_budget_mb=file_size_budget_mb,
         )
         reporter = _stage_reporter(ctx, input_path, output_path)
+        convert_input: Path | list[Path] = input_paths if len(input_paths) > 1 else input_path
         with reporter:
             asset = _convert_for_cli(
-                input_path,
+                convert_input,
                 output_path,
                 profile=profile_options,
                 pipeline=pipeline_spec,
@@ -2797,7 +2812,7 @@ def _read_cad_for_cli(
 
 
 def _convert_for_cli(
-    input_path: Path,
+    input_path: Path | list[Path],
     output_path: Path,
     *,
     profile: str | ConversionProfile,
@@ -2828,7 +2843,7 @@ def _convert_for_cli(
     stl_options: StlExportOptions | None,
     fbx_options: FbxExportOptions | None,
 ) -> Any:
-    if _is_stdio(input_path):
+    if isinstance(input_path, Path) and _is_stdio(input_path):
         data = sys.stdin.buffer.read()
         if not data:
             raise RuntimeError("Missing input data on stdin.")
@@ -2898,7 +2913,7 @@ def _convert_for_cli(
 
 
 def _convert_output(
-    input_path: Path,
+    input_path: Path | list[Path],
     output_path: Path,
     profile: str | ConversionProfile,
     pipeline: PipelineSpec | None,
