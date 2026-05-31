@@ -115,7 +115,8 @@ def test_browser_render_preview_writes_screenshot_and_report(
         assert "--dump-dom" in command
         stdout = (
             '<html><body><pre id="result">'
-            '{"status":"rendered","meshes":1,"triangles":1,"textured_primitives":1,"sampled_textures":1}'
+            '{"status":"rendered","meshes":1,"triangles":1,'
+            '"textured_primitives":1,"sampled_textures":1,"quantized_primitives":1}'
             "</pre></body></html>"
         )
         return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
@@ -137,8 +138,10 @@ def test_browser_render_preview_writes_screenshot_and_report(
     assert report.triangles == 1
     assert report.textured_primitives == 1
     assert report.sampled_textures == 1
+    assert report.quantized_primitives == 1
     assert report.to_dict()["textured_primitives"] == 1
     assert report.to_dict()["sampled_textures"] == 1
+    assert report.to_dict()["quantized_primitives"] == 1
     assert report.error is None
     assert preview.is_file()
 
@@ -162,6 +165,7 @@ def test_browser_render_preview_writes_screenshot_data_from_payload(
             '<html><body><pre id="result">'
             '{"status":"rendered","meshes":1,"triangles":1,'
             '"textured_primitives":1,"sampled_textures":1,'
+            '"quantized_primitives":1,'
             f'"screenshot_data":"{screenshot_data}"'
             "}</pre></body></html>"
         )
@@ -179,6 +183,7 @@ def test_browser_render_preview_writes_screenshot_data_from_payload(
     assert report.status == "rendered"
     assert report.textured_primitives == 1
     assert report.sampled_textures == 1
+    assert report.quantized_primitives == 1
     assert Image.open(preview).getpixel((0, 0)) == (230, 20, 30, 255)
 
 
@@ -195,6 +200,22 @@ def test_browser_render_preview_harness_samples_base_color_textures(tmp_path: Pa
     assert "sampled_textures" in html
     assert "screenshot_data" in html
     assert "preserveDrawingBuffer" in html
+
+
+def test_browser_render_preview_harness_accepts_quantized_accessors(tmp_path: Path) -> None:
+    html = _runtime_browser_render_html(
+        tmp_path / "asset.glb",
+        RuntimeBrowserRenderOptions(browser="fake-browser"),
+    )
+
+    assert "5120: Int8Array" in html
+    assert "5122: Int16Array" in html
+    assert "VERTEX_ATTRIBUTE_COMPONENT_TYPES" in html
+    assert "accessorComponentValue(draw.position" in html
+    assert "draw.position.componentType, draw.position.normalized" in html
+    assert "draw.texcoord.componentType, draw.texcoord.normalized" in html
+    assert "quantized_primitives" in html
+    assert "FLOAT or quantized VEC3 positions" in html
 
 
 def test_engine_runtime_reports_unavailable_when_engine_is_missing(

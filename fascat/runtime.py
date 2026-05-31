@@ -145,6 +145,7 @@ class RuntimeBrowserRenderReport:
     triangles: int
     textured_primitives: int = 0
     sampled_textures: int = 0
+    quantized_primitives: int = 0
     error: str | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -159,6 +160,7 @@ class RuntimeBrowserRenderReport:
             "triangles": self.triangles,
             "textured_primitives": self.textured_primitives,
             "sampled_textures": self.sampled_textures,
+            "quantized_primitives": self.quantized_primitives,
             "error": self.error,
         }
 
@@ -347,6 +349,7 @@ def write_browser_render_preview(
                 triangles=_int(payload.get("triangles"), validation_stats["triangles"]),
                 textured_primitives=_int(payload.get("textured_primitives"), 0),
                 sampled_textures=_int(payload.get("sampled_textures"), 0),
+                quantized_primitives=_int(payload.get("quantized_primitives"), 0),
                 error=str(error) if error is not None else None,
             )
         screenshot_data = payload.get("screenshot_data")
@@ -396,6 +399,7 @@ def write_browser_render_preview(
         triangles=_int(payload.get("triangles"), validation_stats["triangles"]),
         textured_primitives=_int(payload.get("textured_primitives"), 0),
         sampled_textures=_int(payload.get("sampled_textures"), 0),
+        quantized_primitives=_int(payload.get("quantized_primitives"), 0),
         error=str(error) if error is not None else None,
     )
 
@@ -779,6 +783,7 @@ def _browser_render_report(
         triangles=validation_stats["triangles"],
         textured_primitives=0,
         sampled_textures=0,
+        quantized_primitives=0,
         error=error,
     )
 
@@ -984,8 +989,32 @@ function loadAsset() {{
 }}
 
 const COMPONENTS = {{ SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 }};
-const ARRAY_TYPES = {{ 5121: Uint8Array, 5123: Uint16Array, 5125: Uint32Array, 5126: Float32Array }};
-const COMPONENT_BYTES = {{ 5121: 1, 5123: 2, 5125: 4, 5126: 4 }};
+const ARRAY_TYPES = {{ 5120: Int8Array, 5121: Uint8Array, 5122: Int16Array, 5123: Uint16Array, 5125: Uint32Array, 5126: Float32Array }};
+const COMPONENT_BYTES = {{ 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4 }};
+const VERTEX_ATTRIBUTE_COMPONENT_TYPES = new Set([5120, 5121, 5122, 5123, 5126]);
+
+function readAccessorComponent(view, byteOffset, componentType) {{
+  if (componentType === 5120) return view.getInt8(byteOffset);
+  if (componentType === 5121) return view.getUint8(byteOffset);
+  if (componentType === 5122) return view.getInt16(byteOffset, true);
+  if (componentType === 5123) return view.getUint16(byteOffset, true);
+  if (componentType === 5125) return view.getUint32(byteOffset, true);
+  if (componentType === 5126) return view.getFloat32(byteOffset, true);
+  throw new Error("unsupported accessor component type " + componentType);
+}}
+
+function normalizedComponentValue(value, componentType) {{
+  if (componentType === 5120) return Math.max(value / 127.0, -1.0);
+  if (componentType === 5121) return value / 255.0;
+  if (componentType === 5122) return Math.max(value / 32767.0, -1.0);
+  if (componentType === 5123) return value / 65535.0;
+  return value;
+}}
+
+function accessorComponentValue(accessor, row, column) {{
+  const value = accessor.array[row * accessor.itemSize + column];
+  return accessor.normalized ? normalizedComponentValue(value, accessor.componentType) : value;
+}}
 
 function readAccessor(document, buffers, accessorIndex) {{
   const accessor = document.accessors && document.accessors[accessorIndex];
@@ -1003,17 +1032,17 @@ function readAccessor(document, buffers, accessorIndex) {{
   const stride = view.byteStride || (componentBytes * itemSize);
   const length = accessor.count * itemSize;
   if (stride === componentBytes * itemSize) {{
-    return {{ array: new ArrayType(buffer, byteOffset, length), itemSize, count: accessor.count, componentType: accessor.componentType }};
+    return {{ array: new ArrayType(buffer, byteOffset, length), itemSize, count: accessor.count, componentType: accessor.componentType, normalized: !!accessor.normalized }};
   }}
-  if (accessor.componentType !== 5126) throw new Error("strided non-float accessors are not supported");
-  const source = new DataView(buffer, byteOffset, stride * accessor.count);
-  const values = new Float32Array(length);
+  const sourceLength = accessor.count === 0 ? 0 : (accessor.count - 1) * stride + componentBytes * itemSize;
+  const source = new DataView(buffer, byteOffset, sourceLength);
+  const values = new ArrayType(length);
   for (let row = 0; row < accessor.count; row++) {{
     for (let column = 0; column < itemSize; column++) {{
-      values[row * itemSize + column] = source.getFloat32(row * stride + column * componentBytes, true);
+      values[row * itemSize + column] = readAccessorComponent(source, row * stride + column * componentBytes, accessor.componentType);
     }}
   }}
-  return {{ array: values, itemSize, count: accessor.count, componentType: accessor.componentType }};
+  return {{ array: values, itemSize, count: accessor.count, componentType: accessor.componentType, normalized: !!accessor.normalized }};
 }}
 
 function identity() {{
@@ -1198,14 +1227,14 @@ function collectDraws(document, buffers) {{
       if ((primitive.mode === undefined ? 4 : primitive.mode) !== 4) continue;
       if (!primitive.attributes || primitive.attributes.POSITION === undefined) continue;
       const position = readAccessor(document, buffers, primitive.attributes.POSITION);
-      if (position.componentType !== 5126 || position.itemSize !== 3) {{
-        throw new Error("browser render preview currently supports FLOAT VEC3 positions");
+      if (!VERTEX_ATTRIBUTE_COMPONENT_TYPES.has(position.componentType) || position.itemSize !== 3) {{
+        throw new Error("browser render preview currently supports FLOAT or quantized VEC3 positions");
       }}
       const texcoord = primitive.attributes.TEXCOORD_0 === undefined
         ? null
         : readAccessor(document, buffers, primitive.attributes.TEXCOORD_0);
-      if (texcoord && (texcoord.componentType !== 5126 || texcoord.itemSize !== 2)) {{
-        throw new Error("browser render preview currently supports FLOAT VEC2 TEXCOORD_0");
+      if (texcoord && (!VERTEX_ATTRIBUTE_COMPONENT_TYPES.has(texcoord.componentType) || texcoord.itemSize !== 2)) {{
+        throw new Error("browser render preview currently supports FLOAT or quantized VEC2 TEXCOORD_0");
       }}
       const indices = primitive.indices === undefined ? null : readAccessor(document, buffers, primitive.indices);
       const triangles = indices ? Math.floor(indices.count / 3) : Math.floor(position.count / 3);
@@ -1217,6 +1246,7 @@ function collectDraws(document, buffers) {{
         texture: null,
         matrix: world,
         color: materialColor(document, primitive.material),
+        quantized: position.componentType !== 5126 || position.normalized || (texcoord && (texcoord.componentType !== 5126 || texcoord.normalized)),
         triangles
       }});
     }}
@@ -1244,7 +1274,11 @@ function bounds(draws) {{
   for (const draw of draws) {{
     const values = draw.position.array;
     for (let i = 0; i < draw.position.count; i++) {{
-      const p = transformPoint(draw.matrix, [values[i * 3], values[i * 3 + 1], values[i * 3 + 2]]);
+      const p = transformPoint(draw.matrix, [
+        accessorComponentValue(draw.position, i, 0),
+        accessorComponentValue(draw.position, i, 1),
+        accessorComponentValue(draw.position, i, 2)
+      ]);
       for (let axis = 0; axis < 3; axis++) {{
         min[axis] = Math.min(min[axis], p[axis]);
         max[axis] = Math.max(max[axis], p[axis]);
@@ -1286,9 +1320,11 @@ function bounds(draws) {{
     const useTextureLocation = gl.getUniformLocation(drawProgram, "useTexture");
     const textureCache = new Map();
     let texturedPrimitives = 0;
+    let quantizedPrimitives = 0;
     for (const draw of draws) {{
       draw.texture = draw.texcoord ? await textureForMaterial(gl, document, draw.material, textureCache) : null;
       if (draw.texture) texturedPrimitives += 1;
+      if (draw.quantized) quantizedPrimitives += 1;
     }}
 
     gl.viewport(0, 0, canvas.width, canvas.height);
@@ -1303,14 +1339,14 @@ function bounds(draws) {{
       gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
       gl.bufferData(gl.ARRAY_BUFFER, draw.position.array, gl.STATIC_DRAW);
       gl.enableVertexAttribArray(positionLocation);
-      gl.vertexAttribPointer(positionLocation, 3, gl.FLOAT, false, 0, 0);
+      gl.vertexAttribPointer(positionLocation, 3, draw.position.componentType, draw.position.normalized, 0, 0);
       if (texcoordLocation >= 0) {{
         if (draw.texcoord && draw.texture) {{
           const texcoordBuffer = gl.createBuffer();
           gl.bindBuffer(gl.ARRAY_BUFFER, texcoordBuffer);
           gl.bufferData(gl.ARRAY_BUFFER, draw.texcoord.array, gl.STATIC_DRAW);
           gl.enableVertexAttribArray(texcoordLocation);
-          gl.vertexAttribPointer(texcoordLocation, 2, gl.FLOAT, false, 0, 0);
+          gl.vertexAttribPointer(texcoordLocation, 2, draw.texcoord.componentType, draw.texcoord.normalized, 0, 0);
         }} else {{
           gl.disableVertexAttribArray(texcoordLocation);
           gl.vertexAttrib2f(texcoordLocation, 0.0, 0.0);
@@ -1337,9 +1373,9 @@ function bounds(draws) {{
       triangles += draw.triangles;
     }}
     gl.finish();
-    finish({{ status: "rendered", meshes: Array.isArray(document.meshes) ? document.meshes.length : 0, triangles, textured_primitives: texturedPrimitives, sampled_textures: textureCache.size, screenshot_data: canvas.toDataURL("image/png") }});
+    finish({{ status: "rendered", meshes: Array.isArray(document.meshes) ? document.meshes.length : 0, triangles, textured_primitives: texturedPrimitives, sampled_textures: textureCache.size, quantized_primitives: quantizedPrimitives, screenshot_data: canvas.toDataURL("image/png") }});
   }} catch (error) {{
-    finish({{ status: "failed", error: String(error), meshes: 0, triangles: 0, textured_primitives: 0, sampled_textures: 0 }});
+    finish({{ status: "failed", error: String(error), meshes: 0, triangles: 0, textured_primitives: 0, sampled_textures: 0, quantized_primitives: 0 }});
   }}
 }})();
 </script>
