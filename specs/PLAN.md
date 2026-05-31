@@ -65,7 +65,7 @@ The basics are present and produce a valid RT3D asset:
 
 ### B. Real but approximate — refine candidates
 
-- **Occlusion removal** (`ops/actions.py`): real sampled visibility rays; no acceleration structure / GPU, so thin occluders are imprecise.
+- **Occlusion removal** (`ops/actions.py`): real sampled visibility rays with CPU BVH acceleration; no GPU/raster backend, so thin occluders are imprecise.
 - **Hole removal** (`actions.py:190,194`): mesh boundary classification + fill only; closed BREP feature removal not implemented.
 - **Decimation `criterion="quality"`**: maps tolerance → target ratio; not true geometric-error-bounded simplification.
 
@@ -124,7 +124,7 @@ implement → test → document → commit → push → verify CI/docs.
 **Optimize**
 - Geometric-error-bounded simplification (replace quality-heuristic → ratio mapping).
 - AO / user-painted vertex weights as simplification constraints; vertex-color/weight cleanup.
-- Occlusion: acceleration structures + optional raster/GPU backend; standard vs advanced params.
+- Occlusion: optional raster/GPU backend; standard vs advanced params.
 - Loose / precise + symmetry / mirror-aware instance reconstruction.
 - Retopology / proxy-mesh paths (dual-contouring, field-aligned) + normal-map transfer.
 

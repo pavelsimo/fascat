@@ -15,7 +15,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 | --- | --------------------------------------------------------------- | ------------- | -------- |
 | ~~P1~~ | ~~`t_junction_count` is O(edges × vertices)~~ ✅ **done**     | CPU           | High     |
 | ~~P2~~ | ~~`repair()` runs a full before/after diagnostic suite, always-on~~ ✅ **done** | CPU           | High     |
-| P3  | Occlusion ray cast has no acceleration structure                | CPU           | High     |
+| ~~P3~~ | ~~Occlusion ray cast has no acceleration structure~~ ✅ **done** | CPU           | High     |
 | P4  | Per-element Python loops in core mesh kernels                   | CPU           | High     |
 | ~~P11~~ | ~~`Asset.copy()` duplicates every mesh array ~4–8×, ~10×/pipeline~~ ✅ **done** | Memory        | High     |
 | P15 | Exporters build one Python object/string per vertex/triangle    | CPU / I/O     | High     |
@@ -72,7 +72,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   the detailed repair report and warning behavior. The repair `tolerance_policy` records whether
   quality diagnostics were enabled.
 
-### P3 — Occlusion removal is a brute-force ray cast with no acceleration structure — partial (2026-05-31)
+### P3 — Occlusion removal is a brute-force ray cast with no acceleration structure — ✅ done (2026-05-31)
 - **Where:** `fascat/ops/actions.py:1653` (`_sample_is_visible`), `:1666` (`_segment_blocked`),
   `:1675` (`_segment_intersects_mesh`), `:1684` (`_segment_triangle_t`); occluder set built at
   `:1462` (`_candidate_occluders`, all other occurrences).
@@ -83,14 +83,15 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 - **Fix:** Build a BVH/uniform grid per occluder (or use `trimesh.ray`/embree), vectorize the
   ray–triangle test across all candidate faces at once, and spatially cull occluders per
   candidate instead of testing all occurrences.
-- **Progress:** `_segment_intersects_mesh` now vectorizes Möller-Trumbore intersection across all
+- **Resolution:** `_segment_intersects_mesh` now vectorizes Möller-Trumbore intersection across all
   faces in an occluder mesh after the existing per-occluder AABB reject, removing the pure-Python
   per-triangle loop from the innermost ray test. World occurrences now precompute triangle points,
-  edge vectors, and per-triangle bounds once, so each ray can cull candidate triangles by segment
-  AABB before the vectorized intersection without rebuilding `points[faces]`. Each world
-  occurrence now also builds a median-split triangle BVH, so ray tests descend node AABBs and run
-  the vectorized intersection only on leaf-sized triangle batches instead of scanning every
-  triangle bound per ray. Broader occluder-level spatial culling is still open.
+  edge vectors, and per-triangle bounds once, and each occurrence builds a median-split triangle
+  BVH so ray tests descend node AABBs and run vectorized intersection only on leaf-sized triangle
+  batches. Candidate occluder sets now also build a median-split occurrence BVH, so each sampled
+  ray spatially culls occluders by bounds before testing occurrence triangle BVHs. The sampled
+  occlusion method remains approximate and CPU-only, but the listed acceleration-structure gap is
+  closed.
 
 ### P4 — Per-element Python loops in core mesh kernels — partial (2026-05-31)
 - **Where (all `fascat/mesh.py`):** `compute_flat_normals:1026`, `compute_hard_edge_normals:1055`,

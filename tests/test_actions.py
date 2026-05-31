@@ -11,7 +11,10 @@ from fascat.cli import app
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.ops.actions import (
+    _build_occurrence_bvh,
     _build_triangle_bvh,
+    _OccluderSet,
+    _segment_blocked,
     _segment_intersects_mesh,
     _segment_intersects_occurrence,
     _segment_intersects_triangles,
@@ -118,6 +121,54 @@ def test_segment_intersects_occurrence_uses_triangle_bvh_leaves(monkeypatch: pyt
     assert _segment_intersects_occurrence(start, end, occurrence) is True
     assert batch_sizes
     assert max(batch_sizes) < mesh.triangle_count
+
+
+def test_segment_blocked_uses_occluder_bvh_leaves(monkeypatch: pytest.MonkeyPatch) -> None:
+    occurrences: list[_WorldOccurrence] = []
+    for index in range(128):
+        base = float(index * 2)
+        points = np.asarray([[base, 0.0, 0.0], [base + 1.0, 0.0, 0.0], [base, 1.0, 0.0]], dtype=float)
+        faces = np.asarray([[0, 1, 2]], dtype=int)
+        triangles = points[faces]
+        triangle_bounds_min = triangles.min(axis=1)
+        triangle_bounds_max = triangles.max(axis=1)
+        occurrences.append(
+            _WorldOccurrence(
+                node=Node(id=f"node-{index}", name=f"node-{index}", part_id=f"part-{index}"),
+                part_id=f"part-{index}",
+                world_points=points,
+                faces=faces,
+                triangles=triangles,
+                triangle_edges1=triangles[:, 1] - triangles[:, 0],
+                triangle_edges2=triangles[:, 2] - triangles[:, 0],
+                triangle_bounds_min=triangle_bounds_min,
+                triangle_bounds_max=triangle_bounds_max,
+                triangle_bvh=_build_triangle_bvh(triangle_bounds_min, triangle_bounds_max),
+                bounds_min=points.min(axis=0),
+                bounds_max=points.max(axis=0),
+                volume=0.0,
+            )
+        )
+    occluders = _OccluderSet(
+        occurrences=tuple(occurrences),
+        bvh=_build_occurrence_bvh(
+            np.vstack([occurrence.bounds_min for occurrence in occurrences]),
+            np.vstack([occurrence.bounds_max for occurrence in occurrences]),
+        ),
+    )
+    checked_node_ids: list[str] = []
+    original_segment_intersects_occurrence = _segment_intersects_occurrence
+
+    def record_occurrence_check(start_arg: np.ndarray, end_arg: np.ndarray, occurrence: _WorldOccurrence) -> bool:
+        checked_node_ids.append(occurrence.node.id)
+        return original_segment_intersects_occurrence(start_arg, end_arg, occurrence)
+
+    monkeypatch.setattr("fascat.ops.actions._segment_intersects_occurrence", record_occurrence_check)
+    start = np.array([254.25, 0.25, 1.0], dtype=float)
+    end = np.array([254.25, 0.25, -1.0], dtype=float)
+
+    assert _segment_blocked(start, end, occluders) is True
+    assert checked_node_ids == ["node-127"]
 
 
 def _triangle_strip_with_uvs(count: int) -> Mesh:

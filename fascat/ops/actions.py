@@ -29,6 +29,7 @@ IntArray = NDArray[np.int64]
 _AGGRESSIVE_LOD0_RATIO = 0.2
 _DECIMATION_MEMORY_BYTES_PER_MILLION_TRIANGLES = 5_000_000_000
 _DECIMATION_MEMORY_GB_PER_MILLION_TRIANGLES = 5.0
+_OCCLUSION_BVH_LEAF_OCCURRENCES = 8
 _OCCLUSION_BVH_LEAF_TRIANGLES = 64
 _OCCLUSION_BVH_MAX_DEPTH = 32
 
@@ -373,6 +374,15 @@ class _TriangleBvhNode:
 
 
 @dataclass(frozen=True)
+class _OccurrenceBvhNode:
+    bounds_min: FloatArray
+    bounds_max: FloatArray
+    indices: IntArray | None = None
+    left: _OccurrenceBvhNode | None = None
+    right: _OccurrenceBvhNode | None = None
+
+
+@dataclass(frozen=True)
 class _WorldOccurrence:
     node: Node
     part_id: str
@@ -387,6 +397,15 @@ class _WorldOccurrence:
     bounds_min: FloatArray
     bounds_max: FloatArray
     volume: float
+
+
+@dataclass(frozen=True)
+class _OccluderSet:
+    occurrences: tuple[_WorldOccurrence, ...]
+    bvh: _OccurrenceBvhNode | None
+
+    def __bool__(self) -> bool:
+        return bool(self.occurrences)
 
 
 @dataclass(frozen=True)
@@ -1481,13 +1500,21 @@ def _candidate_occluders(
     candidate: _WorldOccurrence,
     occurrences: list[_WorldOccurrence],
     options: RemoveOccludedOptions,
-) -> list[_WorldOccurrence]:
-    return [
+) -> _OccluderSet:
+    candidates = tuple(
         occluder
         for occluder in occurrences
         if occluder.node.id != candidate.node.id
         and (options.consider_transparency_opaque or not _part_is_transparent(asset, occluder.part_id))
-    ]
+    )
+    if not candidates:
+        return _OccluderSet(occurrences=(), bvh=None)
+    bounds_min = np.vstack([occluder.bounds_min for occluder in candidates])
+    bounds_max = np.vstack([occluder.bounds_max for occluder in candidates])
+    return _OccluderSet(
+        occurrences=candidates,
+        bvh=_build_occurrence_bvh(bounds_min, bounds_max),
+    )
 
 
 def _occlusion_directions(options: RemoveOccludedOptions) -> list[FloatArray]:
@@ -1571,7 +1598,7 @@ def _max_occlusion_direction_count(options: RemoveOccludedOptions) -> int:
 
 def _occurrence_visibility_measurement(
     candidate: _WorldOccurrence,
-    occluders: list[_WorldOccurrence],
+    occluders: _OccluderSet,
     directions: list[FloatArray],
     ray_distance: float,
     options: RemoveOccludedOptions,
@@ -1632,7 +1659,7 @@ def _occurrence_visibility_samples(candidate: _WorldOccurrence, precision: int) 
 
 def _visible_face_measurement(
     candidate: _WorldOccurrence,
-    occluders: list[_WorldOccurrence],
+    occluders: _OccluderSet,
     directions: list[FloatArray],
     ray_distance: float,
 ) -> tuple[NDArray[np.bool_], _OcclusionMeasurement]:
@@ -1669,7 +1696,7 @@ def _face_centers(occurrence: _WorldOccurrence) -> FloatArray:
 
 def _sample_is_visible(
     sample: FloatArray,
-    occluders: list[_WorldOccurrence],
+    occluders: _OccluderSet,
     directions: list[FloatArray],
     ray_distance: float,
 ) -> bool:
@@ -1680,13 +1707,36 @@ def _sample_is_visible(
     return False
 
 
-def _segment_blocked(start: FloatArray, end: FloatArray, occluders: list[_WorldOccurrence]) -> bool:
-    for occluder in occluders:
+def _segment_blocked(start: FloatArray, end: FloatArray, occluders: _OccluderSet) -> bool:
+    if occluders.bvh is not None:
+        return _segment_intersects_occluder_bvh(start, end, occluders.bvh, occluders.occurrences)
+    for occluder in occluders.occurrences:
         if not _segment_intersects_bounds(start, end, occluder.bounds_min, occluder.bounds_max):
             continue
         if _segment_intersects_occurrence(start, end, occluder):
             return True
     return False
+
+
+def _segment_intersects_occluder_bvh(
+    start: FloatArray,
+    end: FloatArray,
+    node: _OccurrenceBvhNode,
+    occurrences: tuple[_WorldOccurrence, ...],
+) -> bool:
+    if not _segment_intersects_bounds(start, end, node.bounds_min, node.bounds_max):
+        return False
+    if node.indices is not None:
+        for index in node.indices:
+            occurrence = occurrences[int(index)]
+            if not _segment_intersects_bounds(start, end, occurrence.bounds_min, occurrence.bounds_max):
+                continue
+            if _segment_intersects_occurrence(start, end, occurrence):
+                return True
+        return False
+    if node.left is not None and _segment_intersects_occluder_bvh(start, end, node.left, occurrences):
+        return True
+    return node.right is not None and _segment_intersects_occluder_bvh(start, end, node.right, occurrences)
 
 
 def _segment_intersects_occurrence(start: FloatArray, end: FloatArray, occurrence: _WorldOccurrence) -> bool:
@@ -1784,6 +1834,50 @@ def _build_triangle_bvh(
     if left is None or right is None:
         return _TriangleBvhNode(bounds_min=bounds_min, bounds_max=bounds_max, indices=indices.copy())
     return _TriangleBvhNode(bounds_min=bounds_min, bounds_max=bounds_max, left=left, right=right)
+
+
+def _build_occurrence_bvh(
+    bounds_min_all: FloatArray,
+    bounds_max_all: FloatArray,
+    indices: IntArray | None = None,
+    *,
+    depth: int = 0,
+) -> _OccurrenceBvhNode | None:
+    if bounds_min_all.shape[0] == 0:
+        return None
+    if indices is None:
+        indices = np.arange(bounds_min_all.shape[0], dtype=np.int64)
+    if indices.size == 0:
+        return None
+
+    bounds_min = cast(FloatArray, bounds_min_all[indices].min(axis=0))
+    bounds_max = cast(FloatArray, bounds_max_all[indices].max(axis=0))
+    if indices.size <= _OCCLUSION_BVH_LEAF_OCCURRENCES or depth >= _OCCLUSION_BVH_MAX_DEPTH:
+        return _OccurrenceBvhNode(bounds_min=bounds_min, bounds_max=bounds_max, indices=indices.copy())
+
+    centers = (bounds_min_all[indices] + bounds_max_all[indices]) * 0.5
+    spans = np.ptp(centers, axis=0)
+    axis = int(np.argmax(spans))
+    if float(spans[axis]) <= 0.0:
+        return _OccurrenceBvhNode(bounds_min=bounds_min, bounds_max=bounds_max, indices=indices.copy())
+
+    order = np.argsort(centers[:, axis], kind="mergesort")
+    midpoint = indices.size // 2
+    left = _build_occurrence_bvh(
+        bounds_min_all,
+        bounds_max_all,
+        indices[order[:midpoint]],
+        depth=depth + 1,
+    )
+    right = _build_occurrence_bvh(
+        bounds_min_all,
+        bounds_max_all,
+        indices[order[midpoint:]],
+        depth=depth + 1,
+    )
+    if left is None or right is None:
+        return _OccurrenceBvhNode(bounds_min=bounds_min, bounds_max=bounds_max, indices=indices.copy())
+    return _OccurrenceBvhNode(bounds_min=bounds_min, bounds_max=bounds_max, left=left, right=right)
 
 
 def _segment_intersects_triangles(
