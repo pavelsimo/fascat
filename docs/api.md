@@ -1226,9 +1226,10 @@ metadata for this validation path to reconstruct LOD previews.
 discovery path as `--runtime-browser`, renders supported glTF/GLB mesh
 primitives with WebGL, and writes a PNG screenshot. This path gives a real
 browser renderer artifact for simple uncompressed assets, including node
-transforms and material base-color factors. Draco, meshopt-only payloads, sparse
-accessors, texture sampling, and full engine material/lighting parity remain
-outside the packaged browser preview.
+transforms, material base-color factors, and base-color texture sampling for
+supported image URI/data URI textures. Draco, meshopt-only payloads, sparse
+accessors, KTX2/Basis-only texture payloads, and full engine material/lighting
+parity remain outside the packaged browser preview.
 
 `--runtime-browser` is available for glTF/GLB outputs. It launches a local
 Chromium-compatible browser when one is installed, loads the asset bytes in a

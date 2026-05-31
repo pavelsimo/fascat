@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import subprocess
+from io import BytesIO
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +14,7 @@ from fascat.runtime import (
     RuntimeBrowserOptions,
     RuntimeBrowserRenderOptions,
     RuntimeEngineOptions,
+    _runtime_browser_render_html,
     copy_engine_runtime_harness,
     measure_browser_runtime,
     measure_engine_runtime,
@@ -110,7 +113,11 @@ def test_browser_render_preview_writes_screenshot_and_report(
             Image.new("RGBA", (800, 600), (10, 20, 30, 255)).save(screenshot_path)
             return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
         assert "--dump-dom" in command
-        stdout = '<html><body><pre id="result">{"status":"rendered","meshes":1,"triangles":1}</pre></body></html>'
+        stdout = (
+            '<html><body><pre id="result">'
+            '{"status":"rendered","meshes":1,"triangles":1,"textured_primitives":1,"sampled_textures":1}'
+            "</pre></body></html>"
+        )
         return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
     monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
@@ -128,8 +135,66 @@ def test_browser_render_preview_writes_screenshot_and_report(
     assert report.height == 600
     assert report.meshes == 1
     assert report.triangles == 1
+    assert report.textured_primitives == 1
+    assert report.sampled_textures == 1
+    assert report.to_dict()["textured_primitives"] == 1
+    assert report.to_dict()["sampled_textures"] == 1
     assert report.error is None
     assert preview.is_file()
+
+
+def test_browser_render_preview_writes_screenshot_data_from_payload(
+    monkeypatch,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "asset.glb"
+    preview = tmp_path / "browser-preview.png"
+    _asset().write_gltf(output)
+    image_bytes = BytesIO()
+    Image.new("RGBA", (2, 2), (230, 20, 30, 255)).save(image_bytes, format="PNG")
+    screenshot_data = "data:image/png;base64," + base64.b64encode(image_bytes.getvalue()).decode("ascii")
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], *_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        assert "--dump-dom" in command
+        stdout = (
+            '<html><body><pre id="result">'
+            '{"status":"rendered","meshes":1,"triangles":1,'
+            '"textured_primitives":1,"sampled_textures":1,'
+            f'"screenshot_data":"{screenshot_data}"'
+            "}</pre></body></html>"
+        )
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+
+    report = write_browser_render_preview(
+        output,
+        preview,
+        RuntimeBrowserRenderOptions(browser="fake-browser", timeout_seconds=3.0),
+    )
+
+    assert len(calls) == 1
+    assert report.status == "rendered"
+    assert report.textured_primitives == 1
+    assert report.sampled_textures == 1
+    assert Image.open(preview).getpixel((0, 0)) == (230, 20, 30, 255)
+
+
+def test_browser_render_preview_harness_samples_base_color_textures(tmp_path: Path) -> None:
+    html = _runtime_browser_render_html(
+        tmp_path / "asset.glb",
+        RuntimeBrowserRenderOptions(browser="fake-browser"),
+    )
+
+    assert "baseColorTexture" in html
+    assert "TEXCOORD_0" in html
+    assert "texture2D(baseColorTexture" in html
+    assert "textured_primitives" in html
+    assert "sampled_textures" in html
+    assert "screenshot_data" in html
+    assert "preserveDrawingBuffer" in html
 
 
 def test_engine_runtime_reports_unavailable_when_engine_is_missing(

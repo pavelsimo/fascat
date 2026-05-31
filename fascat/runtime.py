@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import html
 import json
 import os
@@ -141,6 +143,8 @@ class RuntimeBrowserRenderReport:
     height: int
     meshes: int
     triangles: int
+    textured_primitives: int = 0
+    sampled_textures: int = 0
     error: str | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -153,6 +157,8 @@ class RuntimeBrowserRenderReport:
             "height": self.height,
             "meshes": self.meshes,
             "triangles": self.triangles,
+            "textured_primitives": self.textured_primitives,
+            "sampled_textures": self.sampled_textures,
             "error": self.error,
         }
 
@@ -339,39 +345,43 @@ def write_browser_render_preview(
                 height=opts.height,
                 meshes=_int(payload.get("meshes"), validation_stats["meshes"]),
                 triangles=_int(payload.get("triangles"), validation_stats["triangles"]),
+                textured_primitives=_int(payload.get("textured_primitives"), 0),
+                sampled_textures=_int(payload.get("sampled_textures"), 0),
                 error=str(error) if error is not None else None,
             )
-        screenshot_command = _browser_render_screenshot_invocation(browser, harness_path, output_path, opts)
-        try:
-            screenshot_completed = subprocess.run(
-                screenshot_command,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=opts.timeout_seconds,
-            )
-        except subprocess.TimeoutExpired:
-            return _browser_render_report(
-                asset_path,
-                output_path,
-                opts,
-                validation_stats,
-                status="failed",
-                browser=browser,
-                error="browser render preview screenshot timed out",
-            )
-        if screenshot_completed.returncode != 0:
-            detail = (screenshot_completed.stderr or screenshot_completed.stdout).strip().splitlines()
-            message = detail[-1] if detail else f"browser exited with status {screenshot_completed.returncode}"
-            return _browser_render_report(
-                asset_path,
-                output_path,
-                opts,
-                validation_stats,
-                status="failed",
-                browser=browser,
-                error=message,
-            )
+        screenshot_data = payload.get("screenshot_data")
+        if not isinstance(screenshot_data, str) or not _write_png_data_uri(screenshot_data, output_path):
+            screenshot_command = _browser_render_screenshot_invocation(browser, harness_path, output_path, opts)
+            try:
+                screenshot_completed = subprocess.run(
+                    screenshot_command,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=opts.timeout_seconds,
+                )
+            except subprocess.TimeoutExpired:
+                return _browser_render_report(
+                    asset_path,
+                    output_path,
+                    opts,
+                    validation_stats,
+                    status="failed",
+                    browser=browser,
+                    error="browser render preview screenshot timed out",
+                )
+            if screenshot_completed.returncode != 0:
+                detail = (screenshot_completed.stderr or screenshot_completed.stdout).strip().splitlines()
+                message = detail[-1] if detail else f"browser exited with status {screenshot_completed.returncode}"
+                return _browser_render_report(
+                    asset_path,
+                    output_path,
+                    opts,
+                    validation_stats,
+                    status="failed",
+                    browser=browser,
+                    error=message,
+                )
     if not output_path.exists():
         status = "failed"
         error = "browser did not write render preview screenshot"
@@ -384,6 +394,8 @@ def write_browser_render_preview(
         height=opts.height,
         meshes=_int(payload.get("meshes"), validation_stats["meshes"]),
         triangles=_int(payload.get("triangles"), validation_stats["triangles"]),
+        textured_primitives=_int(payload.get("textured_primitives"), 0),
+        sampled_textures=_int(payload.get("sampled_textures"), 0),
         error=str(error) if error is not None else None,
     )
 
@@ -666,6 +678,18 @@ def _parse_browser_payload(output: str) -> dict[str, object] | None:
     return cast(dict[str, object], payload) if isinstance(payload, dict) else None
 
 
+def _write_png_data_uri(value: str, path: Path) -> bool:
+    prefix = "data:image/png;base64,"
+    if not value.startswith(prefix):
+        return False
+    try:
+        data = base64.b64decode(value[len(prefix) :], validate=True)
+    except (binascii.Error, ValueError):
+        return False
+    path.write_bytes(data)
+    return True
+
+
 def _report_from_payload(
     asset_path: Path,
     validation_stats: dict[str, int],
@@ -753,6 +777,8 @@ def _browser_render_report(
         height=options.height,
         meshes=validation_stats["meshes"],
         triangles=validation_stats["triangles"],
+        textured_primitives=0,
+        sampled_textures=0,
         error=error,
     )
 
@@ -1069,9 +1095,24 @@ function shader(gl, type, source) {{
 }}
 
 function program(gl) {{
+  const vertexSource = [
+    "attribute vec3 p;",
+    "attribute vec2 uv;",
+    "uniform mat4 mvp;",
+    "varying vec2 vUv;",
+    "void main() {{ vUv = uv; gl_Position = mvp * vec4(p, 1.0); }}"
+  ].join("\\n");
+  const fragmentSource = [
+    "precision mediump float;",
+    "uniform vec4 color;",
+    "uniform sampler2D baseColorTexture;",
+    "uniform bool useTexture;",
+    "varying vec2 vUv;",
+    "void main() {{ vec4 texel = useTexture ? texture2D(baseColorTexture, vUv) : vec4(1.0); gl_FragColor = color * texel; }}"
+  ].join("\\n");
   const item = gl.createProgram();
-  gl.attachShader(item, shader(gl, gl.VERTEX_SHADER, "attribute vec3 p; uniform mat4 mvp; void main() {{ gl_Position = mvp * vec4(p, 1.0); }}"));
-  gl.attachShader(item, shader(gl, gl.FRAGMENT_SHADER, "precision mediump float; uniform vec4 color; void main() {{ gl_FragColor = color; }}"));
+  gl.attachShader(item, shader(gl, gl.VERTEX_SHADER, vertexSource));
+  gl.attachShader(item, shader(gl, gl.FRAGMENT_SHADER, fragmentSource));
   gl.linkProgram(item);
   if (!gl.getProgramParameter(item, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(item));
   return item;
@@ -1081,6 +1122,67 @@ function materialColor(document, materialIndex) {{
   const material = document.materials && document.materials[materialIndex];
   const factor = material && material.pbrMetallicRoughness && material.pbrMetallicRoughness.baseColorFactor;
   return Array.isArray(factor) ? factor : [0.45, 0.58, 0.72, 1.0];
+}}
+
+function materialBaseColorImageIndex(document, materialIndex) {{
+  const material = document.materials && document.materials[materialIndex];
+  const textureInfo = material && material.pbrMetallicRoughness && material.pbrMetallicRoughness.baseColorTexture;
+  if (!textureInfo || textureInfo.index === undefined) return null;
+  if (textureInfo.texCoord !== undefined && textureInfo.texCoord !== 0) return null;
+  const texture = document.textures && document.textures[textureInfo.index];
+  if (!texture || texture.source === undefined) return null;
+  return texture.source;
+}}
+
+function imageUri(document, imageIndex) {{
+  const image = document.images && document.images[imageIndex];
+  if (!image || !image.uri) return null;
+  if (image.uri.startsWith("data:")) return image.uri;
+  return new URL(image.uri, ASSET_URL).href;
+}}
+
+async function loadImage(uri) {{
+  if (typeof fetch === "function" && typeof createImageBitmap === "function") {{
+    try {{
+      const response = await fetch(uri);
+      if (response.ok || uri.startsWith("data:") || uri.startsWith("file:")) {{
+        return await createImageBitmap(await response.blob());
+      }}
+    }} catch (_error) {{
+      // Fall back to Image for file URLs or older browser builds.
+    }}
+  }}
+  return await new Promise((resolve, reject) => {{
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("failed to load texture image " + uri));
+    image.src = uri;
+  }});
+}}
+
+function createGlTexture(gl, image) {{
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+  const error = gl.getError();
+  if (error !== gl.NO_ERROR) throw new Error("failed to upload texture image: WebGL error " + error);
+  return texture;
+}}
+
+async function textureForMaterial(gl, document, materialIndex, cache) {{
+  const imageIndex = materialBaseColorImageIndex(document, materialIndex);
+  if (imageIndex === null) return null;
+  if (cache.has(imageIndex)) return cache.get(imageIndex);
+  const uri = imageUri(document, imageIndex);
+  if (!uri) return null;
+  const image = await loadImage(uri);
+  const texture = createGlTexture(gl, image);
+  cache.set(imageIndex, texture);
+  return texture;
 }}
 
 function collectDraws(document, buffers) {{
@@ -1099,11 +1201,20 @@ function collectDraws(document, buffers) {{
       if (position.componentType !== 5126 || position.itemSize !== 3) {{
         throw new Error("browser render preview currently supports FLOAT VEC3 positions");
       }}
+      const texcoord = primitive.attributes.TEXCOORD_0 === undefined
+        ? null
+        : readAccessor(document, buffers, primitive.attributes.TEXCOORD_0);
+      if (texcoord && (texcoord.componentType !== 5126 || texcoord.itemSize !== 2)) {{
+        throw new Error("browser render preview currently supports FLOAT VEC2 TEXCOORD_0");
+      }}
       const indices = primitive.indices === undefined ? null : readAccessor(document, buffers, primitive.indices);
       const triangles = indices ? Math.floor(indices.count / 3) : Math.floor(position.count / 3);
       draws.push({{
         position,
         indices,
+        texcoord,
+        material: primitive.material,
+        texture: null,
         matrix: world,
         color: materialColor(document, primitive.material),
         triangles
@@ -1143,13 +1254,14 @@ function bounds(draws) {{
   return {{ min, max }};
 }}
 
-(() => {{
+(async () => {{
   try {{
     const loaded = loadAsset();
     const document = loaded.document;
     const draws = collectDraws(document, loaded.buffers);
     if (!draws.length) throw new Error("asset contains no renderable mesh primitives");
-    const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
+    const contextOptions = {{ preserveDrawingBuffer: true }};
+    const gl = canvas.getContext("webgl2", contextOptions) || canvas.getContext("webgl", contextOptions);
     if (!gl) throw new Error("WebGL context unavailable");
     if (draws.some(draw => draw.indices && draw.indices.componentType === 5125) && !gl.getExtension("OES_element_index_uint")) {{
       throw new Error("browser does not support unsigned-int index buffers");
@@ -1161,14 +1273,23 @@ function bounds(draws) {{
       (box.min[1] + box.max[1]) * 0.5,
       (box.min[2] + box.max[2]) * 0.5
     ];
-    const extent = Math.max(box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2], 1.0);
+    const extent = Math.max(box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2], 1e-6);
     const eye = [center[0] + extent * 1.3, center[1] + extent * 0.9, center[2] + extent * 1.3];
     const view = lookAt(eye, center, [0, 1, 0]);
     const projection = perspective(Math.PI / 4, canvas.width / canvas.height, extent * 0.01, extent * 10.0);
     const drawProgram = program(gl);
     const positionLocation = gl.getAttribLocation(drawProgram, "p");
+    const texcoordLocation = gl.getAttribLocation(drawProgram, "uv");
     const mvpLocation = gl.getUniformLocation(drawProgram, "mvp");
     const colorLocation = gl.getUniformLocation(drawProgram, "color");
+    const textureLocation = gl.getUniformLocation(drawProgram, "baseColorTexture");
+    const useTextureLocation = gl.getUniformLocation(drawProgram, "useTexture");
+    const textureCache = new Map();
+    let texturedPrimitives = 0;
+    for (const draw of draws) {{
+      draw.texture = draw.texcoord ? await textureForMaterial(gl, document, draw.material, textureCache) : null;
+      if (draw.texture) texturedPrimitives += 1;
+    }}
 
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.clearColor(BACKGROUND[0], BACKGROUND[1], BACKGROUND[2], BACKGROUND[3]);
@@ -1183,8 +1304,26 @@ function bounds(draws) {{
       gl.bufferData(gl.ARRAY_BUFFER, draw.position.array, gl.STATIC_DRAW);
       gl.enableVertexAttribArray(positionLocation);
       gl.vertexAttribPointer(positionLocation, 3, gl.FLOAT, false, 0, 0);
+      if (texcoordLocation >= 0) {{
+        if (draw.texcoord && draw.texture) {{
+          const texcoordBuffer = gl.createBuffer();
+          gl.bindBuffer(gl.ARRAY_BUFFER, texcoordBuffer);
+          gl.bufferData(gl.ARRAY_BUFFER, draw.texcoord.array, gl.STATIC_DRAW);
+          gl.enableVertexAttribArray(texcoordLocation);
+          gl.vertexAttribPointer(texcoordLocation, 2, gl.FLOAT, false, 0, 0);
+        }} else {{
+          gl.disableVertexAttribArray(texcoordLocation);
+          gl.vertexAttrib2f(texcoordLocation, 0.0, 0.0);
+        }}
+      }}
       gl.uniformMatrix4fv(mvpLocation, false, new Float32Array(multiply(projection, multiply(view, draw.matrix))));
       gl.uniform4fv(colorLocation, new Float32Array(draw.color));
+      gl.uniform1i(useTextureLocation, draw.texture ? 1 : 0);
+      if (draw.texture) {{
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, draw.texture);
+        gl.uniform1i(textureLocation, 0);
+      }}
       if (draw.indices) {{
         const indexBuffer = gl.createBuffer();
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
@@ -1193,12 +1332,14 @@ function bounds(draws) {{
       }} else {{
         gl.drawArrays(gl.TRIANGLES, 0, draw.position.count);
       }}
+      const drawError = gl.getError();
+      if (drawError !== gl.NO_ERROR) throw new Error("failed to draw primitive: WebGL error " + drawError);
       triangles += draw.triangles;
     }}
     gl.finish();
-    finish({{ status: "rendered", meshes: Array.isArray(document.meshes) ? document.meshes.length : 0, triangles }});
+    finish({{ status: "rendered", meshes: Array.isArray(document.meshes) ? document.meshes.length : 0, triangles, textured_primitives: texturedPrimitives, sampled_textures: textureCache.size, screenshot_data: canvas.toDataURL("image/png") }});
   }} catch (error) {{
-    finish({{ status: "failed", error: String(error), meshes: 0, triangles: 0 }});
+    finish({{ status: "failed", error: String(error), meshes: 0, triangles: 0, textured_primitives: 0, sampled_textures: 0 }});
   }}
 }})();
 </script>
