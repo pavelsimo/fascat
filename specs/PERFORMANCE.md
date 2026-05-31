@@ -18,7 +18,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 | ~~P3~~ | ~~Occlusion ray cast has no acceleration structure~~ ✅ **done** | CPU           | High     |
 | ~~P4~~ | ~~Per-element Python loops in core mesh kernels~~ ✅ **done** | CPU           | High     |
 | ~~P11~~ | ~~`Asset.copy()` duplicates every mesh array ~4–8×, ~10×/pipeline~~ ✅ **done** | Memory        | High     |
-| P15 | Exporters build one Python object/string per vertex/triangle    | CPU / I/O     | High     |
+| ~~P15~~ | ~~Exporters build one Python object/string per vertex/triangle~~ ✅ **done** | CPU / I/O     | High     |
 | ~~P18~~ | ~~`stats()` / `walk()` / draw-call recomputed many times/stage~~ ✅ **done** | System design | Medium   |
 | ~~P5~~ | ~~Edge/adjacency maps rebuilt from `.tolist()` repeatedly~~ ✅ **done** | CPU           | Medium   |
 | ~~P6~~ | ~~`merge_vertices` recomputes components + heavy diagnostics~~ ✅ **done** | CPU           | Medium   |
@@ -266,7 +266,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   occurrence-level mesh/point/triangle stats from the just-written scene, avoiding the default
   validation reread while preserving the existing fallback for zero-mesh outputs.
 
-### P15 — Exporters build one Python object/string per vertex/triangle — partial (2026-05-31)
+### P15 — Exporters build one Python object/string per vertex/triangle — ✅ done (2026-05-31)
 - **Where:** glTF strided path `fascat/io/gltf.py:514-519` (`_accessor_payload` loops every vertex
   row doing `payload[...] = row.tobytes()` whenever `byte_stride` is set, i.e. quantized export);
   OBJ `fascat/io/obj.py:39-51` (per-vertex `v`, per-normal `vn`, per-face `f` f-strings);
@@ -278,7 +278,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 - **Fix:** Vectorize: build strided buffers with a NumPy `(rows, stride)` uint8 view; format
   OBJ/STL with `np.savetxt`-style bulk formatting or a structured dtype + `tobytes()`; feed USD
   via `Vt.*Array` from NumPy buffers instead of Python comprehensions.
-- **Progress:** Binary STL export now collects triangle chunks as NumPy arrays and writes records
+- **Resolution:** Binary STL export now collects triangle chunks as NumPy arrays and writes records
   through a structured dtype (`normal`, `vertices`, attribute byte count) plus one `tobytes()`,
   eliminating per-triangle/per-vertex `struct.pack` loops for the default STL path. glTF strided
   accessor payloads now use a `(rows, byte_stride)` uint8 view instead of copying each row in
@@ -286,8 +286,9 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   consecutive material runs), and ASCII STL writes facet records through one vectorized
   `np.savetxt` pass over normals + triangle vertices. USD mesh export now authors points,
   normals, UVs, face counts, and face indices through `Vt.*Array.FromNumpy`, avoiding per-element
-  `Gf.Vec*`/Python-list construction for the hot geometry arrays. Smaller USD shader/material
-  object construction remains open.
+  `Gf.Vec*`/Python-list construction for the hot geometry arrays. USD shader/material prims are
+  still authored as normal USD objects per material, but that is outside the per-vertex/per-triangle
+  hot path tracked by this item.
 
 ## Concurrency
 
