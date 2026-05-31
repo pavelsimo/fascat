@@ -20,7 +20,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 | ~~P11~~ | ~~`Asset.copy()` duplicates every mesh array ~4–8×, ~10×/pipeline~~ ✅ **done** | Memory        | High     |
 | P15 | Exporters build one Python object/string per vertex/triangle    | CPU / I/O     | High     |
 | ~~P18~~ | ~~`stats()` / `walk()` / draw-call recomputed many times/stage~~ ✅ **done** | System design | Medium   |
-| P5  | Edge/adjacency maps rebuilt from `.tolist()` repeatedly         | CPU           | Medium   |
+| ~~P5~~ | ~~Edge/adjacency maps rebuilt from `.tolist()` repeatedly~~ ✅ **done** | CPU           | Medium   |
 | ~~P6~~ | ~~`merge_vertices` recomputes components + heavy diagnostics~~ ✅ **done** | CPU           | Medium   |
 | ~~P7~~ | ~~Staging computes O(F²) UV overlap diagnostics per part~~ ✅ **done** | CPU           | Medium   |
 | ~~P8~~ | ~~Nearest-centroid material assignment is O(target × source)~~ ✅ **done** | CPU           | Medium   |
@@ -112,16 +112,16 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   components with `np.bincount`, so the union loop only visits edges that can actually collapse.
   The remaining Python loops in subdivide and skinny-triangle cleanup are still open.
 
-### P5 — Edge / adjacency maps rebuilt from `.tolist()` repeatedly — partial (2026-05-31)
+### P5 — Edge / adjacency maps rebuilt from `.tolist()` repeatedly — ✅ done (2026-05-31)
 - **Where:** `fascat/mesh.py:1886` (`_edge_faces_map`), `:2255` (`_undirected_edges_and_counts`),
   `:923` (`orientability_metrics`), `:2172` (`_boundary_loops`); duplicate boundary-loop builder
   at `fascat/ops/actions.py:1344`.
 - **Why:** Each rebuilds Python dict/set edge structures from `self.faces.astype(int).tolist()`
   from scratch. Several are recomputed multiple times within a single `repair()` / quality pass
   and again during feature-preservation in `simplify`.
-- **Fix:** Compute the undirected-edge / edge→faces / boundary structures once per mesh state and
+- **Resolution:** Compute the undirected-edge / edge→faces / boundary structures once per mesh state and
   pass them into the metrics that need them (ties into P17).
-- **Progress:** `boundary_gap_count()` now builds undirected edge/count data once and derives both
+- `boundary_gap_count()` now builds undirected edge/count data once and derives both
   boundary vertices and connected-edge rejection from that table instead of calling
   `_undirected_edges_and_counts()` twice. `Mesh` now lazily caches undirected edge/count arrays,
   edge→face maps, boundary loops, and face unit normals behind content-digest cache keys, so repeat
