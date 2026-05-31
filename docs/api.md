@@ -352,6 +352,7 @@ asset = fc.read_step("motor.step").heal_brep(
         tolerance=0.05,
         sew_faces=True,
         fix_edges=True,
+        unify_same_domain=True,
         remove_sliver_faces=True,
         max_sliver_area=1e-4,
         unify_tolerances=True,
@@ -361,7 +362,7 @@ asset = fc.read_step("motor.step").heal_brep(
 )
 ```
 
-The operation stores per-part `brep_*` metadata and records a `heal_brep` report step. Metadata includes BREP kind, solid/shell/wire/edge/face counts, open shells, free or unstitched edges, small edges at or below the healing tolerance, and sliver-face counts. The report step also includes `tolerance_policy`, which records the effective source/local units used by the BREP backend, declared target units, meters-per-unit conversions, tolerance values in meters, sliver area in square meters, and whether sewing, edge fixing, tolerance unification, sliver removal, T-junction sewing, and non-manifold cracking are enabled, disabled, requested, or not implemented. `fc.convert(..., heal_brep=fc.BrepHealOptions())` runs healing before tessellation. Sliver-face removal is requested through the BREP backend, but the current backend reports a warning when that removal path is unavailable instead of silently claiming that the source shape changed. Remaining open shells, free edges, and small edges are also surfaced as report warnings.
+The operation stores per-part `brep_*` metadata and records a `heal_brep` report step. Metadata includes BREP kind, solid/shell/wire/edge/face counts, open shells, free or unstitched edges, small edges at or below the healing tolerance, sliver-face counts, and same-domain face/edge reductions. The report step also includes `tolerance_policy`, which records the effective source/local units used by the BREP backend, declared target units, meters-per-unit conversions, tolerance values in meters, sliver area in square meters, and whether sewing, edge fixing, same-domain cleanup, tolerance unification, sliver removal, T-junction sewing, and non-manifold cracking are enabled, disabled, requested, or not implemented. `fc.convert(..., heal_brep=fc.BrepHealOptions())` runs healing before tessellation. Same-domain cleanup uses OCCT to merge neighboring faces and edges on coincident surfaces/curves; it is useful for duplicate/split face cleanup but does not replace a full arbitrary overlap or z-fighting solver. Sliver-face removal is requested through the BREP backend, but the current backend reports a warning when that removal path is unavailable instead of silently claiming that the source shape changed. Remaining open shells, free edges, and small edges are also surfaced as report warnings.
 
 Brep healing parameters:
 
@@ -370,6 +371,7 @@ Brep healing parameters:
 | `tolerance` | Working tolerance used for sewing, edge fixes, and tolerance unification. Must be greater than zero. |
 | `sew_faces` | Attempt to sew adjacent faces into shells before tessellation. |
 | `fix_edges` | Attempt to repair bad trims and edge curves where supported by the backend. |
+| `unify_same_domain` | Merge neighboring faces/edges that lie on the same OCCT surface or curve domain. |
 | `remove_sliver_faces` | Request tiny sliver-face removal before tessellation. Current backend support is limited and reports a warning when removal is unavailable. |
 | `max_sliver_area` | Area threshold for sliver-face removal. |
 | `unify_tolerances` | Normalize shape tolerances to the requested working tolerance. |

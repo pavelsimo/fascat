@@ -835,6 +835,7 @@ class Asset:
             operations={
                 "sew_faces": "enabled" if opts.sew_faces else "disabled",
                 "fix_edges": "enabled" if opts.fix_edges else "disabled",
+                "same_domain_cleanup": "enabled" if opts.unify_same_domain else "disabled",
                 "unify_tolerances": "enabled" if opts.unify_tolerances else "disabled",
                 "sliver_face_removal": "requested" if opts.remove_sliver_faces else "disabled",
                 "t_junction_sewing": "not_implemented",

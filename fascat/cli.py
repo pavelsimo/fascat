@@ -2249,7 +2249,11 @@ def _convert_operation_diagnostics(payload: dict[str, Any]) -> list[dict[str, st
                 "BREP healing runs, but sliver-face removal is reported only because backend removal is unavailable",
             )
         else:
-            add("heal_brep", "exact", "BREP sewing, edge fixing, and tolerance unification are requested")
+            add(
+                "heal_brep",
+                "exact",
+                "BREP sewing, edge fixing, tolerance unification, and same-domain cleanup are requested",
+            )
     add("tessellate", "exact", "BREP tessellation uses the selected sag, angle, and edge cleanup settings")
     add("repair", "exact", "mesh repair applies selected cleanup operations after tessellation")
     if payload["atlas"]:

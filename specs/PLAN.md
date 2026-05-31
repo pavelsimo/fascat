@@ -45,7 +45,7 @@ writers, trimesh + numpy (mesh ops).
 | --- | --- | --- | --- |
 | **Import** | STEP hierarchy, transforms, colors, metadata, units, repeated-part instances; IGES XDE hierarchy/material import; native BREP single-shape import | — | typed PMI, multi-file/multi-root, design variants, other non-STEP formats |
 | **Tessellate** | sag / angle / min-edge / curvature-adaptive meshing, CAD UV extraction/projected fallback, tessellation-time tangents, free-edge geometry metadata | CAD UV projection fallback | intrinsic/conformal CAD UV solver, auto per-part tessellation criteria |
-| **Repair / Heal** | vertex merge, dedup, degenerate cleanup, winding fix, small-hole fill, normals; mesh T-junction sewing, boundary-gap stitching, non-manifold cracking, sliver removal, viewer/open-shell orientation; BREP fix-edge / sew | mesh-level hole removal, open-shell component orientation | BREP duplicate-face cleanup, tolerance overlap / z-fighting cleanup, non-orientable strip cracking |
+| **Repair / Heal** | vertex merge, dedup, degenerate cleanup, winding fix, small-hole fill, normals; mesh T-junction sewing, boundary-gap stitching, non-manifold cracking, sliver removal, viewer/open-shell orientation; BREP fix-edge / sew / same-domain cleanup | mesh-level hole removal, open-shell component orientation; BREP same-domain cleanup is not a full arbitrary-overlap solver | BREP tolerance overlap / z-fighting cleanup, non-orientable strip cracking |
 | **Stage / UV** | normals, tangents, xatlas unwrap + bake-domain packing/padding, AABB UV, UV copy, material PBR normalize / merge | solver policy intent | island merge / align, seam graph, backend-enforced solver controls |
 | **Materials** | per-face colors + PBR factors preserved, first-class image resources, raster material atlas baking, source image resize/dedupe/PNG-JPEG fallback processing | source texture sidecar extraction, CAD material-name PBR rule mapping, sampled AO bake | high-poly transfer, rich vendor material-library import |
 | **Optimize** | decimation, quality target-error simplification, instance reconstruction, buffer optimization | sampled occlusion | weighted decimation, retopology, GPU occlusion |
@@ -60,7 +60,7 @@ The basics are present and produce a valid RT3D asset:
 - **Import** (`io/step.py`, `io/iges.py`, `io/brep.py`, OCCT/OCP): STEP geometry, STEP/IGES assembly hierarchy where exposed, transforms, colors, metadata, units, repeated-part instances, native BREP single-shape import, source-space normalization, sidecar source texture reference extraction, and first-pass CAD material-name PBR mapping.
 - **Tessellate** (`ops/tessellate.py`, OCCT `BRepMesh`): `sag`, `angle`, `min_edge_length`, `curvature_adaptive`, `preserve_boundaries`, CAD UV extraction/projected fallback, tessellation-time tangents, and free-edge geometry metadata all change or annotate the real mesh.
 - **Repair — mesh** (`mesh.py`): vertex merge (Euclidean union-find), duplicate / degenerate face removal, T-junction sewing, boundary-gap stitching, non-manifold edge cracking, sliver-face removal, winding fix (trimesh + inward-shell flip), viewer/open-shell orientation, small-hole fill, normal generation.
-- **Heal — BREP** (`ops/heal.py`): `fix_edges`, `unify_tolerances`, `sew_faces` via OCCT `ShapeFix` / `BRepBuilderAPI_Sewing`.
+- **Heal — BREP** (`ops/heal.py`): `fix_edges`, `unify_tolerances`, `sew_faces`, and same-domain face/edge cleanup via OCCT `ShapeFix`, `BRepBuilderAPI_Sewing`, and `ShapeUpgrade_UnifySameDomain`.
 - **Stage** (`ops/stage.py`): normals, tangents, UV unwrap/repack/padding (**xatlas**), AABB/box UV projection, UV copy, material normalize-to-PBR, duplicate-material merge.
 - **Materials** (`ops/actions.py`, `ops/textures.py`, `image.py`): material bake creates first-class PNG images and raster atlas maps for base color, opacity, metallic/roughness, normal, AO, and emissive; texture processing resizes, dedupes, and applies PNG/JPEG fallback policy to first-class images; imported source textures can bind to material texture slots for glTF/USD export.
 - **Optimize** (`ops/optimize.py`, `ops/actions.py`): decimation (**meshoptimizer / fast-simplification**) including quality target-error bounds, instance reconstruction (real scene rewrite), buffer optimization.
@@ -78,7 +78,7 @@ The remaining reportable gaps are now concentrated outside the core mesh pipelin
 
 - **Import enrichment**: typed AP242 PMI, design variants, and true multi-file/multi-root import are not implemented. Source texture extraction exists for referenced sidecar image files, but not for every vendor-specific CAD material-library container.
 - **Advanced CAD attributes**: intrinsic/conformal CAD UV solving and automatic material/metadata/curvature-driven tessellation criteria are still open.
-- **BREP cleanup**: duplicate-face cleanup, tolerance overlap / z-fighting cleanup, and open-shell grouping before BREP healing are still open.
+- **BREP cleanup**: same-domain face/edge cleanup exists for neighboring coincident domains; arbitrary tolerance overlap / z-fighting cleanup and open-shell grouping before BREP healing are still open.
 - **Runtime validation**: reports include measured pipeline/write/validate timings and local memory/load/frame/FPS estimates, plus an optional headless browser/WebGL glTF load/FPS harness. Unity/Unreal measured harnesses and full renderer parity are still open.
 - **Visual validation**: deterministic before/after software preview PNGs and LOD switching contact sheets exist; full renderer screenshots and image-diff thresholds are still open.
 
@@ -114,7 +114,7 @@ This is the master TODO list. Keep items in one of three states:
 - [x] Mesh non-manifold edge cracking. Done 2026-05-31.
 - [x] Mesh sliver-face removal. Done 2026-05-31.
 - [x] Viewer-standpoint face/normal orientation and open-shell/unstitched component winding. Done 2026-05-31.
-- [ ] BREP duplicate-face cleanup and tolerance overlap / z-fighting cleanup.
+- [~] BREP duplicate-face cleanup and tolerance overlap / z-fighting cleanup: OCCT same-domain face/edge cleanup exists for neighboring coincident domains; arbitrary overlap/z-fighting cleanup remains open. Updated 2026-05-31.
 - [ ] Optional non-orientable strip cracking before face orientation.
 - [ ] Open-shell grouping before BREP healing; standalone patch-cleanup expert operations.
 

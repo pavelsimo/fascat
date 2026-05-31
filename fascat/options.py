@@ -350,6 +350,7 @@ class BrepHealOptions:
     tolerance: float = 0.05
     sew_faces: bool = True
     fix_edges: bool = True
+    unify_same_domain: bool = True
     remove_sliver_faces: bool = False
     max_sliver_area: float = 1e-4
     unify_tolerances: bool = True

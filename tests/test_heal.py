@@ -55,7 +55,10 @@ def test_heal_brep_scopes_to_selected_parts_and_records_status(monkeypatch) -> N
     assert healed.parts["selected"].metadata["brep_open_shells"] == "0"
     assert healed.parts["selected"].metadata["brep_free_edges"] == "0"
     assert healed.parts["selected"].metadata["brep_small_edges"] == "0"
-    assert healed.parts["selected"].metadata["brep_heal_operations"] == "fix_edges,unify_tolerances,sew_faces"
+    assert (
+        healed.parts["selected"].metadata["brep_heal_operations"]
+        == "fix_edges,unify_tolerances,sew_faces,unify_same_domain"
+    )
     assert healed.report.warnings == ["Selected: fixed trims"]
     assert healed.report.steps[-1].name == "heal_brep"
     assert healed.report.steps[-1].options["matched"]["parts"] == 1
@@ -93,6 +96,31 @@ def test_heal_brep_report_includes_unit_aware_tolerance_policy(monkeypatch) -> N
     assert healed.parts["selected"].metadata["brep_heal_target_units"] == "metre"
     assert healed.parts["selected"].metadata["brep_heal_heal_tolerance_meters"] == "0.002"
     assert healed.parts["selected"].metadata["brep_heal_max_sliver_area_square_meters"] == "3e-06"
+
+
+def test_heal_brep_records_same_domain_cleanup_metadata(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import fascat.ops.heal as heal
+
+    def fake_heal_shape(shape: object, _options: BrepHealOptions) -> tuple[object, BrepStatus, BrepStatus, list[str]]:
+        assert _options.unify_same_domain is True
+        return (
+            shape,
+            BrepStatus(kind="shell", shells=1, edges=12, faces=6),
+            BrepStatus(kind="shell", shells=1, edges=10, faces=5),
+            [],
+        )
+
+    monkeypatch.setattr(heal, "heal_shape", fake_heal_shape)
+
+    healed = _asset_with_brep().heal_brep(BrepHealOptions())
+    selected = healed.parts["selected"]
+    policy = healed.report.steps[-1].options["tolerance_policy"]
+
+    assert selected.metadata["brep_same_domain_faces_removed"] == "1"
+    assert selected.metadata["brep_same_domain_edges_removed"] == "2"
+    assert selected.metadata["brep_heal_same_domain_cleanup"] == "enabled"
+    assert isinstance(policy, dict)
+    assert policy["operations"]["same_domain_cleanup"] == "enabled"
 
 
 def test_brep_status_dict_includes_topology_risk_counts() -> None:

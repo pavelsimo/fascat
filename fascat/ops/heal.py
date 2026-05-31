@@ -75,6 +75,8 @@ def heal_brep_asset(
             "brep_unstitched_edges": str(after.free_edges),
             "brep_small_edges": str(after.small_edges),
             "brep_sliver_faces": str(after.sliver_faces),
+            "brep_same_domain_faces_removed": str(max(0, before.faces - after.faces)),
+            "brep_same_domain_edges_removed": str(max(0, before.edges - after.edges)),
             "brep_heal_operations": _operation_summary(options),
             "brep_before": str(before.to_dict()),
             "brep_after": str(after.to_dict()),
@@ -96,6 +98,8 @@ def heal_shape(shape: object, options: BrepHealOptions) -> tuple[object, BrepSta
             healed = _fix_shape(healed, options)
         if options.sew_faces:
             healed = _sew_shape(healed, options)
+        if options.unify_same_domain:
+            healed = _unify_same_domain_shape(healed, options)
         if options.remove_sliver_faces and before.sliver_faces:
             warnings.append("sliver face removal is not supported by the current BREP backend")
     except Exception as exc:
@@ -192,6 +196,15 @@ def _sew_shape(shape: object, options: BrepHealOptions) -> object:
     return sewing.SewedShape()
 
 
+def _unify_same_domain_shape(shape: object, options: BrepHealOptions) -> object:
+    from OCP.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
+
+    unifier = ShapeUpgrade_UnifySameDomain(shape, True, True, True)
+    unifier.SetLinearTolerance(float(options.tolerance))
+    unifier.Build()
+    return unifier.Shape()
+
+
 def _count_subshapes(shape: object, shape_type: Any, explorer_type: Any) -> int:
     count = 0
     explorer = explorer_type(shape, shape_type)
@@ -261,6 +274,8 @@ def _operation_summary(options: BrepHealOptions) -> str:
         operations.append("unify_tolerances")
     if options.sew_faces:
         operations.append("sew_faces")
+    if options.unify_same_domain:
+        operations.append("unify_same_domain")
     if options.remove_sliver_faces:
         operations.append("remove_sliver_faces")
     return ",".join(operations)
