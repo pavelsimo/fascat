@@ -991,6 +991,48 @@ def test_mesh_copy_reuses_cached_topology_without_sharing_mutable_values(
     assert copied_edge_faces[(1, 2)] == [0, 1]
 
 
+def test_equivalent_new_mesh_reuses_shared_topology_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    mesh_module._GLOBAL_MESH_CACHE.clear()
+    try:
+        mesh = Mesh(
+            points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+            faces=np.array([[0, 1, 2], [2, 1, 3]], dtype=int),
+        )
+        expected = mesh._face_unit_normals()
+        recreated = Mesh(points=mesh.points.copy(), faces=mesh.faces.copy())
+
+        def fail_cross(*_args: object, **_kwargs: object) -> np.ndarray:
+            pytest.fail("equivalent rebuilt mesh should reuse the shared topology cache")
+
+        monkeypatch.setattr(mesh_module.np, "cross", fail_cross)
+
+        reused = recreated._face_unit_normals()
+        assert np.array_equal(reused, expected)
+        reused[0, 0] = 99.0
+        third = Mesh(points=mesh.points.copy(), faces=mesh.faces.copy())
+
+        assert np.array_equal(third._face_unit_normals(), expected)
+    finally:
+        mesh_module._GLOBAL_MESH_CACHE.clear()
+
+
+def test_equivalent_new_mesh_reuses_shared_fingerprint_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    mesh_module._GLOBAL_MESH_CACHE.clear()
+    try:
+        mesh = valid_triangle()
+        expected = mesh.fingerprint()
+        recreated = Mesh(points=mesh.points.copy(), faces=mesh.faces.copy())
+
+        def fail_sha1() -> object:
+            pytest.fail("equivalent rebuilt mesh should reuse the shared fingerprint cache")
+
+        monkeypatch.setattr(mesh_module.hashlib, "sha1", fail_sha1)
+
+        assert recreated.fingerprint() == expected
+    finally:
+        mesh_module._GLOBAL_MESH_CACHE.clear()
+
+
 def test_subdivide_long_edges_enforces_limit_and_preserves_materials() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [4, 0, 0], [0, 3, 0]], dtype=float),

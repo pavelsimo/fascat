@@ -30,7 +30,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 | P13 | Export binary buffer copied several times                       | Memory        | Medium   |
 | ~~P14~~ | ~~Default `validate_output` re-reads & re-parses the output~~ ✅ **done** | I/O           | Medium   |
 | P16 | Pipeline processes independent parts serially                   | Concurrency   | Medium   |
-| P17 | No memoization of derived mesh topology across stages           | System design | Medium   |
+| ~~P17~~ | ~~No memoization of derived mesh topology across stages~~ ✅ **done** | System design | Medium   |
 | ~~P19~~ | ~~Metrics are heuristic estimates; no benchmark/profiling harness~~ ✅ **done** | Measurement   | High*    |
 
 \* High as an *enabler* — do this first so the rest is data-driven.
@@ -222,8 +222,9 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   per mesh object with content-digest invalidation for public in-place point/face mutations.
   `Mesh.copy()` now clones warm cache entries into copied meshes, so operation-created copies can
   reuse identical-geometry fingerprint/topology values while later geometry edits still miss via
-  the existing content tokens. The remaining gap is reuse across newly generated meshes whose
-  arrays are rebuilt rather than copied.
+  the existing content tokens. A bounded shared mesh cache now also reuses warmed fingerprint and
+  topology values for newly constructed meshes with identical point/face content. The remaining
+  gap is avoiding the content-token hash itself when arrays are rebuilt without lineage metadata.
 
 ### P13 — Export binary buffer is copied several times — partial (2026-05-31)
 - **Where:** `fascat/io/gltf.py:604` (`bytes(builder.data)`), `:982` (`bytearray(binary)` for
@@ -298,7 +299,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 
 ## System design
 
-### P17 — No memoization of derived mesh topology across stages — partial (2026-05-31)
+### P17 — No memoization of derived mesh topology across stages — ✅ done (2026-05-31)
 - **Where:** cross-cutting; see P5 structures plus `quality_metrics` (`fascat/mesh.py:793`),
   `_face_unit_normals` (`:1894`), `fingerprint` (`:242`).
 - **Why:** Edge maps, boundary loops, face normals, quality metrics, and fingerprints are
@@ -307,12 +308,13 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   `mesh_by_source`, `fascat/ops/tessellate.py:46`, and dedups identical parts — good prior art.)
 - **Fix:** Attach a lazily-computed topology cache to `Mesh` (undirected edges, edge→faces,
   boundary loops, face normals) invalidated on geometry mutation.
-- **Progress:** `Mesh` now has lazy caches for undirected edge/count arrays, edge→face maps,
+- **Resolution:** `Mesh` now has lazy caches for undirected edge/count arrays, edge→face maps,
   boundary loops, face unit normals, and mesh fingerprints. Cache tokens hash the relevant
   point/face array contents, so public in-place mutation of arrays invalidates cached topology. The
   cache is preserved across `Mesh.copy()` for identical geometry by cloning cache values into the
-  copied mesh; persistent reuse across newly generated meshes/stages that rebuild arrays remains
-  open.
+  copied mesh. A bounded shared mesh cache reuses those topology/fingerprint values across newly
+  constructed meshes with identical point/face content while cloning mutable cached values before
+  handing them to each mesh.
 
 ### P18 — `stats()` / `walk()` / draw-call breakdown recomputed many times per stage — ✅ done (2026-05-31)
 - **Where:** `fascat/asset.py:76-80` (`Node.walk`), `:243-257` (`stats`), `:181-221`
