@@ -9,6 +9,7 @@ from typing import Any, NamedTuple
 
 import numpy as np
 import pytest
+from PIL import Image
 from typer.testing import CliRunner
 
 from fascat import __version__
@@ -18,6 +19,7 @@ from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.report import Report
 from fascat.runtime import RuntimeBrowserReport, RuntimeEngineReport
+from fascat.visual import write_output_preview
 
 runner = CliRunner()
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -1569,6 +1571,84 @@ def test_validate_can_write_visual_preview_artifacts(tmp_path: Path) -> None:
     assert (lod_dir / "lod0.png").exists()
     assert (lod_dir / "lod1.png").exists()
     assert (lod_dir / "lod-switching.png").exists()
+
+
+def test_validate_can_compare_visual_preview_against_baseline(tmp_path: Path) -> None:
+    output_file = tmp_path / "visual.glb"
+    preview_file = tmp_path / "preview.png"
+    baseline_file = tmp_path / "baseline.png"
+    mesh = Mesh(
+        points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.asarray([[0, 1, 2]], dtype=int),
+    )
+    Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Triangle", part_id="part")]),
+        parts={"part": Part(id="part", name="Triangle", mesh=mesh)},
+        up_axis="Y",
+    ).write_gltf(output_file)
+    write_output_preview(output_file, baseline_file)
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "validate",
+            str(output_file),
+            "--visual-preview",
+            str(preview_file),
+            "--visual-baseline",
+            str(baseline_file),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["visual_diff"]["passed"] is True
+    assert payload["visual_diff"]["changed_pixels"] == 0
+
+
+def test_validate_fails_when_visual_diff_exceeds_threshold(tmp_path: Path) -> None:
+    output_file = tmp_path / "visual.glb"
+    preview_file = tmp_path / "preview.png"
+    baseline_file = tmp_path / "baseline.png"
+    mesh = Mesh(
+        points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.asarray([[0, 1, 2]], dtype=int),
+    )
+    Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Triangle", part_id="part")]),
+        parts={"part": Part(id="part", name="Triangle", mesh=mesh)},
+        up_axis="Y",
+    ).write_gltf(output_file)
+    Image.new("RGBA", (512, 512), (0, 0, 0, 255)).save(baseline_file)
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "validate",
+            str(output_file),
+            "--visual-preview",
+            str(preview_file),
+            "--visual-baseline",
+            str(baseline_file),
+        ],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["visual_diff"]["passed"] is False
+    assert payload["visual_diff"]["changed_pixels"] > 0
+
+
+def test_validate_rejects_visual_baseline_without_preview(tmp_path: Path) -> None:
+    output_file = tmp_path / "visual.glb"
+    baseline_file = tmp_path / "baseline.png"
+
+    result = runner.invoke(app, ["validate", str(output_file), "--visual-baseline", str(baseline_file)])
+
+    assert result.exit_code == 2
+    assert "--visual-baseline requires --visual-preview" in result.output
 
 
 def test_validate_missing_usd_backend_exits_nonzero(

@@ -65,7 +65,7 @@ from fascat.profiles import by_name
 from fascat.profiles import from_file as profile_from_file
 from fascat.report import Report
 from fascat.runtime import RuntimeBrowserOptions, RuntimeEngineOptions, measure_browser_runtime, measure_engine_runtime
-from fascat.visual import write_output_lod_switch_previews, write_output_preview
+from fascat.visual import VisualDiffOptions, compare_images, write_output_lod_switch_previews, write_output_preview
 
 DOCS_URL = "https://pavelsimo.github.io/fascat"
 ISSUES_URL = "https://github.com/pavelsimo/fascat/issues"
@@ -2107,6 +2107,25 @@ def cmd_validate(
         Path | None,
         typer.Option("--visual-preview", help="Write a deterministic software preview PNG during validation."),
     ] = None,
+    visual_baseline: Annotated[
+        Path | None,
+        typer.Option("--visual-baseline", help="Compare --visual-preview against this baseline PNG."),
+    ] = None,
+    visual_diff_pixel_tolerance: Annotated[
+        int,
+        typer.Option("--visual-diff-pixel-tolerance", help="Per-channel byte tolerance for visual baseline diff."),
+    ] = 0,
+    visual_diff_mean_threshold: Annotated[
+        float,
+        typer.Option("--visual-diff-mean-threshold", help="Maximum allowed visual diff mean absolute error."),
+    ] = 0.0,
+    visual_diff_changed_pixel_ratio: Annotated[
+        float,
+        typer.Option(
+            "--visual-diff-changed-pixel-ratio",
+            help="Maximum allowed ratio of pixels that exceed the visual diff tolerance.",
+        ),
+    ] = 0.0,
     lod_preview_dir: Annotated[
         Path | None,
         typer.Option("--lod-preview-dir", help="Write LOD switching preview PNGs and a contact sheet."),
@@ -2151,6 +2170,10 @@ def cmd_validate(
         "runtime_engine_project": str(runtime_engine_project) if runtime_engine_project else None,
         "runtime_engine_timeout": runtime_engine_timeout,
         "visual_preview": str(visual_preview) if visual_preview else None,
+        "visual_baseline": str(visual_baseline) if visual_baseline else None,
+        "visual_diff_pixel_tolerance": visual_diff_pixel_tolerance,
+        "visual_diff_mean_threshold": visual_diff_mean_threshold,
+        "visual_diff_changed_pixel_ratio": visual_diff_changed_pixel_ratio,
         "lod_preview_dir": str(lod_preview_dir) if lod_preview_dir else None,
         "analysis_options": analyze_options.to_dict() if should_analyze else None,
         "filters": filters or [],
@@ -2167,6 +2190,14 @@ def cmd_validate(
         _fail(ctx, payload, "--runtime-timeout must be greater than 0.", code=2)
     if runtime_engine_timeout <= 0.0:
         _fail(ctx, payload, "--runtime-engine-timeout must be greater than 0.", code=2)
+    if visual_diff_pixel_tolerance < 0 or visual_diff_pixel_tolerance > 255:
+        _fail(ctx, payload, "--visual-diff-pixel-tolerance must be between 0 and 255.", code=2)
+    if visual_diff_mean_threshold < 0.0 or visual_diff_mean_threshold > 255.0:
+        _fail(ctx, payload, "--visual-diff-mean-threshold must be between 0 and 255.", code=2)
+    if visual_diff_changed_pixel_ratio < 0.0 or visual_diff_changed_pixel_ratio > 1.0:
+        _fail(ctx, payload, "--visual-diff-changed-pixel-ratio must be between 0 and 1.", code=2)
+    if visual_baseline is not None and visual_preview is None:
+        _fail(ctx, payload, "--visual-baseline requires --visual-preview.", code=2)
     if _is_stdio(output_path) and (visual_preview is not None or lod_preview_dir is not None):
         _fail(ctx, payload, "Visual preview validation requires a file path, not stdin.", code=2)
     if state.dry_run:
@@ -2208,6 +2239,19 @@ def cmd_validate(
         visual_preview_report = (
             write_output_preview(output_path, visual_preview) if visual_preview is not None else None
         )
+        visual_diff_report = (
+            compare_images(
+                visual_baseline,
+                visual_preview,
+                VisualDiffOptions(
+                    pixel_tolerance=visual_diff_pixel_tolerance,
+                    max_mean_absolute_error=visual_diff_mean_threshold,
+                    max_changed_pixel_ratio=visual_diff_changed_pixel_ratio,
+                ),
+            )
+            if visual_baseline is not None and visual_preview is not None
+            else None
+        )
         lod_preview_report = (
             write_output_lod_switch_previews(output_path, lod_preview_dir) if lod_preview_dir is not None else None
         )
@@ -2225,6 +2269,8 @@ def cmd_validate(
         json_payload["runtime_engine"] = runtime_engine_report.to_dict()
     if visual_preview_report is not None:
         json_payload["visual_preview"] = visual_preview_report.to_dict()
+    if visual_diff_report is not None:
+        json_payload["visual_diff"] = visual_diff_report.to_dict()
     if lod_preview_report is not None:
         json_payload["lod_preview"] = lod_preview_report.to_dict()
     message = f"{output_path}: valid {_export_label(output_path)}, {_format_stats(stats)}."
@@ -2232,6 +2278,8 @@ def cmd_validate(
         message = f"{message} Wrote report {report}."
     if visual_preview_report is not None:
         message = f"{message} Wrote preview {visual_preview_report.path}."
+    if visual_diff_report is not None:
+        message = f"{message} Visual diff passed." if visual_diff_report.passed else f"{message} Visual diff failed."
     if lod_preview_report is not None:
         message = f"{message} Wrote LOD previews {lod_preview_report.directory}."
     if analysis is not None and "selection" in analysis.summary:
@@ -2242,6 +2290,9 @@ def cmd_validate(
             message = f"{message} Browser runtime measured {runtime_report.measured_fps:.1f} FPS."
         else:
             message = f"{message} Browser runtime {runtime_report.status}: {runtime_report.error}."
+    if visual_diff_report is not None and not visual_diff_report.passed:
+        _emit(ctx, json_payload, message)
+        raise typer.Exit(1)
     _emit(
         ctx,
         json_payload,

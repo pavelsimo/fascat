@@ -88,6 +88,60 @@ class VisualComparisonReport:
 
 
 @dataclass(frozen=True)
+class VisualDiffOptions:
+    pixel_tolerance: int = 0
+    max_mean_absolute_error: float = 0.0
+    max_changed_pixel_ratio: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.pixel_tolerance < 0 or self.pixel_tolerance > 255:
+            raise ValueError("visual diff pixel_tolerance must be between 0 and 255")
+        if self.max_mean_absolute_error < 0.0 or self.max_mean_absolute_error > 255.0:
+            raise ValueError("visual diff max_mean_absolute_error must be between 0 and 255")
+        if self.max_changed_pixel_ratio < 0.0 or self.max_changed_pixel_ratio > 1.0:
+            raise ValueError("visual diff max_changed_pixel_ratio must be between 0 and 1")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class VisualDiffReport:
+    baseline_path: str
+    candidate_path: str
+    passed: bool
+    baseline_width: int
+    baseline_height: int
+    candidate_width: int
+    candidate_height: int
+    total_pixels: int
+    changed_pixels: int
+    changed_pixel_ratio: float
+    mean_absolute_error: float
+    max_absolute_error: int
+    options: VisualDiffOptions
+    warnings: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "baseline_path": self.baseline_path,
+            "candidate_path": self.candidate_path,
+            "passed": self.passed,
+            "baseline_width": self.baseline_width,
+            "baseline_height": self.baseline_height,
+            "candidate_width": self.candidate_width,
+            "candidate_height": self.candidate_height,
+            "total_pixels": self.total_pixels,
+            "changed_pixels": self.changed_pixels,
+            "changed_pixel_ratio": self.changed_pixel_ratio,
+            "mean_absolute_error": self.mean_absolute_error,
+            "max_absolute_error": self.max_absolute_error,
+            "options": self.options.to_dict(),
+            "warnings": list(self.warnings),
+        }
+
+
+@dataclass(frozen=True)
 class LodSwitchPreviewReport:
     directory: str
     contact_sheet: str
@@ -215,6 +269,69 @@ def write_before_after_previews(
         before=before_report,
         after=after_report,
         contact_sheet=str(contact_sheet),
+    )
+
+
+def compare_images(
+    baseline_path: str | Path,
+    candidate_path: str | Path,
+    options: VisualDiffOptions | None = None,
+) -> VisualDiffReport:
+    opts = options or VisualDiffOptions()
+    baseline = Path(baseline_path)
+    candidate = Path(candidate_path)
+    with Image.open(baseline) as baseline_image:
+        baseline_rgba = baseline_image.convert("RGBA")
+        baseline_values = np.asarray(baseline_rgba, dtype=np.int16)
+        baseline_width, baseline_height = baseline_rgba.size
+    with Image.open(candidate) as candidate_image:
+        candidate_rgba = candidate_image.convert("RGBA")
+        candidate_values = np.asarray(candidate_rgba, dtype=np.int16)
+        candidate_width, candidate_height = candidate_rgba.size
+
+    warnings: list[str] = []
+    if baseline_values.shape != candidate_values.shape:
+        warnings.append("visual diff images have different dimensions")
+        return VisualDiffReport(
+            baseline_path=str(baseline),
+            candidate_path=str(candidate),
+            passed=False,
+            baseline_width=baseline_width,
+            baseline_height=baseline_height,
+            candidate_width=candidate_width,
+            candidate_height=candidate_height,
+            total_pixels=0,
+            changed_pixels=0,
+            changed_pixel_ratio=1.0,
+            mean_absolute_error=255.0,
+            max_absolute_error=255,
+            options=opts,
+            warnings=tuple(warnings),
+        )
+
+    diff = np.abs(baseline_values - candidate_values)
+    changed = np.any(diff > opts.pixel_tolerance, axis=2)
+    total_pixels = int(changed.size)
+    changed_pixels = int(np.count_nonzero(changed))
+    mean_absolute_error = float(np.mean(diff)) if diff.size else 0.0
+    max_absolute_error = int(np.max(diff)) if diff.size else 0
+    changed_pixel_ratio = changed_pixels / total_pixels if total_pixels else 0.0
+    passed = mean_absolute_error <= opts.max_mean_absolute_error and changed_pixel_ratio <= opts.max_changed_pixel_ratio
+    return VisualDiffReport(
+        baseline_path=str(baseline),
+        candidate_path=str(candidate),
+        passed=passed,
+        baseline_width=baseline_width,
+        baseline_height=baseline_height,
+        candidate_width=candidate_width,
+        candidate_height=candidate_height,
+        total_pixels=total_pixels,
+        changed_pixels=changed_pixels,
+        changed_pixel_ratio=changed_pixel_ratio,
+        mean_absolute_error=mean_absolute_error,
+        max_absolute_error=max_absolute_error,
+        options=opts,
+        warnings=tuple(warnings),
     )
 
 

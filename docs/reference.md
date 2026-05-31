@@ -434,6 +434,10 @@ fallbacks.
 | `--draw-call-estimate` | `false` | Report material count, draw-call estimate, mesh/submesh slots, instances, and merged batch counts |
 | `--visual-risk` | `false` | Report before/after visual risk warnings |
 | `--visual-preview` | unset | Write a deterministic software-rendered PNG preview of the validated output mesh |
+| `--visual-baseline` | unset | Compare `--visual-preview` against a baseline PNG and fail validation when thresholds are exceeded |
+| `--visual-diff-pixel-tolerance` | `0` | Per-channel byte tolerance ignored when counting changed visual diff pixels |
+| `--visual-diff-mean-threshold` | `0.0` | Maximum allowed mean absolute error for the visual baseline diff |
+| `--visual-diff-changed-pixel-ratio` | `0.0` | Maximum allowed ratio of changed visual diff pixels |
 | `--lod-preview-dir` | unset | Write LOD switching preview PNGs and `lod-switching.png` into a directory |
 | `--runtime-browser` | `false` | For glTF/GLB, run optional headless browser/WebGL load and FPS measurement |
 | `--runtime-browser-command` | unset | Browser executable for `--runtime-browser`; otherwise `FASCAT_BROWSER` or common Chromium/Chrome names are used |
@@ -461,6 +465,7 @@ fascat validate motor.glb \
   --draw-call-estimate \
   --visual-risk \
   --visual-preview preview.png \
+  --visual-baseline baseline.png \
   --lod-preview-dir preview-lods/ \
   --runtime-browser \
   --report report.json

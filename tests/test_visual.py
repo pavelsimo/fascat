@@ -11,7 +11,9 @@ from fascat.asset import Asset, Node, Part
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.visual import (
+    VisualDiffOptions,
     VisualPreviewOptions,
+    compare_images,
     write_before_after_previews,
     write_lod_switch_previews,
     write_output_lod_switch_previews,
@@ -49,6 +51,39 @@ def test_write_before_after_previews_creates_contact_sheet(tmp_path: Path) -> No
     assert Path(report.after.path).exists()
     with Image.open(report.contact_sheet) as sheet:
         assert sheet.size == (192, 124)
+
+
+def test_compare_images_reports_threshold_pass_and_failure(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline.png"
+    candidate = tmp_path / "candidate.png"
+    Image.new("RGBA", (4, 4), (10, 20, 30, 255)).save(baseline)
+    Image.new("RGBA", (4, 4), (12, 20, 30, 255)).save(candidate)
+
+    failing = compare_images(baseline, candidate, VisualDiffOptions(pixel_tolerance=0))
+    passing = compare_images(
+        baseline,
+        candidate,
+        VisualDiffOptions(pixel_tolerance=2, max_mean_absolute_error=1.0, max_changed_pixel_ratio=0.0),
+    )
+
+    assert failing.passed is False
+    assert failing.changed_pixels == 16
+    assert failing.max_absolute_error == 2
+    assert passing.passed is True
+    assert passing.changed_pixels == 0
+
+
+def test_compare_images_fails_on_dimension_mismatch(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline.png"
+    candidate = tmp_path / "candidate.png"
+    Image.new("RGBA", (4, 4), (10, 20, 30, 255)).save(baseline)
+    Image.new("RGBA", (8, 4), (10, 20, 30, 255)).save(candidate)
+
+    report = compare_images(baseline, candidate)
+
+    assert report.passed is False
+    assert report.changed_pixel_ratio == 1.0
+    assert "different dimensions" in report.warnings[0]
 
 
 def test_write_lod_switch_previews_reports_monotonic_triangle_counts(tmp_path: Path) -> None:

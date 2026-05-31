@@ -80,7 +80,7 @@ The remaining reportable gaps are now concentrated outside the core mesh pipelin
 - **Advanced CAD attributes**: intrinsic/conformal CAD UV solving and automatic material/metadata/curvature-driven tessellation criteria are still open.
 - **BREP cleanup**: same-domain face/edge cleanup and conservative coplanar overlap / z-fighting face cleanup exist; open-shell grouping before BREP healing is still open.
 - **Runtime validation**: reports include measured pipeline/write/validate timings and local memory/load/frame/FPS estimates, plus optional headless browser/WebGL and Unity/Unreal project-backed glTF load/FPS harness drivers. Packaged engine projects and full renderer parity are still open.
-- **Visual validation**: deterministic before/after software preview PNGs and LOD switching contact sheets exist; full renderer screenshots and image-diff thresholds are still open.
+- **Visual validation**: deterministic before/after software preview PNGs, LOD switching contact sheets, and baseline image-diff thresholds exist; full renderer screenshots are still open.
 
 ### D. Intentional deferrals — see [Deferrals](#deferrals).
 
@@ -159,7 +159,7 @@ This is the master TODO list. Keep items in one of three states:
 - [x] Measured pipeline/write/validate timings in profile budget reports. Done 2026-05-31.
 - [x] Runtime memory/load/frame/FPS budget reporting with local estimates. Done 2026-05-31.
 - [~] Runtime profiling: local measured timings, optional headless browser/WebGL glTF load/FPS measurements, and optional Unity/Unreal project-backed harness drivers exist; packaged engine projects and full-scene material/lighting render measurements are still open. Updated 2026-05-31.
-- [~] Visual before/after preview renders and LOD switching checks: deterministic software preview PNGs, output validation previews, and LOD contact sheets exist; full renderer screenshots and image-diff thresholds remain open. Updated 2026-05-31.
+- [~] Visual before/after preview renders and LOD switching checks: deterministic software preview PNGs, output validation previews, LOD contact sheets, and baseline image-diff thresholds exist; full renderer screenshots remain open. Updated 2026-05-31.
 - [~] Real Unity/Unreal/browser runtime load-time, memory, and FPS harness: browser/WebGL glTF harness exists with bounded triangle proxy workload; Unity/Unreal command drivers exist for configured Fascat runtime harness projects, but packaged engine projects remain open. Updated 2026-05-31.
 
 ## Principles

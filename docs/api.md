@@ -1135,13 +1135,17 @@ or before handing an asset to a runtime viewer:
 preview = fc.write_preview(asset, "preview.png")
 comparison = fc.write_before_after_previews(before_asset, after_asset, "visual-review/")
 lod_contact_sheet = fc.write_lod_switch_previews(asset_with_lods, "lod-previews/")
+diff = fc.compare_images("baseline.png", "preview.png", fc.VisualDiffOptions(pixel_tolerance=2))
 ```
 
 The preview renderer is a local orthographic software renderer. It writes PNGs,
 uses material base colors when available, respects node transforms, and can
-substitute each part's LOD mesh to build an LOD switching contact sheet. It is
-intended for quick before/after and LOD review artifacts, not for full
-material/lighting parity with Unity, Unreal, or a browser renderer.
+substitute each part's LOD mesh to build an LOD switching contact sheet.
+`compare_images()` reports mean absolute error, max channel error, changed pixel
+counts, changed pixel ratio, and whether configured thresholds passed. These
+helpers are intended for quick before/after, LOD, and baseline-diff review
+artifacts, not for full material/lighting parity with Unity, Unreal, or a
+browser renderer.
 
 ## Validation
 
@@ -1196,6 +1200,8 @@ Validation-time geometry reports use the same filter selectors as conversion
 when an exported format can be reconstructed for analysis.
 
 `--visual-preview` writes a deterministic PNG from the validated output mesh.
+`--visual-baseline` compares that PNG against a baseline image and exits non-zero
+when the configured diff thresholds fail.
 `--lod-preview-dir` writes `lod0.png`, each available LOD level, and a
 `lod-switching.png` contact sheet. Fascat GLB exports preserve enough LOD
 metadata for this validation path to reconstruct LOD previews.

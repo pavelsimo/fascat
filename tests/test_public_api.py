@@ -63,9 +63,12 @@ def test_public_api_exposes_visual_previews(tmp_path: Path) -> None:
     )
 
     report = fc.write_preview(asset, tmp_path / "preview.png", fc.VisualPreviewOptions(width=64, height=64, padding=12))
+    diff = fc.compare_images(tmp_path / "preview.png", tmp_path / "preview.png", fc.VisualDiffOptions())
 
     assert isinstance(report, fc.VisualPreviewReport)
     assert report.triangles == 1
+    assert isinstance(diff, fc.VisualDiffReport)
+    assert diff.passed is True
 
 
 def test_public_api_exposes_pipeline_spec(tmp_path: Path) -> None:
