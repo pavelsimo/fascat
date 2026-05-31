@@ -663,10 +663,102 @@ def test_repair_records_viewer_standpoint_orientation_intent() -> None:
         )
     )
 
-    assert repaired.metadata["repair_flipped_components_after_orientation"] == "1"
-    assert repaired.metadata["repair_face_orientation_status"] == "intent_not_implemented"
-    assert repaired.metadata["repair_normal_orientation_status"] == "intent_not_implemented"
+    assert repaired.metadata["repair_flipped_components_after_orientation"] == "0"
+    assert repaired.metadata["repair_face_orientation_status"] == "viewer_oriented"
+    assert repaired.metadata["repair_normal_orientation_status"] == "oriented_to_viewer"
     assert repaired.metadata["repair_orientation_viewer_position"] == "0,0,10"
+
+
+def test_repair_can_sew_t_junctions() -> None:
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [2, 0, 0],
+                [0, 1, 0],
+                [1, 0, 0],
+                [1, -1, 0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [0, 3, 4]], dtype=int),
+    )
+
+    repaired = mesh.repair(RepairOptions(fix_t_junctions=True, quality_report=True))
+
+    assert repaired.metadata["repair_t_junctions_before"] == "1"
+    assert repaired.metadata["repair_t_junctions_after"] == "0"
+    assert repaired.metadata["repair_t_junction_sewing"] == "sewn"
+    assert repaired.triangle_count > mesh.triangle_count
+
+
+def test_repair_can_stitch_boundary_gaps() -> None:
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [1.005, 0, 0],
+                [2, 0, 0],
+                [1.005, 1, 0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=int),
+    )
+
+    repaired = mesh.repair(
+        RepairOptions(tolerance=0.01, merge_vertices=False, stitch_boundary_gaps=True, quality_report=True)
+    )
+
+    assert repaired.metadata["repair_boundary_gaps_before"] == "1"
+    assert repaired.metadata["repair_boundary_gaps_after"] == "0"
+    assert repaired.metadata["repair_boundary_gap_stitching"] == "stitched"
+
+
+def test_repair_can_crack_non_manifold_edges() -> None:
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [0, -1, 0],
+                [0, 0, 1],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [1, 0, 3], [0, 1, 4]], dtype=int),
+    )
+
+    repaired = mesh.repair(RepairOptions(crack_non_manifold_edges=True, quality_report=True))
+
+    assert repaired.metadata["repair_non_manifold_edges_before_cracking"] == "1"
+    assert repaired.metadata["repair_non_manifold_edges_after_cracking"] == "0"
+    assert repaired.metadata["repair_non_manifold_edge_cracking"] == "cracked"
+    assert repaired.vertex_count > mesh.vertex_count
+
+
+def test_repair_can_remove_sliver_faces() -> None:
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [10, 0, 0],
+                [0, 0.01, 0],
+                [0, 1, 0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [0, 1, 3]], dtype=int),
+    )
+
+    repaired = mesh.repair(RepairOptions(remove_sliver_faces=True, sliver_aspect_ratio=100.0, quality_report=True))
+
+    assert repaired.triangle_count == 1
+    assert repaired.metadata["repair_sliver_face_removal"] == "removed"
+    assert repaired.metadata["repair_sliver_faces_removed"] == "1"
 
 
 def test_mesh_merges_close_vertices_with_tolerance() -> None:

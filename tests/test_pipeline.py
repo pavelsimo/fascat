@@ -255,15 +255,16 @@ def test_repair_report_includes_unit_aware_tolerance_policy() -> None:
         "face_orientation": "closed_exterior",
         "normal_orientation": "from_faces",
         "quality_diagnostics": "disabled",
-        "t_junction_sewing": "not_implemented",
-        "boundary_gap_stitching": "not_implemented",
-        "non_manifold_edge_cracking": "not_implemented",
+        "t_junction_sewing": "disabled",
+        "boundary_gap_stitching": "disabled",
+        "non_manifold_edge_cracking": "disabled",
+        "sliver_face_removal": "disabled",
     }
     assert mesh.metadata["repair_effective_units"] == "millimetre"
     assert mesh.metadata["repair_target_units"] == "metre"
     assert mesh.metadata["repair_vertex_merge_tolerance_meters"] == "0.002"
     assert mesh.metadata["repair_degenerate_area_epsilon_square_meters"] == "3e-06"
-    assert mesh.metadata["repair_t_junction_sewing"] == "not_implemented"
+    assert mesh.metadata["repair_t_junction_sewing"] == "disabled"
 
 
 def test_repair_reports_non_orientable_topology_before_winding_fix() -> None:
@@ -297,7 +298,7 @@ def test_repair_report_includes_t_junction_metrics() -> None:
     assert mesh.metadata["repair_t_junctions_after"] == "1"
     assert step.after["repair_t_junctions_before"] == 1
     assert step.after["repair_t_junctions_after"] == 1
-    assert any("T-junction sewing is not implemented" in warning for warning in step.warnings)
+    assert any("because T-junction sewing was not requested" in warning for warning in step.warnings)
 
 
 def test_repair_report_includes_boundary_gap_metrics() -> None:
@@ -313,10 +314,10 @@ def test_repair_report_includes_boundary_gap_metrics() -> None:
     assert mesh is not None
     assert mesh.metadata["repair_boundary_gaps_before"] == "1"
     assert mesh.metadata["repair_boundary_gaps_after"] == "1"
-    assert mesh.metadata["repair_boundary_gap_stitching"] == "not_implemented"
+    assert mesh.metadata["repair_boundary_gap_stitching"] == "disabled"
     assert step.after["repair_boundary_gaps_before"] == 1
     assert step.after["repair_boundary_gaps_after"] == 1
-    assert any("boundary gap stitching is not implemented" in warning for warning in step.warnings)
+    assert any("because boundary gap stitching was not requested" in warning for warning in step.warnings)
 
 
 def test_repair_report_includes_flipped_component_metrics() -> None:
@@ -354,15 +355,15 @@ def test_repair_reports_orientation_policy_intent() -> None:
     mesh = repaired.parts["solid"].mesh
     step = repaired.report.steps[-1]
     assert mesh is not None
-    assert mesh.metadata["repair_face_orientation_status"] == "intent_not_implemented"
-    assert mesh.metadata["repair_normal_orientation_status"] == "intent_not_implemented"
+    assert mesh.metadata["repair_face_orientation_status"] == "viewer_oriented"
+    assert mesh.metadata["repair_normal_orientation_status"] == "oriented_to_viewer"
     assert step.options["face_orientation"] == "viewer_standpoint"
     assert step.options["normal_orientation"] == "viewer_standpoint"
     assert step.options["viewer_position"] == [0.0, 0.0, 10.0]
-    assert step.options["tolerance_policy"]["operations"]["face_orientation"] == "intent_not_implemented"
-    assert step.options["tolerance_policy"]["operations"]["normal_orientation"] == "intent_not_implemented"
-    assert any("viewer_standpoint face orientation" in warning for warning in step.warnings)
-    assert any("viewer_standpoint normal orientation" in warning for warning in step.warnings)
+    assert step.options["tolerance_policy"]["operations"]["face_orientation"] == "viewer_oriented"
+    assert step.options["tolerance_policy"]["operations"]["normal_orientation"] == "viewer_oriented"
+    assert not any("viewer_standpoint face orientation" in warning for warning in step.warnings)
+    assert not any("viewer_standpoint normal orientation" in warning for warning in step.warnings)
 
 
 def test_pipeline_repair_orientation_policy_is_parsed() -> None:
@@ -1109,12 +1110,13 @@ def test_convert_report_includes_workflow_summary(monkeypatch, tmp_path: Path) -
     assert manifest_step.after["conversion_manifest_direct_steps"] == 4
     assert summary_step.name == "workflow_summary"
     assert summary_step.options["style"] == "unity_asset_transformer"
-    assert summary_step.after["workflow_stages_total"] == 10
+    assert summary_step.after["workflow_stages_total"] == 11
     assert summary_step.after["workflow_stages_run"] == 7
-    assert summary_step.after["workflow_stages_skipped"] == 3
+    assert summary_step.after["workflow_stages_skipped"] == 4
     assert summary_step.after["workflow_stages_approximate"] == 0
     assert stages["uv_preparation"]["status"] == "run"
     assert stages["material_baking"]["level"] == "exact"
+    assert stages["texture_processing"]["status"] == "skipped"
     assert stages["lod_generation"]["status"] == "run"
     assert stages["export_compression"]["status"] == "skipped"
 
@@ -1485,6 +1487,13 @@ def test_convert_report_checks_profile_budget(monkeypatch, tmp_path: Path) -> No
     assert budget_step.before["draw_call_mesh_instances"] == 1
     assert budget_step.before["draw_call_merged_batches"] == 0
     assert budget_step.after["profile_target_fps"] == 60
+    assert budget_step.after["profile_target_frame_budget_ms"] == 17
+    assert budget_step.after["profile_runtime_frame_estimated_ms"] == 1
+    assert budget_step.after["profile_runtime_estimated_fps"] == 1000
+    assert budget_step.after["profile_runtime_fps_under_target"] == 0
+    assert "profile_measured_pipeline_ms" in budget_step.after
+    assert "profile_measured_write_ms" in budget_step.after
+    assert "profile_measured_validate_ms" in budget_step.after
     assert budget_step.after["profile_triangles_over_budget"] == 0
     assert budget_step.after["profile_unity_reference_triangle_min"] == 100
     assert budget_step.after["profile_unity_reference_triangle_max"] == 200

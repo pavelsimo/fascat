@@ -36,6 +36,7 @@ from fascat.options import (
     StageOptions,
     StlExportOptions,
     TessellationOptions,
+    TextureProcessOptions,
     UsdExportOptions,
 )
 from fascat.report import Report, timed_step
@@ -404,9 +405,10 @@ class Asset:
                 "face_orientation": _repair_face_orientation_operation(opts),
                 "normal_orientation": _repair_normal_orientation_operation(opts),
                 "quality_diagnostics": "enabled" if opts.quality_report else "disabled",
-                "t_junction_sewing": "not_implemented",
-                "boundary_gap_stitching": "not_implemented",
-                "non_manifold_edge_cracking": "not_implemented",
+                "t_junction_sewing": "enabled" if opts.fix_t_junctions else "disabled",
+                "boundary_gap_stitching": "enabled" if opts.stitch_boundary_gaps else "disabled",
+                "non_manifold_edge_cracking": "enabled" if opts.crack_non_manifold_edges else "disabled",
+                "sliver_face_removal": "enabled" if opts.remove_sliver_faces else "disabled",
             },
         )
         repair_unit_metadata = _tolerance_policy_metadata("repair", tolerance_policy)
@@ -419,7 +421,7 @@ class Asset:
                 if part.mesh is None:
                     raise AssertionError("selected repair part must have a mesh")
                 mesh = part.mesh.repair(opts)
-                mesh.metadata = {**mesh.metadata, **repair_unit_metadata}
+                mesh.metadata = {**repair_unit_metadata, **mesh.metadata}
                 return _MeshPartResult(part_id=part.id, mesh=mesh, fingerprint=mesh.fingerprint())
 
             for repaired in parallel_map(part_ids, repair_part, jobs=opts.jobs):
@@ -707,6 +709,25 @@ class Asset:
             options=_options_with_scope(opts.to_dict(), scope),
             before=before,
             after=_hierarchy_report_stats(asset),
+            duration=timer.duration,
+            warnings=step_warnings,
+        )
+        return asset
+
+    def process_textures(self, options: TextureProcessOptions | None = None) -> Asset:
+        from fascat.ops.textures import process_textures_asset
+
+        opts = options or TextureProcessOptions()
+        before = self.stats(include_lods=True)
+        warning_count = len(self.report.warnings)
+        with timed_step() as timer:
+            asset = process_textures_asset(self, opts)
+        step_warnings = asset.report.warnings[warning_count:]
+        asset.report.add_step(
+            "process_textures",
+            options=opts.to_dict(),
+            before=before,
+            after=asset.stats(include_lods=True),
             duration=timer.duration,
             warnings=step_warnings,
         )
@@ -1201,16 +1222,16 @@ def _repair_warnings(part: Part, options: RepairOptions) -> list[str]:
         )
     remaining_t_junctions = _metadata_int(part.mesh.metadata.get("repair_t_junctions_after"), 0)
     if remaining_t_junctions:
-        warnings.append(
-            f"part {part.id} has {remaining_t_junctions} T-junction(s) after mesh repair; "
-            "T-junction sewing is not implemented"
-        )
+        suffix = "after T-junction sewing" if options.fix_t_junctions else "because T-junction sewing was not requested"
+        warnings.append(f"part {part.id} has {remaining_t_junctions} T-junction(s) after mesh repair; {suffix}")
     remaining_boundary_gaps = _metadata_int(part.mesh.metadata.get("repair_boundary_gaps_after"), 0)
     if remaining_boundary_gaps:
-        warnings.append(
-            f"part {part.id} has {remaining_boundary_gaps} boundary gap(s) after mesh repair; "
-            "boundary gap stitching is not implemented"
+        suffix = (
+            "after boundary gap stitching"
+            if options.stitch_boundary_gaps
+            else "because boundary gap stitching was not requested"
         )
+        warnings.append(f"part {part.id} has {remaining_boundary_gaps} boundary gap(s) after mesh repair; {suffix}")
     remaining_flipped_components = _metadata_int(
         part.mesh.metadata.get("repair_flipped_components_after_orientation"),
         0,
@@ -1299,17 +1320,25 @@ def _repair_face_orientation_operation(options: RepairOptions) -> str:
         return "disabled"
     if options.face_orientation == "exterior":
         return "closed_exterior"
+    if options.face_orientation == "single_sided_open_shell":
+        return "open_shell_component_consistent"
+    if options.face_orientation == "unstitched_groups":
+        return "unstitched_group_consistent"
+    if options.face_orientation == "viewer_standpoint":
+        return "viewer_oriented"
     if options.face_orientation in {"source_trusted", "preserve"}:
         return "preserve_source"
-    return "intent_not_implemented"
+    return "unsupported"
 
 
 def _repair_normal_orientation_operation(options: RepairOptions) -> str:
     if options.normal_orientation == "from_faces":
         return "from_faces"
+    if options.normal_orientation == "viewer_standpoint":
+        return "viewer_oriented"
     if options.normal_orientation in {"source_trusted", "preserve"}:
         return "preserve_when_compatible"
-    return "intent_not_implemented"
+    return "unsupported"
 
 
 def _repair_report_stats(asset: Asset) -> dict[str, int]:

@@ -163,6 +163,7 @@ def tessellate_shape(
 
     points = np.empty((point_count, 3), dtype=np.float64)
     faces = np.empty((triangle_count, 3), dtype=np.int64)
+    cad_uv_values = np.full((point_count, 2), np.nan, dtype=np.float64) if options.cad_uvs else None
     material_values = None if face_material_indices is None else np.full(triangle_count, -1, dtype=np.int64)
     face_groups: dict[str, np.ndarray] = {}
     for payload in face_triangulations:
@@ -171,6 +172,10 @@ def tessellate_shape(
         for local_index in range(payload.node_count):
             point = nodes.Value(node_lower + local_index).Transformed(payload.transform)
             points[payload.point_offset + local_index] = (point.X(), point.Y(), point.Z())
+        if cad_uv_values is not None:
+            surface_uvs = _triangulation_uv_nodes(payload.triangulation, payload.node_count)
+            if surface_uvs is not None:
+                cad_uv_values[payload.point_offset : payload.point_offset + payload.node_count] = surface_uvs
 
         triangles = payload.triangulation.MapTriangleArray()
         triangle_lower = int(triangles.Lower())
@@ -212,12 +217,74 @@ def tessellate_shape(
         metadata={"occt_faces": str(face_index)},
     )
     mesh = _apply_mesh_tessellation_controls(mesh, options)
+    if options.cad_uvs:
+        mesh = _apply_cad_uvs(mesh, cad_uv_values)
     if options.create_normals:
         mesh = mesh.compute_normals()
     else:
         mesh.normals = None
+    if options.tessellate_tangents:
+        mesh = mesh.compute_tangents(0)
+        mesh.metadata["tessellation_tangents"] = "generated" if mesh.tangents is not None else "missing_uv0"
+    if options.free_edge_geometry:
+        mesh = _store_free_edge_geometry(mesh)
     mesh.validate()
     return mesh
+
+
+def _triangulation_uv_nodes(triangulation: Any, node_count: int) -> np.ndarray | None:
+    try:
+        has_uv_nodes = triangulation.HasUVNodes()
+    except Exception:
+        return None
+    if not has_uv_nodes:
+        return None
+    try:
+        uv_nodes = triangulation.MapUVNodeArray()
+        lower = int(uv_nodes.Lower())
+        values = np.empty((node_count, 2), dtype=np.float64)
+        for local_index in range(node_count):
+            point = uv_nodes.Value(lower + local_index)
+            values[local_index] = (float(point.X()), float(point.Y()))
+        return values
+    except Exception:
+        return None
+
+
+def _apply_cad_uvs(mesh: Mesh, cad_uv_values: np.ndarray | None) -> Mesh:
+    if cad_uv_values is not None and cad_uv_values.shape == (mesh.vertex_count, 2) and np.isfinite(cad_uv_values).all():
+        result = mesh.copy()
+        result.uvs[0] = _normalize_uv_values(cad_uv_values)
+        result.tangents = None
+        result.metadata = {**result.metadata, "uv0": "cad_surface_uv", "uv0_source": "occt_surface_parameters"}
+        return result
+    return mesh.cad_project_uvs(0)
+
+
+def _normalize_uv_values(values: np.ndarray) -> np.ndarray:
+    mins = values.min(axis=0)
+    maxs = values.max(axis=0)
+    span = maxs - mins
+    span[span == 0.0] = 1.0
+    return cast(np.ndarray, ((values - mins) / span).astype(np.float64))
+
+
+def _store_free_edge_geometry(mesh: Mesh) -> Mesh:
+    edges, counts = mesh._undirected_edges_and_counts()
+    boundary_edges = edges[counts == 1].astype(int)
+    segments = []
+    max_segments = 1024
+    for start, end in boundary_edges[:max_segments].tolist():
+        segments.append([mesh.points[start].astype(float).tolist(), mesh.points[end].astype(float).tolist()])
+    result = mesh.copy()
+    result.metadata = {
+        **result.metadata,
+        "tessellation_free_edge_geometry": "stored",
+        "tessellation_free_edge_segment_count": str(int(boundary_edges.shape[0])),
+        "tessellation_free_edge_segments": json.dumps(segments, sort_keys=True),
+        "tessellation_free_edge_segments_truncated": str(boundary_edges.shape[0] > max_segments).lower(),
+    }
+    return result
 
 
 def _face_material_indices_from_metadata(metadata: Metadata) -> list[int] | None:
@@ -551,10 +618,10 @@ def _record_tessellation_attribute_sources(
         "positions": geometry_source,
         "triangles": geometry_source,
         "normals": _normal_attribute_source(mesh, options, geometry_source),
-        "tangents": _tangent_attribute_source(mesh, geometry_source),
-        "uvs": _uv_attribute_sources(mesh, geometry_source),
+        "tangents": _tangent_attribute_source(mesh, options, geometry_source),
+        "uvs": _uv_attribute_sources(mesh, options, geometry_source),
         "face_groups": _face_group_attribute_source(mesh, geometry_source),
-        "free_edges": "diagnostic_only" if options.free_edge_report else "not_requested",
+        "free_edges": _free_edge_attribute_source(options),
         "brep_patches": _brep_patch_attribute_source(part, options, geometry_source),
     }
     encoded = json.dumps(sources, sort_keys=True)
@@ -572,17 +639,31 @@ def _normal_attribute_source(mesh: Mesh, options: TessellationOptions, geometry_
     return "imported_mesh" if mesh.normals is not None else "missing"
 
 
-def _tangent_attribute_source(mesh: Mesh, geometry_source: str) -> str:
+def _tangent_attribute_source(mesh: Mesh, options: TessellationOptions, geometry_source: str) -> str:
     if mesh.tangents is not None:
+        if geometry_source == "tessellation" and options.tessellate_tangents:
+            return "tessellation"
         return geometry_source
+    if options.tessellate_tangents:
+        return "requested_missing_uvs"
     return "not_generated_by_tessellation" if geometry_source == "tessellation" else "missing"
 
 
-def _uv_attribute_sources(mesh: Mesh, geometry_source: str) -> dict[str, str]:
+def _uv_attribute_sources(mesh: Mesh, options: TessellationOptions, geometry_source: str) -> dict[str, str]:
     if not mesh.uvs:
         return {"status": "not_generated_by_tessellation" if geometry_source == "tessellation" else "missing"}
+    if geometry_source == "tessellation" and options.cad_uvs:
+        return {str(channel): str(mesh.metadata.get(f"uv{channel}", "cad_projected")) for channel in sorted(mesh.uvs)}
     source = "tessellation" if geometry_source == "tessellation" else "imported_mesh"
     return {str(channel): source for channel in sorted(mesh.uvs)}
+
+
+def _free_edge_attribute_source(options: TessellationOptions) -> str:
+    if options.free_edge_geometry:
+        return "geometry_output"
+    if options.free_edge_report:
+        return "diagnostic_only"
+    return "not_requested"
 
 
 def _face_group_attribute_source(mesh: Mesh, geometry_source: str) -> str:
@@ -961,6 +1042,9 @@ def _tessellation_settings_key(options: TessellationOptions) -> tuple[object, ..
         options.preserve_boundaries,
         options.curvature_adaptive,
         options.avoid_skinny_triangles,
+        options.cad_uvs,
+        options.tessellate_tangents,
+        options.free_edge_geometry,
         options.create_normals,
         options.free_edge_report,
         options.reuse_existing_meshes,

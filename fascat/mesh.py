@@ -51,7 +51,11 @@ class MeshValidationError(ValueError):
 
 
 def _should_repair_winding(options: RepairOptions) -> bool:
-    return options.fix_winding and options.face_orientation == "exterior"
+    return options.fix_winding and options.face_orientation in {
+        "exterior",
+        "single_sided_open_shell",
+        "unstitched_groups",
+    }
 
 
 def _repair_face_orientation_status(options: RepairOptions) -> str:
@@ -59,11 +63,17 @@ def _repair_face_orientation_status(options: RepairOptions) -> str:
         return "disabled"
     if options.face_orientation == "exterior":
         return "closed_exterior"
+    if options.face_orientation == "single_sided_open_shell":
+        return "open_shell_component_consistent"
+    if options.face_orientation == "unstitched_groups":
+        return "unstitched_group_consistent"
+    if options.face_orientation == "viewer_standpoint":
+        return "viewer_oriented"
     if options.face_orientation == "source_trusted":
         return "trusted_source"
     if options.face_orientation == "preserve":
         return "preserved"
-    return "intent_not_implemented"
+    return "unsupported"
 
 
 def _apply_repair_normal_orientation(
@@ -74,7 +84,10 @@ def _apply_repair_normal_orientation(
     face_orientation_status: str,
 ) -> tuple[Mesh, str]:
     if options.normal_orientation == "viewer_standpoint":
-        return mesh.compute_normals(), "intent_not_implemented"
+        result = mesh.compute_normals()
+        assert options.viewer_position is not None
+        result = result.orient_normals_toward_viewer(options.viewer_position)
+        return result, "oriented_to_viewer"
     if options.normal_orientation == "from_faces":
         return mesh.compute_normals(), "generated_from_faces"
     if (
@@ -85,7 +98,12 @@ def _apply_repair_normal_orientation(
         result = mesh.copy()
         result.normals = input_normals.copy()
         return result, "preserved_existing"
-    if face_orientation_status == "closed_exterior":
+    if face_orientation_status in {
+        "closed_exterior",
+        "open_shell_component_consistent",
+        "unstitched_group_consistent",
+        "viewer_oriented",
+    }:
         return mesh.compute_normals(), "generated_after_face_orientation"
     return mesh.compute_normals(), "generated_missing_source"
 
@@ -359,10 +377,83 @@ class Mesh:
         mesh = mesh.remove_duplicate_faces()
         if opts.delete_degenerate:
             mesh = mesh.remove_degenerate_faces(opts.area_epsilon)
+        topology_metadata: dict[str, str] = {}
+        if opts.stitch_boundary_gaps:
+            gap_before = mesh.boundary_gap_count(tolerance=boundary_gap_tolerance)
+            mesh = mesh.stitch_boundary_gaps(boundary_gap_tolerance)
+            gap_after = mesh.boundary_gap_count(tolerance=boundary_gap_tolerance)
+            topology_metadata.update(
+                {
+                    "repair_boundary_gap_stitching": "stitched" if gap_after < gap_before else "no_change",
+                    "repair_boundary_gap_stitching_before": str(gap_before),
+                    "repair_boundary_gap_stitching_after": str(gap_after),
+                }
+            )
+        else:
+            topology_metadata["repair_boundary_gap_stitching"] = "disabled"
+        if opts.fix_t_junctions:
+            t_junction_before = mesh.t_junction_count(tolerance=t_junction_tolerance)
+            mesh = mesh.split_t_junctions(tolerance=t_junction_tolerance)
+            t_junction_after = mesh.t_junction_count(tolerance=t_junction_tolerance)
+            topology_metadata.update(
+                {
+                    "repair_t_junction_sewing": "sewn" if t_junction_after < t_junction_before else "no_change",
+                    "repair_t_junction_sewing_before": str(t_junction_before),
+                    "repair_t_junction_sewing_after": str(t_junction_after),
+                }
+            )
+        else:
+            topology_metadata["repair_t_junction_sewing"] = "disabled"
+        if opts.crack_non_manifold_edges:
+            non_manifold_before = int(mesh.quality_metrics(area_epsilon=opts.area_epsilon)["non_manifold_edges"])
+            mesh = mesh.crack_non_manifold_edges()
+            non_manifold_after = int(mesh.quality_metrics(area_epsilon=opts.area_epsilon)["non_manifold_edges"])
+            topology_metadata.update(
+                {
+                    "repair_non_manifold_edge_cracking": "cracked"
+                    if non_manifold_after < non_manifold_before
+                    else "no_change",
+                    "repair_non_manifold_edges_before_cracking": str(non_manifold_before),
+                    "repair_non_manifold_edges_after_cracking": str(non_manifold_after),
+                }
+            )
+        else:
+            topology_metadata["repair_non_manifold_edge_cracking"] = "disabled"
+        if opts.remove_sliver_faces:
+            sliver_before = int(
+                mesh.quality_metrics(
+                    skinny_aspect_ratio=opts.sliver_aspect_ratio,
+                    area_epsilon=opts.area_epsilon,
+                )["skinny_triangles"]
+            )
+            triangle_before = mesh.triangle_count
+            mesh = mesh.remove_sliver_faces(
+                max_aspect_ratio=opts.sliver_aspect_ratio,
+                area_epsilon=opts.area_epsilon,
+            )
+            sliver_after = int(
+                mesh.quality_metrics(
+                    skinny_aspect_ratio=opts.sliver_aspect_ratio,
+                    area_epsilon=opts.area_epsilon,
+                )["skinny_triangles"]
+            )
+            topology_metadata.update(
+                {
+                    "repair_sliver_face_removal": "removed" if mesh.triangle_count < triangle_before else "no_change",
+                    "repair_sliver_faces_before": str(sliver_before),
+                    "repair_sliver_faces_after": str(sliver_after),
+                    "repair_sliver_faces_removed": str(triangle_before - mesh.triangle_count),
+                }
+            )
+        else:
+            topology_metadata["repair_sliver_face_removal"] = "disabled"
         if opts.quality_report:
             orientation_metrics = mesh.orientability_metrics()
         face_orientation_status = _repair_face_orientation_status(opts)
-        if _should_repair_winding(opts):
+        if opts.fix_winding and opts.face_orientation == "viewer_standpoint":
+            assert opts.viewer_position is not None
+            mesh = mesh.orient_faces_toward_viewer(opts.viewer_position)
+        elif _should_repair_winding(opts):
             mesh = mesh.fix_winding()
         mesh, normal_orientation_status = _apply_repair_normal_orientation(
             mesh,
@@ -388,6 +479,7 @@ class Mesh:
             "repair_face_orientation_status": face_orientation_status,
             "repair_normal_orientation_strategy": opts.normal_orientation,
             "repair_normal_orientation_status": normal_orientation_status,
+            **topology_metadata,
         }
         if opts.quality_report:
             repair_metadata.update(
@@ -1016,6 +1108,53 @@ class Mesh:
                 conflicts.add((min(start_index, end_index), max(start_index, end_index), candidate))
         return len(conflicts)
 
+    def _t_junction_split_vertices(self, tolerance: float) -> dict[tuple[int, int], list[int]]:
+        edges, _counts = self._undirected_edges_and_counts()
+        if edges.shape[0] == 0:
+            return {}
+        edge_lengths = self._triangle_edge_lengths().reshape(-1)
+        positive_lengths = edge_lengths[edge_lengths > 0.0]
+        if positive_lengths.size == 0:
+            return {}
+        cell_size = max(float(np.median(positive_lengths)), tolerance)
+        buckets = self._point_cell_buckets(cell_size)
+        splits: dict[tuple[int, int], list[int]] = {}
+        points = self.points
+        for start_index, end_index in edges.astype(int).tolist():
+            start = points[start_index]
+            end = points[end_index]
+            vector = end - start
+            length_squared = float(np.dot(vector, vector))
+            if length_squared <= tolerance * tolerance:
+                continue
+            minimum = np.minimum(start, end) - tolerance
+            maximum = np.maximum(start, end) + tolerance
+            candidates = self._segment_candidate_vertices(minimum, maximum, cell_size, buckets)
+            if candidates.size == 0:
+                continue
+            candidate_points = points[candidates]
+            projection = np.asarray(((candidate_points - start) @ vector) / length_squared, dtype=np.float64)
+            length = math.sqrt(length_squared)
+            endpoint_margin = tolerance / length
+            interior = (projection > endpoint_margin) & (projection < 1.0 - endpoint_margin)
+            if not np.any(interior):
+                continue
+            projected = start + (projection[:, None] * vector)
+            distances = np.linalg.norm(candidate_points - projected, axis=1)
+            on_edge = interior & (distances <= tolerance)
+            values = [
+                int(candidate)
+                for candidate in candidates[on_edge].astype(int).tolist()
+                if int(candidate) not in {start_index, end_index}
+            ]
+            if values:
+                key = (min(start_index, end_index), max(start_index, end_index))
+                splits[key] = sorted(
+                    set(values),
+                    key=lambda vertex: float(np.dot(points[vertex] - points[key[0]], points[key[1]] - points[key[0]])),
+                )
+        return splits
+
     def _point_cell_buckets(self, cell_size: float) -> dict[tuple[int, int, int], IntArray]:
         """Group every vertex index by its integer grid cell ``floor(point / cell_size)``."""
         if self.vertex_count == 0:
@@ -1102,6 +1241,267 @@ class Mesh:
                                 gaps.add(pair)
             buckets.setdefault(key, []).append(vertex)
         return len(gaps)
+
+    def split_t_junctions(self, *, tolerance: float = 1e-9) -> Mesh:
+        if self.triangle_count == 0 or self.vertex_count < 3:
+            return self.copy()
+        distance_tolerance = max(float(tolerance), 1e-12)
+        edge_splits = self._t_junction_split_vertices(distance_tolerance)
+        if not edge_splits:
+            return self.copy()
+
+        points = self.points.tolist()
+        uvs = {channel: values.tolist() for channel, values in self.uvs.items()}
+        new_faces: list[list[int]] = []
+        source_faces: list[int] = []
+        changed = False
+        for face_index, face_values in enumerate(self.faces.astype(int).tolist()):
+            a, b, c = face_values
+            polygon: list[int] = [a]
+            polygon.extend(_oriented_edge_splits(edge_splits, a, b))
+            polygon.append(b)
+            polygon.extend(_oriented_edge_splits(edge_splits, b, c))
+            polygon.append(c)
+            polygon.extend(_oriented_edge_splits(edge_splits, c, a))
+            polygon = _dedupe_polygon_vertices(polygon)
+            if len(polygon) < 3:
+                continue
+            if len(polygon) == 3:
+                new_faces.append(polygon)
+                source_faces.append(face_index)
+                continue
+            changed = True
+            center_index = len(points)
+            points.append(np.asarray(self.points[polygon], dtype=np.float64).mean(axis=0).astype(float).tolist())
+            for channel, values in uvs.items():
+                values.append(
+                    np.asarray(self.uvs[channel][polygon], dtype=np.float64).mean(axis=0).astype(float).tolist()
+                )
+            for index, start in enumerate(polygon):
+                end = polygon[(index + 1) % len(polygon)]
+                triangle = [start, end, center_index]
+                if len(set(triangle)) == 3:
+                    new_faces.append(triangle)
+                    source_faces.append(face_index)
+        if not changed:
+            return self.copy()
+
+        mesh = Mesh(
+            points=np.asarray(points, dtype=np.float64),
+            faces=np.asarray(new_faces, dtype=np.int64),
+            normals=None,
+            tangents=None,
+            uvs={channel: np.asarray(values, dtype=np.float64) for channel, values in uvs.items()},
+            material_indices=None,
+            face_groups={},
+            metadata=dict(self.metadata),
+        )
+        source = np.asarray(source_faces, dtype=np.int64)
+        if self.material_indices is not None:
+            mesh.material_indices = self.material_indices[source].copy()
+        old_to_new: dict[int, list[int]] = defaultdict(list)
+        for new_index, old_index in enumerate(source.astype(int).tolist()):
+            old_to_new[old_index].append(new_index)
+        mesh.face_groups = {
+            name: np.asarray(
+                [
+                    new_index
+                    for old_index in values.astype(int).tolist()
+                    for new_index in old_to_new.get(int(old_index), [])
+                ],
+                dtype=np.int64,
+            )
+            for name, values in self.face_groups.items()
+        }
+        mesh = mesh.remove_degenerate_faces()
+        mesh.metadata = {**mesh.metadata, "t_junction_sewing": "split_edges"}
+        mesh.validate()
+        return mesh
+
+    def stitch_boundary_gaps(self, tolerance: float) -> Mesh:
+        if tolerance <= 0.0 or self.triangle_count == 0 or self.vertex_count < 2:
+            return self.copy()
+        all_edges, counts = self._undirected_edges_and_counts()
+        boundary_edges = {(int(edge[0]), int(edge[1])) for edge in all_edges[counts == 1].astype(int).tolist()}
+        if not boundary_edges:
+            return self.copy()
+        boundary_vertices = sorted({vertex for edge in boundary_edges for vertex in edge})
+        connected_edges = {(int(edge[0]), int(edge[1])) for edge in all_edges.astype(int).tolist()}
+        parent = np.arange(self.vertex_count, dtype=np.int64)
+        rank = np.zeros(self.vertex_count, dtype=np.int64)
+        buckets: dict[tuple[int, int, int], list[int]] = {}
+        merged = False
+
+        def find(vertex: int) -> int:
+            while int(parent[vertex]) != vertex:
+                parent[vertex] = parent[int(parent[vertex])]
+                vertex = int(parent[vertex])
+            return vertex
+
+        def union(left: int, right: int) -> None:
+            nonlocal merged
+            left_root = find(left)
+            right_root = find(right)
+            if left_root == right_root:
+                return
+            if rank[left_root] < rank[right_root]:
+                left_root, right_root = right_root, left_root
+            parent[right_root] = left_root
+            if rank[left_root] == rank[right_root]:
+                rank[left_root] += 1
+            merged = True
+
+        for vertex in boundary_vertices:
+            point = self.points[vertex]
+            key = self._spatial_bucket_key(point, tolerance)
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for dz in (-1, 0, 1):
+                        for other in buckets.get((key[0] + dx, key[1] + dy, key[2] + dz), []):
+                            edge = (min(vertex, other), max(vertex, other))
+                            if edge in connected_edges:
+                                continue
+                            if float(np.linalg.norm(point - self.points[other])) <= tolerance:
+                                union(vertex, other)
+            buckets.setdefault(key, []).append(vertex)
+        if not merged:
+            return self.copy()
+        roots = np.asarray([find(index) for index in range(self.vertex_count)], dtype=np.int64)
+        unique_roots, inverse = np.unique(roots, return_inverse=True)
+        mesh = self.copy()
+        mesh.points = self.points[unique_roots].copy()
+        mesh.faces = inverse[self.faces]
+        mesh.normals = None
+        mesh.tangents = None
+        mesh.uvs = {}
+        mesh = mesh.remove_duplicate_faces().remove_degenerate_faces().remove_unreferenced_vertices()
+        mesh.metadata = {**mesh.metadata, "boundary_gap_stitching": "merged_boundary_vertices"}
+        mesh.validate()
+        return mesh
+
+    def crack_non_manifold_edges(self) -> Mesh:
+        edge_faces = self._edge_faces_map()
+        non_manifold_edges = [(edge, faces) for edge, faces in edge_faces.items() if len(faces) > 2]
+        if not non_manifold_edges:
+            return self.copy()
+
+        points = self.points.tolist()
+        source_normals = self.normals
+        source_tangents = self.tangents
+        normals = None if source_normals is None else source_normals.tolist()
+        tangents = None if source_tangents is None else source_tangents.tolist()
+        uvs = {channel: values.tolist() for channel, values in self.uvs.items()}
+        faces = self.faces.copy()
+        duplicate_for_face_vertex: dict[tuple[int, int], int] = {}
+
+        def duplicate_vertex(face_index: int, vertex: int) -> int:
+            key = (face_index, vertex)
+            existing = duplicate_for_face_vertex.get(key)
+            if existing is not None:
+                return existing
+            new_index = len(points)
+            duplicate_for_face_vertex[key] = new_index
+            points.append(self.points[vertex].astype(float).tolist())
+            if normals is not None and source_normals is not None:
+                normals.append(source_normals[vertex].astype(float).tolist())
+            if tangents is not None and source_tangents is not None:
+                tangents.append(source_tangents[vertex].astype(float).tolist())
+            for channel, values in uvs.items():
+                values.append(self.uvs[channel][vertex].astype(float).tolist())
+            return new_index
+
+        for edge, incident_faces in non_manifold_edges:
+            for face_index in incident_faces[2:]:
+                for vertex in edge:
+                    faces[face_index, faces[face_index] == vertex] = duplicate_vertex(face_index, vertex)
+
+        mesh = Mesh(
+            points=np.asarray(points, dtype=np.float64),
+            faces=faces,
+            normals=None if normals is None else np.asarray(normals, dtype=np.float64),
+            tangents=None if tangents is None else np.asarray(tangents, dtype=np.float64),
+            uvs={channel: np.asarray(values, dtype=np.float64) for channel, values in uvs.items()},
+            material_indices=None if self.material_indices is None else self.material_indices.copy(),
+            face_groups={name: values.copy() for name, values in self.face_groups.items()},
+            metadata={**self.metadata, "non_manifold_edge_cracking": "duplicated_edge_vertices"},
+        )
+        mesh.validate()
+        return mesh
+
+    def remove_sliver_faces(self, *, max_aspect_ratio: float = 20.0, area_epsilon: float = 1e-12) -> Mesh:
+        if max_aspect_ratio <= 1.0:
+            raise ValueError("max_aspect_ratio must be greater than 1")
+        if area_epsilon < 0.0:
+            raise ValueError("area_epsilon must be greater than or equal to 0")
+        if self.triangle_count == 0:
+            return self.copy()
+        lengths = self._triangle_edge_lengths()
+        areas = self._triangle_areas()
+        min_lengths = lengths.min(axis=1)
+        max_lengths = lengths.max(axis=1)
+        aspect_ratios = np.divide(
+            max_lengths,
+            min_lengths,
+            out=np.full(max_lengths.shape, np.inf, dtype=np.float64),
+            where=min_lengths > 0.0,
+        )
+        keep = np.flatnonzero((areas > area_epsilon) & (aspect_ratios <= max_aspect_ratio))
+        if keep.shape[0] == self.triangle_count:
+            return self.copy()
+        mesh = self._filter_faces(keep).remove_unreferenced_vertices()
+        mesh.metadata = {
+            **mesh.metadata,
+            "sliver_face_removal": "removed",
+            "sliver_face_max_aspect_ratio": f"{max_aspect_ratio:g}",
+            "sliver_face_area_epsilon": f"{area_epsilon:g}",
+        }
+        mesh.validate()
+        return mesh
+
+    def orient_faces_toward_viewer(self, viewer_position: Sequence[float]) -> Mesh:
+        if self.triangle_count == 0:
+            return self.copy()
+        viewer = np.asarray(viewer_position, dtype=np.float64)
+        if viewer.shape != (3,):
+            raise ValueError("viewer_position must contain three values")
+        face_centers = self.points[self.faces].mean(axis=1)
+        face_normals = self._face_unit_normals()
+        to_viewer = viewer[None, :] - face_centers
+        flip = np.einsum("ij,ij->i", face_normals, to_viewer) < 0.0
+        if not np.any(flip):
+            mesh = self.copy()
+        else:
+            mesh = self.copy()
+            mesh.faces[flip] = mesh.faces[flip][:, [0, 2, 1]]
+            mesh.normals = None
+            mesh.tangents = None
+        mesh.metadata = {**mesh.metadata, "face_orientation": "viewer_standpoint"}
+        mesh.validate()
+        return mesh
+
+    def orient_normals_toward_viewer(self, viewer_position: Sequence[float]) -> Mesh:
+        if self.normals is None:
+            return self.compute_normals().orient_normals_toward_viewer(viewer_position)
+        viewer = np.asarray(viewer_position, dtype=np.float64)
+        if viewer.shape != (3,):
+            raise ValueError("viewer_position must contain three values")
+        mesh = self.copy()
+        normals = mesh.normals
+        assert normals is not None
+        to_viewer = viewer[None, :] - mesh.points
+        flip = np.einsum("ij,ij->i", normals, to_viewer) < 0.0
+        normals[flip] *= -1.0
+        tangents = mesh.tangents
+        if tangents is not None:
+            tangents[flip, :3] *= -1.0
+        mesh.metadata = {**mesh.metadata, "normal_orientation": "viewer_standpoint"}
+        mesh.validate_normals(require_tangents=mesh.tangents is not None)
+        return mesh
+
+    def cad_project_uvs(self, channel: int = 0) -> Mesh:
+        mesh = self.box_uv(channel)
+        mesh.metadata = {**mesh.metadata, f"uv{channel}": "cad_projected", f"uv{channel}_source": "cad_projection"}
+        return mesh
 
     def orientability_metrics(self) -> dict[str, int]:
         if self.triangle_count == 0:
@@ -2584,6 +2984,25 @@ class Mesh:
             },
             "metadata": dict(self.metadata),
         }
+
+
+def _oriented_edge_splits(edge_splits: dict[tuple[int, int], list[int]], start: int, end: int) -> list[int]:
+    key = (min(start, end), max(start, end))
+    values = list(edge_splits.get(key, ()))
+    if start > end:
+        values.reverse()
+    return values
+
+
+def _dedupe_polygon_vertices(values: list[int]) -> list[int]:
+    deduped: list[int] = []
+    for value in values:
+        if deduped and deduped[-1] == value:
+            continue
+        deduped.append(value)
+    if len(deduped) > 1 and deduped[0] == deduped[-1]:
+        deduped.pop()
+    return deduped
 
 
 def _nearest_centroid_indices(source_centroids: FloatArray, target_centroids: FloatArray) -> IntArray:

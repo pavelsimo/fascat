@@ -51,6 +51,7 @@ from fascat.options import (
     StepReadOptions,
     StlExportOptions,
     TessellationOptions,
+    TextureProcessOptions,
     UnwrapOptions,
     UsdExportOptions,
     UV0Mode,
@@ -68,6 +69,8 @@ ExportFormat = Literal["usd", "gltf", "obj", "stl", "fbx"]
 _LOAD_ESTIMATE_BYTES_PER_MS = 50_000
 _LOAD_ESTIMATE_VERTEX_BYTES = 32
 _LOAD_ESTIMATE_TRIANGLE_INDEX_BYTES = 12
+_FRAME_ESTIMATE_DRAW_CALL_MS = 0.05
+_FRAME_ESTIMATE_TRIANGLE_MS_PER_MILLION = 4.0
 _RUNTIME_COMPRESSION_BY_EXTENSION = {
     "KHR_mesh_quantization": "quantization",
     "EXT_meshopt_compression": "meshopt",
@@ -92,6 +95,7 @@ def convert(
     replace: ReplaceOptions | None = None,
     scene: SceneOptimizeOptions | None = None,
     bake_materials: BakeMaterialOptions | None = None,
+    process_textures: TextureProcessOptions | None = None,
     remove_holes: RemoveHolesOptions | None = None,
     remove_occluded: RemoveOccludedOptions | None = None,
     decimate: DecimateOptions | None = None,
@@ -191,6 +195,10 @@ def convert(
             asset = asset.bake_materials(bake_materials, where=where)
             if progress is not None:
                 progress("bake_materials", asset.stats())
+        if process_textures is not None:
+            asset = asset.process_textures(process_textures)
+            if progress is not None:
+                progress("process_textures", asset.stats())
         if remove_holes is not None:
             asset = asset.remove_holes(remove_holes, where=where)
             if progress is not None:
@@ -316,6 +324,7 @@ def convert(
         replace=replace,
         scene=scene,
         bake_materials=bake_materials,
+        process_textures=process_textures,
         remove_holes=remove_holes,
         remove_occluded=remove_occluded,
         decimate=decimate,
@@ -900,8 +909,23 @@ def _add_profile_budget_report(asset: Asset, profile: ConversionProfile) -> None
     warnings: list[str] = []
 
     violations = 0
+    timings = _measured_report_timings(asset)
+    frame_profile = _estimated_frame_profile(asset)
+    after.update(
+        {
+            "profile_runtime_frame_estimated_ms": frame_profile["estimated_frame_ms"],
+            "profile_runtime_estimated_fps": frame_profile["estimated_fps"],
+            "profile_runtime_triangle_frame_ms": frame_profile["triangle_frame_ms"],
+            "profile_runtime_draw_call_frame_ms": frame_profile["draw_call_frame_ms"],
+            "profile_measured_pipeline_ms": timings["pipeline_ms"],
+            "profile_measured_write_ms": timings["write_ms"],
+            "profile_measured_validate_ms": timings["validate_ms"],
+        }
+    )
     if budget.target_fps is not None:
         after["profile_target_fps"] = budget.target_fps
+        after["profile_target_frame_budget_ms"] = int(round(1000.0 / budget.target_fps))
+        after["profile_runtime_fps_under_target"] = max(0, budget.target_fps - frame_profile["estimated_fps"])
     if budget.max_triangles is not None:
         after["profile_triangle_budget"] = budget.max_triangles
         over = max(0, asset.triangle_count - budget.max_triangles)
@@ -1120,6 +1144,7 @@ def _add_conversion_manifest_report(
     replace: ReplaceOptions | None,
     scene: SceneOptimizeOptions | None,
     bake_materials: BakeMaterialOptions | None,
+    process_textures: TextureProcessOptions | None,
     remove_holes: RemoveHolesOptions | None,
     remove_occluded: RemoveOccludedOptions | None,
     decimate: DecimateOptions | None,
@@ -1140,6 +1165,7 @@ def _add_conversion_manifest_report(
         "replace": _manifest_options(replace),
         "scene": _manifest_options(scene),
         "bake_materials": _manifest_options(bake_materials),
+        "process_textures": _manifest_options(process_textures),
         "remove_holes": _manifest_options(remove_holes),
         "remove_occluded": _manifest_options(remove_occluded),
         "decimate": _manifest_options(decimate),
@@ -1254,6 +1280,16 @@ def _workflow_summary_stages(
         "material baking emitted raster atlas textures"
         if "bake_materials" in steps
         else "material baking was not requested",
+    )
+
+    add(
+        "texture_processing",
+        "run" if "process_textures" in steps else "skipped",
+        "exact" if "process_textures" in steps else "not_applicable",
+        "process_textures",
+        "source texture images were resized, deduped, or converted"
+        if "process_textures" in steps
+        else "source texture processing was not requested",
     )
 
     optimization_ops = [
@@ -1402,6 +1438,29 @@ def _estimated_load_time(asset: Asset) -> dict[str, int]:
         "file_bytes": file_bytes,
         "geometry_bytes": geometry_bytes,
         "texture_bytes": texture_bytes,
+    }
+
+
+def _estimated_frame_profile(asset: Asset) -> dict[str, int]:
+    triangle_frame_ms = int(round((asset.triangle_count / 1_000_000.0) * _FRAME_ESTIMATE_TRIANGLE_MS_PER_MILLION))
+    draw_call_frame_ms = int(round(asset.draw_call_count * _FRAME_ESTIMATE_DRAW_CALL_MS))
+    estimated_frame_ms = max(1, triangle_frame_ms + draw_call_frame_ms)
+    return {
+        "triangle_frame_ms": triangle_frame_ms,
+        "draw_call_frame_ms": draw_call_frame_ms,
+        "estimated_frame_ms": estimated_frame_ms,
+        "estimated_fps": int(round(1000.0 / estimated_frame_ms)),
+    }
+
+
+def _measured_report_timings(asset: Asset) -> dict[str, int]:
+    pipeline_ms = int(round(sum(step.duration for step in asset.report.steps) * 1000.0))
+    write_ms = int(round(sum(step.duration for step in asset.report.steps if step.name == "write") * 1000.0))
+    validate_ms = int(round(sum(step.duration for step in asset.report.steps if step.name == "validate") * 1000.0))
+    return {
+        "pipeline_ms": pipeline_ms,
+        "write_ms": write_ms,
+        "validate_ms": validate_ms,
     }
 
 
@@ -1953,6 +2012,10 @@ def bake_materials(
     return asset.bake_materials(options or BakeMaterialOptions(), where=where)
 
 
+def process_textures(asset: Asset, *, options: TextureProcessOptions | None = None) -> Asset:
+    return asset.process_textures(options or TextureProcessOptions())
+
+
 def decimate(asset: Asset, *, options: DecimateOptions | None = None, where: Filter | None = None) -> Asset:
     return asset.decimate(options or DecimateOptions(), where=where)
 
@@ -1988,6 +2051,8 @@ def lods(
     per_part_budget: bool = False,
     drop_tiny_parts: bool = False,
     tiny_part_screen_size: float = 2.0,
+    engine_profile: Literal["generic", "unity", "unreal"] = "generic",
+    far_lod_bake: bool = False,
     validate: bool = False,
     jobs: int = 1,
     where: Filter | None = None,
@@ -2000,6 +2065,8 @@ def lods(
             per_part_budget=per_part_budget,
             drop_tiny_parts=drop_tiny_parts,
             tiny_part_screen_size=tiny_part_screen_size,
+            engine_profile=engine_profile,
+            far_lod_bake=far_lod_bake,
             validate=validate,
             jobs=jobs,
         ),

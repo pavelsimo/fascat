@@ -8,7 +8,12 @@ import pytest
 from fascat.asset import Asset, Node, Part
 from fascat.material import Material
 from fascat.mesh import Mesh
-from fascat.ops.tessellate import _apply_mesh_tessellation_controls, tessellate_shape
+from fascat.ops.tessellate import (
+    _apply_cad_uvs,
+    _apply_mesh_tessellation_controls,
+    _store_free_edge_geometry,
+    tessellate_shape,
+)
 from fascat.options import TessellationOptions
 
 
@@ -130,6 +135,38 @@ def test_tessellation_edge_controls_rerun_when_first_pass_changes_mesh(monkeypat
     assert calls == 2
     assert result.triangle_count == 2
     assert result.metadata["tessellation_edge_control_passes"] == "2"
+
+
+def test_cad_uv_application_uses_surface_uvs_and_generates_tangents() -> None:
+    mesh = triangle_mesh()
+    with_uvs = _apply_cad_uvs(mesh, np.array([[3.0, 4.0], [5.0, 4.0], [3.0, 8.0]], dtype=float))
+    with_tangents = with_uvs.compute_normals().compute_tangents(0)
+
+    assert with_uvs.metadata["uv0"] == "cad_surface_uv"
+    assert with_uvs.metadata["uv0_source"] == "occt_surface_parameters"
+    assert with_uvs.uvs[0].tolist() == [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
+    assert with_tangents.tangents is not None
+    assert with_tangents.tangents.shape == (3, 4)
+
+
+def test_cad_uv_application_falls_back_to_projected_uvs() -> None:
+    mesh = triangle_mesh()
+
+    with_uvs = _apply_cad_uvs(mesh, None)
+
+    assert with_uvs.metadata["uv0"] == "cad_projected"
+    assert 0 in with_uvs.uvs
+
+
+def test_free_edge_geometry_stores_boundary_segments() -> None:
+    mesh = triangle_mesh()
+
+    with_edges = _store_free_edge_geometry(mesh)
+    segments = json.loads(str(with_edges.metadata["tessellation_free_edge_segments"]))
+
+    assert with_edges.metadata["tessellation_free_edge_geometry"] == "stored"
+    assert with_edges.metadata["tessellation_free_edge_segment_count"] == "3"
+    assert len(segments) == 3
 
 
 @pytest.mark.requires_ocp

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -87,6 +88,8 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
         texture_baked_levels += built.texture_baked_levels
         culling_changed_levels += built.culling_changed_levels
     result.metadata["lod_mode"] = options.mode
+    result.metadata["lod_engine_profile"] = options.engine_profile
+    result.metadata["lod_far_lod_bake"] = str(options.far_lod_bake).lower()
     result.metadata["lod_screen_coverage"] = ",".join(f"{value:.9g}" for value in screen_coverage)
     result.metadata["lod_generated_parts"] = str(generated_parts)
     result.metadata["lod_skipped_no_mesh_parts"] = str(skipped_parts)
@@ -156,10 +159,14 @@ def _build_part_lods(
     level_material_merge: list[str] = []
     level_texture_bake: list[str] = []
     level_culling_granularity: list[str] = []
+    level_switch_distances: list[float] = []
     level_policy_advisory_values: list[str] = []
     level_simplification_sources: list[str] = []
     for index, ratio in enumerate(options.ratios):
         coverage = screen_coverage[index]
+        far_lod = _is_far_lod(ratio, coverage)
+        switch_distance = _switch_distance(diagonal, coverage, options.engine_profile)
+        level_switch_distances.append(switch_distance)
         simplification_source = "source" if index == 0 else "previous"
         policy_metadata = _level_policy_metadata(
             part_occurrences=part_occurrences,
@@ -167,6 +174,8 @@ def _build_part_lods(
             if options.drop_tiny_parts and diagonal * coverage < options.tiny_part_screen_size
             else "part",
             policy_advisory=level_policy_advisories[index],
+            far_lod=far_lod,
+            far_lod_bake=options.far_lod_bake,
         )
         level_instance_reuse.append(policy_metadata["lod_instance_reuse"])
         level_material_merge.append(policy_metadata["lod_material_merge"])
@@ -189,6 +198,8 @@ def _build_part_lods(
                 "lod_screen_coverage": f"{coverage:.9g}",
                 "lod_omitted": "tiny_part",
                 "lod_simplification_source": simplification_source,
+                "lod_engine_profile": options.engine_profile,
+                "lod_switch_distance": f"{switch_distance:.9g}",
                 **policy_metadata,
             }
             lod_meshes.append(lod)
@@ -201,11 +212,15 @@ def _build_part_lods(
         lod = previous_mesh.simplify(target_triangles=_target_lod_triangles(part_source_triangles, ratio))
         if lod.triangle_count > previous_count:
             lod = lod.simplify(target_triangles=previous_count)
+        if options.far_lod_bake and far_lod:
+            lod = _bake_far_lod_mesh(lod)
         lod.metadata = {
             **lod.metadata,
             "lod_ratio": f"{ratio:.9g}",
             "lod_screen_coverage": f"{coverage:.9g}",
             "lod_mode": options.mode,
+            "lod_engine_profile": options.engine_profile,
+            "lod_switch_distance": f"{switch_distance:.9g}",
             "lod_per_part_budget": str(options.per_part_budget).lower(),
             "lod_simplification_source": simplification_source,
             **policy_metadata,
@@ -226,6 +241,8 @@ def _build_part_lods(
         "lod_ratios": ",".join(f"{ratio:.9g}" for ratio in options.ratios),
         "lod_screen_coverage": ",".join(f"{value:.9g}" for value in screen_coverage),
         "lod_mode": options.mode,
+        "lod_engine_profile": options.engine_profile,
+        "lod_far_lod_bake": str(options.far_lod_bake).lower(),
         "lod_per_part_budget": str(options.per_part_budget).lower(),
         "lod_drop_tiny_parts": str(options.drop_tiny_parts).lower(),
         "lod_occurrences": str(part_occurrences),
@@ -247,6 +264,8 @@ def _build_part_lods(
         "lod_level_material_merge": ",".join(level_material_merge),
         "lod_level_texture_bake": ",".join(level_texture_bake),
         "lod_level_culling_granularity": ",".join(level_culling_granularity),
+        "lod_level_switch_distances": ",".join(f"{value:.9g}" for value in level_switch_distances),
+        "lod_switching_validation_status": _switching_validation_status(level_switch_distances),
         "lod_level_policy_advisory": ",".join(level_policy_advisory_values),
         "lod_level_simplification_source": ",".join(level_simplification_sources),
         "lod_reused_instance_levels": str(part_reused_instance_levels),
@@ -287,15 +306,18 @@ def _level_policy_metadata(
     part_occurrences: int,
     culling_granularity: str,
     policy_advisory: str,
+    far_lod: bool,
+    far_lod_bake: bool,
 ) -> dict[str, str]:
     if culling_granularity == "omitted_tiny_part":
         instance_reuse = "omitted"
     else:
         instance_reuse = "preserved" if part_occurrences > 1 else "not_applicable"
+    baked_far_lod = far_lod and far_lod_bake and culling_granularity != "omitted_tiny_part"
     return {
         "lod_instance_reuse": instance_reuse,
-        "lod_material_merge": "not_run",
-        "lod_texture_bake": "not_run",
+        "lod_material_merge": "merged" if baked_far_lod else "not_run",
+        "lod_texture_bake": "baked" if baked_far_lod else "not_run",
         "lod_culling_granularity": culling_granularity,
         "lod_policy_advisory": policy_advisory,
     }
@@ -389,19 +411,31 @@ def _lod_chain_advisories(options: LODOptions, screen_coverage: tuple[float, ...
 
     far_index = len(options.ratios) - 1
     if far_index >= 0 and _is_far_lod(options.ratios[far_index], screen_coverage[far_index]):
-        advisories.append(
-            {
-                "code": "far_lod_proxy_recommended",
-                "severity": "warning",
-                "level": far_index + 1,
-                "ratio": options.ratios[far_index],
-                "screen_coverage": screen_coverage[far_index],
-                "message": (
-                    f"LOD{far_index + 1} is a far-distance geometry-only LOD; "
-                    "consider one-mesh and one-material baking when a future far-LOD backend is available"
-                ),
-            }
-        )
+        if options.far_lod_bake:
+            advisories.append(
+                {
+                    "code": "far_lod_bake_enabled",
+                    "severity": "info",
+                    "level": far_index + 1,
+                    "ratio": options.ratios[far_index],
+                    "screen_coverage": screen_coverage[far_index],
+                    "message": f"LOD{far_index + 1} uses far-distance one-material bake policy",
+                }
+            )
+        else:
+            advisories.append(
+                {
+                    "code": "far_lod_proxy_recommended",
+                    "severity": "warning",
+                    "level": far_index + 1,
+                    "ratio": options.ratios[far_index],
+                    "screen_coverage": screen_coverage[far_index],
+                    "message": (
+                        f"LOD{far_index + 1} is a far-distance geometry-only LOD; "
+                        "enable far_lod_bake for a one-material far runtime level"
+                    ),
+                }
+            )
     return advisories
 
 
@@ -420,6 +454,36 @@ def _empty_lod(mesh: Mesh) -> Mesh:
         faces=np.empty((0, 3), dtype=np.int64),
         metadata={**mesh.metadata, "lod_omitted": "tiny_part"},
     )
+
+
+def _bake_far_lod_mesh(mesh: Mesh) -> Mesh:
+    result = mesh.copy()
+    if result.triangle_count > 0:
+        result.material_indices = np.zeros(result.triangle_count, dtype=np.int64)
+    result.metadata = {
+        **result.metadata,
+        "lod_far_bake": "one_material",
+        "lod_material_merge": "merged",
+        "lod_texture_bake": "baked",
+    }
+    return result
+
+
+def _switch_distance(diagonal: float, screen_coverage: float, engine_profile: str) -> float:
+    if diagonal <= 0.0:
+        return 0.0
+    coverage = max(float(screen_coverage), 1e-6)
+    if engine_profile == "unity":
+        return diagonal / (2.0 * coverage)
+    if engine_profile == "unreal":
+        return diagonal / math.sqrt(coverage)
+    return diagonal / coverage
+
+
+def _switching_validation_status(distances: list[float]) -> str:
+    if not distances:
+        return "not_applicable"
+    return "monotonic" if distances == sorted(distances) else "non_monotonic"
 
 
 def _target_lod_triangles(source_triangles: int, ratio: float) -> int:

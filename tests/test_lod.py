@@ -301,7 +301,44 @@ def test_lods_report_chain_advisories_for_risky_levels() -> None:
     assert len(step.warnings) == 3
     assert "3-4 levels are usually enough" in step.warnings[0]
     assert "keep LOD1 and LOD2 visually conservative" in step.warnings[1]
-    assert "one-mesh and one-material baking" in step.warnings[2]
+    assert "enable far_lod_bake" in step.warnings[2]
+
+
+def test_lods_can_bake_far_level_material_policy() -> None:
+    mesh = _triangle_mesh()
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="node_a", name="Node A", part_id="shared"),
+                Node(id="node_b", name="Node B", part_id="shared"),
+            ],
+        ),
+        parts={"shared": Part(id="shared", name="Shared", mesh=mesh)},
+    )
+
+    with_lods = asset.lods(
+        LODOptions(
+            ratios=(0.5, 0.1),
+            screen_coverage=(0.5, 0.05),
+            engine_profile="unity",
+            far_lod_bake=True,
+        )
+    )
+    part = with_lods.parts["shared"]
+    far_lod = part.lod_meshes[-1]
+
+    assert part.metadata["lod_engine_profile"] == "unity"
+    assert part.metadata["lod_far_lod_bake"] == "true"
+    assert part.metadata["lod_level_material_merge"] == "not_run,merged"
+    assert part.metadata["lod_level_texture_bake"] == "not_run,baked"
+    assert part.metadata["lod_switching_validation_status"] == "monotonic"
+    assert far_lod.material_indices is not None
+    assert far_lod.material_indices.tolist() == [0]
+    assert far_lod.metadata["lod_far_bake"] == "one_material"
+    assert with_lods.metadata["lod_material_merged_levels"] == "1"
+    assert with_lods.metadata["lod_texture_baked_levels"] == "1"
 
 
 def test_lods_warn_when_selected_parts_have_no_mesh() -> None:

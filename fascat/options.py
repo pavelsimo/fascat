@@ -49,6 +49,7 @@ OcclusionStrategy = Literal["conservative", "exterior", "advanced"]
 OcclusionLevel = Literal["parts", "submeshes", "triangles"]
 LODPreset = Literal["desktop", "web", "mobile", "vr"]
 LODOutput = Literal["variants", "extras", "separate"]
+LODEngineProfile = Literal["generic", "unity", "unreal"]
 TextureCompression = Literal["ktx2", "basisu"]
 TextureFallbackFormat = Literal["auto", "png", "jpeg"]
 UsdPackageMode = Literal["default", "usdz"]
@@ -76,6 +77,9 @@ _TESSELLATION_PART_SETTING_KEYS = {
     "avoid_skinny_triangles",
     "quality_report",
     "free_edge_report",
+    "cad_uvs",
+    "tessellate_tangents",
+    "free_edge_geometry",
     "create_normals",
     "keep_brep",
     "reuse_existing_meshes",
@@ -130,6 +134,9 @@ class TessellationOptions:
     avoid_skinny_triangles: bool = False
     quality_report: bool = False
     free_edge_report: bool = False
+    cad_uvs: bool = False
+    tessellate_tangents: bool = False
+    free_edge_geometry: bool = False
     create_normals: bool = True
     keep_brep: bool = False
     reuse_existing_meshes: bool = True
@@ -172,6 +179,11 @@ class RepairOptions:
     viewer_position: tuple[float, float, float] | None = None
     fill_small_holes: bool = False
     area_epsilon: float = 1e-12
+    fix_t_junctions: bool = False
+    stitch_boundary_gaps: bool = False
+    crack_non_manifold_edges: bool = False
+    remove_sliver_faces: bool = False
+    sliver_aspect_ratio: float = 20.0
     jobs: int = 1
 
     def __post_init__(self) -> None:
@@ -179,6 +191,8 @@ class RepairOptions:
             raise ValueError("repair tolerance must be greater than or equal to 0")
         if self.area_epsilon < 0.0:
             raise ValueError("area_epsilon must be greater than or equal to 0")
+        if self.sliver_aspect_ratio <= 1.0:
+            raise ValueError("sliver_aspect_ratio must be greater than 1")
         _validate_jobs(self.jobs)
         if self.face_orientation not in {
             "exterior",
@@ -480,6 +494,8 @@ class LODOptions:
     per_part_budget: bool = False
     drop_tiny_parts: bool = False
     tiny_part_screen_size: float = 2.0
+    engine_profile: LODEngineProfile = "generic"
+    far_lod_bake: bool = False
     validate: bool = False
     jobs: int = 1
 
@@ -494,6 +510,8 @@ class LODOptions:
             raise ValueError("LOD ratios must be sorted from highest to lowest detail")
         if self.mode not in {"variants", "extras", "separate"}:
             raise ValueError("LOD mode must be one of: variants, extras, separate")
+        if self.engine_profile not in {"generic", "unity", "unreal"}:
+            raise ValueError("engine_profile must be one of: generic, unity, unreal")
         if self.screen_coverage is not None:
             screen_coverage = tuple(float(value) for value in self.screen_coverage)
             object.__setattr__(self, "screen_coverage", screen_coverage)
@@ -515,6 +533,8 @@ class LODOptions:
             "per_part_budget": self.per_part_budget,
             "drop_tiny_parts": self.drop_tiny_parts,
             "tiny_part_screen_size": self.tiny_part_screen_size,
+            "engine_profile": self.engine_profile,
+            "far_lod_bake": self.far_lod_bake,
             "validate": self.validate,
             "jobs": self.jobs,
         }
@@ -662,6 +682,36 @@ class BakeMaterialOptions:
 
     def to_dict(self) -> dict[str, object]:
         return {**asdict(self), "bake": list(self.bake)}
+
+
+@dataclass(frozen=True)
+class TextureProcessOptions:
+    max_resolution: int | None = None
+    dedupe: bool = True
+    fallback_format: TextureFallbackFormat = "auto"
+    png_compression: int = 6
+    jpeg_quality: int = 85
+
+    def __post_init__(self) -> None:
+        fallback_format = (
+            self.fallback_format.replace("-", "_") if isinstance(self.fallback_format, str) else self.fallback_format
+        )
+        object.__setattr__(self, "fallback_format", fallback_format)
+        if self.max_resolution is not None and self.max_resolution <= 0:
+            raise ValueError("max_resolution must be greater than 0 when set")
+        if self.fallback_format not in {"auto", "png", "jpeg"}:
+            raise ValueError("fallback_format must be one of: auto, png, jpeg")
+        if not isinstance(self.png_compression, int) or isinstance(self.png_compression, bool):
+            raise ValueError("png_compression must be an integer between 0 and 9")
+        if self.png_compression < 0 or self.png_compression > 9:
+            raise ValueError("png_compression must be between 0 and 9")
+        if not isinstance(self.jpeg_quality, int) or isinstance(self.jpeg_quality, bool):
+            raise ValueError("jpeg_quality must be an integer between 0 and 100")
+        if self.jpeg_quality < 0 or self.jpeg_quality > 100:
+            raise ValueError("jpeg_quality must be between 0 and 100")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
 
 
 @dataclass(frozen=True)

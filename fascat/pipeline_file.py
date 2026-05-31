@@ -32,6 +32,7 @@ from fascat.options import (
     StageOptions,
     StepReadOptions,
     TessellationOptions,
+    TextureProcessOptions,
     UnwrapOptions,
 )
 
@@ -49,6 +50,7 @@ _SUPPORTED_STEP_OPS = frozenset(
         "optimize_scene",
         "scene",
         "bake_materials",
+        "process_textures",
         "decimate",
         "remove_holes",
         "remove_occluded",
@@ -121,6 +123,9 @@ _TESSELLATION_KEYS = frozenset(
         "avoid_skinny_triangles",
         "quality_report",
         "free_edge_report",
+        "cad_uvs",
+        "tessellate_tangents",
+        "free_edge_geometry",
         "create_normals",
         "keep_brep",
         "reuse_existing_meshes",
@@ -139,6 +144,11 @@ _REPAIR_KEYS = frozenset(
         "viewer_position",
         "fill_small_holes",
         "area_epsilon",
+        "fix_t_junctions",
+        "stitch_boundary_gaps",
+        "crack_non_manifold_edges",
+        "remove_sliver_faces",
+        "sliver_aspect_ratio",
     }
 )
 _MERGE_VERTICES_KEYS = frozenset(
@@ -231,6 +241,7 @@ _SCENE_KEYS = frozenset(
 _BAKE_MATERIAL_KEYS = frozenset(
     {"maps_resolution", "force_uv_generation", "uv_channel", "padding", "bake", "merge_output"}
 )
+_TEXTURE_PROCESS_KEYS = frozenset({"max_resolution", "dedupe", "fallback_format", "png_compression", "jpeg_quality"})
 _DECIMATE_KEYS = frozenset(
     {
         "criterion",
@@ -288,6 +299,8 @@ _LOD_KEYS = frozenset(
         "per_part_budget",
         "drop_tiny_parts",
         "tiny_part_screen_size",
+        "engine_profile",
+        "far_lod_bake",
         "validate",
     }
 )
@@ -304,6 +317,7 @@ _STEP_OPTION_KEYS = {
     "optimize_scene": _SCENE_KEYS,
     "scene": _SCENE_KEYS,
     "bake_materials": _BAKE_MATERIAL_KEYS,
+    "process_textures": _TEXTURE_PROCESS_KEYS,
     "decimate": _DECIMATE_KEYS,
     "remove_holes": _REMOVE_HOLES_KEYS,
     "remove_occluded": _REMOVE_OCCLUDED_KEYS,
@@ -797,6 +811,8 @@ def _apply_step(asset: Asset, step: PipelineStep, where: Filter | None) -> Asset
         return asset.optimize_scene(_scene_options(values), where=where)
     if step.op == "bake_materials":
         return asset.bake_materials(_bake_material_options(values), where=where)
+    if step.op == "process_textures":
+        return asset.process_textures(_texture_process_options(values))
     if step.op == "decimate":
         return asset.decimate(_decimate_options(values), where=where)
     if step.op == "remove_holes":
@@ -826,6 +842,9 @@ def _tessellation(values: dict[str, object]) -> TessellationOptions:
         avoid_skinny_triangles=bool(values.get("avoid_skinny_triangles", False)),
         quality_report=bool(values.get("quality_report", False)),
         free_edge_report=bool(values.get("free_edge_report", False)),
+        cad_uvs=bool(values.get("cad_uvs", False)),
+        tessellate_tangents=bool(values.get("tessellate_tangents", False)),
+        free_edge_geometry=bool(values.get("free_edge_geometry", False)),
         create_normals=bool(values.get("create_normals", True)),
         keep_brep=bool(values.get("keep_brep", False)),
         reuse_existing_meshes=bool(values.get("reuse_existing_meshes", True)),
@@ -845,6 +864,11 @@ def _repair_options(values: dict[str, object]) -> RepairOptions:
         viewer_position=_float3(values.get("viewer_position")) if values.get("viewer_position") is not None else None,
         fill_small_holes=bool(values.get("fill_small_holes", False)),
         area_epsilon=_as_float(values.get("area_epsilon", 1e-12)),
+        fix_t_junctions=bool(values.get("fix_t_junctions", False)),
+        stitch_boundary_gaps=bool(values.get("stitch_boundary_gaps", False)),
+        crack_non_manifold_edges=bool(values.get("crack_non_manifold_edges", False)),
+        remove_sliver_faces=bool(values.get("remove_sliver_faces", False)),
+        sliver_aspect_ratio=_as_float(values.get("sliver_aspect_ratio", 20.0)),
         jobs=_as_int(values.get("jobs", 1)),
     )
 
@@ -979,6 +1003,16 @@ def _bake_material_options(values: dict[str, object]) -> BakeMaterialOptions:
     )
 
 
+def _texture_process_options(values: dict[str, object]) -> TextureProcessOptions:
+    return TextureProcessOptions(
+        max_resolution=_as_optional_int(values.get("max_resolution")),
+        dedupe=bool(values.get("dedupe", True)),
+        fallback_format=cast(Any, _literal(values.get("fallback_format", "auto"))),
+        png_compression=_as_int(values.get("png_compression", 6)),
+        jpeg_quality=_as_int(values.get("jpeg_quality", 85)),
+    )
+
+
 def _decimate_options(values: dict[str, object]) -> DecimateOptions:
     return DecimateOptions(
         criterion=cast(Any, values.get("criterion", "target")),
@@ -1045,6 +1079,8 @@ def _lod_options(values: dict[str, object]) -> LODOptions:
         per_part_budget=bool(values.get("per_part_budget", False)),
         drop_tiny_parts=bool(values.get("drop_tiny_parts", False)),
         tiny_part_screen_size=_as_float(values.get("tiny_part_screen_size", 2.0)),
+        engine_profile=cast(Any, values.get("engine_profile", "generic")),
+        far_lod_bake=bool(values.get("far_lod_bake", False)),
         validate=bool(values.get("validate", False)),
         jobs=_as_int(values.get("jobs", 1)),
     )
