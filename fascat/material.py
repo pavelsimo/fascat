@@ -48,6 +48,10 @@ class Material:
             metadata=dict(self.metadata),
         )
 
+    @property
+    def effective_opacity(self) -> float:
+        return min(self.base_color[3], self.opacity)
+
     def to_dict(self) -> dict[str, object]:
         return {
             "id": self.id,

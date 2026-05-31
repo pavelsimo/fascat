@@ -332,6 +332,33 @@ def test_usd_export_authors_preview_surface_material_inputs(tmp_path: Path) -> N
     assert bound_material.GetPath().pathString == "/Materials/pbr"
 
 
+def test_usd_export_uses_effective_material_opacity(tmp_path: Path) -> None:
+    mesh = cube_mesh()
+    material = Material(
+        id="glass",
+        name="Glass",
+        base_color=(0.6, 0.8, 1.0, 0.4),
+        opacity=0.8,
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Cube", part_id="cube")]),
+        parts={"cube": Part(id="cube", name="Cube", mesh=mesh, material_ids=[material.id])},
+        materials={material.id: material},
+    )
+    output = tmp_path / "effective-opacity.usda"
+
+    write_usd(asset, output)
+
+    stage = Usd.Stage.Open(str(output))
+    assert stage is not None
+    shader = UsdShade.Shader(stage.GetPrimAtPath("/Materials/glass/PreviewSurface"))
+    mesh_prim = next(prim for prim in Usd.PrimRange(stage.GetDefaultPrim()) if prim.IsA(UsdGeom.Mesh))
+    usd_mesh = UsdGeom.Mesh(mesh_prim)
+
+    assert shader.GetInput("opacity").Get() == pytest.approx(0.4)
+    assert usd_mesh.GetDisplayOpacityAttr().Get()[0] == pytest.approx(0.4)
+
+
 def test_usd_export_authors_baked_texture_shader_bindings(tmp_path: Path) -> None:
     mesh = cube_mesh()
     uris = {

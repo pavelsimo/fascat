@@ -24,6 +24,30 @@ def test_material_copies_input_metadata() -> None:
 
 
 @pytest.mark.parametrize(
+    ("base_alpha", "opacity", "expected"),
+    [
+        (0.6, 1.0, 0.6),
+        (1.0, 0.35, 0.35),
+        (0.35, 0.35, 0.35),
+        (0.5, 0.25, 0.25),
+    ],
+)
+def test_material_effective_opacity_does_not_double_count_cad_alpha(
+    base_alpha: float,
+    opacity: float,
+    expected: float,
+) -> None:
+    material = Material(
+        id="glass",
+        name="Glass",
+        base_color=(0.8, 0.9, 1.0, base_alpha),
+        opacity=opacity,
+    )
+
+    assert material.effective_opacity == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
     ("overrides", "match"),
     [
         ({"base_color": (1.0, 0.0, 0.0)}, "base_color must contain RGBA values"),

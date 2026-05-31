@@ -264,7 +264,7 @@ def _write_mtl(path: Path, materials: dict[str, Material]) -> None:
     for material in materials.values():
         lines.append(f"newmtl {_obj_name(material.id)}")
         lines.append(f"Kd {material.base_color[0]:.9g} {material.base_color[1]:.9g} {material.base_color[2]:.9g}")
-        lines.append(f"d {material.opacity:.9g}")
+        lines.append(f"d {material.effective_opacity:.9g}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

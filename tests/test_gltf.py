@@ -143,6 +143,7 @@ def test_glb_export_writes_valid_scene_materials_uvs_and_lod_metadata(tmp_path: 
     assert document["meshes"][0]["primitives"][0]["attributes"]["TEXCOORD_0"] >= 0
     assert document["meshes"][0]["primitives"][0]["attributes"]["TANGENT"] >= 0
     assert document["materials"][0]["pbrMetallicRoughness"]["baseColorFactor"] == [1.0, 0.0, 0.0, 1.0]
+    assert document["materials"][1]["pbrMetallicRoughness"]["baseColorFactor"] == [0.0, 0.0, 1.0, 0.5]
     assert document["materials"][1]["alphaMode"] == "BLEND"
     assert "_fascat_index" not in document["materials"][0]
     assert occurrence["matrix"][12:15] == [2.0, 0.0, 0.0]
@@ -207,6 +208,38 @@ def test_glb_export_uses_source_texture_image_bindings(tmp_path: Path) -> None:
 
     document, _binary = _read_glb(output)
     material = document["materials"][0]
+    assert material["pbrMetallicRoughness"]["baseColorTexture"]["index"] == 0
+
+
+def test_glb_export_marks_baked_opacity_textures_blend(tmp_path: Path) -> None:
+    output = tmp_path / "opacity-map.glb"
+    asset = _asset_with_materials_and_lods()
+    asset.images["paint_alpha"] = ImageResource(
+        id="paint_alpha",
+        name="paint-alpha.png",
+        mime_type="image/png",
+        data=b"png",
+        width=1,
+        height=1,
+    )
+    asset.materials["red"] = Material(
+        id="red",
+        name="Red",
+        base_color=(1.0, 0.0, 0.0, 0.6),
+        opacity=0.6,
+        metadata={
+            "baked_maps": "base_color,opacity",
+            "baked_texture_base_color_image": "paint_alpha",
+        },
+    )
+
+    write_gltf(asset, output)
+
+    document, _binary = _read_glb(output)
+    material = document["materials"][0]
+
+    assert material["alphaMode"] == "BLEND"
+    assert material["pbrMetallicRoughness"]["baseColorFactor"] == [1.0, 0.0, 0.0, 0.6]
     assert material["pbrMetallicRoughness"]["baseColorTexture"]["index"] == 0
     assert document["images"][0]["uri"].startswith("data:image/png;base64,")
 

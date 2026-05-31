@@ -407,8 +407,11 @@ def test_gltf_write_reports_lod_and_metadata_runtime_dependencies(tmp_path) -> N
 def test_obj_export_writes_mesh_and_mtl_sidecar(tmp_path) -> None:  # type: ignore[no-untyped-def]
     output = tmp_path / "triangle.obj"
 
-    _asset().write_obj(output, options=ObjExportOptions(materials=True, write_mtl=True, preserve_groups=True))
+    asset = _asset()
+    asset.materials["mat"] = Material(id="mat", name="Mat", base_color=(0.2, 0.4, 0.6, 0.6), opacity=0.6)
+    asset.write_obj(output, options=ObjExportOptions(materials=True, write_mtl=True, preserve_groups=True))
     text = output.read_text(encoding="utf-8")
+    mtl = (tmp_path / "triangle.mtl").read_text(encoding="utf-8")
 
     assert validate_obj(output) == {"meshes": 1, "points": 3, "triangles": 1}
     assert "usemtl mat" in text
@@ -416,6 +419,7 @@ def test_obj_export_writes_mesh_and_mtl_sidecar(tmp_path) -> None:  # type: igno
     assert "s off" in text
     assert "f 1//1 2//1 3//1" in text
     assert (tmp_path / "triangle.mtl").exists()
+    assert "d 0.6" in mtl
 
 
 def test_obj_export_writes_staged_vertex_normals_and_smoothing_groups(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -504,7 +508,7 @@ def test_fbx_export_writes_ascii_scene_graph_and_layers(tmp_path) -> None:  # ty
             id="root", name="root", children=[Node(id="tri", name="Triangle", part_id="tri", transform=transform)]
         ),
         parts={"tri": Part(id="tri", name="Triangle", mesh=mesh, material_ids=["mat"])},
-        materials={"mat": Material(id="mat", name="Mat", base_color=(0.2, 0.4, 0.6, 0.75), metallic=0.5)},
+        materials={"mat": Material(id="mat", name="Mat", base_color=(0.2, 0.4, 0.6, 0.75), metallic=0.5, opacity=0.75)},
         units="metre",
         meters_per_unit=1.0,
         up_axis="Y",
@@ -528,6 +532,7 @@ def test_fbx_export_writes_ascii_scene_graph_and_layers(tmp_path) -> None:  # ty
     assert 'P: "Lcl Translation", "Lcl Translation", "", "A",2,0,0' in text
     assert 'P: "UpAxis", "int", "Integer", "",1' in text
     assert 'P: "UnitScaleFactor", "double", "Number", "",100' in text
+    assert 'P: "Opacity", "double", "Number", "A",0.75' in text
     assert asset.report.steps[-1].options["format"] == "FBX"
     assert "file size budget exceeded" in asset.report.warnings[-1]
 

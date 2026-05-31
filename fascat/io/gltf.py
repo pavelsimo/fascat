@@ -485,7 +485,7 @@ def _texture_fallback_label(texture_fallback_format: str) -> str:
 
 def _material_needs_alpha_safe_fallback(material: Material) -> bool:
     maps = _baked_texture_maps(material.metadata.get("baked_maps"))
-    return material.opacity < 1.0 or material.base_color[3] < 1.0 or "opacity" in maps
+    return material.effective_opacity < 1.0 or "opacity" in maps
 
 
 def _baked_texture_maps(value: object) -> set[str]:
@@ -752,21 +752,28 @@ def _write_materials(
     for index, material in enumerate(materials.values()):
         fascat_extras: dict[str, object] = {"materialId": material.id}
         _add_metadata_extras(fascat_extras, material.metadata, metadata_options)
+        base_color_factor = list(material.base_color)
+        base_color_factor[3] = material.effective_opacity
         gltf_material: dict[str, Any] = {
             "name": material.name or material.id,
             "pbrMetallicRoughness": {
-                "baseColorFactor": list(material.base_color),
+                "baseColorFactor": base_color_factor,
                 "metallicFactor": material.metallic,
                 "roughnessFactor": material.roughness,
             },
             "extras": {"fascat": fascat_extras},
         }
         _add_baked_textures(gltf_material, material, image_resources, images, textures, texture_indices_by_uri)
-        if material.opacity < 1.0 or material.base_color[3] < 1.0:
+        if _material_uses_alpha(material):
             gltf_material["alphaMode"] = "BLEND"
         gltf_material["_fascat_index"] = index
         written[material.id] = gltf_material
     return written
+
+
+def _material_uses_alpha(material: Material) -> bool:
+    maps = _baked_texture_maps(material.metadata.get("baked_maps"))
+    return material.effective_opacity < 1.0 or "opacity" in maps
 
 
 def _add_baked_textures(

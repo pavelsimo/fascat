@@ -176,8 +176,8 @@ def _model_object(object_id: int, name: str, transform: FloatArray, *, kind: str
 
 
 def _material_object(object_id: int, material: Material) -> list[str]:
-    r, g, b, alpha = material.base_color
-    opacity = alpha * material.opacity
+    r, g, b, _alpha = material.base_color
+    opacity = material.effective_opacity
     shininess = max(1.0, (1.0 - material.roughness) * 100.0)
     reflectivity = max(0.0, min(1.0, material.metallic))
     return [

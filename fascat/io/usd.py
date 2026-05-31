@@ -294,7 +294,7 @@ def _write_materials(
         shader = UsdShade.Shader.Define(stage, f"{material_path}/PreviewSurface")
         shader.CreateIdAttr("UsdPreviewSurface")
         shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*material.base_color[:3]))
-        shader.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(float(material.opacity))
+        shader.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(float(material.effective_opacity))
         shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(float(material.metallic))
         shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(float(material.roughness))
         _add_baked_texture_bindings(stage, material_path, material, images, shader, Sdf, UsdShade)
@@ -536,7 +536,7 @@ def _write_display_color(usd_mesh: Any, part: Part, materials: dict[str, Materia
     elif part.material_ids:
         material = materials.get(part.material_ids[0])
         if material is not None:
-            base_color = material.base_color
+            base_color = (*material.base_color[:3], material.effective_opacity)
     usd_mesh.CreateDisplayColorAttr(_vt_vec3f_array(np.asarray([base_color[:3]], dtype=np.float32), Vt))
     usd_mesh.CreateDisplayOpacityAttr([float(base_color[3])])
 
