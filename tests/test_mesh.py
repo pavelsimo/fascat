@@ -970,6 +970,27 @@ def test_mesh_copy_does_not_reenter_constructor_copy(monkeypatch: pytest.MonkeyP
     assert mesh.uvs[0][0, 0] == 0.0
 
 
+def test_mesh_copy_reuses_cached_topology_without_sharing_mutable_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [2, 1, 3]], dtype=int),
+    )
+    edge_faces = mesh._edge_faces_map()
+    copied = mesh.copy()
+    edge_faces[(1, 2)].append(99)
+
+    def fail_face_edges(self: Mesh) -> np.ndarray:
+        pytest.fail("copied mesh should reuse the cloned topology cache")
+
+    monkeypatch.setattr(Mesh, "_face_edges", fail_face_edges)
+
+    copied_edge_faces = copied._edge_faces_map()
+
+    assert copied_edge_faces[(1, 2)] == [0, 1]
+
+
 def test_subdivide_long_edges_enforces_limit_and_preserves_materials() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [4, 0, 0], [0, 3, 0]], dtype=float),

@@ -232,7 +232,7 @@ class Mesh:
         return int(self.faces.shape[0])
 
     def copy(self) -> Mesh:
-        return Mesh._adopt(
+        mesh = Mesh._adopt(
             points=self.points.copy(),
             faces=self.faces.copy(),
             normals=None if self.normals is None else self.normals.copy(),
@@ -242,6 +242,8 @@ class Mesh:
             face_groups={name: values.copy() for name, values in self.face_groups.items()},
             metadata=dict(self.metadata),
         )
+        mesh._cache = _clone_cache_entries(self._cache)
+        return mesh
 
     def validate(self) -> None:
         if self.points.ndim != 2 or self.points.shape[1] != 3:
@@ -2668,6 +2670,24 @@ def _array_cache_token(array: NDArray[Any]) -> tuple[tuple[int, ...], str, bytes
     digest = hashlib.blake2b(digest_size=16)
     digest.update(contiguous.tobytes())
     return tuple(int(size) for size in contiguous.shape), str(contiguous.dtype), digest.digest()
+
+
+def _clone_cache_entries(
+    cache: dict[str, tuple[tuple[object, ...], object]],
+) -> dict[str, tuple[tuple[object, ...], object]]:
+    return {name: (token, _clone_cache_value(value)) for name, (token, value) in cache.items()}
+
+
+def _clone_cache_value(value: object) -> object:
+    if isinstance(value, np.ndarray):
+        return value.copy()
+    if isinstance(value, tuple):
+        return tuple(_clone_cache_value(item) for item in value)
+    if isinstance(value, list):
+        return [_clone_cache_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _clone_cache_value(item) for key, item in value.items()}
+    return value
 
 
 def _boundary_edges_from_faces(faces: list[list[int]]) -> set[tuple[int, int]]:
