@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- add IGES and native BREP import support for CAD conversion workflows
+- add benchmark tooling for measuring CAD import and conversion performance
+- add configurable per-part worker jobs for repair, staging, optimization, decimation, and LOD generation
+
+### Changed
+- improve conversion performance across mesh repair, staging, occlusion, decimation, tessellation, LOD generation, and USD/glTF/OBJ/STL export paths
+- reduce repeated mesh topology, validation, fingerprint, and export-buffer work across pipeline stages
+- accelerate occlusion removal with triangle and occurrence BVH culling
+
+### Fixed
+- bound memory usage during nearest-centroid material assignment on large meshes
+
 ## [0.2.0] - 2026-05-28
 
 ### Added
