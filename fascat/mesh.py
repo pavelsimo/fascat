@@ -38,6 +38,16 @@ _GLOBAL_MESH_CACHE_LOCK = Lock()
 _MISSING_CACHE_VALUE = object()
 
 
+def _tolerance_decimals(tolerance: float) -> int:
+    if tolerance <= 0.0:
+        return 12
+    return max(0, min(12, int(math.ceil(-math.log10(tolerance)))))
+
+
+def _rounded_key(values: NDArray[np.float64], decimals: int) -> tuple[float, ...]:
+    return tuple(float(value) for value in np.round(values, decimals).tolist())
+
+
 @dataclass(frozen=True, slots=True)
 class _CentroidKdNode:
     index: int
@@ -2073,6 +2083,92 @@ class Mesh:
             "out_of_unit_vertices": out_of_unit_vertices,
             "degenerate_faces": int(np.count_nonzero(degenerate)),
             "overlapping_face_pairs": overlapping_pairs,
+        }
+
+    def uv_seam_graph_stats(self, channel: int = 0, *, tolerance: float = 1e-9) -> dict[str, int | float]:
+        if tolerance < 0.0:
+            raise ValueError("tolerance must be greater than or equal to 0")
+        if channel not in self.uvs:
+            raise ValueError(f"uv channel {channel} is not present")
+        if self.vertex_count == 0 or self.triangle_count == 0:
+            return {
+                "mesh_vertices": 0,
+                "position_vertices": 0,
+                "edges": 0,
+                "components": 0,
+                "total_length": 0.0,
+                "longest_component_length": 0.0,
+            }
+
+        decimals = _tolerance_decimals(tolerance)
+        position_keys = [_rounded_key(point, decimals) for point in self.points]
+        uv_keys = [_rounded_key(uv, decimals) for uv in self.uvs[channel]]
+        edge_uvs: dict[
+            tuple[tuple[float, ...], tuple[float, ...]], set[tuple[tuple[float, ...], tuple[float, ...]]]
+        ] = defaultdict(set)
+        edge_lengths: dict[tuple[tuple[float, ...], tuple[float, ...]], float] = {}
+        edge_vertices: dict[tuple[tuple[float, ...], tuple[float, ...]], set[int]] = defaultdict(set)
+        for face in self.faces.astype(int).tolist():
+            for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
+                start_key = position_keys[start]
+                end_key = position_keys[end]
+                if start_key == end_key:
+                    continue
+                if start_key <= end_key:
+                    edge_key = (start_key, end_key)
+                    uv_pair = (uv_keys[start], uv_keys[end])
+                else:
+                    edge_key = (end_key, start_key)
+                    uv_pair = (uv_keys[end], uv_keys[start])
+                edge_uvs[edge_key].add(uv_pair)
+                edge_vertices[edge_key].update((start, end))
+                edge_lengths.setdefault(edge_key, float(np.linalg.norm(self.points[start] - self.points[end])))
+
+        seam_edges = [edge for edge, uv_pairs in edge_uvs.items() if len(uv_pairs) > 1]
+        if not seam_edges:
+            return {
+                "mesh_vertices": 0,
+                "position_vertices": 0,
+                "edges": 0,
+                "components": 0,
+                "total_length": 0.0,
+                "longest_component_length": 0.0,
+            }
+
+        parent: dict[tuple[float, ...], tuple[float, ...]] = {}
+
+        def find(key: tuple[float, ...]) -> tuple[float, ...]:
+            parent.setdefault(key, key)
+            while parent[key] != key:
+                parent[key] = parent[parent[key]]
+                key = parent[key]
+            return key
+
+        def union(left: tuple[float, ...], right: tuple[float, ...]) -> None:
+            left_root = find(left)
+            right_root = find(right)
+            if left_root != right_root:
+                parent[right_root] = left_root
+
+        mesh_vertices: set[int] = set()
+        position_vertices: set[tuple[float, ...]] = set()
+        for left, right in seam_edges:
+            union(left, right)
+            position_vertices.update((left, right))
+            mesh_vertices.update(edge_vertices[(left, right)])
+
+        component_lengths: dict[tuple[float, ...], float] = defaultdict(float)
+        for left, right in seam_edges:
+            component_lengths[find(left)] += edge_lengths[(left, right)]
+        total_length = float(sum(component_lengths.values()))
+        longest = float(max(component_lengths.values(), default=0.0))
+        return {
+            "mesh_vertices": len(mesh_vertices),
+            "position_vertices": len(position_vertices),
+            "edges": len(seam_edges),
+            "components": len(component_lengths),
+            "total_length": total_length,
+            "longest_component_length": longest,
         }
 
     def uv_distortion_metrics(self, channel: int = 0, *, tolerance: float = 1e-9) -> dict[str, int | float]:

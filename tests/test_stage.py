@@ -399,6 +399,56 @@ def test_stage_classifies_existing_uv_channels_by_runtime_domain() -> None:
     assert "2 UV vertices outside 0..1" in warnings[0]
 
 
+def test_stage_records_tileable_uv_seam_graph() -> None:
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [0, 0, 0],
+                [1, 0, 0],
+                [1, -1, 0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=int),
+        uvs={
+            0: np.array(
+                [
+                    [0.0, 0.0],
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [0.1, 0.2],
+                    [0.9, 0.2],
+                    [1.0, -1.0],
+                ],
+                dtype=float,
+            )
+        },
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    staged = asset.stage(StageOptions(uv0="none", uv1=None))
+    staged_mesh = staged.parts["part"].mesh
+
+    assert staged_mesh is not None
+    assert staged_mesh.metadata["uv0_seam_graph_status"] == "present"
+    assert staged_mesh.metadata["uv0_seam_edges"] == "1"
+    assert staged_mesh.metadata["uv0_seam_components"] == "1"
+    assert staged_mesh.metadata["uv0_seam_position_vertices"] == "2"
+    assert staged_mesh.metadata["uv0_seam_mesh_vertices"] == "4"
+    assert staged_mesh.metadata["uv0_seam_length"] == "1"
+    assert staged_mesh.metadata["uv0_seam_longest_component_length"] == "1"
+    assert staged.metadata["stage_uv_seam_graph_channels"] == "1"
+    assert staged.metadata["stage_uv_seam_graph_edges"] == "1"
+    assert staged.report.steps[-1].after["stage_uv_seam_graph_channels"] == 1
+    assert staged.report.steps[-1].after["stage_uv_seam_graph_edges"] == 1
+
+
 def test_stage_respects_normals_false_and_uv0_none() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),

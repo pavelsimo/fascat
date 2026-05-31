@@ -1531,6 +1531,16 @@ def _stage_report_stats(asset: Asset) -> dict[str, int]:
             asset.metadata["stage_uv_forbid_overlapping_violations"],
             0,
         )
+    if "stage_uv_seam_graph_channels" in asset.metadata:
+        stats["stage_uv_seam_graph_channels"] = _metadata_int(
+            asset.metadata["stage_uv_seam_graph_channels"],
+            0,
+        )
+    if "stage_uv_seam_graph_edges" in asset.metadata:
+        stats["stage_uv_seam_graph_edges"] = _metadata_int(
+            asset.metadata["stage_uv_seam_graph_edges"],
+            0,
+        )
     for key in (
         "stage_normals_generated_parts",
         "stage_normals_regenerated_parts",

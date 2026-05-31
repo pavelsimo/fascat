@@ -79,6 +79,8 @@ def _empty_uv_summary() -> dict[str, int]:
         "bake_missing_repack": 0,
         "policy_intent": 0,
         "forbid_overlapping_violations": 0,
+        "seam_graph_channels": 0,
+        "seam_graph_edges": 0,
     }
 
 
@@ -636,6 +638,7 @@ def _tag_uv_layout_quality(
         )
         validation_problems = _uv_validation_problems(stats, domain=domain, forbid_overlapping=forbid_overlapping)
         _tag_uv_policy_metadata(mesh, prefix, mode, domain, stats, options, uv_summary)
+        _tag_uv_seam_graph_metadata(mesh, prefix, channel, uv_summary)
         mesh.metadata[f"{prefix}_domain"] = domain
         mesh.metadata[f"{prefix}_bounds"] = _uv_bounds(mesh.uvs[channel])
         mesh.metadata[f"{prefix}_unit_domain_status"] = _uv_unit_domain_status(stats["out_of_unit_vertices"])
@@ -717,6 +720,26 @@ def _tag_uv_policy_metadata(
         uv_summary["policy_intent"] += 1
 
 
+def _tag_uv_seam_graph_metadata(
+    mesh: Mesh,
+    prefix: str,
+    channel: int,
+    uv_summary: dict[str, int],
+) -> None:
+    stats = mesh.uv_seam_graph_stats(channel)
+    seam_edges = int(stats["edges"])
+    mesh.metadata[f"{prefix}_seam_graph_status"] = "present" if seam_edges else "none"
+    mesh.metadata[f"{prefix}_seam_edges"] = str(seam_edges)
+    mesh.metadata[f"{prefix}_seam_components"] = str(int(stats["components"]))
+    mesh.metadata[f"{prefix}_seam_position_vertices"] = str(int(stats["position_vertices"]))
+    mesh.metadata[f"{prefix}_seam_mesh_vertices"] = str(int(stats["mesh_vertices"]))
+    mesh.metadata[f"{prefix}_seam_length"] = _format_uv_metric(stats["total_length"])
+    mesh.metadata[f"{prefix}_seam_longest_component_length"] = _format_uv_metric(stats["longest_component_length"])
+    if seam_edges:
+        uv_summary["seam_graph_channels"] += 1
+        uv_summary["seam_graph_edges"] += seam_edges
+
+
 def _should_compute_uv_distortion(*, domain: str, options: StageOptions) -> bool:
     return domain == "bake" or options.unwrap.max_stretch is not None
 
@@ -764,6 +787,10 @@ def _tag_uv_summary(asset: Asset, uv_summary: dict[str, int]) -> None:
     forbid_violations = uv_summary["forbid_overlapping_violations"]
     if forbid_violations:
         asset.metadata["stage_uv_forbid_overlapping_violations"] = str(forbid_violations)
+    seam_channels = uv_summary["seam_graph_channels"]
+    if seam_channels:
+        asset.metadata["stage_uv_seam_graph_channels"] = str(seam_channels)
+        asset.metadata["stage_uv_seam_graph_edges"] = str(uv_summary["seam_graph_edges"])
 
 
 def _uv_workflow_steps(mesh: Mesh, prefix: str, mode: str) -> str:
