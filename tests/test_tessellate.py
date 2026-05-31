@@ -783,6 +783,68 @@ def test_tessellation_quality_advisor_accepts_detail_tuned_settings() -> None:
     assert tessellated.report.steps[-1].warnings == []
 
 
+def test_detail_adaptive_tessellation_applies_material_metadata_settings(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import fascat.ops.tessellate as tessellate_module
+
+    material = Material(
+        id="chrome",
+        name="Polished chrome",
+        base_color=(0.8, 0.8, 0.8, 1.0),
+        metallic=1.0,
+        roughness=0.2,
+    )
+    high_detail_shape = object()
+    plain_shape = object()
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="node_high", name="Inspection", part_id="high"),
+                Node(id="node_plain", name="Plain", part_id="plain"),
+            ],
+        ),
+        parts={
+            "high": Part(
+                id="high",
+                name="Inspection",
+                source_shape=high_detail_shape,
+                material_ids=[material.id],
+                metadata={"surface_detail": "high"},
+            ),
+            "plain": Part(id="plain", name="Plain", source_shape=plain_shape),
+        },
+        materials={material.id: material},
+    )
+    calls: dict[int, TessellationOptions] = {}
+
+    def fake_tessellate_shape(shape: object, options: TessellationOptions, **_kwargs: object) -> Mesh:
+        calls[id(shape)] = options
+        offset = 0.0 if shape is high_detail_shape else 2.0
+        mesh = triangle_mesh()
+        mesh.points = mesh.points + np.array([offset, 0.0, 0.0])
+        return mesh
+
+    monkeypatch.setattr(tessellate_module, "tessellate_shape", fake_tessellate_shape)
+
+    tessellated = asset.tessellate(TessellationOptions(detail_adaptive=True, quality_report=True))
+    high = tessellated.parts["high"]
+    plain = tessellated.parts["plain"]
+
+    assert calls[id(high_detail_shape)].sag_ratio == 0.01
+    assert calls[id(high_detail_shape)].curvature_adaptive is True
+    assert calls[id(plain_shape)].sag_ratio is None
+    assert calls[id(plain_shape)].curvature_adaptive is False
+    assert high.metadata["tessellation_detail_adaptive"] == "applied"
+    assert high.metadata["tessellation_detail_contexts"] == "high_detail_metadata,shiny_material"
+    assert high.metadata["tessellation_detail_adaptive_sag_ratio"] == "0.01"
+    assert high.mesh is not None
+    assert high.mesh.metadata["tessellation_detail_adaptive"] == "applied"
+    assert plain.metadata["tessellation_detail_adaptive"] == "not_applicable"
+    assert "tessellation_quality_advisories" not in high.metadata
+    assert tessellated.report.steps[-1].warnings == []
+
+
 def test_tessellation_free_edge_report_records_reused_meshes() -> None:
     asset = Asset(
         root=Node(id="root", name="root", children=[Node(id="node", name="Part", part_id="part")]),

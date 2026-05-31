@@ -670,6 +670,13 @@ def cmd_convert(
         bool,
         typer.Option("--curvature-adaptive", help="Use tighter interior meshing on curved CAD faces."),
     ] = False,
+    detail_adaptive: Annotated[
+        bool,
+        typer.Option(
+            "--detail-adaptive",
+            help="Auto-tighten tessellation for shiny or high-detail material/metadata parts.",
+        ),
+    ] = False,
     avoid_skinny_triangles: Annotated[
         bool,
         typer.Option("--avoid-skinny-triangles", help="Refine long skinny triangles after tessellation."),
@@ -1340,6 +1347,7 @@ def cmd_convert(
         "min_edge_length": min_edge_length,
         "preserve_boundaries": preserve_boundaries,
         "curvature_adaptive": curvature_adaptive,
+        "detail_adaptive": detail_adaptive,
         "avoid_skinny_triangles": avoid_skinny_triangles,
         "quality_report": str(quality_report) if quality_report else None,
         "free_edge_report": free_edge_report,
@@ -1701,6 +1709,7 @@ def cmd_convert(
             else base_tessellation.max_polygon_length,
             preserve_boundaries=preserve_boundaries,
             curvature_adaptive=curvature_adaptive,
+            detail_adaptive=detail_adaptive or base_tessellation.detail_adaptive,
             avoid_skinny_triangles=avoid_skinny_triangles,
             quality_report=quality_report is not None or base_tessellation.quality_report,
             free_edge_report=free_edge_report or base_tessellation.free_edge_report,

@@ -531,6 +531,7 @@ def test_asset_operation_reports_include_options_and_before_after_counts() -> No
             "max_polygon_length",
             "preserve_boundaries",
             "curvature_adaptive",
+            "detail_adaptive",
             "avoid_skinny_triangles",
             "quality_report",
             "free_edge_report",

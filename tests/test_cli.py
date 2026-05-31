@@ -1272,6 +1272,7 @@ def test_convert_writes_tessellation_quality_report(monkeypatch, tmp_path: Path)
         assert tessellation.sag_ratio == 0.02
         assert tessellation.min_edge_length == 0.01
         assert tessellation.max_polygon_length == 3.0
+        assert tessellation.detail_adaptive is True
         assert tessellation.avoid_skinny_triangles is True
         assert tessellation.quality_report is True
         assert tessellation.free_edge_report is True
@@ -1302,6 +1303,7 @@ def test_convert_writes_tessellation_quality_report(monkeypatch, tmp_path: Path)
             "0.02",
             "--retessellate-existing-meshes",
             "--free-edge-report",
+            "--detail-adaptive",
             "--avoid-skinny-triangles",
             "--unwrap-method",
             "isometric",

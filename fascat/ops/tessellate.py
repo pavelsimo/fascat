@@ -24,6 +24,7 @@ _LONG_OBJECT_AXIS_RATIO = 8.0
 _SHINY_ROUGHNESS_THRESHOLD = 0.25
 _METALLIC_DETAIL_ROUGHNESS_THRESHOLD = 0.5
 _METALLIC_DETAIL_THRESHOLD = 0.5
+_DETAIL_ADAPTIVE_SAG_RATIO = 0.01
 _DETAIL_METADATA_KEYS = frozenset(
     {
         "critical_detail",
@@ -61,8 +62,9 @@ def tessellate_asset(asset: Asset, options: TessellationOptions, *, selected_par
     for part in result.parts.values():
         if selected_part_ids is not None and part.id not in selected_part_ids:
             continue
-        part_options = _options_for_part(options, part)
+        part_options = _options_for_part(options, part, result)
         if part.mesh is not None and part_options.reuse_existing_meshes:
+            _record_detail_adaptive_selection(result, part, options, part_options)
             _record_tessellation_attribute_sources(result, part, part_options, geometry_source="imported_mesh")
             _record_tessellation_diagnostics(result, part, part_options)
             continue
@@ -95,6 +97,7 @@ def tessellate_asset(asset: Asset, options: TessellationOptions, *, selected_par
         else:
             part.mesh = cached_mesh.copy()
         part.fingerprint = part.mesh.fingerprint()
+        _record_detail_adaptive_selection(result, part, options, part_options)
         _record_tessellation_attribute_sources(result, part, part_options, geometry_source="tessellation")
         _record_tessellation_diagnostics(result, part, part_options)
         _record_brep_patch_cleanup(result, part, part_options)
@@ -294,14 +297,44 @@ def _face_material_indices_from_metadata(metadata: Metadata) -> list[int] | None
     return [int(item) for item in str(value).split(",") if item]
 
 
-def _options_for_part(options: TessellationOptions, part: Part) -> TessellationOptions:
+def _options_for_part(options: TessellationOptions, part: Part, asset: Asset) -> TessellationOptions:
     overrides = options.part_settings.get(part.id) or options.part_settings.get(part.name)
-    if not overrides:
+    detail_contexts = _detail_sensitive_contexts(asset, part) if options.detail_adaptive else []
+    if not overrides and not detail_contexts:
         return options
     values = options.to_dict()
     values["part_settings"] = {}
-    values.update(overrides)
+    if detail_contexts:
+        if values["sag_ratio"] is None:
+            values["sag_ratio"] = _DETAIL_ADAPTIVE_SAG_RATIO
+        values["curvature_adaptive"] = True
+    if overrides:
+        values.update(overrides)
     return TessellationOptions(**cast(Any, values))
+
+
+def _record_detail_adaptive_selection(
+    asset: Asset,
+    part: Part,
+    requested: TessellationOptions,
+    effective: TessellationOptions,
+) -> None:
+    if not requested.detail_adaptive:
+        return
+    contexts = _detail_sensitive_contexts(asset, part)
+    state = "not_applicable"
+    if contexts:
+        state = "applied" if effective.sag_ratio is not None or effective.curvature_adaptive else "overridden"
+    metadata = {
+        "tessellation_detail_adaptive": state,
+        "tessellation_detail_contexts": ",".join(contexts),
+        "tessellation_detail_adaptive_curvature": str(effective.curvature_adaptive).lower(),
+    }
+    if effective.sag_ratio is not None:
+        metadata["tessellation_detail_adaptive_sag_ratio"] = _format_metadata_value(effective.sag_ratio)
+    part.metadata.update(metadata)
+    if part.mesh is not None:
+        part.mesh.metadata.update(metadata)
 
 
 def _occt_mesh_parameters(options: TessellationOptions, parameters_factory: Any) -> Any:
@@ -417,6 +450,7 @@ def tessellation_tolerance_policy(asset: Asset, options: TessellationOptions) ->
         "sag": float(options.sag),
         "sag_ratio": options.sag_ratio,
         "curvature_adaptive": bool(options.curvature_adaptive),
+        "detail_adaptive": bool(options.detail_adaptive),
         "preserve_boundaries": bool(options.preserve_boundaries),
     }
     if active_kind == "absolute_sag":
@@ -579,6 +613,8 @@ def _tessellation_tolerance_policy_metadata(policy: dict[str, object]) -> dict[s
         "sag",
         "sag_ratio",
         "angle_degrees",
+        "curvature_adaptive",
+        "preserve_boundaries",
         "min_edge_length",
         "max_edge_length",
         "max_polygon_length",

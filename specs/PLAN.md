@@ -44,7 +44,7 @@ writers, trimesh + numpy (mesh ops).
 | Stage | Real & complete | Approximate (refine) | Gap (metadata-only / not implemented) |
 | --- | --- | --- | --- |
 | **Import** | STEP hierarchy, transforms, colors, metadata, units, repeated-part instances; explicit multi-root STEP path-list import; quoted external-reference STEP graph discovery/merge from a master file; IGES XDE hierarchy/material import; native BREP single-shape import | deeper vendor-specific external-reference placement semantics | typed PMI, design variants, other non-STEP formats |
-| **Tessellate** | sag / angle / min-edge / curvature-adaptive meshing, CAD UV extraction/projected fallback, tessellation-time tangents, free-edge geometry metadata | CAD UV projection fallback | intrinsic/conformal CAD UV solver, auto per-part tessellation criteria |
+| **Tessellate** | sag / angle / min-edge / curvature-adaptive meshing, material/metadata-driven detail-adaptive per-part criteria, CAD UV extraction/projected fallback, tessellation-time tangents, free-edge geometry metadata | CAD UV projection fallback | intrinsic/conformal CAD UV solver, curvature-only auto criteria |
 | **Repair / Heal** | vertex merge, dedup, degenerate cleanup, winding fix, small-hole fill, normals; mesh T-junction sewing, boundary-gap stitching, non-manifold cracking, sliver removal, viewer/open-shell orientation; BREP fix-edge / sew / same-domain cleanup / coplanar overlap cleanup | mesh-level hole removal, open-shell component orientation | non-orientable strip cracking |
 | **Stage / UV** | normals, tangents, xatlas unwrap + bake-domain packing/padding, AABB UV, UV copy, material PBR normalize / merge | solver policy intent | island merge / align, seam graph, backend-enforced solver controls |
 | **Materials** | per-face colors + PBR factors preserved, first-class image resources, raster material atlas baking, source image resize/dedupe/PNG-JPEG fallback processing, JSON/MTL/ZIP vendor material-library import | source texture sidecar extraction, CAD material-name PBR rule mapping, sampled AO bake | high-poly transfer, closed/proprietary vendor material-library containers |
@@ -58,7 +58,7 @@ writers, trimesh + numpy (mesh ops).
 The basics are present and produce a valid RT3D asset:
 
 - **Import** (`io/step.py`, `io/iges.py`, `io/brep.py`, OCCT/OCP): STEP geometry, explicit multi-root STEP path-list import, master STEP quoted external-reference graph discovery/merge, STEP/IGES assembly hierarchy where exposed, transforms, colors, metadata, units, repeated-part instances, native BREP single-shape import, source-space normalization, sidecar source texture reference extraction, and first-pass CAD material-name PBR mapping.
-- **Tessellate** (`ops/tessellate.py`, OCCT `BRepMesh`): `sag`, `angle`, `min_edge_length`, `curvature_adaptive`, `preserve_boundaries`, CAD UV extraction/projected fallback, tessellation-time tangents, and free-edge geometry metadata all change or annotate the real mesh.
+- **Tessellate** (`ops/tessellate.py`, OCCT `BRepMesh`): `sag`, `angle`, `min_edge_length`, `curvature_adaptive`, material/metadata-driven detail-adaptive per-part settings, `preserve_boundaries`, CAD UV extraction/projected fallback, tessellation-time tangents, and free-edge geometry metadata all change or annotate the real mesh.
 - **Repair — mesh** (`mesh.py`): vertex merge (Euclidean union-find), duplicate / degenerate face removal, T-junction sewing, boundary-gap stitching, non-manifold edge cracking, sliver-face removal, winding fix (trimesh + inward-shell flip), viewer/open-shell orientation, small-hole fill, normal generation.
 - **Heal — BREP** (`ops/heal.py`): `fix_edges`, `unify_tolerances`, `sew_faces`, same-domain face/edge cleanup, and coplanar overlap/z-fighting face cleanup via OCCT `ShapeFix`, `BRepBuilderAPI_Sewing`, `ShapeUpgrade_UnifySameDomain`, and `BRepTools_ReShape`.
 - **Stage** (`ops/stage.py`): normals, tangents, UV unwrap/repack/padding (**xatlas**), AABB/box UV projection, UV copy, material normalize-to-PBR, duplicate-material merge.
@@ -77,7 +77,7 @@ The basics are present and produce a valid RT3D asset:
 The remaining reportable gaps are now concentrated outside the core mesh pipeline:
 
 - **Import enrichment**: explicit multi-root STEP path-list import exists with deterministic namespaces and per-member warnings. Master STEP quoted external `.step` / `.stp` reference graphs are discovered recursively and merged through the same deterministic member path; deeper vendor-specific placement semantics around those references remain approximate. Typed AP242 PMI and design variants are not implemented. Source texture extraction exists for referenced sidecar image files. JSON/MTL material-library records, including ZIP packages with embedded textures, can now map PBR factors and texture slots, but closed/proprietary CAD material-library containers remain open.
-- **Advanced CAD attributes**: intrinsic/conformal CAD UV solving and automatic material/metadata/curvature-driven tessellation criteria are still open.
+- **Advanced CAD attributes**: intrinsic/conformal CAD UV solving and curvature-only automatic tessellation criteria are still open.
 - **BREP cleanup**: same-domain face/edge cleanup and conservative coplanar overlap / z-fighting face cleanup exist; open-shell grouping before BREP healing is still open.
 - **Runtime validation**: reports include measured pipeline/write/validate timings and local memory/load/frame/FPS estimates, plus optional headless browser/WebGL and packaged or project-backed Unity/Unreal glTF runtime harness drivers. The packaged engine templates validate command wiring and engine-process glTF/GLB load/parse metrics; full renderer parity is still open.
 - **Visual validation**: deterministic before/after software preview PNGs, LOD switching contact sheets, baseline image-diff thresholds, and browser/WebGL rendered screenshots for supported uncompressed glTF/GLB primitives exist; texture sampling, compressed-mesh browser rendering, and full Unity/Unreal renderer screenshots are still open.
@@ -106,7 +106,7 @@ This is the master TODO list. Keep items in one of three states:
 - [x] Tessellation-time tangent generation from generated UV0. Done 2026-05-31.
 - [x] Optional free-edge geometry metadata output for wire overlays. Done 2026-05-31.
 - [~] CAD-derived UV generation: current fallback is projected, not a full intrinsic/conformal surface UV solver.
-- [ ] Auto-apply material / metadata / curvature-driven per-part tessellation criteria. Today this is advisory-only.
+- [~] Auto-apply material / metadata / curvature-driven per-part tessellation criteria: `detail_adaptive` now turns shiny/high-detail material and metadata detection into per-part `sag_ratio=0.01` plus `curvature_adaptive=True`, while curvature-only targeting is still open. Updated 2026-05-31.
 
 **Repair / Heal**
 - [x] Mesh T-junction sewing. Done 2026-05-31.

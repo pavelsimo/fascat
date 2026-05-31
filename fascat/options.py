@@ -75,6 +75,7 @@ _TESSELLATION_PART_SETTING_KEYS = {
     "max_polygon_length",
     "preserve_boundaries",
     "curvature_adaptive",
+    "detail_adaptive",
     "avoid_skinny_triangles",
     "quality_report",
     "free_edge_report",
@@ -147,6 +148,7 @@ class TessellationOptions:
     max_polygon_length: float | None = None
     preserve_boundaries: bool = True
     curvature_adaptive: bool = False
+    detail_adaptive: bool = False
     avoid_skinny_triangles: bool = False
     quality_report: bool = False
     free_edge_report: bool = False
