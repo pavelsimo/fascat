@@ -10,7 +10,14 @@ from fascat.asset import Asset, Node, Part
 from fascat.cli import app
 from fascat.material import Material
 from fascat.mesh import Mesh
-from fascat.ops.actions import _segment_intersects_mesh, _segment_triangle_t
+from fascat.ops.actions import (
+    _build_triangle_bvh,
+    _segment_intersects_mesh,
+    _segment_intersects_occurrence,
+    _segment_intersects_triangles,
+    _segment_triangle_t,
+    _WorldOccurrence,
+)
 from fascat.options import (
     BakeMaterialOptions,
     DecimateOptions,
@@ -60,6 +67,57 @@ def test_segment_intersects_mesh_matches_scalar_triangle_hits() -> None:
 
     assert _segment_intersects_mesh(start, end, points, faces) is any(scalar_hits)
     assert _segment_intersects_mesh(miss_start, miss_end, points, faces) is False
+
+
+def test_segment_intersects_occurrence_uses_triangle_bvh_leaves(monkeypatch: pytest.MonkeyPatch) -> None:
+    mesh = _triangle_strip(160)
+    triangles = mesh.points[mesh.faces]
+    triangle_bounds_min = triangles.min(axis=1)
+    triangle_bounds_max = triangles.max(axis=1)
+    occurrence = _WorldOccurrence(
+        node=Node(id="node", name="node", part_id="part"),
+        part_id="part",
+        world_points=mesh.points,
+        faces=mesh.faces,
+        triangles=triangles,
+        triangle_edges1=triangles[:, 1] - triangles[:, 0],
+        triangle_edges2=triangles[:, 2] - triangles[:, 0],
+        triangle_bounds_min=triangle_bounds_min,
+        triangle_bounds_max=triangle_bounds_max,
+        triangle_bvh=_build_triangle_bvh(triangle_bounds_min, triangle_bounds_max),
+        bounds_min=mesh.points.min(axis=0),
+        bounds_max=mesh.points.max(axis=0),
+        volume=1.0,
+    )
+    batch_sizes: list[int] = []
+
+    def record_triangle_batch(
+        start_arg: np.ndarray,
+        end_arg: np.ndarray,
+        triangles_arg: np.ndarray,
+        edge1: np.ndarray,
+        edge2: np.ndarray,
+        triangle_bounds_min_arg: np.ndarray,
+        triangle_bounds_max_arg: np.ndarray,
+    ) -> bool:
+        batch_sizes.append(triangles_arg.shape[0])
+        return _segment_intersects_triangles(
+            start_arg,
+            end_arg,
+            triangles_arg,
+            edge1,
+            edge2,
+            triangle_bounds_min_arg,
+            triangle_bounds_max_arg,
+        )
+
+    monkeypatch.setattr("fascat.ops.actions._segment_intersects_triangles", record_triangle_batch)
+    start = np.array([318.25, 0.25, 1.0], dtype=float)
+    end = np.array([318.25, 0.25, -1.0], dtype=float)
+
+    assert _segment_intersects_occurrence(start, end, occurrence) is True
+    assert batch_sizes
+    assert max(batch_sizes) < mesh.triangle_count
 
 
 def _triangle_strip_with_uvs(count: int) -> Mesh:

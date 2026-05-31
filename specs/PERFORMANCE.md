@@ -87,8 +87,10 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   faces in an occluder mesh after the existing per-occluder AABB reject, removing the pure-Python
   per-triangle loop from the innermost ray test. World occurrences now precompute triangle points,
   edge vectors, and per-triangle bounds once, so each ray can cull candidate triangles by segment
-  AABB before the vectorized intersection without rebuilding `points[faces]`. A true BVH/grid and
-  broader spatial occluder culling are still open.
+  AABB before the vectorized intersection without rebuilding `points[faces]`. Each world
+  occurrence now also builds a median-split triangle BVH, so ray tests descend node AABBs and run
+  the vectorized intersection only on leaf-sized triangle batches instead of scanning every
+  triangle bound per ray. Broader occluder-level spatial culling is still open.
 
 ### P4 — Per-element Python loops in core mesh kernels — partial (2026-05-31)
 - **Where (all `fascat/mesh.py`):** `compute_flat_normals:1026`, `compute_hard_edge_normals:1055`,

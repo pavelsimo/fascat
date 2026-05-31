@@ -29,6 +29,8 @@ IntArray = NDArray[np.int64]
 _AGGRESSIVE_LOD0_RATIO = 0.2
 _DECIMATION_MEMORY_BYTES_PER_MILLION_TRIANGLES = 5_000_000_000
 _DECIMATION_MEMORY_GB_PER_MILLION_TRIANGLES = 5.0
+_OCCLUSION_BVH_LEAF_TRIANGLES = 64
+_OCCLUSION_BVH_MAX_DEPTH = 32
 
 
 def bake_materials_asset(
@@ -362,6 +364,15 @@ class _HoleLoop:
 
 
 @dataclass(frozen=True)
+class _TriangleBvhNode:
+    bounds_min: FloatArray
+    bounds_max: FloatArray
+    indices: IntArray | None = None
+    left: _TriangleBvhNode | None = None
+    right: _TriangleBvhNode | None = None
+
+
+@dataclass(frozen=True)
 class _WorldOccurrence:
     node: Node
     part_id: str
@@ -372,6 +383,7 @@ class _WorldOccurrence:
     triangle_edges2: FloatArray
     triangle_bounds_min: FloatArray
     triangle_bounds_max: FloatArray
+    triangle_bvh: _TriangleBvhNode | None
     bounds_min: FloatArray
     bounds_max: FloatArray
     volume: float
@@ -1678,6 +1690,8 @@ def _segment_blocked(start: FloatArray, end: FloatArray, occluders: list[_WorldO
 
 
 def _segment_intersects_occurrence(start: FloatArray, end: FloatArray, occurrence: _WorldOccurrence) -> bool:
+    if occurrence.triangle_bvh is not None:
+        return _segment_intersects_bvh(start, end, occurrence.triangle_bvh, occurrence)
     return _segment_intersects_triangles(
         start,
         end,
@@ -1687,6 +1701,30 @@ def _segment_intersects_occurrence(start: FloatArray, end: FloatArray, occurrenc
         occurrence.triangle_bounds_min,
         occurrence.triangle_bounds_max,
     )
+
+
+def _segment_intersects_bvh(
+    start: FloatArray,
+    end: FloatArray,
+    node: _TriangleBvhNode,
+    occurrence: _WorldOccurrence,
+) -> bool:
+    if not _segment_intersects_bounds(start, end, node.bounds_min, node.bounds_max):
+        return False
+    if node.indices is not None:
+        indices = node.indices
+        return _segment_intersects_triangles(
+            start,
+            end,
+            occurrence.triangles[indices],
+            occurrence.triangle_edges1[indices],
+            occurrence.triangle_edges2[indices],
+            occurrence.triangle_bounds_min[indices],
+            occurrence.triangle_bounds_max[indices],
+        )
+    if node.left is not None and _segment_intersects_bvh(start, end, node.left, occurrence):
+        return True
+    return node.right is not None and _segment_intersects_bvh(start, end, node.right, occurrence)
 
 
 def _segment_intersects_mesh(start: FloatArray, end: FloatArray, points: FloatArray, faces: IntArray) -> bool:
@@ -1702,6 +1740,50 @@ def _segment_intersects_mesh(start: FloatArray, end: FloatArray, points: FloatAr
         triangles.min(axis=1),
         triangles.max(axis=1),
     )
+
+
+def _build_triangle_bvh(
+    triangle_bounds_min: FloatArray,
+    triangle_bounds_max: FloatArray,
+    indices: IntArray | None = None,
+    *,
+    depth: int = 0,
+) -> _TriangleBvhNode | None:
+    if triangle_bounds_min.shape[0] == 0:
+        return None
+    if indices is None:
+        indices = np.arange(triangle_bounds_min.shape[0], dtype=np.int64)
+    if indices.size == 0:
+        return None
+
+    bounds_min = cast(FloatArray, triangle_bounds_min[indices].min(axis=0))
+    bounds_max = cast(FloatArray, triangle_bounds_max[indices].max(axis=0))
+    if indices.size <= _OCCLUSION_BVH_LEAF_TRIANGLES or depth >= _OCCLUSION_BVH_MAX_DEPTH:
+        return _TriangleBvhNode(bounds_min=bounds_min, bounds_max=bounds_max, indices=indices.copy())
+
+    centers = (triangle_bounds_min[indices] + triangle_bounds_max[indices]) * 0.5
+    spans = np.ptp(centers, axis=0)
+    axis = int(np.argmax(spans))
+    if float(spans[axis]) <= 0.0:
+        return _TriangleBvhNode(bounds_min=bounds_min, bounds_max=bounds_max, indices=indices.copy())
+
+    order = np.argsort(centers[:, axis], kind="mergesort")
+    midpoint = indices.size // 2
+    left = _build_triangle_bvh(
+        triangle_bounds_min,
+        triangle_bounds_max,
+        indices[order[:midpoint]],
+        depth=depth + 1,
+    )
+    right = _build_triangle_bvh(
+        triangle_bounds_min,
+        triangle_bounds_max,
+        indices[order[midpoint:]],
+        depth=depth + 1,
+    )
+    if left is None or right is None:
+        return _TriangleBvhNode(bounds_min=bounds_min, bounds_max=bounds_max, indices=indices.copy())
+    return _TriangleBvhNode(bounds_min=bounds_min, bounds_max=bounds_max, left=left, right=right)
 
 
 def _segment_intersects_triangles(
@@ -1918,6 +2000,12 @@ def _world_occurrences(asset: Asset) -> list[_WorldOccurrence]:
                     world_max = cast(FloatArray, world_points.max(axis=0))
                 triangle_edges1 = triangles[:, 1] - triangles[:, 0]
                 triangle_edges2 = triangles[:, 2] - triangles[:, 0]
+                triangle_bounds_min = (
+                    triangles.min(axis=1) if triangles.shape[0] else np.empty((0, 3), dtype=np.float64)
+                )
+                triangle_bounds_max = (
+                    triangles.max(axis=1) if triangles.shape[0] else np.empty((0, 3), dtype=np.float64)
+                )
                 volume = float(np.prod(np.maximum(world_max - world_min, 0.0)))
                 occurrences.append(
                     _WorldOccurrence(
@@ -1928,12 +2016,9 @@ def _world_occurrences(asset: Asset) -> list[_WorldOccurrence]:
                         triangles=triangles,
                         triangle_edges1=triangle_edges1,
                         triangle_edges2=triangle_edges2,
-                        triangle_bounds_min=triangles.min(axis=1)
-                        if triangles.shape[0]
-                        else np.empty((0, 3), dtype=np.float64),
-                        triangle_bounds_max=triangles.max(axis=1)
-                        if triangles.shape[0]
-                        else np.empty((0, 3), dtype=np.float64),
+                        triangle_bounds_min=triangle_bounds_min,
+                        triangle_bounds_max=triangle_bounds_max,
+                        triangle_bvh=_build_triangle_bvh(triangle_bounds_min, triangle_bounds_max),
                         bounds_min=world_min,
                         bounds_max=world_max,
                         volume=volume,
