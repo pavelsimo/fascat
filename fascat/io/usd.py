@@ -416,18 +416,18 @@ def _write_mesh(
     material_paths: dict[str, str],
     metadata_options: MetadataExportOptions,
 ) -> None:
-    from pxr import Gf, Sdf, UsdGeom, Vt
+    from pxr import Sdf, UsdGeom, Vt
 
     mesh.validate()
     usd_mesh = UsdGeom.Mesh.Define(stage, path)
     usd_mesh.CreateSubdivisionSchemeAttr("none")
-    usd_mesh.CreatePointsAttr([Gf.Vec3f(*point) for point in mesh.points.tolist()])
-    usd_mesh.CreateFaceVertexCountsAttr([3] * mesh.triangle_count)
-    usd_mesh.CreateFaceVertexIndicesAttr(mesh.faces.reshape(-1).astype(int).tolist())
+    usd_mesh.CreatePointsAttr(_vt_vec3f_array(mesh.points, Vt))
+    usd_mesh.CreateFaceVertexCountsAttr(_vt_int_array(np.full(mesh.triangle_count, 3, dtype=np.int32), Vt))
+    usd_mesh.CreateFaceVertexIndicesAttr(_vt_int_array(mesh.faces.reshape(-1), Vt))
     mins, maxs = mesh.bounds()
-    usd_mesh.CreateExtentAttr(Vt.Vec3fArray([Gf.Vec3f(*mins.tolist()), Gf.Vec3f(*maxs.tolist())]))
+    usd_mesh.CreateExtentAttr(_vt_vec3f_array(np.vstack((mins, maxs)), Vt))
     if mesh.normals is not None:
-        usd_mesh.CreateNormalsAttr([Gf.Vec3f(*normal) for normal in mesh.normals.tolist()])
+        usd_mesh.CreateNormalsAttr(_vt_vec3f_array(mesh.normals, Vt))
         usd_mesh.SetNormalsInterpolation(UsdGeom.Tokens.vertex)
     if 0 in mesh.uvs:
         primvar = UsdGeom.PrimvarsAPI(usd_mesh).CreatePrimvar(
@@ -435,7 +435,7 @@ def _write_mesh(
             Sdf.ValueTypeNames.TexCoord2fArray,
             UsdGeom.Tokens.vertex,
         )
-        primvar.Set([Gf.Vec2f(*uv) for uv in mesh.uvs[0].tolist()])
+        primvar.Set(_vt_vec2f_array(mesh.uvs[0], Vt))
     _write_display_color(usd_mesh, part, materials)
     if part.material_ids:
         _bind_materials(stage, usd_mesh, part, mesh, materials, material_paths)
@@ -444,8 +444,20 @@ def _write_mesh(
     _set_metadata_custom_data(usd_mesh.GetPrim(), part.metadata, metadata_options)
 
 
+def _vt_vec3f_array(values: np.ndarray, Vt: Any) -> Any:
+    return Vt.Vec3fArray.FromNumpy(np.ascontiguousarray(values, dtype=np.float32))
+
+
+def _vt_vec2f_array(values: np.ndarray, Vt: Any) -> Any:
+    return Vt.Vec2fArray.FromNumpy(np.ascontiguousarray(values, dtype=np.float32))
+
+
+def _vt_int_array(values: np.ndarray, Vt: Any) -> Any:
+    return Vt.IntArray.FromNumpy(np.ascontiguousarray(values, dtype=np.int32))
+
+
 def _write_display_color(usd_mesh: Any, part: Part, materials: dict[str, Material]) -> None:
-    from pxr import Gf
+    from pxr import Vt
 
     base_color = (0.75, 0.75, 0.75, 1.0)
     if "display_color" in part.metadata:
@@ -456,7 +468,7 @@ def _write_display_color(usd_mesh: Any, part: Part, materials: dict[str, Materia
         material = materials.get(part.material_ids[0])
         if material is not None:
             base_color = material.base_color
-    usd_mesh.CreateDisplayColorAttr([Gf.Vec3f(*base_color[:3])])
+    usd_mesh.CreateDisplayColorAttr(_vt_vec3f_array(np.asarray([base_color[:3]], dtype=np.float32), Vt))
     usd_mesh.CreateDisplayOpacityAttr([float(base_color[3])])
 
 

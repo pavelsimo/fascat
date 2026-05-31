@@ -275,7 +275,10 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   accessor payloads now use a `(rows, byte_stride)` uint8 view instead of copying each row in
   Python. OBJ export now writes vertex, normal, and face lines in bulk blocks (faces grouped by
   consecutive material runs), and ASCII STL writes facet records through one vectorized
-  `np.savetxt` pass over normals + triangle vertices. USD object construction remains open.
+  `np.savetxt` pass over normals + triangle vertices. USD mesh export now authors points,
+  normals, UVs, face counts, and face indices through `Vt.*Array.FromNumpy`, avoiding per-element
+  `Gf.Vec*`/Python-list construction for the hot geometry arrays. Smaller USD shader/material
+  object construction remains open.
 
 ## Concurrency
 
