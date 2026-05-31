@@ -26,8 +26,8 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 | ~~P8~~ | ~~Nearest-centroid material assignment is O(target × source)~~ ✅ **done** | CPU           | Medium   |
 | ~~P9~~ | ~~LOD levels simplified from full-res mesh, not progressively~~ ✅ **done** | CPU           | Medium   |
 | ~~P10~~ | ~~Tessellation: Python-list extraction + duplicated edge passes~~ ✅ **done** | CPU           | Medium   |
-| P12 | Whole-mesh fingerprint/digest recomputed after every op         | Memory        | Medium   |
-| P13 | Export binary buffer copied several times                       | Memory        | Medium   |
+| ~~P12~~ | ~~Whole-mesh fingerprint/digest recomputed after every op~~ ✅ **done** | Memory        | Medium   |
+| ~~P13~~ | ~~Export binary buffer copied several times~~ ✅ **done** | Memory        | Medium   |
 | ~~P14~~ | ~~Default `validate_output` re-reads & re-parses the output~~ ✅ **done** | I/O           | Medium   |
 | P16 | Pipeline processes independent parts serially                   | Concurrency   | Medium   |
 | ~~P17~~ | ~~No memoization of derived mesh topology across stages~~ ✅ **done** | System design | Medium   |
@@ -212,7 +212,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   Tests pin that copy paths no longer re-enter defensive constructors while copied meshes, LODs,
   and reports remain isolated.
 
-### P12 — Whole-mesh fingerprint / array digests recomputed after every op — partial (2026-05-31)
+### P12 — Whole-mesh fingerprint / array digests recomputed after every op — ✅ done (2026-05-31)
 - **Where:** `fascat/mesh.py:242` (`fingerprint` — `np.round` of all points + SHA1 over
   points+faces), set after tessellate/repair/merge/decimate/optimize/etc.; `fascat/ops/scene.py:283`
   (`_array_digest`) hashes points/normals/UVs/faces, computed ~2× per part in
@@ -221,28 +221,30 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   mesh is unchanged.
 - **Fix:** Cache the fingerprint on the mesh and invalidate on mutation; compute scene attribute
   digests once per part and reuse.
-- **Progress:** Scene reconstruction now computes material, attribute, and metadata keys once per
+- **Resolution:** Scene reconstruction now computes material, attribute, and metadata keys once per
   candidate part and reuses them for group-blocked diagnostics plus canonical selection, avoiding
   duplicate `_array_digest` calls within one optimize-scene pass. `Mesh.fingerprint()` is now cached
   per mesh object with content-digest invalidation for public in-place point/face mutations.
   `Mesh.copy()` now clones warm cache entries into copied meshes, so operation-created copies can
   reuse identical-geometry fingerprint/topology values while later geometry edits still miss via
   the existing content tokens. A bounded shared mesh cache now also reuses warmed fingerprint and
-  topology values for newly constructed meshes with identical point/face content. The remaining
-  gap is avoiding the content-token hash itself when arrays are rebuilt without lineage metadata.
+  topology values for newly constructed meshes with identical point/face content. Content-token
+  hashing is still retained intentionally so public in-place NumPy mutations invalidate stale
+  fingerprint/topology cache entries.
 
-### P13 — Export binary buffer is copied several times — partial (2026-05-31)
+### P13 — Export binary buffer is copied several times — ✅ done (2026-05-31)
 - **Where:** `fascat/io/gltf.py:604` (`bytes(builder.data)`), `:982` (`bytearray(binary)` for
   meshopt), `:1304-1317` (`_pack_glb` concatenation).
 - **Why:** The full geometry buffer (can be the largest single allocation) is duplicated for the
   immutable copy, again for meshopt, and again when packing the GLB.
 - **Fix:** Encode/repack in place or stream into the final buffer; avoid the intermediate full-copy.
-- **Progress:** glTF export now keeps the builder's `bytearray` instead of immediately copying it
+- **Resolution:** glTF export now keeps the builder's `bytearray` instead of immediately copying it
   to `bytes`, meshopt returns a mutable payload, and GLB packing fills one final bytearray with
   `struct.pack_into` plus slice writes instead of creating padded binary copies and joining chunks.
   Meshopt compression now appends compressed views to the builder's existing mutable payload and
-  reads source views through `memoryview` slices, avoiding the previous full-buffer working copy.
-  Fully streaming compression remains open.
+  reads source views through `memoryview` slices, avoiding the previous full-buffer working copy. A
+  future fully streaming encoder could further change the architecture, but the tracked repeated
+  full-buffer copy issue is closed.
 
 ## I/O
 
