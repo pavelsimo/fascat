@@ -4,15 +4,18 @@ import subprocess
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
 from fascat.asset import Asset, Node, Part
 from fascat.mesh import Mesh
 from fascat.runtime import (
     RuntimeBrowserOptions,
+    RuntimeBrowserRenderOptions,
     RuntimeEngineOptions,
     copy_engine_runtime_harness,
     measure_browser_runtime,
     measure_engine_runtime,
+    write_browser_render_preview,
 )
 
 
@@ -69,6 +72,64 @@ def test_browser_runtime_parses_headless_browser_measurements(
     assert report.frame_count == 117
     assert report.memory_bytes == 4096
     assert report.workload_scale == 1.0
+
+
+def test_browser_render_preview_reports_unavailable_when_browser_is_missing(
+    monkeypatch,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "asset.glb"
+    preview = tmp_path / "preview.png"
+    _asset().write_gltf(output)
+    monkeypatch.delenv("FASCAT_BROWSER", raising=False)
+    monkeypatch.setattr("fascat.runtime.shutil.which", lambda _name: None)
+
+    report = write_browser_render_preview(output, preview)
+
+    assert report.status == "unavailable"
+    assert report.browser is None
+    assert report.preview_path == str(preview)
+    assert report.meshes == 1
+    assert report.triangles == 1
+    assert "no chromium-compatible browser" in str(report.error)
+    assert not preview.exists()
+
+
+def test_browser_render_preview_writes_screenshot_and_report(
+    monkeypatch,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "asset.glb"
+    preview = tmp_path / "browser-preview.png"
+    _asset().write_gltf(output)
+
+    def fake_run(command: list[str], *_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        screenshot_args = [item for item in command if item.startswith("--screenshot=")]
+        if screenshot_args:
+            screenshot_path = Path(screenshot_args[0].split("=", 1)[1])
+            Image.new("RGBA", (800, 600), (10, 20, 30, 255)).save(screenshot_path)
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        assert "--dump-dom" in command
+        stdout = '<html><body><pre id="result">{"status":"rendered","meshes":1,"triangles":1}</pre></body></html>'
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+
+    report = write_browser_render_preview(
+        output,
+        preview,
+        RuntimeBrowserRenderOptions(browser="fake-browser", timeout_seconds=3.0),
+    )
+
+    assert report.status == "rendered"
+    assert report.browser == "fake-browser"
+    assert report.preview_path == str(preview)
+    assert report.width == 800
+    assert report.height == 600
+    assert report.meshes == 1
+    assert report.triangles == 1
+    assert report.error is None
+    assert preview.is_file()
 
 
 def test_engine_runtime_reports_unavailable_when_engine_is_missing(

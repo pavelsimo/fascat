@@ -84,12 +84,15 @@ from fascat.pipeline import (
 from fascat.pipeline_file import PipelineSpec, PipelineStep
 from fascat.runtime import (
     RuntimeBrowserOptions,
+    RuntimeBrowserRenderOptions,
+    RuntimeBrowserRenderReport,
     RuntimeBrowserReport,
     RuntimeEngineOptions,
     RuntimeEngineReport,
     copy_engine_runtime_harness,
     measure_browser_runtime,
     measure_engine_runtime,
+    write_browser_render_preview,
 )
 from fascat.size_ladder import GltfSizeLadderReport, GltfSizeLadderVariant, measure_gltf_size_ladder
 from fascat.visual import (
@@ -151,6 +154,8 @@ __all__ = [
     "RemoveHolesOptions",
     "RemoveOccludedOptions",
     "RuntimeBrowserOptions",
+    "RuntimeBrowserRenderOptions",
+    "RuntimeBrowserRenderReport",
     "RuntimeBrowserReport",
     "RuntimeEngineOptions",
     "RuntimeEngineReport",
@@ -216,6 +221,7 @@ __all__ = [
     "write_fbx",
     "write_usd",
     "write_before_after_previews",
+    "write_browser_render_preview",
     "write_lod_switch_previews",
     "write_output_lod_switch_previews",
     "write_output_preview",

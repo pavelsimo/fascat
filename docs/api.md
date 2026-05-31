@@ -1181,6 +1181,7 @@ unity_runtime = fc.measure_engine_runtime(
 )
 
 preview = fc.write_output_preview("motor.glb", "motor-preview.png")
+browser_preview = fc.write_browser_render_preview("motor.glb", "motor-browser.png")
 ```
 
 The CLI can write a validation-time quality report for exported assets:
@@ -1201,6 +1202,7 @@ fascat validate motor.glb \
   --runtime-engine-project FascatUnityHarness
 
 fascat validate motor.glb \
+  --runtime-browser-preview motor-browser.png \
   --visual-preview motor-preview.png \
   --lod-preview-dir lod-previews/
 ```
@@ -1214,6 +1216,13 @@ when the configured diff thresholds fail.
 `--lod-preview-dir` writes `lod0.png`, each available LOD level, and a
 `lod-switching.png` contact sheet. Fascat GLB exports preserve enough LOD
 metadata for this validation path to reconstruct LOD previews.
+`--runtime-browser-preview` launches the same Chromium-compatible browser
+discovery path as `--runtime-browser`, renders supported glTF/GLB mesh
+primitives with WebGL, and writes a PNG screenshot. This path gives a real
+browser renderer artifact for simple uncompressed assets, including node
+transforms and material base-color factors. Draco, meshopt-only payloads, sparse
+accessors, texture sampling, and full engine material/lighting parity remain
+outside the packaged browser preview.
 
 `--runtime-browser` is available for glTF/GLB outputs. It launches a local
 Chromium-compatible browser when one is installed, loads the asset bytes in a

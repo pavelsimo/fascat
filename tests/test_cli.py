@@ -18,7 +18,7 @@ from fascat.cli import app, run
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.report import Report
-from fascat.runtime import RuntimeBrowserReport, RuntimeEngineReport
+from fascat.runtime import RuntimeBrowserRenderReport, RuntimeBrowserReport, RuntimeEngineReport
 from fascat.visual import write_output_preview
 
 runner = CliRunner()
@@ -1500,6 +1500,48 @@ def test_validate_can_include_browser_runtime_measurement(
     payload = json.loads(result.output)
     assert payload["runtime_browser"]["status"] == "measured"
     assert payload["runtime_browser"]["measured_fps"] == 60.0
+
+
+def test_validate_can_write_browser_render_preview(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_file = tmp_path / "runtime.glb"
+    preview_file = tmp_path / "browser-preview.png"
+    mesh = Mesh(
+        points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.asarray([[0, 1, 2]], dtype=int),
+    )
+    Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Triangle", part_id="part")]),
+        parts={"part": Part(id="part", name="Triangle", mesh=mesh)},
+        up_axis="Y",
+    ).write_gltf(output_file)
+
+    def fake_preview(path: str | Path, preview_path: str | Path, options: object = None) -> RuntimeBrowserRenderReport:
+        assert Path(path) == output_file
+        assert Path(preview_path) == preview_file
+        return RuntimeBrowserRenderReport(
+            path=str(path),
+            status="rendered",
+            browser="fake-browser",
+            preview_path=str(preview_path),
+            width=800,
+            height=600,
+            meshes=1,
+            triangles=1,
+        )
+
+    monkeypatch.setattr("fascat.cli.write_browser_render_preview", fake_preview)
+
+    result = runner.invoke(
+        app, ["--json", "validate", str(output_file), "--runtime-browser-preview", str(preview_file)]
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["runtime_browser_preview"]["status"] == "rendered"
+    assert payload["runtime_browser_preview"]["preview_path"] == str(preview_file)
 
 
 def test_validate_can_include_engine_runtime_measurement(

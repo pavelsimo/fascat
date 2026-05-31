@@ -64,7 +64,14 @@ from fascat.pipeline_file import PipelineSpec
 from fascat.profiles import by_name
 from fascat.profiles import from_file as profile_from_file
 from fascat.report import Report
-from fascat.runtime import RuntimeBrowserOptions, RuntimeEngineOptions, measure_browser_runtime, measure_engine_runtime
+from fascat.runtime import (
+    RuntimeBrowserOptions,
+    RuntimeBrowserRenderOptions,
+    RuntimeEngineOptions,
+    measure_browser_runtime,
+    measure_engine_runtime,
+    write_browser_render_preview,
+)
 from fascat.visual import VisualDiffOptions, compare_images, write_output_lod_switch_previews, write_output_preview
 
 DOCS_URL = "https://pavelsimo.github.io/fascat"
@@ -2122,6 +2129,10 @@ def cmd_validate(
         Path | None,
         typer.Option("--visual-preview", help="Write a deterministic software preview PNG during validation."),
     ] = None,
+    runtime_browser_preview: Annotated[
+        Path | None,
+        typer.Option("--runtime-browser-preview", help="Write a browser/WebGL-rendered preview PNG during validation."),
+    ] = None,
     visual_baseline: Annotated[
         Path | None,
         typer.Option("--visual-baseline", help="Compare --visual-preview against this baseline PNG."),
@@ -2185,6 +2196,7 @@ def cmd_validate(
         "runtime_engine_project": str(runtime_engine_project) if runtime_engine_project else None,
         "runtime_engine_timeout": runtime_engine_timeout,
         "visual_preview": str(visual_preview) if visual_preview else None,
+        "runtime_browser_preview": str(runtime_browser_preview) if runtime_browser_preview else None,
         "visual_baseline": str(visual_baseline) if visual_baseline else None,
         "visual_diff_pixel_tolerance": visual_diff_pixel_tolerance,
         "visual_diff_mean_threshold": visual_diff_mean_threshold,
@@ -2213,7 +2225,9 @@ def cmd_validate(
         _fail(ctx, payload, "--visual-diff-changed-pixel-ratio must be between 0 and 1.", code=2)
     if visual_baseline is not None and visual_preview is None:
         _fail(ctx, payload, "--visual-baseline requires --visual-preview.", code=2)
-    if _is_stdio(output_path) and (visual_preview is not None or lod_preview_dir is not None):
+    if _is_stdio(output_path) and (
+        visual_preview is not None or runtime_browser_preview is not None or lod_preview_dir is not None
+    ):
         _fail(ctx, payload, "Visual preview validation requires a file path, not stdin.", code=2)
     if state.dry_run:
         _emit(ctx, payload, f"Would validate {output_path}.")
@@ -2251,6 +2265,18 @@ def cmd_validate(
             if runtime_engine is not None
             else None
         )
+        runtime_browser_preview_report = (
+            write_browser_render_preview(
+                output_path,
+                runtime_browser_preview,
+                RuntimeBrowserRenderOptions(
+                    browser=runtime_browser_command,
+                    timeout_seconds=runtime_timeout,
+                ),
+            )
+            if runtime_browser_preview is not None
+            else None
+        )
         visual_preview_report = (
             write_output_preview(output_path, visual_preview) if visual_preview is not None else None
         )
@@ -2282,6 +2308,8 @@ def cmd_validate(
         json_payload["runtime_browser"] = runtime_report.to_dict()
     if runtime_engine_report is not None:
         json_payload["runtime_engine"] = runtime_engine_report.to_dict()
+    if runtime_browser_preview_report is not None:
+        json_payload["runtime_browser_preview"] = runtime_browser_preview_report.to_dict()
     if visual_preview_report is not None:
         json_payload["visual_preview"] = visual_preview_report.to_dict()
     if visual_diff_report is not None:
@@ -2293,6 +2321,8 @@ def cmd_validate(
         message = f"{message} Wrote report {report}."
     if visual_preview_report is not None:
         message = f"{message} Wrote preview {visual_preview_report.path}."
+    if runtime_browser_preview_report is not None:
+        message = f"{message} Wrote browser preview {runtime_browser_preview_report.preview_path}."
     if visual_diff_report is not None:
         message = f"{message} Visual diff passed." if visual_diff_report.passed else f"{message} Visual diff failed."
     if lod_preview_report is not None:

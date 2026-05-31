@@ -16,7 +16,7 @@ from typing import Literal, Protocol, cast
 from fascat.io.gltf import validate_gltf
 
 RuntimeEngineName = Literal["unity", "unreal"]
-_RESULT_RE = re.compile(r'<pre id="result">(?P<payload>.*?)</pre>', re.DOTALL)
+_RESULT_RE = re.compile(r'<pre id="result"[^>]*>(?P<payload>.*?)</pre>', re.DOTALL)
 _BROWSER_CANDIDATES = (
     "chromium",
     "chromium-browser",
@@ -73,6 +73,31 @@ class RuntimeBrowserOptions:
 
 
 @dataclass(frozen=True)
+class RuntimeBrowserRenderOptions:
+    browser: str | None = None
+    width: int = 800
+    height: int = 600
+    timeout_seconds: float = 15.0
+    virtual_time_budget_ms: int = 3000
+    background_color: tuple[int, int, int, int] = (248, 249, 250, 255)
+
+    def __post_init__(self) -> None:
+        if self.width <= 0 or self.height <= 0:
+            raise ValueError("browser render preview dimensions must be greater than 0")
+        if self.timeout_seconds <= 0.0:
+            raise ValueError("browser render preview timeout_seconds must be greater than 0")
+        if self.virtual_time_budget_ms <= 0:
+            raise ValueError("browser render preview virtual_time_budget_ms must be greater than 0")
+        if len(self.background_color) != 4:
+            raise ValueError("browser render preview background_color must contain RGBA byte values")
+        if any(value < 0 or value > 255 for value in self.background_color):
+            raise ValueError("browser render preview background_color values must be between 0 and 255")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class RuntimeBrowserReport:
     path: str
     status: str
@@ -102,6 +127,32 @@ class RuntimeBrowserReport:
             "triangles": self.triangles,
             "workload_triangles": self.workload_triangles,
             "workload_scale": self.workload_scale,
+            "error": self.error,
+        }
+
+
+@dataclass(frozen=True)
+class RuntimeBrowserRenderReport:
+    path: str
+    status: str
+    browser: str | None
+    preview_path: str
+    width: int
+    height: int
+    meshes: int
+    triangles: int
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "path": self.path,
+            "status": self.status,
+            "browser": self.browser,
+            "preview_path": self.preview_path,
+            "width": self.width,
+            "height": self.height,
+            "meshes": self.meshes,
+            "triangles": self.triangles,
             "error": self.error,
         }
 
@@ -202,6 +253,139 @@ def measure_browser_runtime(path: str | Path, options: RuntimeBrowserOptions | N
     if payload is None:
         return _failed_report(asset_path, validation_stats, browser, "browser did not return runtime measurements")
     return _report_from_payload(asset_path, validation_stats, browser, payload)
+
+
+def write_browser_render_preview(
+    path: str | Path,
+    preview_path: str | Path,
+    options: RuntimeBrowserRenderOptions | None = None,
+) -> RuntimeBrowserRenderReport:
+    opts = options or RuntimeBrowserRenderOptions()
+    asset_path = Path(path)
+    if asset_path.suffix.lower() not in {".gltf", ".glb"}:
+        raise ValueError("browser render preview only supports glTF/GLB outputs")
+    if not asset_path.exists():
+        raise FileNotFoundError(f"missing runtime asset: {asset_path}")
+
+    validation_stats = validate_gltf(asset_path)
+    output_path = Path(preview_path)
+    browser = _browser_command(opts)
+    if browser is None:
+        return _browser_render_report(
+            asset_path,
+            output_path,
+            opts,
+            validation_stats,
+            status="unavailable",
+            browser=None,
+            error="no chromium-compatible browser executable found",
+        )
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="fascat-browser-render-") as directory:
+        harness_path = Path(directory) / "browser-render.html"
+        harness_path.write_text(_runtime_browser_render_html(asset_path.resolve(), opts), encoding="utf-8")
+        command = _browser_render_report_invocation(browser, harness_path, opts)
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=opts.timeout_seconds,
+            )
+        except subprocess.TimeoutExpired:
+            return _browser_render_report(
+                asset_path,
+                output_path,
+                opts,
+                validation_stats,
+                status="failed",
+                browser=browser,
+                error="browser render preview timed out",
+            )
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout).strip().splitlines()
+            message = detail[-1] if detail else f"browser exited with status {completed.returncode}"
+            return _browser_render_report(
+                asset_path,
+                output_path,
+                opts,
+                validation_stats,
+                status="failed",
+                browser=browser,
+                error=message,
+            )
+        payload = _parse_browser_payload(completed.stdout)
+        if payload is None:
+            return _browser_render_report(
+                asset_path,
+                output_path,
+                opts,
+                validation_stats,
+                status="failed",
+                browser=browser,
+                error="browser did not return render preview measurements",
+            )
+        status = str(payload.get("status", "failed"))
+        error = payload.get("error")
+        if status != "rendered":
+            return RuntimeBrowserRenderReport(
+                path=str(asset_path),
+                status=status,
+                browser=browser,
+                preview_path=str(output_path),
+                width=opts.width,
+                height=opts.height,
+                meshes=_int(payload.get("meshes"), validation_stats["meshes"]),
+                triangles=_int(payload.get("triangles"), validation_stats["triangles"]),
+                error=str(error) if error is not None else None,
+            )
+        screenshot_command = _browser_render_screenshot_invocation(browser, harness_path, output_path, opts)
+        try:
+            screenshot_completed = subprocess.run(
+                screenshot_command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=opts.timeout_seconds,
+            )
+        except subprocess.TimeoutExpired:
+            return _browser_render_report(
+                asset_path,
+                output_path,
+                opts,
+                validation_stats,
+                status="failed",
+                browser=browser,
+                error="browser render preview screenshot timed out",
+            )
+        if screenshot_completed.returncode != 0:
+            detail = (screenshot_completed.stderr or screenshot_completed.stdout).strip().splitlines()
+            message = detail[-1] if detail else f"browser exited with status {screenshot_completed.returncode}"
+            return _browser_render_report(
+                asset_path,
+                output_path,
+                opts,
+                validation_stats,
+                status="failed",
+                browser=browser,
+                error=message,
+            )
+    if not output_path.exists():
+        status = "failed"
+        error = "browser did not write render preview screenshot"
+    return RuntimeBrowserRenderReport(
+        path=str(asset_path),
+        status=status,
+        browser=browser,
+        preview_path=str(output_path),
+        width=opts.width,
+        height=opts.height,
+        meshes=_int(payload.get("meshes"), validation_stats["meshes"]),
+        triangles=_int(payload.get("triangles"), validation_stats["triangles"]),
+        error=str(error) if error is not None else None,
+    )
 
 
 def measure_engine_runtime(path: str | Path, options: RuntimeEngineOptions) -> RuntimeEngineReport:
@@ -324,7 +508,7 @@ def _copy_resource_tree(source: _ResourceNode, destination: Path) -> None:
             target.write_bytes(child.read_bytes())
 
 
-def _browser_command(options: RuntimeBrowserOptions) -> str | None:
+def _browser_command(options: RuntimeBrowserOptions | RuntimeBrowserRenderOptions) -> str | None:
     if options.browser:
         return options.browser
     env_browser = os.environ.get("FASCAT_BROWSER")
@@ -426,6 +610,51 @@ def _browser_invocation(browser: str, harness_path: Path, options: RuntimeBrowse
     ]
 
 
+def _browser_render_report_invocation(
+    browser: str,
+    harness_path: Path,
+    options: RuntimeBrowserRenderOptions,
+) -> list[str]:
+    return [
+        browser,
+        "--headless=new",
+        "--allow-file-access-from-files",
+        "--disable-dev-shm-usage",
+        "--no-sandbox",
+        "--ignore-gpu-blocklist",
+        "--use-gl=swiftshader",
+        "--enable-unsafe-swiftshader",
+        "--run-all-compositor-stages-before-draw",
+        f"--window-size={options.width},{options.height}",
+        f"--virtual-time-budget={options.virtual_time_budget_ms}",
+        "--dump-dom",
+        harness_path.resolve().as_uri(),
+    ]
+
+
+def _browser_render_screenshot_invocation(
+    browser: str,
+    harness_path: Path,
+    preview_path: Path,
+    options: RuntimeBrowserRenderOptions,
+) -> list[str]:
+    return [
+        browser,
+        "--headless=new",
+        "--allow-file-access-from-files",
+        "--disable-dev-shm-usage",
+        "--no-sandbox",
+        "--ignore-gpu-blocklist",
+        "--use-gl=swiftshader",
+        "--enable-unsafe-swiftshader",
+        "--run-all-compositor-stages-before-draw",
+        f"--window-size={options.width},{options.height}",
+        f"--virtual-time-budget={options.virtual_time_budget_ms}",
+        f"--screenshot={preview_path.resolve()}",
+        harness_path.resolve().as_uri(),
+    ]
+
+
 def _parse_browser_payload(output: str) -> dict[str, object] | None:
     match = _RESULT_RE.search(output)
     if match is None:
@@ -501,6 +730,29 @@ def _failed_report(
         triangles=validation_stats["triangles"],
         workload_triangles=0,
         workload_scale=0.0,
+        error=error,
+    )
+
+
+def _browser_render_report(
+    asset_path: Path,
+    preview_path: Path,
+    options: RuntimeBrowserRenderOptions,
+    validation_stats: dict[str, int],
+    *,
+    status: str,
+    browser: str | None,
+    error: str | None,
+) -> RuntimeBrowserRenderReport:
+    return RuntimeBrowserRenderReport(
+        path=str(asset_path),
+        status=status,
+        browser=browser,
+        preview_path=str(preview_path),
+        width=options.width,
+        height=options.height,
+        meshes=validation_stats["meshes"],
+        triangles=validation_stats["triangles"],
         error=error,
     )
 
@@ -614,6 +866,345 @@ def _optional_float(value: object) -> float | None:
 def _int(value: object, default: int) -> int:
     parsed = _optional_int(value)
     return default if parsed is None else parsed
+
+
+def _runtime_browser_render_html(asset_path: Path, options: RuntimeBrowserRenderOptions) -> str:
+    asset_url = json.dumps(asset_path.as_uri())
+    background = json.dumps([round(channel / 255.0, 6) for channel in options.background_color])
+    return f"""<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>fascat browser render preview</title></head>
+<body style="margin:0;overflow:hidden;background:transparent">
+<canvas id="canvas" width="{options.width}" height="{options.height}"></canvas>
+<pre id="result" style="display:none">{{"status":"running"}}</pre>
+<script>
+const ASSET_URL = {asset_url};
+const BACKGROUND = {background};
+const canvas = document.getElementById("canvas");
+const result = document.getElementById("result");
+
+function finish(payload) {{
+  result.textContent = JSON.stringify(payload);
+  document.title = "fascat-browser-render-done";
+}}
+
+function bytesToString(bytes) {{
+  return new TextDecoder("utf-8").decode(bytes);
+}}
+
+function readUint32(bytes, offset) {{
+  return new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0, true);
+}}
+
+function dataUriToBuffer(uri) {{
+  const comma = uri.indexOf(",");
+  if (comma < 0) throw new Error("invalid data URI buffer");
+  const header = uri.slice(0, comma);
+  const payload = uri.slice(comma + 1);
+  if (header.includes(";base64")) {{
+    const binary = atob(payload);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
+  }}
+  return new TextEncoder().encode(decodeURIComponent(payload)).buffer;
+}}
+
+function loadBufferUri(uri) {{
+  const xhr = new XMLHttpRequest();
+  xhr.open("GET", uri, false);
+  xhr.overrideMimeType("text/plain; charset=x-user-defined");
+  xhr.send(null);
+  if (xhr.status !== 0 && (xhr.status < 200 || xhr.status >= 300)) throw new Error("failed to load " + uri);
+  if (xhr.responseText === undefined) throw new Error("empty response for " + uri);
+  const text = xhr.responseText;
+  const bytes = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i) & 0xff;
+  return bytes.buffer;
+}}
+
+function loadAsset() {{
+  const buffer = loadBufferUri(ASSET_URL);
+  const bytes = new Uint8Array(buffer);
+  if (bytes.length >= 20 && bytes[0] === 0x67 && bytes[1] === 0x6c && bytes[2] === 0x54 && bytes[3] === 0x46) {{
+    const jsonLength = readUint32(bytes, 12);
+    const jsonType = readUint32(bytes, 16);
+    if (jsonType !== 0x4e4f534a) throw new Error("first GLB chunk is not JSON");
+    const jsonStart = 20;
+    const jsonEnd = jsonStart + jsonLength;
+    const document = JSON.parse(bytesToString(bytes.slice(jsonStart, jsonEnd)));
+    const buffers = [];
+    let chunkOffset = jsonEnd + (jsonLength % 4 === 0 ? 0 : 4 - (jsonLength % 4));
+    if (bytes.length >= chunkOffset + 8) {{
+      const binaryLength = readUint32(bytes, chunkOffset);
+      const binaryType = readUint32(bytes, chunkOffset + 4);
+      if (binaryType === 0x004e4942) buffers[0] = bytes.slice(chunkOffset + 8, chunkOffset + 8 + binaryLength).buffer;
+    }}
+    return {{ document, buffers }};
+  }}
+  const document = JSON.parse(bytesToString(bytes));
+  const buffers = [];
+  const bufferDefs = Array.isArray(document.buffers) ? document.buffers : [];
+  for (let i = 0; i < bufferDefs.length; i++) {{
+    const uri = bufferDefs[i].uri;
+    if (!uri) throw new Error("external glTF buffer is missing a URI");
+    if (uri.startsWith("data:")) {{
+      buffers[i] = dataUriToBuffer(uri);
+    }} else {{
+      buffers[i] = loadBufferUri(new URL(uri, ASSET_URL).href);
+    }}
+  }}
+  return {{ document, buffers }};
+}}
+
+const COMPONENTS = {{ SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 }};
+const ARRAY_TYPES = {{ 5121: Uint8Array, 5123: Uint16Array, 5125: Uint32Array, 5126: Float32Array }};
+const COMPONENT_BYTES = {{ 5121: 1, 5123: 2, 5125: 4, 5126: 4 }};
+
+function readAccessor(document, buffers, accessorIndex) {{
+  const accessor = document.accessors && document.accessors[accessorIndex];
+  if (!accessor) throw new Error("missing accessor " + accessorIndex);
+  if (accessor.sparse) throw new Error("sparse accessors are not supported by browser render preview");
+  const view = document.bufferViews && document.bufferViews[accessor.bufferView];
+  if (!view) throw new Error("missing bufferView for accessor " + accessorIndex);
+  const buffer = buffers[view.buffer || 0];
+  if (!buffer) throw new Error("missing buffer data for accessor " + accessorIndex);
+  const itemSize = COMPONENTS[accessor.type] || 1;
+  const ArrayType = ARRAY_TYPES[accessor.componentType];
+  const componentBytes = COMPONENT_BYTES[accessor.componentType];
+  if (!ArrayType || !componentBytes) throw new Error("unsupported accessor component type " + accessor.componentType);
+  const byteOffset = (view.byteOffset || 0) + (accessor.byteOffset || 0);
+  const stride = view.byteStride || (componentBytes * itemSize);
+  const length = accessor.count * itemSize;
+  if (stride === componentBytes * itemSize) {{
+    return {{ array: new ArrayType(buffer, byteOffset, length), itemSize, count: accessor.count, componentType: accessor.componentType }};
+  }}
+  if (accessor.componentType !== 5126) throw new Error("strided non-float accessors are not supported");
+  const source = new DataView(buffer, byteOffset, stride * accessor.count);
+  const values = new Float32Array(length);
+  for (let row = 0; row < accessor.count; row++) {{
+    for (let column = 0; column < itemSize; column++) {{
+      values[row * itemSize + column] = source.getFloat32(row * stride + column * componentBytes, true);
+    }}
+  }}
+  return {{ array: values, itemSize, count: accessor.count, componentType: accessor.componentType }};
+}}
+
+function identity() {{
+  return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+}}
+
+function multiply(a, b) {{
+  const out = new Array(16).fill(0);
+  for (let column = 0; column < 4; column++) {{
+    for (let row = 0; row < 4; row++) {{
+      out[column * 4 + row] =
+        a[0 * 4 + row] * b[column * 4 + 0] +
+        a[1 * 4 + row] * b[column * 4 + 1] +
+        a[2 * 4 + row] * b[column * 4 + 2] +
+        a[3 * 4 + row] * b[column * 4 + 3];
+    }}
+  }}
+  return out;
+}}
+
+function nodeMatrix(node) {{
+  if (Array.isArray(node.matrix) && node.matrix.length === 16) return node.matrix.slice();
+  const t = node.translation || [0, 0, 0];
+  const r = node.rotation || [0, 0, 0, 1];
+  const s = node.scale || [1, 1, 1];
+  const x = r[0], y = r[1], z = r[2], w = r[3];
+  const x2 = x + x, y2 = y + y, z2 = z + z;
+  const xx = x * x2, xy = x * y2, xz = x * z2;
+  const yy = y * y2, yz = y * z2, zz = z * z2;
+  const wx = w * x2, wy = w * y2, wz = w * z2;
+  return [
+    (1 - (yy + zz)) * s[0], (xy + wz) * s[0], (xz - wy) * s[0], 0,
+    (xy - wz) * s[1], (1 - (xx + zz)) * s[1], (yz + wx) * s[1], 0,
+    (xz + wy) * s[2], (yz - wx) * s[2], (1 - (xx + yy)) * s[2], 0,
+    t[0], t[1], t[2], 1
+  ];
+}}
+
+function transformPoint(m, p) {{
+  return [
+    m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12],
+    m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13],
+    m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14]
+  ];
+}}
+
+function subtract(a, b) {{ return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }}
+function cross(a, b) {{ return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }}
+function dot(a, b) {{ return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }}
+function normalize(v) {{
+  const length = Math.hypot(v[0], v[1], v[2]) || 1;
+  return [v[0] / length, v[1] / length, v[2] / length];
+}}
+
+function lookAt(eye, center, up) {{
+  const z = normalize(subtract(eye, center));
+  const x = normalize(cross(up, z));
+  const y = cross(z, x);
+  return [
+    x[0], y[0], z[0], 0,
+    x[1], y[1], z[1], 0,
+    x[2], y[2], z[2], 0,
+    -dot(x, eye), -dot(y, eye), -dot(z, eye), 1
+  ];
+}}
+
+function perspective(fovy, aspect, near, far) {{
+  const f = 1.0 / Math.tan(fovy / 2);
+  const nf = 1 / (near - far);
+  return [f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0];
+}}
+
+function shader(gl, type, source) {{
+  const item = gl.createShader(type);
+  gl.shaderSource(item, source);
+  gl.compileShader(item);
+  if (!gl.getShaderParameter(item, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(item));
+  return item;
+}}
+
+function program(gl) {{
+  const item = gl.createProgram();
+  gl.attachShader(item, shader(gl, gl.VERTEX_SHADER, "attribute vec3 p; uniform mat4 mvp; void main() {{ gl_Position = mvp * vec4(p, 1.0); }}"));
+  gl.attachShader(item, shader(gl, gl.FRAGMENT_SHADER, "precision mediump float; uniform vec4 color; void main() {{ gl_FragColor = color; }}"));
+  gl.linkProgram(item);
+  if (!gl.getProgramParameter(item, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(item));
+  return item;
+}}
+
+function materialColor(document, materialIndex) {{
+  const material = document.materials && document.materials[materialIndex];
+  const factor = material && material.pbrMetallicRoughness && material.pbrMetallicRoughness.baseColorFactor;
+  return Array.isArray(factor) ? factor : [0.45, 0.58, 0.72, 1.0];
+}}
+
+function collectDraws(document, buffers) {{
+  const draws = [];
+  const nodes = Array.isArray(document.nodes) ? document.nodes : [];
+  const scenes = Array.isArray(document.scenes) ? document.scenes : [];
+  const scene = scenes[document.scene || 0] || scenes[0] || {{ nodes: nodes.map((_, index) => index) }};
+
+  function addMesh(meshIndex, world) {{
+    const mesh = document.meshes && document.meshes[meshIndex];
+    if (!mesh || !Array.isArray(mesh.primitives)) return;
+    for (const primitive of mesh.primitives) {{
+      if ((primitive.mode === undefined ? 4 : primitive.mode) !== 4) continue;
+      if (!primitive.attributes || primitive.attributes.POSITION === undefined) continue;
+      const position = readAccessor(document, buffers, primitive.attributes.POSITION);
+      if (position.componentType !== 5126 || position.itemSize !== 3) {{
+        throw new Error("browser render preview currently supports FLOAT VEC3 positions");
+      }}
+      const indices = primitive.indices === undefined ? null : readAccessor(document, buffers, primitive.indices);
+      const triangles = indices ? Math.floor(indices.count / 3) : Math.floor(position.count / 3);
+      draws.push({{
+        position,
+        indices,
+        matrix: world,
+        color: materialColor(document, primitive.material),
+        triangles
+      }});
+    }}
+  }}
+
+  function walk(nodeIndex, parent) {{
+    const node = nodes[nodeIndex];
+    if (!node) return;
+    const world = multiply(parent, nodeMatrix(node));
+    if (node.mesh !== undefined) addMesh(node.mesh, world);
+    if (Array.isArray(node.children)) for (const child of node.children) walk(child, world);
+  }}
+
+  const roots = Array.isArray(scene.nodes) ? scene.nodes : [];
+  for (const root of roots) walk(root, identity());
+  if (!roots.length && Array.isArray(document.meshes)) {{
+    for (let index = 0; index < document.meshes.length; index++) addMesh(index, identity());
+  }}
+  return draws;
+}}
+
+function bounds(draws) {{
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (const draw of draws) {{
+    const values = draw.position.array;
+    for (let i = 0; i < draw.position.count; i++) {{
+      const p = transformPoint(draw.matrix, [values[i * 3], values[i * 3 + 1], values[i * 3 + 2]]);
+      for (let axis = 0; axis < 3; axis++) {{
+        min[axis] = Math.min(min[axis], p[axis]);
+        max[axis] = Math.max(max[axis], p[axis]);
+      }}
+    }}
+  }}
+  return {{ min, max }};
+}}
+
+(() => {{
+  try {{
+    const loaded = loadAsset();
+    const document = loaded.document;
+    const draws = collectDraws(document, loaded.buffers);
+    if (!draws.length) throw new Error("asset contains no renderable mesh primitives");
+    const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
+    if (!gl) throw new Error("WebGL context unavailable");
+    if (draws.some(draw => draw.indices && draw.indices.componentType === 5125) && !gl.getExtension("OES_element_index_uint")) {{
+      throw new Error("browser does not support unsigned-int index buffers");
+    }}
+
+    const box = bounds(draws);
+    const center = [
+      (box.min[0] + box.max[0]) * 0.5,
+      (box.min[1] + box.max[1]) * 0.5,
+      (box.min[2] + box.max[2]) * 0.5
+    ];
+    const extent = Math.max(box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2], 1.0);
+    const eye = [center[0] + extent * 1.3, center[1] + extent * 0.9, center[2] + extent * 1.3];
+    const view = lookAt(eye, center, [0, 1, 0]);
+    const projection = perspective(Math.PI / 4, canvas.width / canvas.height, extent * 0.01, extent * 10.0);
+    const drawProgram = program(gl);
+    const positionLocation = gl.getAttribLocation(drawProgram, "p");
+    const mvpLocation = gl.getUniformLocation(drawProgram, "mvp");
+    const colorLocation = gl.getUniformLocation(drawProgram, "color");
+
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(BACKGROUND[0], BACKGROUND[1], BACKGROUND[2], BACKGROUND[3]);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+    gl.useProgram(drawProgram);
+
+    let triangles = 0;
+    for (const draw of draws) {{
+      const positionBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, draw.position.array, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(positionLocation);
+      gl.vertexAttribPointer(positionLocation, 3, gl.FLOAT, false, 0, 0);
+      gl.uniformMatrix4fv(mvpLocation, false, new Float32Array(multiply(projection, multiply(view, draw.matrix))));
+      gl.uniform4fv(colorLocation, new Float32Array(draw.color));
+      if (draw.indices) {{
+        const indexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, draw.indices.array, gl.STATIC_DRAW);
+        gl.drawElements(gl.TRIANGLES, draw.indices.count, draw.indices.componentType, 0);
+      }} else {{
+        gl.drawArrays(gl.TRIANGLES, 0, draw.position.count);
+      }}
+      triangles += draw.triangles;
+    }}
+    gl.finish();
+    finish({{ status: "rendered", meshes: Array.isArray(document.meshes) ? document.meshes.length : 0, triangles }});
+  }} catch (error) {{
+    finish({{ status: "failed", error: String(error), meshes: 0, triangles: 0 }});
+  }}
+}})();
+</script>
+</body>
+</html>
+"""
 
 
 def _runtime_harness_html(asset_path: Path, options: RuntimeBrowserOptions) -> str:
