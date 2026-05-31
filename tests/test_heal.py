@@ -10,7 +10,7 @@ from fascat.asset import Asset, Node, Part
 from fascat.cli import app
 from fascat.filter import Filter
 from fascat.mesh import Mesh
-from fascat.ops.heal import BrepStatus, brep_status
+from fascat.ops.heal import BrepHealDiagnostics, BrepStatus, brep_status, heal_shape
 from fascat.options import BrepHealOptions, ConversionProfile, RepairOptions, StageOptions
 from fascat.pipeline import convert
 
@@ -37,12 +37,15 @@ def _asset_with_brep() -> Asset:
 def test_heal_brep_scopes_to_selected_parts_and_records_status(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     import fascat.ops.heal as heal
 
-    def fake_heal_shape(shape: object, _options: BrepHealOptions) -> tuple[object, BrepStatus, BrepStatus, list[str]]:
+    def fake_heal_shape(
+        shape: object, _options: BrepHealOptions
+    ) -> tuple[object, BrepStatus, BrepStatus, list[str], BrepHealDiagnostics]:
         return (
             {"healed": shape},
             BrepStatus(kind="open_surface", shells=1, faces=3, open_shells=1),
             BrepStatus(kind="solid", solids=1, faces=3, open_shells=0),
             ["fixed trims"],
+            BrepHealDiagnostics(),
         )
 
     monkeypatch.setattr(heal, "heal_shape", fake_heal_shape)
@@ -57,7 +60,7 @@ def test_heal_brep_scopes_to_selected_parts_and_records_status(monkeypatch) -> N
     assert healed.parts["selected"].metadata["brep_small_edges"] == "0"
     assert (
         healed.parts["selected"].metadata["brep_heal_operations"]
-        == "fix_edges,unify_tolerances,sew_faces,unify_same_domain"
+        == "fix_edges,unify_tolerances,sew_faces,unify_same_domain,remove_overlapping_faces"
     )
     assert healed.report.warnings == ["Selected: fixed trims"]
     assert healed.report.steps[-1].name == "heal_brep"
@@ -67,12 +70,15 @@ def test_heal_brep_scopes_to_selected_parts_and_records_status(monkeypatch) -> N
 def test_heal_brep_report_includes_unit_aware_tolerance_policy(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     import fascat.ops.heal as heal
 
-    def fake_heal_shape(shape: object, _options: BrepHealOptions) -> tuple[object, BrepStatus, BrepStatus, list[str]]:
+    def fake_heal_shape(
+        shape: object, _options: BrepHealOptions
+    ) -> tuple[object, BrepStatus, BrepStatus, list[str], BrepHealDiagnostics]:
         return (
             shape,
             BrepStatus(kind="surface", faces=1),
             BrepStatus(kind="surface", faces=1),
             [],
+            BrepHealDiagnostics(),
         )
 
     monkeypatch.setattr(heal, "heal_shape", fake_heal_shape)
@@ -101,13 +107,21 @@ def test_heal_brep_report_includes_unit_aware_tolerance_policy(monkeypatch) -> N
 def test_heal_brep_records_same_domain_cleanup_metadata(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     import fascat.ops.heal as heal
 
-    def fake_heal_shape(shape: object, _options: BrepHealOptions) -> tuple[object, BrepStatus, BrepStatus, list[str]]:
+    def fake_heal_shape(
+        shape: object, _options: BrepHealOptions
+    ) -> tuple[object, BrepStatus, BrepStatus, list[str], BrepHealDiagnostics]:
         assert _options.unify_same_domain is True
         return (
             shape,
             BrepStatus(kind="shell", shells=1, edges=12, faces=6),
             BrepStatus(kind="shell", shells=1, edges=10, faces=5),
             [],
+            BrepHealDiagnostics(
+                faces_removed=1,
+                edges_removed=2,
+                same_domain_faces_removed=1,
+                same_domain_edges_removed=2,
+            ),
         )
 
     monkeypatch.setattr(heal, "heal_shape", fake_heal_shape)
@@ -147,6 +161,8 @@ def test_brep_status_dict_includes_topology_risk_counts() -> None:
         "free_edges": 4,
         "small_edges": 2,
         "sliver_faces": 1,
+        "overlapping_face_pairs": 0,
+        "z_fighting_faces": 0,
     }
 
 
@@ -164,10 +180,80 @@ def test_brep_status_reports_closed_box_topology() -> None:
     assert status.small_edges == 0
 
 
+def _duplicate_coplanar_face_compound() -> object:
+    pytest.importorskip("OCP.BRep")
+    from OCP.BRep import BRep_Builder
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+    from OCP.gp import gp_Dir, gp_Pln, gp_Pnt
+    from OCP.TopoDS import TopoDS_Compound
+
+    plane = gp_Pln(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(0.0, 0.0, 1.0))
+    face_a = BRepBuilderAPI_MakeFace(plane, 0.0, 1.0, 0.0, 1.0).Face()
+    face_b = BRepBuilderAPI_MakeFace(plane, 0.0, 1.0, 0.0, 1.0).Face()
+    compound = TopoDS_Compound()
+    builder = BRep_Builder()
+    builder.MakeCompound(compound)
+    builder.Add(compound, face_a)
+    builder.Add(compound, face_b)
+    return compound
+
+
+def test_brep_status_detects_coplanar_z_fighting_faces() -> None:
+    shape = _duplicate_coplanar_face_compound()
+
+    status = brep_status(
+        shape,
+        detect_overlaps=True,
+        overlap_tolerance=0.05,
+        overlap_area_ratio=0.995,
+    )
+
+    assert status.faces == 2
+    assert status.overlapping_face_pairs == 1
+    assert status.z_fighting_faces == 2
+
+
+def test_heal_shape_removes_redundant_overlapping_faces() -> None:
+    shape = _duplicate_coplanar_face_compound()
+
+    healed_shape, before, after, warnings, diagnostics = heal_shape(shape, BrepHealOptions(tolerance=0.05))
+
+    assert healed_shape is not shape
+    assert warnings == []
+    assert before.faces == 2
+    assert before.overlapping_face_pairs == 1
+    assert after.faces == 1
+    assert after.overlapping_face_pairs == 0
+    assert after.z_fighting_faces == 0
+    assert diagnostics.faces_removed == 1
+    assert diagnostics.overlapping_faces_removed == 1
+
+
+def test_heal_brep_records_overlap_cleanup_metadata() -> None:
+    shape = _duplicate_coplanar_face_compound()
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="panel", name="Panel", part_id="panel")]),
+        parts={"panel": Part(id="panel", name="Panel", source_shape=shape)},
+    )
+
+    healed = asset.heal_brep(BrepHealOptions(tolerance=0.05))
+
+    panel = healed.parts["panel"]
+    assert panel.metadata["brep_faces"] == "1"
+    assert panel.metadata["brep_overlapping_face_pairs"] == "0"
+    assert panel.metadata["brep_z_fighting_faces"] == "0"
+    assert panel.metadata["brep_overlapping_face_pairs_resolved"] == "1"
+    assert panel.metadata["brep_overlapping_faces_removed"] == "1"
+    assert panel.metadata["brep_faces_removed"] == "1"
+    assert panel.metadata["brep_heal_overlap_z_fighting_cleanup"] == "enabled"
+
+
 def test_heal_brep_reports_remaining_topology_risks(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     import fascat.ops.heal as heal
 
-    def fake_heal_shape(shape: object, _options: BrepHealOptions) -> tuple[object, BrepStatus, BrepStatus, list[str]]:
+    def fake_heal_shape(
+        shape: object, _options: BrepHealOptions
+    ) -> tuple[object, BrepStatus, BrepStatus, list[str], BrepHealDiagnostics]:
         return (
             shape,
             BrepStatus(kind="open_surface", shells=1, wires=1, edges=5, faces=2, open_shells=1, free_edges=4),
@@ -182,6 +268,7 @@ def test_heal_brep_reports_remaining_topology_risks(monkeypatch) -> None:  # typ
                 small_edges=1,
             ),
             [],
+            BrepHealDiagnostics(),
         )
 
     monkeypatch.setattr(heal, "heal_shape", fake_heal_shape)
@@ -212,6 +299,7 @@ def test_heal_brep_can_fail_on_remaining_open_shells(monkeypatch) -> None:  # ty
             BrepStatus(kind="open_surface", open_shells=1),
             BrepStatus(kind="open_surface", open_shells=1),
             [],
+            BrepHealDiagnostics(),
         ),
     )
 
@@ -230,6 +318,7 @@ def test_heal_brep_reports_unsupported_sliver_face_removal(monkeypatch) -> None:
             BrepStatus(kind="solid", sliver_faces=1),
             BrepStatus(kind="solid", sliver_faces=1),
             [],
+            BrepHealDiagnostics(),
         ),
     )
 
@@ -262,9 +351,11 @@ def test_convert_runs_heal_brep_before_tessellation(monkeypatch, tmp_path: Path)
         lods=None,
     )
 
-    def fake_heal_shape(shape: object, _options: BrepHealOptions) -> tuple[object, BrepStatus, BrepStatus, list[str]]:
+    def fake_heal_shape(
+        shape: object, _options: BrepHealOptions
+    ) -> tuple[object, BrepStatus, BrepStatus, list[str], BrepHealDiagnostics]:
         calls.append("heal")
-        return (shape, BrepStatus(kind="shell"), BrepStatus(kind="solid", solids=1), [])
+        return (shape, BrepStatus(kind="shell"), BrepStatus(kind="solid", solids=1), [], BrepHealDiagnostics())
 
     def fake_tessellate_asset(written_asset: Asset, _options: object, *, selected_part_ids=None) -> Asset:  # type: ignore[no-untyped-def]
         calls.append("tessellate")
@@ -305,6 +396,8 @@ def test_cli_convert_accepts_heal_brep_during_dry_run() -> None:
             "--heal-brep",
             "--heal-tolerance",
             "0.1",
+            "--overlap-area-ratio",
+            "0.9",
             "--remove-sliver-faces",
             "--max-sliver-area",
             "0.001",
@@ -314,6 +407,8 @@ def test_cli_convert_accepts_heal_brep_during_dry_run() -> None:
     assert result.exit_code == 0, result.output
     assert '"heal_brep": true' in result.output
     assert '"heal_tolerance": 0.1' in result.output
+    assert '"cleanup_overlapping_faces": true' in result.output
+    assert '"overlap_area_ratio": 0.9' in result.output
 
 
 def test_cli_rejects_invalid_heal_tolerance() -> None:
@@ -323,3 +418,12 @@ def test_cli_rejects_invalid_heal_tolerance() -> None:
 
     assert result.exit_code == 2
     assert "--heal-tolerance must be greater than 0" in result.output
+
+
+def test_cli_rejects_invalid_overlap_area_ratio() -> None:
+    result = runner.invoke(
+        app, ["--dry-run", "convert", "input.step", "output.glb", "--heal-brep", "--overlap-area-ratio", "1.1"]
+    )
+
+    assert result.exit_code == 2
+    assert "--overlap-area-ratio must be greater than 0 and no more than 1" in result.output

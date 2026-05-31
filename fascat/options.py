@@ -352,6 +352,8 @@ class BrepHealOptions:
     sew_faces: bool = True
     fix_edges: bool = True
     unify_same_domain: bool = True
+    remove_overlapping_faces: bool = True
+    overlap_area_ratio: float = 0.995
     remove_sliver_faces: bool = False
     max_sliver_area: float = 1e-4
     unify_tolerances: bool = True
@@ -360,6 +362,8 @@ class BrepHealOptions:
     def __post_init__(self) -> None:
         if self.tolerance <= 0.0:
             raise ValueError("heal tolerance must be greater than 0")
+        if self.overlap_area_ratio <= 0.0 or self.overlap_area_ratio > 1.0:
+            raise ValueError("overlap_area_ratio must be greater than 0 and no more than 1")
         if self.max_sliver_area < 0.0:
             raise ValueError("max_sliver_area must be greater than or equal to 0")
 

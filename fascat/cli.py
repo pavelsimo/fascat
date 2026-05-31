@@ -443,6 +443,17 @@ def cmd_inspect(
     ] = None,
     heal_brep: Annotated[bool, typer.Option("--heal-brep", help="Run BREP healing before inspection output.")] = False,
     heal_tolerance: Annotated[float, typer.Option("--heal-tolerance", help="BREP healing tolerance.")] = 0.05,
+    cleanup_overlapping_faces: Annotated[
+        bool,
+        typer.Option(
+            "--cleanup-overlapping-faces/--keep-overlapping-faces",
+            help="Remove redundant coplanar BREP faces that overlap enough to z-fight.",
+        ),
+    ] = True,
+    overlap_area_ratio: Annotated[
+        float,
+        typer.Option("--overlap-area-ratio", help="Minimum smaller-face area ratio for BREP overlap cleanup."),
+    ] = 0.995,
     remove_sliver_faces: Annotated[
         bool,
         typer.Option("--remove-sliver-faces", help="Request tiny sliver-face removal during BREP healing."),
@@ -483,6 +494,8 @@ def cmd_inspect(
         "target_handedness": None if target_handedness is None else target_handedness.value,
         "heal_brep": heal_brep,
         "heal_tolerance": heal_tolerance,
+        "cleanup_overlapping_faces": cleanup_overlapping_faces,
+        "overlap_area_ratio": overlap_area_ratio,
         "remove_sliver_faces": remove_sliver_faces,
         "max_sliver_area": max_sliver_area,
         "filters": filters or [],
@@ -492,6 +505,8 @@ def cmd_inspect(
     where = _parse_filter_options(filters, exclude_filters, ctx, payload)
     if heal_tolerance <= 0.0:
         _fail(ctx, payload, "--heal-tolerance must be greater than 0.", code=2)
+    if overlap_area_ratio <= 0.0 or overlap_area_ratio > 1.0:
+        _fail(ctx, payload, "--overlap-area-ratio must be greater than 0 and no more than 1.", code=2)
     if max_sliver_area < 0.0:
         _fail(ctx, payload, "--max-sliver-area must be greater than or equal to 0.", code=2)
     if source_meters_per_unit is not None and source_meters_per_unit <= 0.0:
@@ -525,6 +540,8 @@ def cmd_inspect(
         asset = asset.heal_brep(
             _brep_heal_options(
                 heal_tolerance=heal_tolerance,
+                cleanup_overlapping_faces=cleanup_overlapping_faces,
+                overlap_area_ratio=overlap_area_ratio,
                 remove_sliver_faces=remove_sliver_faces,
                 max_sliver_area=max_sliver_area,
             ),
@@ -650,6 +667,17 @@ def cmd_convert(
     ] = True,
     heal_brep: Annotated[bool, typer.Option("--heal-brep", help="Run BREP healing before tessellation.")] = False,
     heal_tolerance: Annotated[float, typer.Option("--heal-tolerance", help="BREP healing tolerance.")] = 0.05,
+    cleanup_overlapping_faces: Annotated[
+        bool,
+        typer.Option(
+            "--cleanup-overlapping-faces/--keep-overlapping-faces",
+            help="Remove redundant coplanar BREP faces that overlap enough to z-fight.",
+        ),
+    ] = True,
+    overlap_area_ratio: Annotated[
+        float,
+        typer.Option("--overlap-area-ratio", help="Minimum smaller-face area ratio for BREP overlap cleanup."),
+    ] = 0.995,
     remove_sliver_faces: Annotated[
         bool,
         typer.Option("--remove-sliver-faces", help="Detect tiny sliver faces during BREP healing."),
@@ -1286,6 +1314,8 @@ def cmd_convert(
         "reuse_existing_meshes": reuse_existing_meshes,
         "heal_brep": heal_brep,
         "heal_tolerance": heal_tolerance,
+        "cleanup_overlapping_faces": cleanup_overlapping_faces,
+        "overlap_area_ratio": overlap_area_ratio,
         "remove_sliver_faces": remove_sliver_faces,
         "max_sliver_area": max_sliver_area,
         "fail_on_open_shells": fail_on_open_shells,
@@ -1483,6 +1513,8 @@ def cmd_convert(
         _fail(ctx, payload, "--min-edge-length must be less than or equal to --max-edge-length.", code=2)
     if heal_tolerance <= 0.0:
         _fail(ctx, payload, "--heal-tolerance must be greater than 0.", code=2)
+    if overlap_area_ratio <= 0.0 or overlap_area_ratio > 1.0:
+        _fail(ctx, payload, "--overlap-area-ratio must be greater than 0 and no more than 1.", code=2)
     if max_sliver_area < 0.0:
         _fail(ctx, payload, "--max-sliver-area must be greater than or equal to 0.", code=2)
     if max_vertices_per_mesh is not None and max_vertices_per_mesh <= 0:
@@ -1740,6 +1772,8 @@ def cmd_convert(
         heal_options = (
             _brep_heal_options(
                 heal_tolerance=heal_tolerance,
+                cleanup_overlapping_faces=cleanup_overlapping_faces,
+                overlap_area_ratio=overlap_area_ratio,
                 remove_sliver_faces=remove_sliver_faces,
                 max_sliver_area=max_sliver_area,
                 fail_on_open_shells=fail_on_open_shells,
@@ -2272,7 +2306,7 @@ def _convert_operation_diagnostics(payload: dict[str, Any]) -> list[dict[str, st
             add(
                 "heal_brep",
                 "exact",
-                "BREP sewing, edge fixing, tolerance unification, and same-domain cleanup are requested",
+                "BREP sewing, edge fixing, tolerance unification, same-domain cleanup, and overlap cleanup are requested",
             )
     add("tessellate", "exact", "BREP tessellation uses the selected sag, angle, and edge cleanup settings")
     add("repair", "exact", "mesh repair applies selected cleanup operations after tessellation")
@@ -2583,12 +2617,16 @@ def _read_pipeline_for_cli(path: Path, ctx: typer.Context, payload: dict[str, An
 def _brep_heal_options(
     *,
     heal_tolerance: float,
+    cleanup_overlapping_faces: bool,
+    overlap_area_ratio: float,
     remove_sliver_faces: bool,
     max_sliver_area: float,
     fail_on_open_shells: bool = False,
 ) -> BrepHealOptions:
     return BrepHealOptions(
         tolerance=heal_tolerance,
+        remove_overlapping_faces=cleanup_overlapping_faces,
+        overlap_area_ratio=overlap_area_ratio,
         remove_sliver_faces=remove_sliver_faces,
         max_sliver_area=max_sliver_area,
         fail_on_open_shells=fail_on_open_shells,
