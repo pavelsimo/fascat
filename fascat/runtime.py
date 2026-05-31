@@ -13,7 +13,7 @@ from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from importlib import resources
 from pathlib import Path
-from typing import Literal, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 
 from fascat.io.gltf import validate_gltf
 
@@ -146,6 +146,9 @@ class RuntimeBrowserRenderReport:
     textured_primitives: int = 0
     sampled_textures: int = 0
     quantized_primitives: int = 0
+    required_extensions: tuple[str, ...] = ()
+    unsupported_extensions: tuple[str, ...] = ()
+    preview_limitations: tuple[str, ...] = ()
     error: str | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -161,6 +164,9 @@ class RuntimeBrowserRenderReport:
             "textured_primitives": self.textured_primitives,
             "sampled_textures": self.sampled_textures,
             "quantized_primitives": self.quantized_primitives,
+            "required_extensions": list(self.required_extensions),
+            "unsupported_extensions": list(self.unsupported_extensions),
+            "preview_limitations": list(self.preview_limitations),
             "error": self.error,
         }
 
@@ -191,6 +197,14 @@ class RuntimeEngineOptions:
         if self.preview_path is not None:
             data["preview_path"] = str(self.preview_path)
         return data
+
+
+@dataclass(frozen=True)
+class _BrowserRenderPreflight:
+    required_extensions: tuple[str, ...] = ()
+    unsupported_extensions: tuple[str, ...] = ()
+    preview_limitations: tuple[str, ...] = ()
+    fatal: bool = False
 
 
 @dataclass(frozen=True)
@@ -289,7 +303,20 @@ def write_browser_render_preview(
         raise FileNotFoundError(f"missing runtime asset: {asset_path}")
 
     validation_stats = validate_gltf(asset_path)
+    preflight = _browser_render_preflight(asset_path)
     output_path = Path(preview_path)
+    if preflight.fatal:
+        return _browser_render_report(
+            asset_path,
+            output_path,
+            opts,
+            validation_stats,
+            status="unsupported",
+            browser=None,
+            error="; ".join(preflight.preview_limitations),
+            preflight=preflight,
+        )
+
     browser = _browser_command(opts)
     if browser is None:
         return _browser_render_report(
@@ -300,6 +327,7 @@ def write_browser_render_preview(
             status="unavailable",
             browser=None,
             error="no chromium-compatible browser executable found",
+            preflight=preflight,
         )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -324,6 +352,7 @@ def write_browser_render_preview(
                 status="failed",
                 browser=browser,
                 error="browser render preview timed out",
+                preflight=preflight,
             )
         if completed.returncode != 0:
             detail = (completed.stderr or completed.stdout).strip().splitlines()
@@ -336,6 +365,7 @@ def write_browser_render_preview(
                 status="failed",
                 browser=browser,
                 error=message,
+                preflight=preflight,
             )
         payload = _parse_browser_payload(completed.stdout)
         if payload is None:
@@ -347,6 +377,7 @@ def write_browser_render_preview(
                 status="failed",
                 browser=browser,
                 error="browser did not return render preview measurements",
+                preflight=preflight,
             )
         status = str(payload.get("status", "failed"))
         error = payload.get("error")
@@ -363,6 +394,9 @@ def write_browser_render_preview(
                 textured_primitives=_int(payload.get("textured_primitives"), 0),
                 sampled_textures=_int(payload.get("sampled_textures"), 0),
                 quantized_primitives=_int(payload.get("quantized_primitives"), 0),
+                required_extensions=preflight.required_extensions,
+                unsupported_extensions=preflight.unsupported_extensions,
+                preview_limitations=preflight.preview_limitations,
                 error=str(error) if error is not None else None,
             )
         screenshot_data = payload.get("screenshot_data")
@@ -385,6 +419,7 @@ def write_browser_render_preview(
                     status="failed",
                     browser=browser,
                     error="browser render preview screenshot timed out",
+                    preflight=preflight,
                 )
             if screenshot_completed.returncode != 0:
                 detail = (screenshot_completed.stderr or screenshot_completed.stdout).strip().splitlines()
@@ -397,10 +432,14 @@ def write_browser_render_preview(
                     status="failed",
                     browser=browser,
                     error=message,
+                    preflight=preflight,
                 )
     if not output_path.exists():
         status = "failed"
         error = "browser did not write render preview screenshot"
+    elif status == "rendered" and preflight.preview_limitations:
+        status = "rendered_partial"
+        error = "; ".join(preflight.preview_limitations)
     return RuntimeBrowserRenderReport(
         path=str(asset_path),
         status=status,
@@ -413,6 +452,9 @@ def write_browser_render_preview(
         textured_primitives=_int(payload.get("textured_primitives"), 0),
         sampled_textures=_int(payload.get("sampled_textures"), 0),
         quantized_primitives=_int(payload.get("quantized_primitives"), 0),
+        required_extensions=preflight.required_extensions,
+        unsupported_extensions=preflight.unsupported_extensions,
+        preview_limitations=preflight.preview_limitations,
         error=str(error) if error is not None else None,
     )
 
@@ -790,7 +832,9 @@ def _browser_render_report(
     status: str,
     browser: str | None,
     error: str | None,
+    preflight: _BrowserRenderPreflight | None = None,
 ) -> RuntimeBrowserRenderReport:
+    checks = preflight or _BrowserRenderPreflight()
     return RuntimeBrowserRenderReport(
         path=str(asset_path),
         status=status,
@@ -803,8 +847,158 @@ def _browser_render_report(
         textured_primitives=0,
         sampled_textures=0,
         quantized_primitives=0,
+        required_extensions=checks.required_extensions,
+        unsupported_extensions=checks.unsupported_extensions,
+        preview_limitations=checks.preview_limitations,
         error=error,
     )
+
+
+def _browser_render_preflight(asset_path: Path) -> _BrowserRenderPreflight:
+    document = _read_gltf_json_document(asset_path)
+    required = tuple(sorted(_string_list(document.get("extensionsRequired"))))
+    unsupported_extensions: set[str] = set()
+    limitations: list[str] = []
+    fatal = False
+
+    if _document_uses_draco(document):
+        unsupported_extensions.add("KHR_draco_mesh_compression")
+        limitations.append("browser preview cannot decode KHR_draco_mesh_compression geometry")
+        fatal = True
+    if _document_has_meshopt_only_buffer_views(document):
+        unsupported_extensions.add("EXT_meshopt_compression")
+        limitations.append("browser preview cannot decode meshopt bufferViews without fallback buffer data")
+        fatal = True
+    if _document_uses_basis_textures(document):
+        unsupported_extensions.add("KHR_texture_basisu")
+        limitations.append("browser preview renders geometry without KTX2/Basis texture sampling")
+
+    return _BrowserRenderPreflight(
+        required_extensions=required,
+        unsupported_extensions=tuple(sorted(unsupported_extensions)),
+        preview_limitations=tuple(limitations),
+        fatal=fatal,
+    )
+
+
+def _read_gltf_json_document(asset_path: Path) -> dict[str, Any]:
+    if asset_path.suffix.lower() == ".glb":
+        data = asset_path.read_bytes()
+        if len(data) < 20 or data[0:4] != b"glTF":
+            raise RuntimeError("GLB header is invalid")
+        json_length = int.from_bytes(data[12:16], "little")
+        json_type = int.from_bytes(data[16:20], "little")
+        if json_type != 0x4E4F534A:
+            raise RuntimeError("first GLB chunk is not JSON")
+        end = 20 + json_length
+        if end > len(data):
+            raise RuntimeError("GLB JSON chunk length is invalid")
+        loaded = json.loads(data[20:end].decode("utf-8"))
+    else:
+        loaded = json.loads(asset_path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise RuntimeError("glTF JSON document must be an object")
+    return cast(dict[str, Any], loaded)
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def _document_uses_draco(document: dict[str, Any]) -> bool:
+    if "KHR_draco_mesh_compression" in _string_list(document.get("extensionsRequired")):
+        return True
+    for primitive in _iter_gltf_primitives(document):
+        extensions = primitive.get("extensions")
+        if isinstance(extensions, dict) and "KHR_draco_mesh_compression" in extensions:
+            return True
+    return False
+
+
+def _document_has_meshopt_only_buffer_views(document: dict[str, Any]) -> bool:
+    buffer_views = document.get("bufferViews")
+    accessors = document.get("accessors")
+    if not isinstance(buffer_views, list) or not isinstance(accessors, list):
+        return False
+    referenced_buffer_views = _referenced_primitive_buffer_views(document, accessors)
+    for index, view in enumerate(buffer_views):
+        if index not in referenced_buffer_views:
+            continue
+        if not isinstance(view, dict):
+            continue
+        extensions = view.get("extensions")
+        if not isinstance(extensions, dict) or "EXT_meshopt_compression" not in extensions:
+            continue
+        if "buffer" not in view:
+            return True
+    return False
+
+
+def _document_uses_basis_textures(document: dict[str, Any]) -> bool:
+    if "KHR_texture_basisu" in _string_list(document.get("extensionsRequired")):
+        return True
+    textures = document.get("textures")
+    if isinstance(textures, list):
+        for texture in textures:
+            if not isinstance(texture, dict):
+                continue
+            extensions = texture.get("extensions")
+            if isinstance(extensions, dict) and "KHR_texture_basisu" in extensions:
+                return True
+    images = document.get("images")
+    if isinstance(images, list):
+        for image in images:
+            if not isinstance(image, dict):
+                continue
+            mime_type = image.get("mimeType")
+            uri = image.get("uri")
+            if mime_type == "image/ktx2" or (isinstance(uri, str) and uri.lower().endswith(".ktx2")):
+                return True
+    return False
+
+
+def _referenced_primitive_buffer_views(document: dict[str, Any], accessors: list[object]) -> set[int]:
+    indices: set[int] = set()
+    for accessor_index in _iter_primitive_accessor_indices(document):
+        if accessor_index < 0 or accessor_index >= len(accessors):
+            continue
+        accessor = accessors[accessor_index]
+        if not isinstance(accessor, dict):
+            continue
+        buffer_view = accessor.get("bufferView")
+        if isinstance(buffer_view, int):
+            indices.add(buffer_view)
+    return indices
+
+
+def _iter_primitive_accessor_indices(document: dict[str, Any]) -> Iterable[int]:
+    for primitive in _iter_gltf_primitives(document):
+        index = primitive.get("indices")
+        if isinstance(index, int):
+            yield index
+        attributes = primitive.get("attributes")
+        if not isinstance(attributes, dict):
+            continue
+        for attribute_index in attributes.values():
+            if isinstance(attribute_index, int):
+                yield attribute_index
+
+
+def _iter_gltf_primitives(document: dict[str, Any]) -> Iterable[dict[str, Any]]:
+    meshes = document.get("meshes")
+    if not isinstance(meshes, list):
+        return
+    for mesh in meshes:
+        if not isinstance(mesh, dict):
+            continue
+        primitives = mesh.get("primitives")
+        if not isinstance(primitives, list):
+            continue
+        for primitive in primitives:
+            if isinstance(primitive, dict):
+                yield primitive
 
 
 def _engine_report_from_payload(

@@ -2361,7 +2361,15 @@ def cmd_validate(
     if visual_preview_report is not None:
         message = f"{message} Wrote preview {visual_preview_report.path}."
     if runtime_browser_preview_report is not None:
-        message = f"{message} Wrote browser preview {runtime_browser_preview_report.preview_path}."
+        if runtime_browser_preview_report.status in {"rendered", "rendered_partial"}:
+            message = f"{message} Wrote browser preview {runtime_browser_preview_report.preview_path}."
+            if runtime_browser_preview_report.status == "rendered_partial":
+                message = f"{message} Browser preview partial: {runtime_browser_preview_report.error}."
+        else:
+            message = (
+                f"{message} Browser preview {runtime_browser_preview_report.status}: "
+                f"{runtime_browser_preview_report.error}."
+            )
     if runtime_engine_report is not None and runtime_engine_report.preview_path is not None:
         if runtime_engine_report.render_status == "rendered":
             message = f"{message} Wrote engine preview {runtime_engine_report.preview_path}."

@@ -188,6 +188,80 @@ def test_browser_render_preview_writes_screenshot_data_from_payload(
     assert Image.open(preview).getpixel((0, 0)) == (230, 20, 30, 255)
 
 
+def test_browser_render_preview_reports_unsupported_draco_without_running_browser(
+    monkeypatch,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "asset.gltf"
+    preview = tmp_path / "browser-preview.png"
+    _asset().write_gltf(output)
+    document = json.loads(output.read_text(encoding="utf-8"))
+    document["extensionsUsed"] = ["KHR_draco_mesh_compression"]
+    document["extensionsRequired"] = ["KHR_draco_mesh_compression"]
+    document["meshes"][0]["primitives"][0]["extensions"] = {"KHR_draco_mesh_compression": {"bufferView": 0}}
+    output.write_text(json.dumps(document), encoding="utf-8")
+
+    def fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("browser should not run for unsupported Draco preview")
+
+    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+
+    report = write_browser_render_preview(
+        output,
+        preview,
+        RuntimeBrowserRenderOptions(browser="fake-browser", timeout_seconds=3.0),
+    )
+
+    assert report.status == "unsupported"
+    assert report.browser is None
+    assert report.required_extensions == ("KHR_draco_mesh_compression",)
+    assert report.unsupported_extensions == ("KHR_draco_mesh_compression",)
+    assert "KHR_draco_mesh_compression" in str(report.error)
+    assert not preview.exists()
+
+
+def test_browser_render_preview_marks_ktx2_texture_preview_partial(
+    monkeypatch,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "asset.gltf"
+    preview = tmp_path / "browser-preview.png"
+    _asset().write_gltf(output)
+    document = json.loads(output.read_text(encoding="utf-8"))
+    document["extensionsUsed"] = ["KHR_texture_basisu"]
+    document["textures"] = [{"extensions": {"KHR_texture_basisu": {"source": 0}}}]
+    document["images"] = [{"mimeType": "image/ktx2", "uri": "data:image/ktx2;base64,"}]
+    output.write_text(json.dumps(document), encoding="utf-8")
+    image_bytes = BytesIO()
+    Image.new("RGBA", (2, 2), (40, 50, 60, 255)).save(image_bytes, format="PNG")
+    screenshot_data = "data:image/png;base64," + base64.b64encode(image_bytes.getvalue()).decode("ascii")
+
+    def fake_run(command: list[str], *_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert "--dump-dom" in command
+        stdout = (
+            '<html><body><pre id="result">'
+            '{"status":"rendered","meshes":1,"triangles":1,'
+            '"textured_primitives":0,"sampled_textures":0,'
+            f'"screenshot_data":"{screenshot_data}"'
+            "}</pre></body></html>"
+        )
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+
+    report = write_browser_render_preview(
+        output,
+        preview,
+        RuntimeBrowserRenderOptions(browser="fake-browser", timeout_seconds=3.0),
+    )
+
+    assert report.status == "rendered_partial"
+    assert report.unsupported_extensions == ("KHR_texture_basisu",)
+    assert "KTX2/Basis" in str(report.error)
+    assert report.to_dict()["unsupported_extensions"] == ["KHR_texture_basisu"]
+    assert Image.open(preview).getpixel((0, 0)) == (40, 50, 60, 255)
+
+
 def test_browser_render_preview_harness_samples_base_color_textures(tmp_path: Path) -> None:
     html = _runtime_browser_render_html(
         tmp_path / "asset.glb",
