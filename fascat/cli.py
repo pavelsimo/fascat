@@ -2146,6 +2146,13 @@ def cmd_validate(
             help="Custom Unity project folder or Unreal .uproject with Fascat harness.",
         ),
     ] = None,
+    runtime_engine_preview: Annotated[
+        Path | None,
+        typer.Option(
+            "--runtime-engine-preview",
+            help="Preview PNG path requested from a custom Unity/Unreal runtime harness.",
+        ),
+    ] = None,
     runtime_engine_timeout: Annotated[
         float,
         typer.Option("--runtime-engine-timeout", help="Unity/Unreal runtime harness timeout in seconds."),
@@ -2219,6 +2226,7 @@ def cmd_validate(
         "runtime_engine": None if runtime_engine is None else runtime_engine.value,
         "runtime_engine_command": runtime_engine_command,
         "runtime_engine_project": str(runtime_engine_project) if runtime_engine_project else None,
+        "runtime_engine_preview": str(runtime_engine_preview) if runtime_engine_preview else None,
         "runtime_engine_timeout": runtime_engine_timeout,
         "visual_preview": str(visual_preview) if visual_preview else None,
         "runtime_browser_preview": str(runtime_browser_preview) if runtime_browser_preview else None,
@@ -2250,8 +2258,13 @@ def cmd_validate(
         _fail(ctx, payload, "--visual-diff-changed-pixel-ratio must be between 0 and 1.", code=2)
     if visual_baseline is not None and visual_preview is None:
         _fail(ctx, payload, "--visual-baseline requires --visual-preview.", code=2)
+    if runtime_engine_preview is not None and runtime_engine is None:
+        _fail(ctx, payload, "--runtime-engine-preview requires --runtime-engine.", code=2)
     if _is_stdio(output_path) and (
-        visual_preview is not None or runtime_browser_preview is not None or lod_preview_dir is not None
+        visual_preview is not None
+        or runtime_browser_preview is not None
+        or runtime_engine_preview is not None
+        or lod_preview_dir is not None
     ):
         _fail(ctx, payload, "Visual preview validation requires a file path, not stdin.", code=2)
     if state.dry_run:
@@ -2284,6 +2297,7 @@ def cmd_validate(
                     engine=cast(Any, runtime_engine.value),
                     executable=runtime_engine_command,
                     project=runtime_engine_project,
+                    preview_path=runtime_engine_preview,
                     timeout_seconds=runtime_engine_timeout,
                 ),
             )
@@ -2348,6 +2362,13 @@ def cmd_validate(
         message = f"{message} Wrote preview {visual_preview_report.path}."
     if runtime_browser_preview_report is not None:
         message = f"{message} Wrote browser preview {runtime_browser_preview_report.preview_path}."
+    if runtime_engine_report is not None and runtime_engine_report.preview_path is not None:
+        if runtime_engine_report.render_status == "rendered":
+            message = f"{message} Wrote engine preview {runtime_engine_report.preview_path}."
+        else:
+            message = (
+                f"{message} Engine preview {runtime_engine_report.render_status}: {runtime_engine_report.render_error}."
+            )
     if visual_diff_report is not None:
         message = f"{message} Visual diff passed." if visual_diff_report.passed else f"{message} Visual diff failed."
     if lod_preview_report is not None:

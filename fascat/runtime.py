@@ -170,6 +170,7 @@ class RuntimeEngineOptions:
     engine: RuntimeEngineName
     executable: str | None = None
     project: str | Path | None = None
+    preview_path: str | Path | None = None
     timeout_seconds: float = 120.0
     extra_args: tuple[str, ...] = ()
 
@@ -187,6 +188,8 @@ class RuntimeEngineOptions:
         data = asdict(self)
         if self.project is not None:
             data["project"] = str(self.project)
+        if self.preview_path is not None:
+            data["preview_path"] = str(self.preview_path)
         return data
 
 
@@ -205,6 +208,11 @@ class RuntimeEngineReport:
     memory_bytes: int | None
     meshes: int
     triangles: int
+    preview_path: str | None = None
+    render_status: str = "not_requested"
+    render_time_ms: int | None = None
+    rendered_frames: int = 0
+    render_error: str | None = None
     error: str | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -222,6 +230,11 @@ class RuntimeEngineReport:
             "memory_bytes": self.memory_bytes,
             "meshes": self.meshes,
             "triangles": self.triangles,
+            "preview_path": self.preview_path,
+            "render_status": self.render_status,
+            "render_time_ms": self.render_time_ms,
+            "rendered_frames": self.rendered_frames,
+            "render_error": self.render_error,
             "error": self.error,
         }
 
@@ -446,8 +459,11 @@ def measure_engine_runtime(path: str | Path, options: RuntimeEngineOptions) -> R
                     executable=executable,
                     project=None,
                 )
+        preview_path = None if options.preview_path is None else Path(options.preview_path)
+        if preview_path is not None:
+            preview_path.parent.mkdir(parents=True, exist_ok=True)
         report_path = Path(directory) / "runtime-report.json"
-        command = _engine_invocation(executable, project, asset_path, report_path, options)
+        command = _engine_invocation(executable, project, asset_path, report_path, preview_path, options)
         try:
             completed = subprocess.run(
                 command,
@@ -556,6 +572,7 @@ def _engine_invocation(
     project: Path,
     asset_path: Path,
     report_path: Path,
+    preview_path: Path | None,
     options: RuntimeEngineOptions,
 ) -> list[str]:
     asset = str(asset_path.resolve())
@@ -574,6 +591,7 @@ def _engine_invocation(
             asset,
             "-fascatReport",
             report,
+            *(["-fascatPreview", str(preview_path.resolve())] if preview_path is not None else []),
             *options.extra_args,
         ]
     return [
@@ -582,6 +600,7 @@ def _engine_invocation(
         "-run=FascatRuntimeHarness",
         f"-FascatAsset={asset}",
         f"-FascatReport={report}",
+        *([f"-FascatPreview={preview_path.resolve()}"] if preview_path is not None else []),
         "-unattended",
         "-nosplash",
         *options.extra_args,
@@ -800,6 +819,15 @@ def _engine_report_from_payload(
     status = str(payload.get("status", "measured"))
     error = payload.get("error")
     engine_version = payload.get("engine_version")
+    preview_path = None if options.preview_path is None else Path(options.preview_path)
+    render_status = str(payload.get("render_status", "not_requested" if preview_path is None else "unavailable"))
+    render_error = payload.get("render_error")
+    if preview_path is not None:
+        if preview_path.exists() and render_status in {"not_requested", "unavailable"}:
+            render_status = "rendered"
+        elif not preview_path.exists() and render_status == "rendered":
+            render_status = "failed"
+            render_error = "engine harness reported a rendered preview but did not write the requested PNG"
     return RuntimeEngineReport(
         path=str(asset_path),
         status=status,
@@ -814,6 +842,11 @@ def _engine_report_from_payload(
         memory_bytes=_optional_int(payload.get("memory_bytes")),
         meshes=_int(payload.get("meshes"), validation_stats["meshes"]),
         triangles=_int(payload.get("triangles"), validation_stats["triangles"]),
+        preview_path=str(preview_path) if preview_path is not None else None,
+        render_status=render_status,
+        render_time_ms=_optional_int(payload.get("render_time_ms")),
+        rendered_frames=_int(payload.get("rendered_frames"), 0),
+        render_error=str(render_error) if render_error is not None else None,
         error=str(error) if error is not None else None,
     )
 
@@ -841,6 +874,11 @@ def _engine_unavailable_report(
         memory_bytes=None,
         meshes=validation_stats["meshes"],
         triangles=validation_stats["triangles"],
+        preview_path=None if options.preview_path is None else str(options.preview_path),
+        render_status="not_requested" if options.preview_path is None else "unavailable",
+        render_time_ms=None,
+        rendered_frames=0,
+        render_error=error if options.preview_path is not None else None,
         error=error,
     )
 
@@ -868,6 +906,11 @@ def _engine_failed_report(
         memory_bytes=None,
         meshes=validation_stats["meshes"],
         triangles=validation_stats["triangles"],
+        preview_path=None if options.preview_path is None else str(options.preview_path),
+        render_status="not_requested" if options.preview_path is None else "failed",
+        render_time_ms=None,
+        rendered_frames=0,
+        render_error=error if options.preview_path is not None else None,
         error=error,
     )
 

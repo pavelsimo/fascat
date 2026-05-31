@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
 import numpy as np
 import pytest
@@ -1553,6 +1553,7 @@ def test_validate_can_include_engine_runtime_measurement(
     tmp_path: Path,
 ) -> None:
     output_file = tmp_path / "runtime.glb"
+    preview_file = tmp_path / "engine-preview.png"
     project = tmp_path / "UnityProject"
     project.mkdir()
     mesh = Mesh(
@@ -1567,6 +1568,7 @@ def test_validate_can_include_engine_runtime_measurement(
 
     def fake_measure(path: str | Path, options: object) -> RuntimeEngineReport:
         assert Path(path) == output_file
+        assert cast(Any, options).preview_path == preview_file
         return RuntimeEngineReport(
             path=str(path),
             status="measured",
@@ -1581,6 +1583,10 @@ def test_validate_can_include_engine_runtime_measurement(
             memory_bytes=8192,
             meshes=1,
             triangles=1,
+            preview_path=str(preview_file),
+            render_status="rendered",
+            render_time_ms=12,
+            rendered_frames=1,
         )
 
     monkeypatch.setattr("fascat.cli.measure_engine_runtime", fake_measure)
@@ -1597,6 +1603,8 @@ def test_validate_can_include_engine_runtime_measurement(
             "Unity",
             "--runtime-engine-project",
             str(project),
+            "--runtime-engine-preview",
+            str(preview_file),
         ],
     )
 
@@ -1605,6 +1613,29 @@ def test_validate_can_include_engine_runtime_measurement(
     assert payload["runtime_engine"]["status"] == "measured"
     assert payload["runtime_engine"]["engine"] == "unity"
     assert payload["runtime_engine"]["measured_fps"] == 72.0
+    assert payload["runtime_engine"]["preview_path"] == str(preview_file)
+    assert payload["runtime_engine"]["render_status"] == "rendered"
+
+
+def test_validate_rejects_engine_preview_without_engine(tmp_path: Path) -> None:
+    output_file = tmp_path / "runtime.glb"
+    mesh = Mesh(
+        points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.asarray([[0, 1, 2]], dtype=int),
+    )
+    Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Triangle", part_id="part")]),
+        parts={"part": Part(id="part", name="Triangle", mesh=mesh)},
+        up_axis="Y",
+    ).write_gltf(output_file)
+
+    result = runner.invoke(
+        app,
+        ["validate", str(output_file), "--runtime-engine-preview", str(tmp_path / "preview.png")],
+    )
+
+    assert result.exit_code == 2
+    assert "--runtime-engine-preview requires --runtime-engine" in plain(result.output)
 
 
 def test_validate_can_write_visual_preview_artifacts(tmp_path: Path) -> None:

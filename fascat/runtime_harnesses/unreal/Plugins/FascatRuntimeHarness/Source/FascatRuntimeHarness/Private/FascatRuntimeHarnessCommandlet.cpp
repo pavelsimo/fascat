@@ -178,6 +178,7 @@ bool ReadAssetCounts(const FString& AssetPath, FFascatAssetCounts& OutCounts, FS
 FString BuildPayload(
     const FString& Status,
     const FString& Error,
+    const FString& PreviewPath,
     int64 LoadTimeMs,
     const FFascatAssetCounts& Counts
 )
@@ -192,6 +193,23 @@ FString BuildPayload(
     Payload->SetNumberField(TEXT("memory_bytes"), Counts.MemoryBytes);
     Payload->SetNumberField(TEXT("meshes"), Counts.Meshes);
     Payload->SetNumberField(TEXT("triangles"), Counts.Triangles);
+    if (PreviewPath.IsEmpty())
+    {
+        Payload->SetField(TEXT("preview_path"), MakeShared<FJsonValueNull>());
+        Payload->SetStringField(TEXT("render_status"), TEXT("not_requested"));
+        Payload->SetStringField(TEXT("render_error"), TEXT(""));
+    }
+    else
+    {
+        Payload->SetStringField(TEXT("preview_path"), PreviewPath);
+        Payload->SetStringField(TEXT("render_status"), TEXT("unavailable"));
+        Payload->SetStringField(
+            TEXT("render_error"),
+            TEXT("packaged Unreal harness measures glTF/GLB load/parse only; use a custom harness for renderer screenshots")
+        );
+    }
+    Payload->SetField(TEXT("render_time_ms"), MakeShared<FJsonValueNull>());
+    Payload->SetNumberField(TEXT("rendered_frames"), 0);
     Payload->SetStringField(TEXT("error"), Error);
 
     FString PayloadText;
@@ -207,8 +225,10 @@ int32 UFascatRuntimeHarnessCommandlet::Main(const FString& Params)
 
     FString AssetPath;
     FString ReportPath;
+    FString PreviewPath;
     FParse::Value(FCommandLine::Get(), TEXT("FascatAsset="), AssetPath);
     FParse::Value(FCommandLine::Get(), TEXT("FascatReport="), ReportPath);
+    FParse::Value(FCommandLine::Get(), TEXT("FascatPreview="), PreviewPath);
 
     const double Start = FPlatformTime::Seconds();
     FString Status = TEXT("measured");
@@ -226,7 +246,7 @@ int32 UFascatRuntimeHarnessCommandlet::Main(const FString& Params)
     }
 
     const int64 LoadTimeMs = static_cast<int64>((FPlatformTime::Seconds() - Start) * 1000.0);
-    const FString Payload = BuildPayload(Status, Error, LoadTimeMs, Counts);
+    const FString Payload = BuildPayload(Status, Error, PreviewPath, LoadTimeMs, Counts);
 
     if (!ReportPath.IsEmpty())
     {

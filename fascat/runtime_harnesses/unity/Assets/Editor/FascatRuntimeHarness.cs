@@ -12,10 +12,15 @@ public static class FascatRuntimeHarness
     {
         string assetPath = Arg("-fascatAsset");
         string reportPath = Arg("-fascatReport");
+        string previewPath = Arg("-fascatPreview");
         var stopwatch = Stopwatch.StartNew();
 
         string status = "measured";
         string error = "";
+        string renderStatus = string.IsNullOrEmpty(previewPath) ? "not_requested" : "unavailable";
+        string renderError = string.IsNullOrEmpty(previewPath)
+            ? ""
+            : "packaged Unity harness measures glTF/GLB load/parse only; use a custom harness for renderer screenshots";
         long memoryBytes = 0;
         int meshes = 0;
         int triangles = 0;
@@ -54,6 +59,11 @@ public static class FascatRuntimeHarness
             ["memory_bytes"] = memoryBytes,
             ["meshes"] = meshes,
             ["triangles"] = triangles,
+            ["preview_path"] = string.IsNullOrEmpty(previewPath) ? JValue.CreateNull() : new JValue(previewPath),
+            ["render_status"] = renderStatus,
+            ["render_time_ms"] = JValue.CreateNull(),
+            ["rendered_frames"] = 0,
+            ["render_error"] = renderError,
             ["error"] = error
         };
         string json = payload.ToString(Formatting.None);
