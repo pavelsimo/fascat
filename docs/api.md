@@ -1115,6 +1115,21 @@ Analysis parameters:
 | `tiny_part_diagonal` | Bounding-box diagonal threshold used to classify tiny parts. |
 | `max_self_intersection_pairs` | Maximum non-adjacent triangle pairs to check before reporting a lower-bound result. |
 
+Use the visual preview helpers when you need deterministic review artifacts in CI
+or before handing an asset to a runtime viewer:
+
+```python
+preview = fc.write_preview(asset, "preview.png")
+comparison = fc.write_before_after_previews(before_asset, after_asset, "visual-review/")
+lod_contact_sheet = fc.write_lod_switch_previews(asset_with_lods, "lod-previews/")
+```
+
+The preview renderer is a local orthographic software renderer. It writes PNGs,
+uses material base colors when available, respects node transforms, and can
+substitute each part's LOD mesh to build an LOD switching contact sheet. It is
+intended for quick before/after and LOD review artifacts, not for full
+material/lighting parity with Unity, Unreal, or a browser renderer.
+
 ## Validation
 
 Direct write calls produce files but do not automatically reopen and validate them. Validate direct writes explicitly when you need the same safety as `fc.convert()`.
@@ -1132,6 +1147,8 @@ runtime = fc.measure_browser_runtime(
     "motor.glb",
     options=fc.RuntimeBrowserOptions(duration_seconds=2.0),
 )
+
+preview = fc.write_output_preview("motor.glb", "motor-preview.png")
 ```
 
 The CLI can write a validation-time quality report for exported assets:
@@ -1143,10 +1160,19 @@ fascat validate motor.glb \
   --report quality-report.json
 
 fascat validate motor.glb --runtime-browser
+
+fascat validate motor.glb \
+  --visual-preview motor-preview.png \
+  --lod-preview-dir lod-previews/
 ```
 
 Validation-time geometry reports use the same filter selectors as conversion
 when an exported format can be reconstructed for analysis.
+
+`--visual-preview` writes a deterministic PNG from the validated output mesh.
+`--lod-preview-dir` writes `lod0.png`, each available LOD level, and a
+`lod-switching.png` contact sheet. Fascat GLB exports preserve enough LOD
+metadata for this validation path to reconstruct LOD previews.
 
 `--runtime-browser` is available for glTF/GLB outputs. It launches a local
 Chromium-compatible browser when one is installed, loads the asset bytes in a

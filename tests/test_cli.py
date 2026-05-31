@@ -1412,6 +1412,50 @@ def test_validate_can_include_browser_runtime_measurement(
     assert payload["runtime_browser"]["measured_fps"] == 60.0
 
 
+def test_validate_can_write_visual_preview_artifacts(tmp_path: Path) -> None:
+    output_file = tmp_path / "visual.glb"
+    preview_file = tmp_path / "preview.png"
+    lod_dir = tmp_path / "lod-previews"
+    points = np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float)
+    mesh = Mesh(
+        points=points,
+        faces=np.asarray([[0, 1, 2], [2, 1, 3]], dtype=int),
+    )
+    lod_mesh = Mesh(
+        points=points[:3].copy(),
+        faces=np.asarray([[0, 1, 2]], dtype=int),
+        metadata={"lod_ratio": "0.5", "lod_screen_coverage": "0.25"},
+    )
+    Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Triangle", part_id="part")]),
+        parts={"part": Part(id="part", name="Triangle", mesh=mesh, lod_meshes=[lod_mesh])},
+        up_axis="Y",
+    ).write_gltf(output_file)
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "validate",
+            str(output_file),
+            "--visual-preview",
+            str(preview_file),
+            "--lod-preview-dir",
+            str(lod_dir),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["visual_preview"]["triangles"] == 2
+    assert payload["lod_preview"]["levels"] == 2
+    assert payload["lod_preview"]["monotonic_triangles"] is True
+    assert preview_file.exists()
+    assert (lod_dir / "lod0.png").exists()
+    assert (lod_dir / "lod1.png").exists()
+    assert (lod_dir / "lod-switching.png").exists()
+
+
 def test_validate_missing_usd_backend_exits_nonzero(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

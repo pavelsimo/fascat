@@ -618,6 +618,7 @@ def _append_gltf_node_parts(
             parts,
             material_ids_by_index,
             node_name=str(node.get("name", f"Node {node_index}")),
+            node_extras=_fascat_extras(node),
             node_metadata=_fascat_metadata(node),
             node_transform=node_transform,
         )
@@ -678,6 +679,13 @@ def _transform_points(points: FloatArray, matrix: NDArray[np.float64]) -> FloatA
     return cast(FloatArray, (matrix @ homogeneous.T).T[:, :3])
 
 
+@dataclass(frozen=True)
+class _GltfMeshGeometry:
+    mesh: Mesh
+    material_ids: list[str]
+    metadata: dict[str, object]
+
+
 def _gltf_mesh_part(
     document: dict[str, Any],
     buffers: list[bytes],
@@ -686,9 +694,43 @@ def _gltf_mesh_part(
     material_ids_by_index: dict[int, str],
     *,
     node_name: str,
+    node_extras: dict[str, object],
     node_metadata: dict[str, object],
     node_transform: NDArray[np.float64],
 ) -> Node:
+    from fascat.io import gltf as gltf_io
+
+    meshes = gltf_io._array(document.get("meshes"), "meshes")
+    mesh = gltf_io._object(meshes[mesh_index], f"mesh {mesh_index}")
+    geometry = _gltf_mesh_geometry(document, buffers, mesh_index, material_ids_by_index, node_transform=node_transform)
+    source_part_id = _fascat_string(mesh, "partId")
+    part_id = _unique_part_id(parts, source_part_id or f"mesh_{mesh_index}_{len(parts)}")
+    part_name = _fascat_string(mesh, "originalName") or str(mesh.get("name", node_name))
+    lod_meshes = [
+        _gltf_mesh_geometry(
+            document, buffers, lod_mesh_index, material_ids_by_index, node_transform=node_transform
+        ).mesh
+        for lod_mesh_index in _gltf_lod_mesh_indices(node_extras)
+    ]
+    parts[part_id] = Part(
+        id=part_id,
+        name=part_name,
+        mesh=geometry.mesh,
+        material_ids=geometry.material_ids,
+        metadata=geometry.metadata,
+        lod_meshes=lod_meshes,
+    )
+    return Node(id=f"node_{part_id}", name=node_name, part_id=part_id, metadata=node_metadata)
+
+
+def _gltf_mesh_geometry(
+    document: dict[str, Any],
+    buffers: list[bytes],
+    mesh_index: int,
+    material_ids_by_index: dict[int, str],
+    *,
+    node_transform: NDArray[np.float64],
+) -> _GltfMeshGeometry:
     from fascat.io import gltf as gltf_io
 
     meshes = gltf_io._array(document.get("meshes"), "meshes")
@@ -733,14 +775,30 @@ def _gltf_mesh_part(
         if face_material_indices and len(face_material_indices) == len(faces)
         else None
     )
-    source_part_id = _fascat_string(mesh, "partId")
-    part_id = _unique_part_id(parts, source_part_id or f"mesh_{mesh_index}_{len(parts)}")
-    part_name = _fascat_string(mesh, "originalName") or str(mesh.get("name", node_name))
-    mesh_value = Mesh(points=points, faces=faces, material_indices=material_indices, metadata=dict(mesh_metadata))
-    parts[part_id] = Part(
-        id=part_id, name=part_name, mesh=mesh_value, material_ids=material_ids, metadata=mesh_metadata
+    return _GltfMeshGeometry(
+        mesh=Mesh(points=points, faces=faces, material_indices=material_indices, metadata=dict(mesh_metadata)),
+        material_ids=material_ids,
+        metadata=mesh_metadata,
     )
-    return Node(id=f"node_{part_id}", name=node_name, part_id=part_id, metadata=node_metadata)
+
+
+def _gltf_lod_mesh_indices(node_extras: dict[str, object]) -> list[int]:
+    lods = node_extras.get("lods")
+    if isinstance(lods, list):
+        result = [
+            item["mesh"]
+            for item in lods
+            if isinstance(item, dict)
+            and "omitted" not in item
+            and isinstance(item.get("mesh"), int)
+            and not isinstance(item.get("mesh"), bool)
+        ]
+        if result:
+            return result
+    indices = node_extras.get("lodMeshIndices")
+    if not isinstance(indices, list):
+        return []
+    return [index for index in indices if isinstance(index, int) and not isinstance(index, bool)]
 
 
 def _read_gltf_float_accessor(document: dict[str, Any], buffers: list[bytes], accessor_index: int) -> FloatArray:

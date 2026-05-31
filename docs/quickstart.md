@@ -151,6 +151,7 @@ fascat validate output.usdc
 fascat validate output.glb
 fascat validate output.fbx
 fascat validate output.glb --geometry-quality --report quality-report.json
+fascat validate output.glb --visual-preview preview.png --lod-preview-dir preview-lods/
 ```
 
 ## JSON output

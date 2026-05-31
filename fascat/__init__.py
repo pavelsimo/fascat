@@ -81,6 +81,17 @@ from fascat.pipeline import (
 )
 from fascat.pipeline_file import PipelineSpec, PipelineStep
 from fascat.runtime import RuntimeBrowserOptions, RuntimeBrowserReport, measure_browser_runtime
+from fascat.visual import (
+    LodSwitchPreviewReport,
+    VisualComparisonReport,
+    VisualPreviewOptions,
+    VisualPreviewReport,
+    write_before_after_previews,
+    write_lod_switch_previews,
+    write_output_lod_switch_previews,
+    write_output_preview,
+    write_preview,
+)
 
 __version__ = "0.2.0"
 
@@ -137,6 +148,10 @@ __all__ = [
     "Tolerance",
     "UnwrapOptions",
     "UsdExportOptions",
+    "LodSwitchPreviewReport",
+    "VisualComparisonReport",
+    "VisualPreviewOptions",
+    "VisualPreviewReport",
     "WorkflowRecipe",
     "WorkflowRecipeChoice",
     "__version__",
@@ -174,4 +189,9 @@ __all__ = [
     "write_stl",
     "write_fbx",
     "write_usd",
+    "write_before_after_previews",
+    "write_lod_switch_previews",
+    "write_output_lod_switch_previews",
+    "write_output_preview",
+    "write_preview",
 ]

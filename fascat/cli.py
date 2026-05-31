@@ -65,6 +65,7 @@ from fascat.profiles import by_name
 from fascat.profiles import from_file as profile_from_file
 from fascat.report import Report
 from fascat.runtime import RuntimeBrowserOptions, measure_browser_runtime
+from fascat.visual import write_output_lod_switch_previews, write_output_preview
 
 DOCS_URL = "https://pavelsimo.github.io/fascat"
 ISSUES_URL = "https://github.com/pavelsimo/fascat/issues"
@@ -1949,6 +1950,7 @@ def cmd_convert(
   fascat validate motor.usdc
   fascat validate motor.glb
   fascat validate motor.glb --geometry-quality --report report.json
+  fascat validate motor.glb --visual-preview preview.png --lod-preview-dir previews/
   fascat validate motor.glb --filter 'material=painted' --geometry-quality
   fascat --json validate motor.usda
   cat motor.usdc | fascat validate -
@@ -2011,6 +2013,14 @@ def cmd_validate(
         float,
         typer.Option("--runtime-timeout", help="Browser runtime validation timeout in seconds."),
     ] = 15.0,
+    visual_preview: Annotated[
+        Path | None,
+        typer.Option("--visual-preview", help="Write a deterministic software preview PNG during validation."),
+    ] = None,
+    lod_preview_dir: Annotated[
+        Path | None,
+        typer.Option("--lod-preview-dir", help="Write LOD switching preview PNGs and a contact sheet."),
+    ] = None,
     filters: Annotated[
         list[str] | None,
         typer.Option("--filter", help="Scope validation-time analysis with selectors such as path=*/Fasteners/*."),
@@ -2046,6 +2056,8 @@ def cmd_validate(
         "runtime_browser_command": runtime_browser_command,
         "runtime_duration": runtime_duration,
         "runtime_timeout": runtime_timeout,
+        "visual_preview": str(visual_preview) if visual_preview else None,
+        "lod_preview_dir": str(lod_preview_dir) if lod_preview_dir else None,
         "analysis_options": analyze_options.to_dict() if should_analyze else None,
         "filters": filters or [],
         "exclude_filters": exclude_filters or [],
@@ -2055,6 +2067,8 @@ def cmd_validate(
     should_analyze = should_analyze or where is not None
     payload["analysis_options"] = analyze_options.to_dict() if should_analyze else None
     _validate_export_output(output_path, ctx, payload)
+    if _is_stdio(output_path) and (visual_preview is not None or lod_preview_dir is not None):
+        _fail(ctx, payload, "Visual preview validation requires a file path, not stdin.", code=2)
     if state.dry_run:
         _emit(ctx, payload, f"Would validate {output_path}.")
         return
@@ -2078,6 +2092,12 @@ def cmd_validate(
             if runtime_browser
             else None
         )
+        visual_preview_report = (
+            write_output_preview(output_path, visual_preview) if visual_preview is not None else None
+        )
+        lod_preview_report = (
+            write_output_lod_switch_previews(output_path, lod_preview_dir) if lod_preview_dir is not None else None
+        )
     except Exception as exc:
         _fail(ctx, payload, str(exc))
         raise AssertionError("unreachable") from exc
@@ -2088,9 +2108,17 @@ def cmd_validate(
         json_payload["analysis"] = analysis.to_dict()
     if runtime_report is not None:
         json_payload["runtime_browser"] = runtime_report.to_dict()
+    if visual_preview_report is not None:
+        json_payload["visual_preview"] = visual_preview_report.to_dict()
+    if lod_preview_report is not None:
+        json_payload["lod_preview"] = lod_preview_report.to_dict()
     message = f"{output_path}: valid {_export_label(output_path)}, {_format_stats(stats)}."
     if report is not None:
         message = f"{message} Wrote report {report}."
+    if visual_preview_report is not None:
+        message = f"{message} Wrote preview {visual_preview_report.path}."
+    if lod_preview_report is not None:
+        message = f"{message} Wrote LOD previews {lod_preview_report.directory}."
     if analysis is not None and "selection" in analysis.summary:
         selection = cast(dict[str, Any], analysis.summary["selection"])
         message = f"{message} Matched {_format_stats(cast(dict[str, int], selection['stats']))}."

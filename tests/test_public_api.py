@@ -52,6 +52,22 @@ def test_public_api_exposes_quality_analysis() -> None:
     assert report.summary["open_boundaries"] == 1
 
 
+def test_public_api_exposes_visual_previews(tmp_path: Path) -> None:
+    mesh = fc.Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    asset = fc.Asset(
+        root=fc.Node(id="root", name="root", children=[fc.Node(id="node", name="node", part_id="part")]),
+        parts={"part": fc.Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    report = fc.write_preview(asset, tmp_path / "preview.png", fc.VisualPreviewOptions(width=64, height=64, padding=12))
+
+    assert isinstance(report, fc.VisualPreviewReport)
+    assert report.triangles == 1
+
+
 def test_public_api_exposes_pipeline_spec(tmp_path: Path) -> None:
     pipeline_file = tmp_path / "pipeline.toml"
     pipeline_file.write_text('[[steps]]\nop = "repair"\n', encoding="utf-8")
