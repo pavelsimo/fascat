@@ -8,7 +8,7 @@ import pytest
 from fascat.asset import Asset, Node, Part
 from fascat.material import Material
 from fascat.mesh import Mesh
-from fascat.ops.tessellate import _apply_mesh_tessellation_controls
+from fascat.ops.tessellate import _apply_mesh_tessellation_controls, tessellate_shape
 from fascat.options import TessellationOptions
 
 
@@ -130,6 +130,27 @@ def test_tessellation_edge_controls_rerun_when_first_pass_changes_mesh(monkeypat
     assert calls == 2
     assert result.triangle_count == 2
     assert result.metadata["tessellation_edge_control_passes"] == "2"
+
+
+@pytest.mark.requires_ocp
+def test_tessellate_shape_extracts_occt_faces_into_numpy_buffers() -> None:
+    pytest.importorskip("OCP.BRepPrimAPI")
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+
+    shape = BRepPrimAPI_MakeBox(1.0, 2.0, 3.0).Shape()
+    mesh = tessellate_shape(
+        shape,
+        TessellationOptions(sag=0.1, relative=False),
+        face_material_indices=[0, 1, 2, 3, 4, 5],
+    )
+
+    assert mesh.points.dtype == np.float64
+    assert mesh.faces.dtype == np.int64
+    assert mesh.triangle_count > 0
+    assert mesh.material_indices is not None
+    assert mesh.material_indices.shape == (mesh.triangle_count,)
+    assert len(mesh.face_groups) == 6
+    assert sum(values.shape[0] for values in mesh.face_groups.values()) == mesh.triangle_count
 
 
 def test_tessellate_reuses_source_shape_mesh_for_matching_parts(monkeypatch) -> None:  # type: ignore[no-untyped-def]

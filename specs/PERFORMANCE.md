@@ -25,7 +25,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 | ~~P7~~ | ~~Staging computes O(F²) UV overlap diagnostics per part~~ ✅ **done** | CPU           | Medium   |
 | ~~P8~~ | ~~Nearest-centroid material assignment is O(target × source)~~ ✅ **done** | CPU           | Medium   |
 | ~~P9~~ | ~~LOD levels simplified from full-res mesh, not progressively~~ ✅ **done** | CPU           | Medium   |
-| P10 | Tessellation: Python-list extraction + duplicated edge passes   | CPU           | Medium   |
+| ~~P10~~ | ~~Tessellation: Python-list extraction + duplicated edge passes~~ ✅ **done** | CPU           | Medium   |
 | P12 | Whole-mesh fingerprint/digest recomputed after every op         | Memory        | Medium   |
 | P13 | Export binary buffer copied several times                       | Memory        | Medium   |
 | ~~P14~~ | ~~Default `validate_output` re-reads & re-parses the output~~ ✅ **done** | I/O           | Medium   |
@@ -182,16 +182,18 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   triangle count. Per-level metadata records `lod_simplification_source`, and tests pin the
   progressive call sequence and resulting counts.
 
-### P10 — Tessellation: Python-list extraction and duplicated edge-control passes — partial (2026-05-31)
+### P10 — Tessellation: Python-list extraction and duplicated edge-control passes — ✅ done (2026-05-31)
 - **Where:** `fascat/ops/tessellate.py:116-147` (per-OCCT-node / per-triangle list building with
   `.Transformed()` per node) and `:211-228` (`_apply_mesh_tessellation_controls` runs
   subdivide→collapse→skinny→**subdivide→collapse again**).
 - **Why:** Vertex/triangle extraction appends tuples in Python; and the long-edge/short-edge
   passes (themselves Python loops, see P4) run twice unconditionally.
-- **Progress:** The second subdivide/collapse pass is now conditional on the first pass changing
+- **Resolution:** The second subdivide/collapse pass is now conditional on the first pass changing
   vertex or triangle counts, and metadata records `tessellation_edge_control_passes`. OCCT
-  triangulation extraction is still Python-list based and remains open.
-- **Remaining fix:** Batch triangulation reads where the OCCT API allows.
+  triangulation extraction now scans face triangulations once to preallocate NumPy point, face, and
+  material-index arrays, then fills those buffers directly from the OCP indexed arrays. The
+  installed OCP bindings still expose nodes and triangles through indexed access rather than a
+  NumPy buffer protocol, but the geometry extraction path no longer grows Python point/face lists.
 
 ## Memory
 

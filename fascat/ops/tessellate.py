@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import dataclass
 from typing import Any, cast
 
 import numpy as np
@@ -39,6 +40,19 @@ _DETAIL_METADATA_VALUES = frozenset(
     {"1", "critical", "detailed", "fine", "high", "high_detail", "inspection", "true", "yes"}
 )
 _SHINY_MATERIAL_VALUES = frozenset({"chrome", "gloss", "glossy", "mirror", "polished", "shiny"})
+
+
+@dataclass(frozen=True)
+class _FaceTriangulation:
+    face_index: int
+    triangulation: Any
+    transform: Any
+    reversed_face: bool
+    material_index: int | None
+    point_offset: int
+    triangle_offset: int
+    node_count: int
+    triangle_count: int
 
 
 def tessellate_asset(asset: Asset, options: TessellationOptions, *, selected_part_ids: set[str] | None = None) -> Asset:
@@ -113,10 +127,9 @@ def tessellate_shape(
     mesher = BRepMesh_IncrementalMesh(brep_shape, parameters)
     mesher.Perform()
 
-    points: list[tuple[float, float, float]] = []
-    faces: list[tuple[int, int, int]] = []
-    material_indices: list[int] = []
-    face_groups: dict[str, list[int]] = {}
+    face_triangulations: list[_FaceTriangulation] = []
+    point_count = 0
+    triangle_count = 0
     face_index = 0
     explorer = TopExp_Explorer(brep_shape, TopAbs_FACE)
     while explorer.More():
@@ -127,34 +140,75 @@ def tessellate_shape(
         if face_material_indices is not None and face_index < len(face_material_indices):
             material_index = face_material_indices[face_index]
         if triangulation is not None:
-            offset = len(points)
             transform = location.Transformation()
-            for node_index in range(1, triangulation.NbNodes() + 1):
-                point = triangulation.Node(node_index).Transformed(transform)
-                points.append((point.X(), point.Y(), point.Z()))
-            reversed_face = face.Orientation() == TopAbs_REVERSED
-            for triangle_index in range(1, triangulation.NbTriangles() + 1):
-                a, b, c = triangulation.Triangle(triangle_index).Get()
-                mesh_face_index = len(faces)
-                if reversed_face:
-                    faces.append((offset + c - 1, offset + b - 1, offset + a - 1))
-                else:
-                    faces.append((offset + a - 1, offset + b - 1, offset + c - 1))
-                face_groups.setdefault(f"occt_face_{face_index}", []).append(mesh_face_index)
-                if material_index is not None:
-                    material_indices.append(material_index)
+            node_count = int(triangulation.NbNodes())
+            face_triangle_count = int(triangulation.NbTriangles())
+            face_triangulations.append(
+                _FaceTriangulation(
+                    face_index=face_index,
+                    triangulation=triangulation,
+                    transform=transform,
+                    reversed_face=face.Orientation() == TopAbs_REVERSED,
+                    material_index=material_index,
+                    point_offset=point_count,
+                    triangle_offset=triangle_count,
+                    node_count=node_count,
+                    triangle_count=face_triangle_count,
+                )
+            )
+            point_count += node_count
+            triangle_count += face_triangle_count
         face_index += 1
         explorer.Next()
 
+    points = np.empty((point_count, 3), dtype=np.float64)
+    faces = np.empty((triangle_count, 3), dtype=np.int64)
+    material_values = None if face_material_indices is None else np.full(triangle_count, -1, dtype=np.int64)
+    face_groups: dict[str, np.ndarray] = {}
+    for payload in face_triangulations:
+        nodes = payload.triangulation.MapNodeArray()
+        node_lower = int(nodes.Lower())
+        for local_index in range(payload.node_count):
+            point = nodes.Value(node_lower + local_index).Transformed(payload.transform)
+            points[payload.point_offset + local_index] = (point.X(), point.Y(), point.Z())
+
+        triangles = payload.triangulation.MapTriangleArray()
+        triangle_lower = int(triangles.Lower())
+        face_group = np.arange(
+            payload.triangle_offset,
+            payload.triangle_offset + payload.triangle_count,
+            dtype=np.int64,
+        )
+        if face_group.size:
+            face_groups[f"occt_face_{payload.face_index}"] = face_group
+        for local_index in range(payload.triangle_count):
+            a, b, c = triangles.Value(triangle_lower + local_index).Get()
+            if payload.reversed_face:
+                faces[payload.triangle_offset + local_index] = (
+                    payload.point_offset + c - 1,
+                    payload.point_offset + b - 1,
+                    payload.point_offset + a - 1,
+                )
+            else:
+                faces[payload.triangle_offset + local_index] = (
+                    payload.point_offset + a - 1,
+                    payload.point_offset + b - 1,
+                    payload.point_offset + c - 1,
+                )
+        if material_values is not None and payload.material_index is not None:
+            material_values[payload.triangle_offset : payload.triangle_offset + payload.triangle_count] = (
+                payload.material_index
+            )
+
     mesh = Mesh(
-        points=np.asarray(points, dtype=np.float64).reshape((-1, 3)),
-        faces=np.asarray(faces, dtype=np.int64).reshape((-1, 3)),
+        points=points,
+        faces=faces,
         material_indices=(
-            np.asarray(material_indices, dtype=np.int64)
-            if material_indices and len(material_indices) == len(faces)
+            material_values
+            if material_values is not None and material_values.size > 0 and bool(np.all(material_values >= 0))
             else None
         ),
-        face_groups={name: np.asarray(values, dtype=np.int64) for name, values in face_groups.items()},
+        face_groups=face_groups,
         metadata={"occt_faces": str(face_index)},
     )
     mesh = _apply_mesh_tessellation_controls(mesh, options)
