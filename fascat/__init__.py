@@ -9,7 +9,7 @@ from fascat.io.brep import read_brep
 from fascat.io.fbx import validate_fbx
 from fascat.io.gltf import validate_gltf
 from fascat.io.iges import read_iges
-from fascat.io.step import read_step
+from fascat.io.step import read_step, read_step_many
 from fascat.io.usd import validate_usd
 from fascat.material import Material
 from fascat.mesh import Mesh, MeshValidationError
@@ -171,6 +171,7 @@ __all__ = [
     "process_textures",
     "profiles",
     "read_step",
+    "read_step_many",
     "read_brep",
     "read_iges",
     "repair",

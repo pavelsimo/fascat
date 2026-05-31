@@ -111,6 +111,7 @@ Core pipeline calls:
 | API | Parameters | Purpose |
 |-----|------------|---------|
 | `fc.read_step(path, options=None)` | `path` is a STEP file path or `-` for stdin. `options` is `StepReadOptions`. | Import STEP assembly hierarchy, metadata, materials, and source BREP handles when the backend exposes them. |
+| `fc.read_step_many(paths, options=None, continue_on_error=False)` | `paths` is an ordered list of `.step` / `.stp` files. | Import explicit multi-root STEP members into deterministic per-file namespaces, prefix member warnings, and preserve each member as a top-level root. |
 | `fc.read_iges(path, options=None)` | `path` ends in `.igs` or `.iges`. `options` is `IgesReadOptions`. | Import IGES geometry through the same OCP/XDE hierarchy, transform, color, and material path used by STEP. |
 | `fc.read_brep(path, options=None)` | `path` ends in `.brep`. `options` is `BrepReadOptions`. | Import a native OpenCASCADE BREP file as one root occurrence and one source-shape part. |
 | `asset.tessellate(options, where=None)` | `options` is `TessellationOptions`. `where` optionally scopes the operation with a `Filter`. | Convert source BREP geometry into meshes. |
@@ -295,6 +296,8 @@ STEP and IGES import can scan source-file string references for sidecar PNG, JPE
 
 STEP import reports also include `import_decisions`, which records each import toggle as requested, effective, and `honored`, `approximated`, `unsupported`, `disabled`, `not_present`, or `backend_default`. The same report step includes `loaded_representations`, a per-part list of BREP, construction-point, construction-line, or empty-shape inputs plus deleted construction-only nodes and source topology counts.
 
+Use `fc.read_step_many([...])` or `fc.convert([...], "out.glb")` when an assembly is delivered as several root STEP files rather than one file. Fascat imports each member through the normal STEP path, namespaces nodes, parts, materials, images, and PMI IDs with a deterministic member prefix, keeps each member root under a shared multi-file root node, and prefixes warnings with the member index and path. `continue_on_error=True` keeps successfully imported members and records failed members in the import report. This does not yet resolve external-reference graphs from inside one master STEP file.
+
 Metadata and PMI parameters:
 
 | Option | Parameter | Meaning |
@@ -307,7 +310,7 @@ Metadata and PMI parameters:
 | `StepReadOptions` | `pmi` | Import typed PMI records when the backend exposes them; AP242 PMI markers are reported when typed import is unavailable. |
 | `StepReadOptions` | `design_variants` | Request STEP design variant import. Current backend support is limited and reports a warning when requested variants cannot be loaded. |
 | `StepReadOptions` | `existing_meshes` | Prefer existing tessellation payloads from the source file when the importer exposes them. Tessellation `reuse_existing_meshes` still controls whether loaded meshes are retessellated later. |
-| `StepReadOptions` | `multi_file` | Request multi-file STEP assembly import intent. Current single-path imports report a warning instead of silently claiming external references were loaded. |
+| `StepReadOptions` | `multi_file` | Request multi-file STEP assembly import intent. `read_step_many()` honors explicit member lists; single-path imports still report a warning instead of silently claiming external references were loaded. |
 | `StepReadOptions` | `source_textures` | Scan STEP/IGES source text for referenced sidecar PNG/JPEG/KTX2 texture files, load resolved files into `asset.images`, and report resolved/missing/unreadable counts. |
 | `StepReadOptions` | `source_texture_search_paths` | Extra directories used to resolve relative source texture references in addition to the CAD file directory. |
 | `StepReadOptions` | `material_library_mapping` | Apply deterministic CAD material-name mapping rules to PBR metallic, roughness, opacity, and default color values when source visual material names are available. |
@@ -862,7 +865,7 @@ Conversion parameters:
 
 | Parameter | Meaning |
 |-----------|---------|
-| `input_path` | CAD input path ending in `.step`, `.stp`, `.igs`, `.iges`, or `.brep`. CLI stdin remains STEP-oriented because stdin has no suffix. |
+| `input_path` | CAD input path ending in `.step`, `.stp`, `.igs`, `.iges`, or `.brep`; Python callers may pass a sequence of STEP paths for explicit multi-root import. CLI stdin remains STEP-oriented because stdin has no suffix. |
 | `output_path` | Output path. Suffix selects USD, glTF, OBJ, STL, or FBX. |
 | `profile` | Profile name or `ConversionProfile` that supplies default tessellation, repair, stage, optimize, LOD, budget, and workflow-recipe metadata. |
 | `import_options` | `StepReadOptions` for STEP metadata and PMI import. |

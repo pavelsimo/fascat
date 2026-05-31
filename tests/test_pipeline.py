@@ -713,6 +713,31 @@ def test_convert_report_includes_timed_write_and_validate_steps(monkeypatch, tmp
     assert converted.report.output_stats == converted.stats()
 
 
+def test_convert_accepts_explicit_multi_step_input_sequence(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    captured: dict[str, object] = {}
+
+    def fake_read_step_many(paths: list[Path], *, options: StepReadOptions | None = None) -> Asset:
+        captured["paths"] = paths
+        captured["options"] = options
+        return _triangle_asset()
+
+    monkeypatch.setattr(pipeline, "read_step_many", fake_read_step_many)
+    monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False, options=None: None)
+    monkeypatch.setattr(pipeline, "validate_usd", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
+
+    imported = convert(
+        [tmp_path / "body.step", tmp_path / "fasteners.stp"],
+        tmp_path / "output.usdc",
+        profile=_test_profile(),
+        import_options=StepReadOptions(multi_file=True),
+    )
+
+    assert captured["paths"] == [tmp_path / "body.step", tmp_path / "fasteners.stp"]
+    assert isinstance(captured["options"], StepReadOptions)
+    assert captured["options"].multi_file is True
+    assert "write" in {step.name for step in imported.report.steps}
+
+
 def test_convert_can_run_toml_pipeline_steps(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     import fascat.pipeline as pipeline
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -17,7 +17,7 @@ from fascat.io.gltf import write_gltf_with_validation as _write_gltf
 from fascat.io.iges import IGES_SUFFIXES, read_iges
 from fascat.io.obj import OBJ_SUFFIXES, validate_obj
 from fascat.io.obj import write_obj_with_validation_stats as _write_obj
-from fascat.io.step import read_step
+from fascat.io.step import read_step, read_step_many
 from fascat.io.stl import STL_SUFFIXES, validate_stl
 from fascat.io.stl import write_stl_with_validation_stats as _write_stl
 from fascat.io.usd import validate_usd
@@ -66,6 +66,7 @@ if TYPE_CHECKING:
 USD_SUFFIXES = {".usd", ".usda", ".usdc", ".usdz"}
 CAD_SUFFIXES = {".step", ".stp"} | IGES_SUFFIXES | BREP_SUFFIXES
 ExportFormat = Literal["usd", "gltf", "obj", "stl", "fbx"]
+InputPath = str | Path | Sequence[str | Path]
 _LOAD_ESTIMATE_BYTES_PER_MS = 50_000
 _LOAD_ESTIMATE_VERTEX_BYTES = 32
 _LOAD_ESTIMATE_TRIANGLE_INDEX_BYTES = 12
@@ -80,7 +81,7 @@ _RUNTIME_COMPRESSION_BY_EXTENSION = {
 
 
 def convert(
-    input_path: str | Path,
+    input_path: InputPath,
     output_path: str | Path,
     *,
     profile: str | ConversionProfile = "realtime-desktop",
@@ -339,7 +340,14 @@ def convert(
     return asset
 
 
-def _read_input(path: str | Path, *, options: StepReadOptions | None = None) -> Asset:
+def _read_input(path: InputPath, *, options: StepReadOptions | None = None) -> Asset:
+    if not isinstance(path, (str, Path)):
+        paths = [Path(item) for item in path]
+        suffixes = {item.suffix.lower() for item in paths}
+        if not suffixes <= {".step", ".stp"}:
+            names = ", ".join(sorted(suffix or "<none>" for suffix in suffixes))
+            raise ValueError(f"multi-file CAD import currently supports only STEP inputs; got: {names}")
+        return read_step_many(paths, options=options)
     suffix = Path(path).suffix.lower()
     if suffix in {".step", ".stp"}:
         return read_step(path, options=options) if options is not None else read_step(path)

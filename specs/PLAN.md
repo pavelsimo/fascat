@@ -43,7 +43,7 @@ writers, trimesh + numpy (mesh ops).
 
 | Stage | Real & complete | Approximate (refine) | Gap (metadata-only / not implemented) |
 | --- | --- | --- | --- |
-| **Import** | STEP hierarchy, transforms, colors, metadata, units, repeated-part instances; IGES XDE hierarchy/material import; native BREP single-shape import | — | typed PMI, multi-file/multi-root, design variants, other non-STEP formats |
+| **Import** | STEP hierarchy, transforms, colors, metadata, units, repeated-part instances; explicit multi-root STEP path-list import; IGES XDE hierarchy/material import; native BREP single-shape import | external-reference STEP graph resolution | typed PMI, design variants, other non-STEP formats |
 | **Tessellate** | sag / angle / min-edge / curvature-adaptive meshing, CAD UV extraction/projected fallback, tessellation-time tangents, free-edge geometry metadata | CAD UV projection fallback | intrinsic/conformal CAD UV solver, auto per-part tessellation criteria |
 | **Repair / Heal** | vertex merge, dedup, degenerate cleanup, winding fix, small-hole fill, normals; mesh T-junction sewing, boundary-gap stitching, non-manifold cracking, sliver removal, viewer/open-shell orientation; BREP fix-edge / sew / same-domain cleanup | mesh-level hole removal, open-shell component orientation; BREP same-domain cleanup is not a full arbitrary-overlap solver | BREP tolerance overlap / z-fighting cleanup, non-orientable strip cracking |
 | **Stage / UV** | normals, tangents, xatlas unwrap + bake-domain packing/padding, AABB UV, UV copy, material PBR normalize / merge | solver policy intent | island merge / align, seam graph, backend-enforced solver controls |
@@ -57,7 +57,7 @@ writers, trimesh + numpy (mesh ops).
 
 The basics are present and produce a valid RT3D asset:
 
-- **Import** (`io/step.py`, `io/iges.py`, `io/brep.py`, OCCT/OCP): STEP geometry, STEP/IGES assembly hierarchy where exposed, transforms, colors, metadata, units, repeated-part instances, native BREP single-shape import, source-space normalization, sidecar source texture reference extraction, and first-pass CAD material-name PBR mapping.
+- **Import** (`io/step.py`, `io/iges.py`, `io/brep.py`, OCCT/OCP): STEP geometry, explicit multi-root STEP path-list import, STEP/IGES assembly hierarchy where exposed, transforms, colors, metadata, units, repeated-part instances, native BREP single-shape import, source-space normalization, sidecar source texture reference extraction, and first-pass CAD material-name PBR mapping.
 - **Tessellate** (`ops/tessellate.py`, OCCT `BRepMesh`): `sag`, `angle`, `min_edge_length`, `curvature_adaptive`, `preserve_boundaries`, CAD UV extraction/projected fallback, tessellation-time tangents, and free-edge geometry metadata all change or annotate the real mesh.
 - **Repair — mesh** (`mesh.py`): vertex merge (Euclidean union-find), duplicate / degenerate face removal, T-junction sewing, boundary-gap stitching, non-manifold edge cracking, sliver-face removal, winding fix (trimesh + inward-shell flip), viewer/open-shell orientation, small-hole fill, normal generation.
 - **Heal — BREP** (`ops/heal.py`): `fix_edges`, `unify_tolerances`, `sew_faces`, and same-domain face/edge cleanup via OCCT `ShapeFix`, `BRepBuilderAPI_Sewing`, and `ShapeUpgrade_UnifySameDomain`.
@@ -76,7 +76,7 @@ The basics are present and produce a valid RT3D asset:
 
 The remaining reportable gaps are now concentrated outside the core mesh pipeline:
 
-- **Import enrichment**: typed AP242 PMI, design variants, and true multi-file/multi-root import are not implemented. Source texture extraction exists for referenced sidecar image files, but not for every vendor-specific CAD material-library container.
+- **Import enrichment**: explicit multi-root STEP path-list import exists with deterministic namespaces and per-member warnings, but external-reference graph resolution from a master STEP file is still open. Typed AP242 PMI and design variants are not implemented. Source texture extraction exists for referenced sidecar image files, but not for every vendor-specific CAD material-library container.
 - **Advanced CAD attributes**: intrinsic/conformal CAD UV solving and automatic material/metadata/curvature-driven tessellation criteria are still open.
 - **BREP cleanup**: same-domain face/edge cleanup exists for neighboring coincident domains; arbitrary tolerance overlap / z-fighting cleanup and open-shell grouping before BREP healing are still open.
 - **Runtime validation**: reports include measured pipeline/write/validate timings and local memory/load/frame/FPS estimates, plus an optional headless browser/WebGL glTF load/FPS harness. Unity/Unreal measured harnesses and full renderer parity are still open.
@@ -95,7 +95,7 @@ This is the master TODO list. Keep items in one of three states:
 **Import**
 - [x] IGES input (`.igs`, `.iges`) with XDE hierarchy/material import. Done 2026-05-31.
 - [x] Native BREP input (`.brep`) as a single-shape source. Done 2026-05-31.
-- [ ] True multi-file/multi-root import with deterministic namespaces and per-member warnings.
+- [~] True multi-file/multi-root import with deterministic namespaces and per-member warnings: explicit STEP path lists are supported in Python APIs and `convert([...], output)`; external-reference graph resolution from one master STEP and CLI multi-input remain open. Updated 2026-05-31.
 - [ ] Typed AP242 PMI extraction plus optional visual annotation geometry.
 - [ ] Design-variant import.
 - [ ] Mixed BREP construction-curve policy: delete / preserve metadata / tessellate tubes.

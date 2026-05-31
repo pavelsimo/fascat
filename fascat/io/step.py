@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import re
 import tempfile
-from dataclasses import dataclass
+from collections.abc import Iterable
+from dataclasses import dataclass, replace
 from io import BytesIO
 from pathlib import Path
 from typing import Any, cast
@@ -15,7 +16,7 @@ from fascat._ocp import shape_fingerprint as _shape_fingerprint
 from fascat.asset import Asset, Node, Part
 from fascat.image import ImageMimeType, ImageResource
 from fascat.material import Material
-from fascat.metadata import Metadata
+from fascat.metadata import Metadata, PmiAnnotation
 from fascat.options import StepReadOptions
 from fascat.report import Report, timed_step
 
@@ -90,6 +91,22 @@ class _SourceTextureExtraction:
     images: dict[str, ImageResource]
     summary: dict[str, int]
     warnings: list[str]
+
+
+@dataclass(frozen=True)
+class _StepMemberImport:
+    index: int
+    source: Path
+    namespace: str
+    asset: Asset
+
+
+@dataclass(frozen=True)
+class _StepNamespaceMaps:
+    nodes: dict[str, str]
+    parts: dict[str, str]
+    materials: dict[str, str]
+    images: dict[str, str]
 
 
 _MATERIAL_LIBRARY_RULES: tuple[_MaterialLibraryRule, ...] = (
@@ -202,6 +219,64 @@ class _SpaceNormalization:
 def read_step(path: str | Path, *, options: StepReadOptions | None = None) -> Asset:
     source = Path(path)
     return _read_step_path(source, source_identity=str(source.resolve()), options=options or StepReadOptions())
+
+
+def read_step_many(
+    paths: Iterable[str | Path],
+    *,
+    options: StepReadOptions | None = None,
+    continue_on_error: bool = False,
+) -> Asset:
+    sources = [Path(path) for path in paths]
+    if not sources:
+        raise ValueError("read_step_many requires at least one STEP file")
+
+    opts = options or StepReadOptions()
+    member_options = replace(opts, multi_file=False)
+    members: list[_StepMemberImport] = []
+    failed_members: list[dict[str, object]] = []
+    warnings: list[str] = []
+    with timed_step() as timer:
+        for index, source in enumerate(sources, start=1):
+            namespace = _multi_file_namespace(index, source)
+            try:
+                member_asset = _read_step_path(
+                    source,
+                    source_identity=str(source.resolve()),
+                    options=member_options,
+                )
+            except Exception as exc:
+                warning = f"multi-file STEP member {index} ({source}) failed to import: {exc}"
+                failed_members.append(
+                    {
+                        "index": index,
+                        "source": str(source),
+                        "namespace": namespace,
+                        "status": "error",
+                        "error": str(exc),
+                    }
+                )
+                if not continue_on_error:
+                    raise
+                warnings.append(warning)
+                continue
+            member_warnings = [
+                f"multi-file STEP member {index} ({source}): {warning}" for warning in member_asset.report.warnings
+            ]
+            warnings.extend(member_warnings)
+            members.append(_StepMemberImport(index=index, source=source, namespace=namespace, asset=member_asset))
+
+        if not members:
+            raise RuntimeError("multi-file STEP import did not import any members")
+
+    return _merge_step_member_assets(
+        members,
+        failed_members=failed_members,
+        options=opts,
+        sources=sources,
+        duration=timer.duration,
+        warnings=warnings,
+    )
 
 
 def _read_step_path(source: Path, *, source_identity: str, options: StepReadOptions) -> Asset:
@@ -325,6 +400,372 @@ def read_step_bytes(data: bytes, *, name: str = "stdin.step", options: StepReadO
         asset.metadata["source"] = name
         asset.metadata["source_identity"] = name
     return asset
+
+
+def _merge_step_member_assets(
+    members: list[_StepMemberImport],
+    *,
+    failed_members: list[dict[str, object]],
+    options: StepReadOptions,
+    sources: list[Path],
+    duration: float,
+    warnings: list[str],
+) -> Asset:
+    target_units = members[0].asset.units
+    target_meters_per_unit = members[0].asset.meters_per_unit
+    target_up_axis = members[0].asset.up_axis
+    root_children: list[Node] = []
+    parts: dict[str, Part] = {}
+    materials: dict[str, Material] = {}
+    images: dict[str, ImageResource] = {}
+    pmi: list[PmiAnnotation] = []
+    member_records: list[dict[str, object]] = []
+
+    for member in members:
+        maps = _step_namespace_maps(member.asset, member.namespace)
+        root = _namespace_step_node(member.asset.root, maps)
+        root.metadata.update(
+            {
+                "multi_file_member_index": member.index,
+                "multi_file_member_source": str(member.source),
+                "multi_file_member_namespace": member.namespace,
+            }
+        )
+        unit_warning = _normalize_member_root_units(
+            root,
+            member.asset,
+            target_units=target_units,
+            target_meters_per_unit=target_meters_per_unit,
+            target_up_axis=target_up_axis,
+            source=member.source,
+            index=member.index,
+        )
+        if unit_warning is not None:
+            warnings.append(unit_warning)
+        root_children.append(root)
+
+        for image_id, image in member.asset.images.items():
+            images[maps.images[image_id]] = _namespace_step_image(image, maps, member)
+        for material_id, material in member.asset.materials.items():
+            materials[maps.materials[material_id]] = _namespace_step_material(material, maps, member)
+        for part_id, part in member.asset.parts.items():
+            parts[maps.parts[part_id]] = _namespace_step_part(part, maps, member)
+        pmi.extend(_namespace_step_pmi(annotation, maps, member) for annotation in member.asset.pmi)
+
+        member_records.append(
+            {
+                "index": member.index,
+                "source": str(member.source),
+                "namespace": member.namespace,
+                "status": "imported",
+                "root_node_id": root.id,
+                "nodes": len(member.asset.root.walk()),
+                "parts": len(member.asset.parts),
+                "materials": len(member.asset.materials),
+                "images": len(member.asset.images),
+                "warnings": len(member.asset.report.warnings),
+                "units": member.asset.units,
+                "meters_per_unit": member.asset.meters_per_unit,
+                "up_axis": member.asset.up_axis,
+            }
+        )
+
+    member_records = sorted([*member_records, *failed_members], key=lambda item: cast(int, item["index"]))
+    source_identity = _multi_file_source_identity(sources)
+    root = Node(
+        id=_stable_id("node", f"{source_identity}:root"),
+        name="multi-file STEP assembly",
+        children=root_children,
+        metadata={
+            "source": "multi-file STEP import",
+            "source_identity": source_identity,
+            "multi_file": "true",
+            "multi_file_member_count": str(len(members)),
+        },
+    )
+    report = Report(source_path=None)
+    asset = Asset(
+        root=root,
+        parts=parts,
+        materials=materials,
+        images=images,
+        units=target_units,
+        meters_per_unit=target_meters_per_unit,
+        up_axis=target_up_axis,
+        source_path=None,
+        metadata=_multi_file_asset_metadata(
+            options,
+            source_identity=source_identity,
+            members=member_records,
+            target_units=target_units,
+            target_meters_per_unit=target_meters_per_unit,
+            target_up_axis=target_up_axis,
+        ),
+        pmi=pmi,
+        report=report,
+    )
+    asset.report.input_stats = asset.stats()
+    for warning in warnings:
+        asset.report.add_warning(warning)
+    asset.report.add_step(
+        "import",
+        options={
+            "format": "STEP",
+            "backend": "OCP",
+            "read_options": {**options.to_dict(), "multi_file": True},
+            "multi_file": True,
+            "member_count": len(members),
+            "failed_member_count": len(failed_members),
+            "members": member_records,
+            "import_decisions": _multi_file_import_decisions(options, len(members), len(failed_members)),
+        },
+        before={"nodes": 0, "parts": 0, "occurrences": 0, "materials": 0, "vertices": 0, "triangles": 0},
+        after=asset.stats(),
+        duration=duration,
+        warnings=warnings,
+    )
+    if asset.metadata:
+        asset.metadata["import_decisions"] = _multi_file_import_decisions(options, len(members), len(failed_members))
+    return asset
+
+
+def _step_namespace_maps(asset: Asset, namespace: str) -> _StepNamespaceMaps:
+    return _StepNamespaceMaps(
+        nodes={node.id: f"{namespace}__{node.id}" for node in asset.root.walk()},
+        parts={part_id: f"{namespace}__{part_id}" for part_id in asset.parts},
+        materials={material_id: f"{namespace}__{material_id}" for material_id in asset.materials},
+        images={image_id: f"{namespace}__{image_id}" for image_id in asset.images},
+    )
+
+
+def _namespace_step_node(node: Node, maps: _StepNamespaceMaps) -> Node:
+    metadata = _namespace_metadata_ids(node.metadata, part_ids=maps.parts, node_ids=maps.nodes)
+    return Node(
+        id=maps.nodes[node.id],
+        name=node.name,
+        children=[_namespace_step_node(child, maps) for child in node.children],
+        part_id=None if node.part_id is None else maps.parts.get(node.part_id, node.part_id),
+        transform=node.transform,
+        metadata=metadata,
+    )
+
+
+def _namespace_step_part(part: Part, maps: _StepNamespaceMaps, member: _StepMemberImport) -> Part:
+    metadata = _namespace_metadata_ids(part.metadata, part_ids=maps.parts, node_ids=maps.nodes)
+    metadata.update(
+        {
+            "multi_file_member_index": member.index,
+            "multi_file_member_source": str(member.source),
+            "multi_file_member_namespace": member.namespace,
+            "multi_file_member_part_id": part.id,
+        }
+    )
+    return Part(
+        id=maps.parts[part.id],
+        name=part.name,
+        source_shape=part.source_shape,
+        mesh=None if part.mesh is None else part.mesh.copy(),
+        material_ids=[maps.materials.get(material_id, material_id) for material_id in part.material_ids],
+        metadata=metadata,
+        fingerprint=part.fingerprint,
+        lod_meshes=[mesh.copy() for mesh in part.lod_meshes],
+    )
+
+
+def _namespace_step_material(material: Material, maps: _StepNamespaceMaps, member: _StepMemberImport) -> Material:
+    metadata = _namespace_metadata_ids(material.metadata, image_ids=maps.images)
+    metadata.update(
+        {
+            "multi_file_member_index": member.index,
+            "multi_file_member_source": str(member.source),
+            "multi_file_member_namespace": member.namespace,
+            "multi_file_member_material_id": material.id,
+        }
+    )
+    return Material(
+        id=maps.materials[material.id],
+        name=material.name,
+        base_color=material.base_color,
+        metallic=material.metallic,
+        roughness=material.roughness,
+        opacity=material.opacity,
+        metadata=metadata,
+    )
+
+
+def _namespace_step_image(
+    image: ImageResource,
+    maps: _StepNamespaceMaps,
+    member: _StepMemberImport,
+) -> ImageResource:
+    metadata = dict(image.metadata)
+    metadata.update(
+        {
+            "multi_file_member_index": member.index,
+            "multi_file_member_source": str(member.source),
+            "multi_file_member_namespace": member.namespace,
+            "multi_file_member_image_id": image.id,
+        }
+    )
+    return ImageResource(
+        id=maps.images[image.id],
+        name=image.name,
+        mime_type=image.mime_type,
+        data=image.data,
+        width=image.width,
+        height=image.height,
+        metadata=metadata,
+    )
+
+
+def _namespace_step_pmi(
+    annotation: PmiAnnotation,
+    maps: _StepNamespaceMaps,
+    member: _StepMemberImport,
+) -> PmiAnnotation:
+    source = dict(annotation.source)
+    source.update(
+        {
+            "multi_file_member_index": member.index,
+            "multi_file_member_source": str(member.source),
+            "multi_file_member_namespace": member.namespace,
+            "multi_file_member_pmi_id": annotation.id,
+        }
+    )
+    return PmiAnnotation(
+        id=f"{member.namespace}__{annotation.id}",
+        kind=annotation.kind,
+        text=annotation.text,
+        value=annotation.value,
+        unit=annotation.unit,
+        tolerance=annotation.tolerance,
+        applies_to=[maps.parts.get(part_id, part_id) for part_id in annotation.applies_to],
+        view=annotation.view,
+        plane=None if annotation.plane is None else [list(row) for row in annotation.plane],
+        source=source,
+    )
+
+
+def _namespace_metadata_ids(
+    metadata: Metadata,
+    *,
+    part_ids: dict[str, str] | None = None,
+    node_ids: dict[str, str] | None = None,
+    image_ids: dict[str, str] | None = None,
+) -> Metadata:
+    result = dict(metadata)
+    part_ids = part_ids or {}
+    node_ids = node_ids or {}
+    image_ids = image_ids or {}
+    for key, value in list(result.items()):
+        if key.endswith("_image") and isinstance(value, str) and value in image_ids:
+            result[key] = image_ids[value]
+        elif key in {"source_part_id", "source_part_ids", "split_source_part_id", "split_source_part_ids"}:
+            result[key] = _namespace_metadata_value(value, part_ids)
+        elif key in {"source_node_id", "source_node_ids", "split_source_node_id", "split_source_node_ids"}:
+            result[key] = _namespace_metadata_value(value, node_ids)
+    return result
+
+
+def _namespace_metadata_value(value: object, mapping: dict[str, str]) -> object:
+    if isinstance(value, str):
+        separator = "|" if "|" in value and "," not in value else ","
+        items = [item.strip() for item in value.replace("|", ",").split(",") if item.strip()]
+        if not items:
+            return value
+        mapped = [mapping.get(item, item) for item in items]
+        return separator.join(mapped)
+    if isinstance(value, list):
+        return [mapping.get(str(item), str(item)) for item in value]
+    if isinstance(value, tuple):
+        return tuple(mapping.get(str(item), str(item)) for item in value)
+    return mapping.get(str(value), value)
+
+
+def _normalize_member_root_units(
+    root: Node,
+    asset: Asset,
+    *,
+    target_units: str,
+    target_meters_per_unit: float,
+    target_up_axis: str,
+    source: Path,
+    index: int,
+) -> str | None:
+    scale = asset.meters_per_unit / target_meters_per_unit
+    if not np.isclose(scale, 1.0):
+        transform = np.eye(4, dtype=np.float64)
+        transform[:3, :3] *= scale
+        root.transform = transform @ root.transform
+        root.metadata["multi_file_unit_conversion"] = {
+            "source_units": asset.units,
+            "source_meters_per_unit": asset.meters_per_unit,
+            "target_units": target_units,
+            "target_meters_per_unit": target_meters_per_unit,
+            "scale": scale,
+        }
+    if asset.up_axis != target_up_axis:
+        return (
+            f"multi-file STEP member {index} ({source}) uses up axis {asset.up_axis}; "
+            f"combined asset uses {target_up_axis}; set target_up_axis to normalize all members explicitly"
+        )
+    return None
+
+
+def _multi_file_asset_metadata(
+    options: StepReadOptions,
+    *,
+    source_identity: str,
+    members: list[dict[str, object]],
+    target_units: str,
+    target_meters_per_unit: float,
+    target_up_axis: str,
+) -> Metadata:
+    if not options.metadata:
+        return {}
+    return {
+        "source": "multi-file STEP import",
+        "source_identity": source_identity,
+        "units": target_units,
+        "meters_per_unit": target_meters_per_unit,
+        "up_axis": target_up_axis,
+        "metadata_options": {**options.to_dict(), "multi_file": True},
+        "multi_file_import": {
+            "member_count": sum(1 for member in members if member.get("status") == "imported"),
+            "failed_member_count": sum(1 for member in members if member.get("status") == "error"),
+            "members": members,
+        },
+    }
+
+
+def _multi_file_import_decisions(
+    options: StepReadOptions,
+    member_count: int,
+    failed_member_count: int,
+) -> dict[str, object]:
+    return {
+        "multi_file": _import_decision(
+            requested=True,
+            effective=member_count > 0,
+            state="approximated" if failed_member_count else "honored",
+            detail=(
+                "explicit STEP member paths were imported as separate deterministic namespaces; "
+                "single-file external STEP reference resolution remains unsupported"
+            ),
+            counts={"members": member_count, "failed_members": failed_member_count},
+        )
+    }
+
+
+def _multi_file_namespace(index: int, source: Path) -> str:
+    stem = re.sub(r"[^a-z0-9]+", "_", source.stem.lower()).strip("_") or "step"
+    digest = _stable_id("ns", str(source.resolve())).split("_", 1)[1][:8]
+    return f"member{index}_{stem}_{digest}"
+
+
+def _multi_file_source_identity(sources: list[Path]) -> str:
+    encoded = "|".join(str(source.resolve()) for source in sources)
+    return _stable_id("step_multi", encoded)
 
 
 def _read_xde_document(path: Path, options: StepReadOptions) -> tuple[Any, Any, Any, Any, str, float]:

@@ -7,6 +7,7 @@ import pytest
 from PIL import Image
 
 import fascat as fc
+import fascat.io.step as step_io
 from fascat.io.step import (
     _apply_material_library_mapping,
     _attach_source_textures_to_materials,
@@ -25,8 +26,10 @@ from fascat.io.step import (
     _ShapeTopologyCounts,
     _space_normalization,
     _StepHeaderInfo,
+    read_step_many,
 )
 from fascat.options import StepReadOptions
+from fascat.report import Report
 
 
 def test_canonical_part_id_reuses_matching_shape_and_material() -> None:
@@ -211,6 +214,125 @@ def test_step_source_texture_extraction_reports_missing_references(tmp_path: Pat
     assert extraction.images == {}
     assert extraction.summary == {"references": 1, "resolved": 0, "missing": 1, "unsupported": 0, "unreadable": 0}
     assert extraction.warnings == ["source texture reference could not be resolved: missing_normal.jpg"]
+
+
+def test_read_step_many_namespaces_members_and_prefixes_member_warnings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[Path, str, bool]] = []
+
+    def fake_read_step_path(source: Path, *, source_identity: str, options: StepReadOptions) -> fc.Asset:
+        calls.append((source, source_identity, options.multi_file))
+        material = fc.Material(
+            id="mat",
+            name="Paint",
+            base_color=(0.8, 0.2, 0.1, 1.0),
+            metadata={"source_texture_base_color_image": "img"},
+        )
+        image = fc.ImageResource(
+            id="img",
+            name=f"{source.stem}.png",
+            mime_type="image/png",
+            data=b"png",
+            width=1,
+            height=1,
+        )
+        report = Report(source_path=str(source))
+        report.input_stats = {
+            "nodes": 2,
+            "parts": 1,
+            "occurrences": 1,
+            "materials": 1,
+            "images": 1,
+            "vertices": 0,
+            "triangles": 0,
+        }
+        report.add_warning(f"{source.stem} member warning")
+        report.add_step("import", options={"format": "STEP"}, after=report.input_stats)
+        return fc.Asset(
+            root=fc.Node(
+                id="root",
+                name=source.stem,
+                children=[fc.Node(id="occurrence", name="occurrence", part_id="part")],
+            ),
+            parts={"part": fc.Part(id="part", name="Part", material_ids=["mat"])},
+            materials={"mat": material},
+            images={"img": image},
+            metadata={"source": str(source), "source_identity": source_identity},
+            report=report,
+        )
+
+    monkeypatch.setattr(step_io, "_read_step_path", fake_read_step_path)
+
+    first = tmp_path / "assembly-a.step"
+    second = tmp_path / "assembly-b.step"
+    asset = read_step_many([first, second], options=StepReadOptions(multi_file=True))
+    repeated = read_step_many([first, second], options=StepReadOptions(multi_file=True))
+
+    assert [call[0] for call in calls[:2]] == [first, second]
+    assert [call[2] for call in calls[:2]] == [False, False]
+    assert asset.source_path is None
+    assert asset.report.source_path is None
+    assert asset.stats()["parts"] == 2
+    assert asset.stats()["occurrences"] == 2
+    assert "part" not in asset.parts
+    assert "mat" not in asset.materials
+    assert "img" not in asset.images
+    assert sorted(asset.parts) == sorted(repeated.parts)
+    assert sorted(asset.materials) == sorted(repeated.materials)
+    assert sorted(asset.images) == sorted(repeated.images)
+    for part in asset.parts.values():
+        assert part.material_ids
+        assert part.material_ids[0] in asset.materials
+        assert part.metadata["multi_file_member_part_id"] == "part"
+    for material in asset.materials.values():
+        image_id = material.metadata["source_texture_base_color_image"]
+        assert image_id in asset.images
+        assert material.metadata["multi_file_member_material_id"] == "mat"
+    assert [child.metadata["multi_file_member_index"] for child in asset.root.children] == [1, 2]
+    assert all("member warning" in warning for warning in asset.report.warnings)
+
+    import_step = asset.report.steps[0]
+    assert import_step.name == "import"
+    assert import_step.options["multi_file"] is True
+    assert import_step.options["member_count"] == 2
+    assert import_step.options["failed_member_count"] == 0
+    assert import_step.options["import_decisions"]["multi_file"]["state"] == "honored"
+    assert asset.metadata["multi_file_import"]["member_count"] == 2
+
+
+def test_read_step_many_can_continue_after_member_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_read_step_path(source: Path, *, source_identity: str, options: StepReadOptions) -> fc.Asset:
+        _ = source_identity, options
+        if source.name == "bad.step":
+            raise RuntimeError("boom")
+        report = Report(source_path=str(source))
+        return fc.Asset(
+            root=fc.Node(id="root", name=source.stem, children=[fc.Node(id="occurrence", name="occurrence")]),
+            report=report,
+        )
+
+    monkeypatch.setattr(step_io, "_read_step_path", fake_read_step_path)
+
+    asset = read_step_many(
+        [tmp_path / "good.step", tmp_path / "bad.step"],
+        options=StepReadOptions(),
+        continue_on_error=True,
+    )
+
+    import_step = asset.report.steps[0]
+    assert import_step.options["member_count"] == 1
+    assert import_step.options["failed_member_count"] == 1
+    assert import_step.options["import_decisions"]["multi_file"]["state"] == "approximated"
+    assert "bad.step" in asset.report.warnings[0]
+    assert "boom" in asset.report.warnings[0]
+
+    with pytest.raises(RuntimeError, match="boom"):
+        read_step_many([tmp_path / "good.step", tmp_path / "bad.step"])
 
 
 def test_material_library_mapping_applies_known_cad_material_rules() -> None:
