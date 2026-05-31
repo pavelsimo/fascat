@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using GLTFast;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
@@ -17,10 +18,7 @@ public static class FascatRuntimeHarness
 
         string status = "measured";
         string error = "";
-        string renderStatus = string.IsNullOrEmpty(previewPath) ? "not_requested" : "unavailable";
-        string renderError = string.IsNullOrEmpty(previewPath)
-            ? ""
-            : "packaged Unity harness measures glTF/GLB load/parse only; use a custom harness for renderer screenshots";
+        RenderResult renderResult = RenderResult.NotRequested();
         long memoryBytes = 0;
         int meshes = 0;
         int triangles = 0;
@@ -30,6 +28,7 @@ public static class FascatRuntimeHarness
         {
             status = "failed";
             error = "missing -fascatAsset input";
+            renderResult = string.IsNullOrEmpty(previewPath) ? RenderResult.NotRequested() : RenderResult.Failed(error);
         }
         else
         {
@@ -38,12 +37,16 @@ public static class FascatRuntimeHarness
                 AssetCounts counts = LoadAssetCounts(assetPath);
                 meshes = counts.Meshes;
                 triangles = counts.Triangles;
-                memoryBytes = counts.MemoryBytes + GC.GetTotalMemory(false);
+                memoryBytes = counts.MemoryBytes;
+                renderResult = RenderPreview(assetPath, previewPath);
+                frameCount = renderResult.RenderedFrames;
+                memoryBytes += GC.GetTotalMemory(false);
             }
             catch (Exception exception)
             {
                 status = "failed";
                 error = exception.Message;
+                renderResult = string.IsNullOrEmpty(previewPath) ? RenderResult.NotRequested() : RenderResult.Failed(error);
             }
         }
 
@@ -60,10 +63,10 @@ public static class FascatRuntimeHarness
             ["meshes"] = meshes,
             ["triangles"] = triangles,
             ["preview_path"] = string.IsNullOrEmpty(previewPath) ? JValue.CreateNull() : new JValue(previewPath),
-            ["render_status"] = renderStatus,
-            ["render_time_ms"] = JValue.CreateNull(),
-            ["rendered_frames"] = 0,
-            ["render_error"] = renderError,
+            ["render_status"] = renderResult.Status,
+            ["render_time_ms"] = renderResult.RenderTimeMs >= 0 ? new JValue(renderResult.RenderTimeMs) : JValue.CreateNull(),
+            ["rendered_frames"] = renderResult.RenderedFrames,
+            ["render_error"] = renderResult.Error,
             ["error"] = error
         };
         string json = payload.ToString(Formatting.None);
@@ -94,6 +97,171 @@ public static class FascatRuntimeHarness
             }
         }
         return "";
+    }
+
+    static RenderResult RenderPreview(string assetPath, string previewPath)
+    {
+        if (string.IsNullOrEmpty(previewPath))
+        {
+            return RenderResult.NotRequested();
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        GameObject root = null;
+        Camera camera = null;
+        Light light = null;
+        RenderTexture renderTexture = null;
+        Texture2D image = null;
+        GltfImport gltf = null;
+        RenderTexture previousTarget = RenderTexture.active;
+
+        try
+        {
+            string previewDirectory = Path.GetDirectoryName(previewPath);
+            if (!string.IsNullOrEmpty(previewDirectory))
+            {
+                Directory.CreateDirectory(previewDirectory);
+            }
+
+            root = new GameObject("FascatRuntimeAsset");
+            gltf = new GltfImport();
+            string assetUri = new Uri(Path.GetFullPath(assetPath)).AbsoluteUri;
+            bool loaded = gltf.Load(assetUri).GetAwaiter().GetResult();
+            if (!loaded)
+            {
+                stopwatch.Stop();
+                return RenderResult.Failed("glTFast failed to load the asset", stopwatch.ElapsedMilliseconds);
+            }
+
+            bool instantiated = gltf.InstantiateMainSceneAsync(root.transform).GetAwaiter().GetResult();
+            if (!instantiated)
+            {
+                stopwatch.Stop();
+                return RenderResult.Failed(
+                    "glTFast failed to instantiate the main scene",
+                    stopwatch.ElapsedMilliseconds
+                );
+            }
+
+            Bounds bounds = SceneBounds(root);
+            camera = CreateCamera(bounds);
+            light = CreateLight(bounds);
+            RenderSettings.ambientLight = new Color(0.35f, 0.35f, 0.35f, 1.0f);
+
+            const int width = 800;
+            const int height = 600;
+            renderTexture = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
+            renderTexture.Create();
+            camera.targetTexture = renderTexture;
+            camera.Render();
+
+            RenderTexture.active = renderTexture;
+            image = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            image.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+            image.Apply();
+            File.WriteAllBytes(previewPath, image.EncodeToPNG());
+            stopwatch.Stop();
+
+            return new RenderResult
+            {
+                Status = "rendered",
+                Error = "",
+                RenderTimeMs = stopwatch.ElapsedMilliseconds,
+                RenderedFrames = 1
+            };
+        }
+        catch (Exception exception)
+        {
+            stopwatch.Stop();
+            return new RenderResult
+            {
+                Status = "failed",
+                Error = exception.Message,
+                RenderTimeMs = stopwatch.ElapsedMilliseconds,
+                RenderedFrames = 0
+            };
+        }
+        finally
+        {
+            RenderTexture.active = previousTarget;
+            if (gltf != null)
+            {
+                gltf.Dispose();
+            }
+            if (camera != null)
+            {
+                camera.targetTexture = null;
+            }
+            if (renderTexture != null)
+            {
+                renderTexture.Release();
+                UnityEngine.Object.DestroyImmediate(renderTexture);
+            }
+            if (image != null)
+            {
+                UnityEngine.Object.DestroyImmediate(image);
+            }
+            if (light != null)
+            {
+                UnityEngine.Object.DestroyImmediate(light.gameObject);
+            }
+            if (camera != null)
+            {
+                UnityEngine.Object.DestroyImmediate(camera.gameObject);
+            }
+            if (root != null)
+            {
+                UnityEngine.Object.DestroyImmediate(root);
+            }
+        }
+    }
+
+    static Bounds SceneBounds(GameObject root)
+    {
+        Renderer[] renderers = root.GetComponentsInChildren<Renderer>();
+        if (renderers.Length == 0)
+        {
+            return new Bounds(Vector3.zero, Vector3.one);
+        }
+
+        Bounds bounds = renderers[0].bounds;
+        for (int i = 1; i < renderers.Length; i++)
+        {
+            bounds.Encapsulate(renderers[i].bounds);
+        }
+        if (bounds.size.sqrMagnitude < 1e-6f)
+        {
+            bounds.Expand(1.0f);
+        }
+        return bounds;
+    }
+
+    static Camera CreateCamera(Bounds bounds)
+    {
+        GameObject cameraObject = new GameObject("FascatRuntimeCamera");
+        Camera camera = cameraObject.AddComponent<Camera>();
+        Vector3 center = bounds.center;
+        float radius = Mathf.Max(bounds.extents.magnitude, 0.5f);
+        camera.transform.position = center + new Vector3(radius * 1.4f, radius * 0.9f, radius * 1.4f);
+        camera.transform.LookAt(center);
+        camera.clearFlags = CameraClearFlags.SolidColor;
+        camera.backgroundColor = new Color(0.972f, 0.976f, 0.980f, 1.0f);
+        camera.nearClipPlane = Mathf.Max(radius * 0.01f, 0.001f);
+        camera.farClipPlane = Mathf.Max(radius * 8.0f, 10.0f);
+        camera.fieldOfView = 35.0f;
+        camera.allowHDR = false;
+        camera.allowMSAA = false;
+        return camera;
+    }
+
+    static Light CreateLight(Bounds bounds)
+    {
+        GameObject lightObject = new GameObject("FascatRuntimeKeyLight");
+        Light light = lightObject.AddComponent<Light>();
+        light.type = LightType.Directional;
+        light.intensity = 1.0f;
+        light.transform.rotation = Quaternion.LookRotation(bounds.center - (bounds.center + new Vector3(1.0f, 1.5f, 1.0f)));
+        return light;
     }
 
     static AssetCounts LoadAssetCounts(string assetPath)
@@ -200,5 +368,35 @@ public static class FascatRuntimeHarness
         public int Meshes;
         public int Triangles;
         public long MemoryBytes;
+    }
+
+    struct RenderResult
+    {
+        public string Status;
+        public string Error;
+        public long RenderTimeMs;
+        public int RenderedFrames;
+
+        public static RenderResult NotRequested()
+        {
+            return new RenderResult
+            {
+                Status = "not_requested",
+                Error = "",
+                RenderTimeMs = -1,
+                RenderedFrames = 0
+            };
+        }
+
+        public static RenderResult Failed(string error, long renderTimeMs = -1)
+        {
+            return new RenderResult
+            {
+                Status = "failed",
+                Error = error,
+                RenderTimeMs = renderTimeMs,
+                RenderedFrames = 0
+            };
+        }
     }
 }

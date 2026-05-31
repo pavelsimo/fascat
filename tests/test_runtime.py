@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import subprocess
 from io import BytesIO
 from pathlib import Path
@@ -254,6 +255,7 @@ def test_engine_runtime_parses_unity_harness_measurements(
     def fake_run(command: list[str], *_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         report_path = Path(command[command.index("-fascatReport") + 1])
         assert command[command.index("-fascatPreview") + 1] == str(preview.resolve())
+        assert "-nographics" not in command
         Image.new("RGBA", (4, 4), (20, 40, 60, 255)).save(preview)
         report_path.write_text(
             """
@@ -307,12 +309,20 @@ def test_engine_runtime_parses_unity_harness_measurements(
 
 def test_copy_engine_runtime_harness_writes_unity_template(tmp_path: Path) -> None:
     project = copy_engine_runtime_harness("unity", tmp_path / "UnityHarness")
+    harness = (project / "Assets" / "Editor" / "FascatRuntimeHarness.cs").read_text(encoding="utf-8")
+    manifest = json.loads((project / "Packages" / "manifest.json").read_text(encoding="utf-8"))
 
     assert project == tmp_path / "UnityHarness"
     assert (project / "Assets" / "Editor" / "FascatRuntimeHarness.cs").is_file()
     assert (project / "Packages" / "manifest.json").is_file()
     assert (project / "ProjectSettings" / "ProjectVersion.txt").is_file()
-    assert "-fascatPreview" in (project / "Assets" / "Editor" / "FascatRuntimeHarness.cs").read_text(encoding="utf-8")
+    assert manifest["dependencies"]["com.unity.cloud.gltfast"] == "6.19.0"
+    assert "-fascatPreview" in harness
+    assert "using GLTFast;" in harness
+    assert "new GltfImport()" in harness
+    assert "InstantiateMainSceneAsync" in harness
+    assert "RenderTexture" in harness
+    assert "EncodeToPNG" in harness
 
 
 def test_copy_engine_runtime_harness_writes_unreal_template(tmp_path: Path) -> None:
@@ -351,6 +361,7 @@ def test_engine_runtime_uses_packaged_unity_harness_when_project_is_omitted(
 
     def fake_run(command: list[str], *_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         project = Path(command[command.index("-projectPath") + 1])
+        assert "-nographics" in command
         assert (project / "Assets" / "Editor" / "FascatRuntimeHarness.cs").is_file()
         assert (project / "Packages" / "manifest.json").is_file()
         report_path = Path(command[command.index("-fascatReport") + 1])

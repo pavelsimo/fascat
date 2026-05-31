@@ -581,7 +581,7 @@ def _engine_invocation(
         return [
             executable,
             "-batchmode",
-            "-nographics",
+            *([] if preview_path is not None else ["-nographics"]),
             "-quit",
             "-projectPath",
             str(project),
