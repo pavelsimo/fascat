@@ -1438,54 +1438,35 @@ class Mesh:
         if mesh.triangle_count == 0:
             return mesh
 
-        points = mesh.points.tolist()
-        faces: list[list[int]] = mesh.faces.astype(int).tolist()
-        material_indices = None if mesh.material_indices is None else mesh.material_indices.astype(int).tolist()
+        points = mesh.points.copy()
+        faces = mesh.faces.copy()
+        material_indices = None if mesh.material_indices is None else mesh.material_indices.copy()
 
         changed = True
         iterations = 0
         edge_pairs = np.asarray([[0, 1], [1, 2], [2, 0]], dtype=np.int64)
         while changed and iterations < 32:
-            changed = False
             iterations += 1
-            point_array = np.asarray(points, dtype=np.float64)
-            face_array = np.asarray(faces, dtype=np.int64)
-            triangles = point_array[face_array]
+            triangles = points[faces]
             edge_lengths = np.linalg.norm(
                 triangles[:, edge_pairs[:, 1]] - triangles[:, edge_pairs[:, 0]],
                 axis=2,
             )
-            longest_by_face = np.argmax(edge_lengths, axis=1)
-            longest_lengths = edge_lengths[np.arange(face_array.shape[0]), longest_by_face]
-            next_faces: list[list[int]] = []
-            next_materials: list[int] = []
-            for face_index, face in enumerate(faces):
-                longest = int(longest_by_face[face_index])
-                if float(longest_lengths[face_index]) <= max_edge_length:
-                    next_faces.append(face)
-                    if material_indices is not None:
-                        next_materials.append(material_indices[face_index])
-                    continue
-                changed = True
-                a_corner, b_corner = edge_pairs[longest]
-                c_corner = int(3 - a_corner - b_corner)
-                a = face[int(a_corner)]
-                b = face[int(b_corner)]
-                c = face[c_corner]
-                midpoint = ((np.asarray(points[a]) + np.asarray(points[b])) * 0.5).tolist()
-                midpoint_index = len(points)
-                points.append(midpoint)
-                next_faces.append([a, midpoint_index, c])
-                next_faces.append([midpoint_index, b, c])
-                if material_indices is not None:
-                    next_materials.extend([material_indices[face_index], material_indices[face_index]])
-            faces = next_faces
-            material_indices = next_materials if material_indices is not None else None
+            longest_by_face = cast(IntArray, np.argmax(edge_lengths, axis=1).astype(np.int64))
+            longest_lengths = edge_lengths[np.arange(faces.shape[0]), longest_by_face]
+            split_mask = longest_lengths > max_edge_length
+            points, faces, material_indices, changed = _split_faces_at_edges(
+                points,
+                faces,
+                edge_pairs[longest_by_face],
+                split_mask,
+                material_indices,
+            )
 
         result = Mesh(
-            points=np.asarray(points, dtype=np.float64),
-            faces=np.asarray(faces, dtype=np.int64),
-            material_indices=None if material_indices is None else np.asarray(material_indices, dtype=np.int64),
+            points=points,
+            faces=faces,
+            material_indices=material_indices,
             metadata={**mesh.metadata, "max_edge_length": str(max_edge_length)},
         )
         if 0 in mesh.uvs or 1 in mesh.uvs:
@@ -1572,64 +1553,42 @@ class Mesh:
         if mesh.triangle_count == 0:
             return mesh
 
-        points = mesh.points.tolist()
-        faces: list[list[int]] = mesh.faces.astype(int).tolist()
-        material_indices = None if mesh.material_indices is None else mesh.material_indices.astype(int).tolist()
+        points = mesh.points.copy()
+        faces = mesh.faces.copy()
+        material_indices = None if mesh.material_indices is None else mesh.material_indices.copy()
         edge_pairs = np.asarray([[0, 1], [1, 2], [2, 0]], dtype=np.int64)
 
         for _iteration in range(max_iterations):
-            changed = False
             boundary_edges = _boundary_edges_from_faces(faces) if preserve_boundaries else set()
-            point_array = np.asarray(points, dtype=np.float64)
-            face_array = np.asarray(faces, dtype=np.int64)
-            triangles = point_array[face_array]
+            triangles = points[faces]
             edge_lengths = np.linalg.norm(
                 triangles[:, edge_pairs[:, 1]] - triangles[:, edge_pairs[:, 0]],
                 axis=2,
             )
             shortest_lengths = edge_lengths.min(axis=1)
             longest_lengths = edge_lengths.max(axis=1)
-            aspect_ratios = np.zeros(face_array.shape[0], dtype=np.float64)
+            aspect_ratios = np.zeros(faces.shape[0], dtype=np.float64)
             valid = shortest_lengths > 0.0
             aspect_ratios[valid] = longest_lengths[valid] / shortest_lengths[valid]
-            longest_by_face = np.argmax(edge_lengths, axis=1)
-            next_faces: list[list[int]] = []
-            next_materials: list[int] = []
-            for face_index, face in enumerate(faces):
-                if shortest_lengths[face_index] <= 0.0 or aspect_ratios[face_index] <= max_aspect_ratio:
-                    next_faces.append(face)
-                    if material_indices is not None:
-                        next_materials.append(material_indices[face_index])
-                    continue
-                longest_index = int(longest_by_face[face_index])
-                a_corner, b_corner = edge_pairs[longest_index]
-                a = face[int(a_corner)]
-                b = face[int(b_corner)]
-                edge = (min(a, b), max(a, b))
-                if edge in boundary_edges:
-                    next_faces.append(face)
-                    if material_indices is not None:
-                        next_materials.append(material_indices[face_index])
-                    continue
-                changed = True
-                c_corner = int(3 - a_corner - b_corner)
-                c = face[c_corner]
-                midpoint = ((np.asarray(points[a]) + np.asarray(points[b])) * 0.5).tolist()
-                midpoint_index = len(points)
-                points.append(midpoint)
-                next_faces.append([a, midpoint_index, c])
-                next_faces.append([midpoint_index, b, c])
-                if material_indices is not None:
-                    next_materials.extend([material_indices[face_index], material_indices[face_index]])
-            faces = next_faces
-            material_indices = next_materials if material_indices is not None else None
+            longest_by_face = cast(IntArray, np.argmax(edge_lengths, axis=1).astype(np.int64))
+            split_edges = edge_pairs[longest_by_face]
+            split_mask = (shortest_lengths > 0.0) & (aspect_ratios > max_aspect_ratio)
+            if preserve_boundaries and np.any(split_mask):
+                split_mask &= ~_edge_boundary_mask(faces, split_edges, boundary_edges)
+            points, faces, material_indices, changed = _split_faces_at_edges(
+                points,
+                faces,
+                split_edges,
+                split_mask,
+                material_indices,
+            )
             if not changed:
                 break
 
         result = Mesh(
-            points=np.asarray(points, dtype=np.float64),
-            faces=np.asarray(faces, dtype=np.int64),
-            material_indices=None if material_indices is None else np.asarray(material_indices, dtype=np.int64),
+            points=points,
+            faces=faces,
+            material_indices=material_indices,
             metadata={**mesh.metadata, "skinny_triangle_max_aspect_ratio": str(max_aspect_ratio)},
         )
         return result.remove_degenerate_faces().remove_unreferenced_vertices()
@@ -2749,13 +2708,72 @@ def _clone_cache_value(value: object) -> object:
     return value
 
 
-def _boundary_edges_from_faces(faces: list[list[int]]) -> set[tuple[int, int]]:
-    counts: dict[tuple[int, int], int] = {}
-    for face in faces:
-        for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
-            edge = (min(start, end), max(start, end))
-            counts[edge] = counts.get(edge, 0) + 1
-    return {edge for edge, count in counts.items() if count == 1}
+def _edge_boundary_mask(
+    faces: IntArray,
+    edge_corners: IntArray,
+    boundary_edges: set[tuple[int, int]],
+) -> NDArray[np.bool_]:
+    if not boundary_edges:
+        return np.zeros(faces.shape[0], dtype=np.bool_)
+    rows = np.arange(faces.shape[0], dtype=np.int64)
+    starts = faces[rows, edge_corners[:, 0]]
+    ends = faces[rows, edge_corners[:, 1]]
+    return np.asarray(
+        [
+            (min(int(start), int(end)), max(int(start), int(end))) in boundary_edges
+            for start, end in zip(starts, ends, strict=True)
+        ],
+        dtype=np.bool_,
+    )
+
+
+def _split_faces_at_edges(
+    points: FloatArray,
+    faces: IntArray,
+    edge_corners: IntArray,
+    split_mask: NDArray[np.bool_],
+    material_indices: IntArray | None,
+) -> tuple[FloatArray, IntArray, IntArray | None, bool]:
+    split_indices = np.flatnonzero(split_mask)
+    if split_indices.size == 0:
+        return points, faces, material_indices, False
+
+    split_edges = edge_corners[split_indices]
+    a = faces[split_indices, split_edges[:, 0]]
+    b = faces[split_indices, split_edges[:, 1]]
+    c = faces[split_indices, 3 - split_edges[:, 0] - split_edges[:, 1]]
+    midpoint_indices = np.arange(points.shape[0], points.shape[0] + split_indices.size, dtype=np.int64)
+    midpoints = (points[a] + points[b]) * 0.5
+
+    repeat_counts = np.where(split_mask, 2, 1).astype(np.int64)
+    output_starts = np.cumsum(repeat_counts) - repeat_counts
+    next_faces = np.empty((faces.shape[0] + split_indices.size, 3), dtype=np.int64)
+    preserved = ~split_mask
+    next_faces[output_starts[preserved]] = faces[preserved]
+    split_starts = output_starts[split_indices]
+    next_faces[split_starts] = np.column_stack([a, midpoint_indices, c])
+    next_faces[split_starts + 1] = np.column_stack([midpoint_indices, b, c])
+
+    next_material_indices = None if material_indices is None else np.repeat(material_indices, repeat_counts)
+    return cast(FloatArray, np.vstack([points, midpoints])), next_faces, next_material_indices, True
+
+
+def _boundary_edges_from_faces(faces: IntArray) -> set[tuple[int, int]]:
+    if faces.size == 0:
+        return set()
+    edges = np.sort(
+        np.concatenate(
+            [
+                faces[:, [0, 1]],
+                faces[:, [1, 2]],
+                faces[:, [2, 0]],
+            ],
+            axis=0,
+        ),
+        axis=1,
+    )
+    unique_edges, counts = np.unique(edges, axis=0, return_counts=True)
+    return {(int(edge[0]), int(edge[1])) for edge in unique_edges[counts == 1].astype(int).tolist()}
 
 
 def _fallback_tangent(normal: FloatArray) -> FloatArray:

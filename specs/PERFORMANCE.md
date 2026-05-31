@@ -16,7 +16,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 | ~~P1~~ | ~~`t_junction_count` is O(edges × vertices)~~ ✅ **done**     | CPU           | High     |
 | ~~P2~~ | ~~`repair()` runs a full before/after diagnostic suite, always-on~~ ✅ **done** | CPU           | High     |
 | ~~P3~~ | ~~Occlusion ray cast has no acceleration structure~~ ✅ **done** | CPU           | High     |
-| P4  | Per-element Python loops in core mesh kernels                   | CPU           | High     |
+| ~~P4~~ | ~~Per-element Python loops in core mesh kernels~~ ✅ **done** | CPU           | High     |
 | ~~P11~~ | ~~`Asset.copy()` duplicates every mesh array ~4–8×, ~10×/pipeline~~ ✅ **done** | Memory        | High     |
 | P15 | Exporters build one Python object/string per vertex/triangle    | CPU / I/O     | High     |
 | ~~P18~~ | ~~`stats()` / `walk()` / draw-call recomputed many times/stage~~ ✅ **done** | System design | Medium   |
@@ -93,7 +93,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   occlusion method remains approximate and CPU-only, but the listed acceleration-structure gap is
   closed.
 
-### P4 — Per-element Python loops in core mesh kernels — partial (2026-05-31)
+### P4 — Per-element Python loops in core mesh kernels — ✅ done (2026-05-31)
 - **Where (all `fascat/mesh.py`):** `compute_flat_normals:1026`, `compute_hard_edge_normals:1055`,
   `compute_tangents:1171`, `subdivide_long_edges:1224`, `improve_skinny_triangles:1334`,
   `collapse_short_edges:1279`; plus `np.add.at` scatter at `:1013`, `:1016`, `:1196`, `:1197`.
@@ -104,7 +104,7 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
 - **Fix:** Vectorize: expand per-corner contributions with `np.repeat`, accumulate with
   `np.bincount` (per component) or `np.add.reduceat` on sorted indices instead of `np.add.at`;
   rebuild flat/hard-edge vertices with array ops rather than Python lists.
-- **Progress:** `compute_normals()` now replaces `np.add.at` scatter accumulation with
+- **Resolution:** `compute_normals()` now replaces `np.add.at` scatter accumulation with
   `np.bincount` reductions for both angle-weighted and area-weighted smooth normals.
   `compute_flat_normals()` now expands corner vertices/normals/UVs with array indexing instead of
   append loops, `compute_tangents()` computes per-face tangents in bulk and accumulates with
@@ -114,8 +114,11 @@ category, severity, code location, why it is slow, and a fix direction (not a fu
   now filters short-edge candidates with one vectorized length pass and averages merged vertex
   components with `np.bincount`, so the union loop only visits edges that can actually collapse.
   `subdivide_long_edges()` and `improve_skinny_triangles()` now compute per-iteration edge lengths,
-  longest edges, and aspect ratios in bulk; their remaining Python work is the variable-output
-  face-splitting assembly.
+  longest edges, and aspect ratios in bulk, then assemble split faces, new midpoint vertices, and
+  material-index repeats through indexed NumPy arrays instead of per-face append loops. Connectivity
+  decisions that require union-find or boundary-edge membership still use small Python control
+  loops, but the listed per-element numeric kernels no longer do their hot accumulation or
+  variable-output assembly one element at a time.
 
 ### P5 — Edge / adjacency maps rebuilt from `.tolist()` repeatedly — ✅ done (2026-05-31)
 - **Where:** `fascat/mesh.py:1886` (`_edge_faces_map`), `:2255` (`_undirected_edges_and_counts`),

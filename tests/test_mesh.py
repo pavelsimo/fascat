@@ -1058,6 +1058,30 @@ def test_subdivide_long_edges_enforces_limit_and_preserves_materials() -> None:
     assert set(subdivided.material_indices.tolist()) == {1}
 
 
+def test_split_faces_at_edges_preserves_order_and_materials() -> None:
+    points = np.array(
+        [[0, 0, 0], [4, 0, 0], [0, 1, 0], [10, 0, 0], [11, 0, 0], [10, 1, 0]],
+        dtype=float,
+    )
+    faces = np.array([[0, 1, 2], [3, 4, 5]], dtype=int)
+    edge_corners = np.array([[0, 1], [1, 2]], dtype=int)
+    material_indices = np.array([4, 9], dtype=int)
+
+    next_points, next_faces, next_materials, changed = mesh_module._split_faces_at_edges(
+        points,
+        faces,
+        edge_corners,
+        np.array([True, False], dtype=np.bool_),
+        material_indices,
+    )
+
+    assert changed is True
+    assert next_points[-1].tolist() == [2.0, 0.0, 0.0]
+    assert next_faces.tolist() == [[0, 6, 2], [6, 1, 2], [3, 4, 5]]
+    assert next_materials is not None
+    assert next_materials.tolist() == [4, 4, 9]
+
+
 def test_collapse_short_edges_respects_boundary_preservation() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [0.01, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
