@@ -34,6 +34,7 @@ Dry-run JSON for `convert` includes `operation_diagnostics`, a list of planned o
 | `fascat inspect input.step` | Inspect CAD assembly metadata and planned conversion inputs |
 | `fascat convert input.step [output.usdc]` | Convert STEP, IGES, or BREP CAD into OpenUSD, glTF, OBJ, STL, or FBX |
 | `fascat validate output.usdc` | Validate generated USD, glTF, OBJ, STL, or FBX output |
+| `fascat validate output.glb --runtime-browser` | Measure optional headless browser/WebGL load and FPS for glTF/GLB output |
 | `fascat help [command]` | Show top-level or command-specific help |
 | `fascat version` | Print version and exit |
 
@@ -254,6 +255,7 @@ Units and behavior notes:
 - LOD report metadata separates source, added-LOD, and full-chain vertex/triangle counts plus estimated mesh payload bytes, making the memory and export-size tradeoff of extra LOD levels visible before runtime testing. Ratio LODs simplify progressively from the previous generated level while preserving each requested ratio against the source triangle count.
 - LOD chain advisories warn when a chain has more than four generated levels, when LOD1 or LOD2 are too aggressive for close or mid views, and when the farthest LOD is still geometry-only and should eventually use one-mesh/one-material baking.
 - LOD per-level policy metadata reports the simplification source, whether instances were reused, whether materials were merged, whether textures were baked, whether culling granularity changed, and which advisory applies to each level, so current behavior is explicit while far-LOD material baking and merge workflows remain deferred.
+- `fascat validate output.glb --runtime-browser` runs a Chromium-compatible headless browser when available, loads the GLB/GLTF bytes, executes a bounded WebGL triangle workload derived from asset triangle count, and reports measured browser load time, FPS, frame count, memory bytes, and workload scale. If no browser is available, the runtime report is marked unavailable instead of estimated.
 - `--decimate-criterion quality` passes tolerance-derived target error bounds to the simplification backend and records bound/result metadata plus achieved triangle reduction.
 - Explicit decimation reports protected hard-edge, hole-boundary, material-boundary, UV-seam, silhouette, and total feature-face counts so topology/material/UV preservation pressure is visible.
 - `--uv-importance ignore` strips UV/tangent attributes before simplification; `preserve-seams` uses UVs for seam preservation and then strips them; `preserve-islands` keeps UVs through the output.
@@ -405,7 +407,7 @@ fallbacks.
 | LOD generation | Partial | `run_lod_generators` / `lods` report steps; untessellated parts are skipped with `lod_status="skipped_no_mesh"`, generated/skipped counts, warnings, per-level counts, progressive simplification source metadata, source/added/full-chain mesh payload estimates, chain advisories for excessive levels, aggressive close-view ratios, far LOD bake metadata, scene-level far proxy counts, and per-level instance/material/texture/culling policy metadata | Add format-specific Unity/Unreal LOD export profiles and measured runtime validation |
 | Instance reconstruction | Partial | `optimize_scene` reconstructs exact matching mesh fingerprints and position-tolerant near-identical meshes when topology, vertex attributes, material assignments, and metadata match; metadata records reconstructed part/occurrence counts, similarity tolerance/candidate counts, vertex/triangle savings, and estimated mesh-payload byte savings; hierarchy reports separate draw calls by mesh count, referenced materials, submesh/material slots, instances, merged batches, and export-advisor warnings when merging removes reusable instances | Add transform-aware matching and export-format-specific compressed size estimates |
 | Runtime compression | Implemented | glTF quantization, meshopt, Draco, and KTX2/Basis texture compression are implemented; glTF write reports list runtime extension dependencies, expected support, Unity glTFast/web/mobile/XR compatibility notes with fallback behavior, and a runtime decision matrix for quantization, meshopt, Draco, KTX2/Basis, and PNG/JPEG fallbacks | Add size-ladder reports and profile presets that request compression automatically |
-| Export and budgets | Implemented for USD, USDZ, glTF/GLB, OBJ, STL | `write` report includes glTF runtime dependencies, file size, estimated geometry/texture/metadata payload bytes, referenced/unused/written material counts, source/referenced/unused/duplicate-reference/written image counts, and optional budget warnings; glTF, USD, and OBJ exports prune unused materials from the written artifact; glTF also omits images referenced only by unused materials and deduplicates repeated embedded texture/image references; `texture_export_policy` records profile texture caps, resize candidates, estimated resized bytes/savings, KTX2/Basis requested/supported state, and alpha-aware PNG/JPEG fallback policy before write, including PNG compression, JPEG quality, and transparency-loss warnings; `profile_budget` reports selected-profile target FPS plus triangle, vertex, per-mesh vertex/index-buffer, texture-resolution, texture-memory, estimated load-time, draw-call budget status, draw-call breakdown fields, supported compression/runtime-extension caps, and Unity reference triangle/draw-call ranges when present | Add measured runtime load profiling and imported source image resize/dedupe passes |
+| Export and budgets | Implemented for USD, USDZ, glTF/GLB, OBJ, STL | `write` report includes glTF runtime dependencies, file size, estimated geometry/texture/metadata payload bytes, referenced/unused/written material counts, source/referenced/unused/duplicate-reference/written image counts, and optional budget warnings; glTF, USD, and OBJ exports prune unused materials from the written artifact; glTF also omits images referenced only by unused materials and deduplicates repeated embedded texture/image references; `texture_export_policy` records profile texture caps, resize candidates, estimated resized bytes/savings, KTX2/Basis requested/supported state, and alpha-aware PNG/JPEG fallback policy before write, including PNG compression, JPEG quality, and transparency-loss warnings; `profile_budget` reports selected-profile target FPS plus triangle, vertex, per-mesh vertex/index-buffer, texture-resolution, texture-memory, estimated load-time, draw-call budget status, draw-call breakdown fields, supported compression/runtime-extension caps, and Unity reference triangle/draw-call ranges when present; `validate --runtime-browser` adds measured browser/WebGL load/FPS reports when a local browser is available | Add Unity/Unreal measured runtime harnesses, size-ladder reports, and profile presets that request compression automatically |
 | PMI metadata export | Partial | glTF `extras.fascat` and USD `customData` include PMI records and resolve links through `source_part_ids` after merge/replace | Add visual annotation geometry for `metadata_and_visuals` |
 
 ## Validate flags
@@ -420,6 +422,10 @@ fallbacks.
 | `--tiny-parts` | `false` | Report tiny part stats |
 | `--draw-call-estimate` | `false` | Report material count, draw-call estimate, mesh/submesh slots, instances, and merged batch counts |
 | `--visual-risk` | `false` | Report before/after visual risk warnings |
+| `--runtime-browser` | `false` | For glTF/GLB, run optional headless browser/WebGL load and FPS measurement |
+| `--runtime-browser-command` | unset | Browser executable for `--runtime-browser`; otherwise `FASCAT_BROWSER` or common Chromium/Chrome names are used |
+| `--runtime-duration` | `2.0` | Browser FPS measurement duration in seconds |
+| `--runtime-timeout` | `15.0` | Browser runtime validation timeout in seconds |
 | `--filter` | unset | Scope validation-time geometry analysis with an assembly selector |
 | `--exclude-filter` | unset | Exclude selector matches from validation-time analysis |
 | `--report` | unset | Write validation and geometry quality report as JSON |
@@ -437,6 +443,7 @@ fascat validate motor.glb \
   --tiny-parts \
   --draw-call-estimate \
   --visual-risk \
+  --runtime-browser \
   --report report.json
 ```
 

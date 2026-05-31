@@ -1127,6 +1127,11 @@ asset.write_gltf("motor.glb")
 gltf_stats = fc.validate_gltf("motor.glb")
 
 stats = fc.validate_output("motor.glb")
+
+runtime = fc.measure_browser_runtime(
+    "motor.glb",
+    options=fc.RuntimeBrowserOptions(duration_seconds=2.0),
+)
 ```
 
 The CLI can write a validation-time quality report for exported assets:
@@ -1136,10 +1141,20 @@ fascat validate motor.glb \
   --filter 'material=Painted*' \
   --geometry-quality \
   --report quality-report.json
+
+fascat validate motor.glb --runtime-browser
 ```
 
 Validation-time geometry reports use the same filter selectors as conversion
 when an exported format can be reconstructed for analysis.
+
+`--runtime-browser` is available for glTF/GLB outputs. It launches a local
+Chromium-compatible browser when one is installed, loads the asset bytes in a
+headless page, creates a WebGL workload from the asset triangle count, and
+reports measured load time, FPS, frame count, memory bytes, and workload scale.
+Set `FASCAT_BROWSER` or pass `--runtime-browser-command` when the browser is not
+on the default PATH. If no browser is available, the report returns
+`status="unavailable"` instead of substituting an estimate.
 
 ## Inspecting assets
 

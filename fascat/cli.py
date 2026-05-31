@@ -64,6 +64,7 @@ from fascat.pipeline_file import PipelineSpec
 from fascat.profiles import by_name
 from fascat.profiles import from_file as profile_from_file
 from fascat.report import Report
+from fascat.runtime import RuntimeBrowserOptions, measure_browser_runtime
 
 DOCS_URL = "https://pavelsimo.github.io/fascat"
 ISSUES_URL = "https://github.com/pavelsimo/fascat/issues"
@@ -1994,6 +1995,22 @@ def cmd_validate(
         bool,
         typer.Option("--visual-risk", help="Report before/after visual risk warnings."),
     ] = False,
+    runtime_browser: Annotated[
+        bool,
+        typer.Option("--runtime-browser", help="Run optional headless browser/WebGL runtime measurement for glTF/GLB."),
+    ] = False,
+    runtime_browser_command: Annotated[
+        str | None,
+        typer.Option("--runtime-browser-command", help="Browser executable to use for --runtime-browser."),
+    ] = None,
+    runtime_duration: Annotated[
+        float,
+        typer.Option("--runtime-duration", help="Browser runtime FPS measurement duration in seconds."),
+    ] = 2.0,
+    runtime_timeout: Annotated[
+        float,
+        typer.Option("--runtime-timeout", help="Browser runtime validation timeout in seconds."),
+    ] = 15.0,
     filters: Annotated[
         list[str] | None,
         typer.Option("--filter", help="Scope validation-time analysis with selectors such as path=*/Fasteners/*."),
@@ -2025,6 +2042,10 @@ def cmd_validate(
         "output": str(output_path),
         "dry_run": state.dry_run,
         "geometry_quality": geometry_quality,
+        "runtime_browser": runtime_browser,
+        "runtime_browser_command": runtime_browser_command,
+        "runtime_duration": runtime_duration,
+        "runtime_timeout": runtime_timeout,
         "analysis_options": analyze_options.to_dict() if should_analyze else None,
         "filters": filters or [],
         "exclude_filters": exclude_filters or [],
@@ -2045,6 +2066,18 @@ def cmd_validate(
             analyze_options if should_analyze else None,
             where=where,
         )
+        runtime_report = (
+            measure_browser_runtime(
+                output_path,
+                RuntimeBrowserOptions(
+                    browser=runtime_browser_command,
+                    duration_seconds=runtime_duration,
+                    timeout_seconds=runtime_timeout,
+                ),
+            )
+            if runtime_browser
+            else None
+        )
     except Exception as exc:
         _fail(ctx, payload, str(exc))
         raise AssertionError("unreachable") from exc
@@ -2053,12 +2086,19 @@ def cmd_validate(
     json_payload = {**payload, "stats": stats}
     if analysis is not None:
         json_payload["analysis"] = analysis.to_dict()
+    if runtime_report is not None:
+        json_payload["runtime_browser"] = runtime_report.to_dict()
     message = f"{output_path}: valid {_export_label(output_path)}, {_format_stats(stats)}."
     if report is not None:
         message = f"{message} Wrote report {report}."
     if analysis is not None and "selection" in analysis.summary:
         selection = cast(dict[str, Any], analysis.summary["selection"])
         message = f"{message} Matched {_format_stats(cast(dict[str, int], selection['stats']))}."
+    if runtime_report is not None:
+        if runtime_report.status == "measured" and runtime_report.measured_fps is not None:
+            message = f"{message} Browser runtime measured {runtime_report.measured_fps:.1f} FPS."
+        else:
+            message = f"{message} Browser runtime {runtime_report.status}: {runtime_report.error}."
     _emit(
         ctx,
         json_payload,

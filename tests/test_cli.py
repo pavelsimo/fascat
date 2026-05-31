@@ -17,6 +17,7 @@ from fascat.cli import app, run
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.report import Report
+from fascat.runtime import RuntimeBrowserReport
 
 runner = CliRunner()
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -1367,6 +1368,48 @@ def test_validate_can_scope_geometry_quality_with_filter(tmp_path: Path) -> None
     assert selection["stats"]["parts"] == 1
     assert selection["matches"][0]["part_id"] == "kept"
     assert payload["analysis"]["summary"]["parts"] == 1
+
+
+def test_validate_can_include_browser_runtime_measurement(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_file = tmp_path / "runtime.glb"
+    mesh = Mesh(
+        points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.asarray([[0, 1, 2]], dtype=int),
+    )
+    Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Triangle", part_id="part")]),
+        parts={"part": Part(id="part", name="Triangle", mesh=mesh)},
+        up_axis="Y",
+    ).write_gltf(output_file)
+
+    def fake_measure(path: str | Path, options: object = None) -> RuntimeBrowserReport:
+        assert Path(path) == output_file
+        return RuntimeBrowserReport(
+            path=str(path),
+            status="measured",
+            browser="fake-browser",
+            load_time_ms=10,
+            measured_fps=60.0,
+            frame_count=120,
+            measurement_duration_ms=2000,
+            memory_bytes=4096,
+            meshes=1,
+            triangles=1,
+            workload_triangles=1,
+            workload_scale=1.0,
+        )
+
+    monkeypatch.setattr("fascat.cli.measure_browser_runtime", fake_measure)
+
+    result = runner.invoke(app, ["--json", "validate", str(output_file), "--runtime-browser"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["runtime_browser"]["status"] == "measured"
+    assert payload["runtime_browser"]["measured_fps"] == 60.0
 
 
 def test_validate_missing_usd_backend_exits_nonzero(

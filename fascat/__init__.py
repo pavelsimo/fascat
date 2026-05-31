@@ -80,6 +80,7 @@ from fascat.pipeline import (
     write_usd,
 )
 from fascat.pipeline_file import PipelineSpec, PipelineStep
+from fascat.runtime import RuntimeBrowserOptions, RuntimeBrowserReport, measure_browser_runtime
 
 __version__ = "0.2.0"
 
@@ -122,6 +123,8 @@ __all__ = [
     "RepairOptions",
     "RemoveHolesOptions",
     "RemoveOccludedOptions",
+    "RuntimeBrowserOptions",
+    "RuntimeBrowserReport",
     "SceneOptimizeOptions",
     "ReplaceOptions",
     "SelectionMatch",
@@ -147,6 +150,7 @@ __all__ = [
     "lods",
     "merge",
     "merge_vertices",
+    "measure_browser_runtime",
     "optimize",
     "optimize_scene",
     "process_textures",
