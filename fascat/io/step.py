@@ -1861,6 +1861,8 @@ def _step_condition_operator(entity: str) -> str | None:
         return "literal"
     if normalized in {"CONDITIONALCONFIGURATION", "EFFECTIVITYASSIGNMENT"}:
         return "conditional"
+    if normalized == "BOOLEANVARIABLE":
+        return "variable"
     return None
 
 
@@ -2117,6 +2119,9 @@ def _condition_record_matches_requested(
         return _StepConditionMatch(matched=matched, positive=matched)
     if operator == "literal":
         return _StepConditionMatch(matched=bool(record.condition_value))
+    if operator == "variable":
+        matched = _design_variant_record_self_matches_requested(record, normalized_requested)
+        return _StepConditionMatch(matched=matched, positive=matched)
 
     child_records = [
         child for reference in record.references if (child := records_by_reference.get(reference)) is not None

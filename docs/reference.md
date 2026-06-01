@@ -86,11 +86,12 @@ or values inside supported serial/date/time-interval effectivity ranges when
 those records resolve to labels that match imported node, part, or source-name
 metadata. Simple AP242 boolean condition records such as `AND_EXPRESSION`,
 `OR_EXPRESSION`, `XOR_EXPRESSION`, `NOT_EXPRESSION`, and
-`BOOLEAN_LITERAL` are reported with condition operators, and boolean literals
-include parsed true/false values. Supported conditions gate their operand labels
-before those labels can drive geometry pruning; conditional wrappers also gate
-their configured target labels. Report steps also include
-`loaded_representations`, a per-part
+`BOOLEAN_LITERAL` / `BOOLEAN_VARIABLE` are reported with condition operators,
+and boolean literals include parsed true/false values. Supported conditions gate
+their operand labels before those labels can drive geometry pruning; boolean
+variables act as named operands selected by label or STEP record id, and
+conditional wrappers also gate their configured target labels. Report steps also
+include `loaded_representations`, a per-part
 BREP/construction-shape summary plus deleted construction-only nodes and source
 topology counts. Free construction edges split from mixed face+curve STEP shapes
 appear as separate construction-line parts or construction cleanup counts,
