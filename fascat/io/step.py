@@ -137,6 +137,16 @@ _STEP_PMI_SEMANTIC_ENTITY_KINDS = {
     "SHAPE_ASPECT_RELATIONSHIP": "pmi_target_relationship",
     "SHAPE_DEFINING_RELATIONSHIP": "pmi_target_relationship",
     "STYLED_ITEM": "pmi_presentation",
+    "DIRECTED_TOLERANCE_ZONE": "pmi_tolerance_zone",
+    "NON_UNIFORM_ZONE_DEFINITION": "pmi_tolerance_zone_definition",
+    "ORIENTED_TOLERANCE_ZONE": "pmi_tolerance_zone",
+    "PROJECTED_ZONE_DEFINITION": "pmi_tolerance_zone_definition",
+    "PROJECTED_ZONE_DEFINITION_WITH_OFFSET": "pmi_tolerance_zone_definition",
+    "RUNOUT_ZONE_DEFINITION": "pmi_tolerance_zone_definition",
+    "TOLERANCE_ZONE": "pmi_tolerance_zone",
+    "TOLERANCE_ZONE_DEFINITION": "pmi_tolerance_zone_definition",
+    "TOLERANCE_ZONE_FORM": "pmi_tolerance_zone_form",
+    "TOLERANCE_ZONE_WITH_DATUM": "pmi_tolerance_zone",
 }
 _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "ABS_FUNCTION": "abs_function",

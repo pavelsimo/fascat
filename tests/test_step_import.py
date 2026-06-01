@@ -313,6 +313,43 @@ def test_step_pmi_semantic_graph_includes_callout_and_associativity_records(tmp_
     assert {"source": "#42", "target": "#21", "relationship": "step_reference"} in payload["edges"]
 
 
+def test_step_pmi_semantic_graph_includes_tolerance_zone_records(tmp_path: Path) -> None:
+    source = tmp_path / "pmi-tolerance-zone.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#20=PRODUCT_DEFINITION_SHAPE('bracket','',#19);\n"
+        "#21=SHAPE_ASPECT('hole axis','',#20,.T.);\n"
+        "#30=GEOMETRIC_TOLERANCE('position tolerance',0.2,#21);\n"
+        "#40=TOLERANCE_ZONE_FORM('cylindrical');\n"
+        "#42=TOLERANCE_ZONE('position zone','',#20,.T.,(#30),#40);\n"
+        "#43=PROJECTED_ZONE_DEFINITION(#42,(#21),#21,#50);\n"
+        "#50=LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(12.0),#51);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    graph = _extract_step_pmi_semantic_graph(source, StepReadOptions(pmi=True))
+    payload = graph.to_dict()
+
+    assert graph.summary == {
+        "nodes": 6,
+        "pmi_nodes": 1,
+        "referenced_nodes": 5,
+        "edges": 7,
+        "missing_references": 0,
+    }
+    assert [node["id"] for node in payload["nodes"]] == ["#20", "#21", "#30", "#40", "#42", "#43"]
+    assert payload["nodes"][3]["kind"] == "pmi_tolerance_zone_form"
+    assert payload["nodes"][4]["kind"] == "pmi_tolerance_zone"
+    assert payload["nodes"][5]["kind"] == "pmi_tolerance_zone_definition"
+    assert {"source": "#42", "target": "#30", "relationship": "step_reference"} in payload["edges"]
+    assert {"source": "#42", "target": "#40", "relationship": "step_reference"} in payload["edges"]
+    assert {"source": "#43", "target": "#42", "relationship": "step_reference"} in payload["edges"]
+    assert {"source": "#43", "target": "#21", "relationship": "step_reference"} in payload["edges"]
+
+
 def test_step_text_pmi_extraction_respects_disabled_pmi(tmp_path: Path) -> None:
     source = tmp_path / "pmi.step"
     source.write_text("#1=GEOMETRIC_TOLERANCE('flatness',0.05,#2);\n", encoding="utf-8")
