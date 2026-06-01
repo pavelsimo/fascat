@@ -1957,7 +1957,7 @@ def _extract_step_design_variants(source: Path, options: StepReadOptions) -> _St
             continue
         strings = _step_string_values(record.args)
         references = tuple(f"#{item}" for item in _STEP_REFERENCE_RE.findall(record.args))
-        effectivity_values = _step_effectivity_values(record.entity, strings, record.args)
+        effectivity_values = _step_effectivity_values(record.entity, strings, record.args, step_records)
         records.append(
             _StepDesignVariantRecord(
                 id=f"step_variant_{record.number}",
@@ -2202,12 +2202,61 @@ def _step_condition_text(entity: str, args: str) -> str | None:
     return values[-1] if values else None
 
 
-def _step_effectivity_values(entity: str, strings: list[str], args: str) -> tuple[str, ...]:
+def _step_effectivity_values(
+    entity: str,
+    strings: list[str],
+    args: str,
+    records: dict[str, _StepRecord],
+) -> tuple[str, ...]:
     if "EFFECTIVITY" not in entity:
         return ()
     values: list[str] = [item for item in strings if item]
+    normalized_entity = entity.replace("_", "")
+    if normalized_entity in {"DATEDEFFECTIVITY", "TIMEINTERVALBASEDEFFECTIVITY"}:
+        references = tuple(f"#{item}" for item in _STEP_REFERENCE_RE.findall(args))
+        values.extend(_step_referenced_date_values(references, records))
     if not values:
         values.extend(str(value) for value in _step_number_values(args))
+    return tuple(dict.fromkeys(values))
+
+
+def _step_referenced_date_values(references: tuple[str, ...], records: dict[str, _StepRecord]) -> list[str]:
+    values: list[str] = []
+    visited: set[str] = set()
+
+    def visit(reference: str, depth: int) -> None:
+        if depth > 6 or reference in visited:
+            return
+        visited.add(reference)
+        record = records.get(reference)
+        if record is None:
+            return
+        for value in _step_record_date_values(record):
+            if value not in values:
+                values.append(value)
+        for child_reference in _step_record_references(record):
+            visit(child_reference, depth + 1)
+
+    for reference in references:
+        visit(reference, 0)
+    return values
+
+
+def _step_record_date_values(record: _StepRecord) -> tuple[str, ...]:
+    values: list[str] = []
+    for value in _step_string_values(record.args):
+        parsed = _parse_effectivity_date(value)
+        if parsed is not None:
+            values.append(parsed.isoformat())
+    if record.entity == "CALENDAR_DATE":
+        numbers = _step_number_values(record.args)
+        if len(numbers) >= 3 and all(float(value).is_integer() for value in numbers[:3]):
+            try:
+                parsed = date(int(numbers[0]), int(numbers[2]), int(numbers[1]))
+            except ValueError:
+                parsed = None
+            if parsed is not None:
+                values.append(parsed.isoformat())
     return tuple(dict.fromkeys(values))
 
 

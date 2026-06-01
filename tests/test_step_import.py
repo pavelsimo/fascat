@@ -468,6 +468,103 @@ def test_step_design_variant_selection_resolves_dated_effectivity_range(tmp_path
     assert set(parts) == {"cover"}
 
 
+def test_step_design_variant_selection_resolves_referenced_time_interval_effectivity_range(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=CONFIGURATION_ITEM('service interval','time gated option',#1);\n"
+        "#11=PRODUCT_CONCEPT_FEATURE('interval cover','select interval cover',#2);\n"
+        "#12=CONFIGURATION_DESIGN(#10,#11);\n"
+        "#13=TIME_INTERVAL_BASED_EFFECTIVITY('service interval',#14);\n"
+        "#14=TIME_INTERVAL_WITH_BOUNDS('service bounds',#15,#16);\n"
+        "#15=CALENDAR_DATE(2026,1,1);\n"
+        "#16=CALENDAR_DATE(2026,31,12);\n"
+        "#20=EFFECTIVITY_ASSIGNMENT(#13,#11);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="cover-node", name="Interval Cover", part_id="cover"),
+            fc.Node(id="plug-node", name="Blanking Plug", part_id="plug"),
+        ],
+    )
+    parts = {
+        "cover": fc.Part(
+            id="cover",
+            name="Interval Cover",
+            material_ids=["cover-mat"],
+            metadata={"source_name": "interval cover"},
+        ),
+        "plug": fc.Part(
+            id="plug",
+            name="Blanking Plug",
+            material_ids=["plug-mat"],
+            metadata={"source_name": "blanking plug"},
+        ),
+    }
+    materials = {
+        "cover-mat": fc.Material(id="cover-mat", name="Cover Paint", base_color=(1.0, 0.0, 0.0, 1.0)),
+        "plug-mat": fc.Material(id="plug-mat", name="Plug Paint", base_color=(0.0, 0.0, 1.0, 1.0)),
+    }
+
+    matching_options = StepReadOptions(design_variant_selection=("2026-06-01",))
+    matching_extraction = _extract_step_design_variants(source, matching_options)
+    matching_root = root.copy()
+    matching_parts = {key: part.copy() for key, part in parts.items()}
+    matching_materials = dict(materials)
+
+    matching_selection = _apply_step_design_variant_selection(
+        matching_root,
+        matching_parts,
+        matching_materials,
+        matching_extraction,
+        matching_options,
+    )
+
+    time_effectivity = next(
+        record for record in matching_extraction.records if record.kind == "time_interval_based_effectivity"
+    )
+    assert time_effectivity.effectivity_kind == "time_interval"
+    assert time_effectivity.effectivity_values == ("service interval", "2026-01-01", "2026-12-31")
+    assert time_effectivity.effectivity_range == ("2026-01-01", "2026-12-31")
+    assert matching_selection.status == "applied"
+    assert matching_selection.matched_records == ("step_variant_20",)
+    assert [child.name for child in matching_root.children] == ["Interval Cover"]
+    assert set(matching_parts) == {"cover"}
+
+    out_of_range_options = StepReadOptions(design_variant_selection=("2027-01-01",))
+    out_of_range_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, out_of_range_options),
+        out_of_range_options,
+    )
+
+    assert out_of_range_selection.status == "unmatched_geometry"
+    assert out_of_range_selection.matched_records == ()
+
+    target_options = StepReadOptions(design_variant_selection=("interval cover",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+
 def test_step_design_variant_selection_gates_product_definition_effectivity_usage(
     tmp_path: Path,
 ) -> None:

@@ -84,7 +84,8 @@ STEP design variant configuration/effectivity metadata when
 geometry by selected variant labels, STEP record ids, exact effectivity values,
 or values inside supported serial/date/time-interval effectivity ranges when
 those records resolve to labels that match imported node, part, or source-name
-metadata. Simple AP242 condition/expression records such as `AND_EXPRESSION`,
+metadata, including referenced `TIME_INTERVAL_WITH_BOUNDS` / `CALENDAR_DATE`
+date bounds. Simple AP242 condition/expression records such as `AND_EXPRESSION`,
 `OR_EXPRESSION`, `XOR_EXPRESSION`, `NOT_EXPRESSION`, `EQUALS_EXPRESSION`,
 `COMPARISON_EQUAL`, `COMPARISON_NOT_EQUAL`, `COMPARISON_GREATER`,
 `COMPARISON_GREATER_EQUAL`, `COMPARISON_LESS`, `COMPARISON_LESS_EQUAL`,
