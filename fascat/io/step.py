@@ -101,6 +101,10 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "CONFIGURATION_EFFECTIVITY": "configuration_effectivity",
     "CONFIGURATION_ITEM": "configuration_item",
     "CONFIGURED_EFFECTIVITY_ASSIGNMENT": "configured_effectivity_assignment",
+    "DATED_EFFECTIVITY": "dated_effectivity",
+    "EFFECTIVITY": "effectivity",
+    "EFFECTIVITY_ASSIGNMENT": "effectivity_assignment",
+    "LOT_EFFECTIVITY": "lot_effectivity",
     "PRODUCT_CONCEPT": "product_concept",
     "PRODUCT_CONCEPT_CONTEXT": "product_concept_context",
     "PRODUCT_CONCEPT_FEATURE": "product_concept_feature",
@@ -108,6 +112,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "PRODUCT_CONCEPT_FEATURE_CATEGORY": "product_concept_feature_category",
     "PRODUCT_CONCEPT_FEATURE_CATEGORY_USAGE": "product_concept_feature_category_usage",
     "PRODUCT_DEFINITION_EFFECTIVITY": "product_definition_effectivity",
+    "SERIAL_NUMBERED_EFFECTIVITY": "serial_numbered_effectivity",
+    "TIME_INTERVAL_BASED_EFFECTIVITY": "time_interval_based_effectivity",
 }
 _STEP_UNIT_RE = re.compile(r"\b(mm|millimet(?:er|re)|cm|centimet(?:er|re)|m|met(?:er|re)|in|inch|deg|degree)\b", re.I)
 _GENERIC_MATERIAL_TOKENS = {"cad", "color", "material", "mat", "texture", "map", "source"}
@@ -248,16 +254,25 @@ class _StepDesignVariantRecord:
     label: str
     references: tuple[str, ...]
     reference_labels: tuple[str, ...] = ()
+    resolved_reference_labels: tuple[str, ...] = ()
+    effectivity_kind: str | None = None
+    effectivity_values: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        data: dict[str, object] = {
             "id": self.id,
             "kind": self.kind,
             "entity": self.entity,
             "label": self.label,
             "references": list(self.references),
             "reference_labels": list(self.reference_labels),
+            "resolved_reference_labels": list(self.resolved_reference_labels),
         }
+        if self.effectivity_kind is not None:
+            data["effectivity_kind"] = self.effectivity_kind
+        if self.effectivity_values:
+            data["effectivity_values"] = list(self.effectivity_values)
+        return data
 
 
 @dataclass(frozen=True)
@@ -1723,6 +1738,9 @@ def _extract_step_design_variants(source: Path, options: StepReadOptions) -> _St
                 label=" / ".join(strings) if strings else record.entity.lower().replace("_", " "),
                 references=references,
                 reference_labels=_step_reference_labels(references, step_records),
+                resolved_reference_labels=_step_resolved_reference_labels(references, step_records),
+                effectivity_kind=_step_effectivity_kind(record.entity),
+                effectivity_values=_step_effectivity_values(record.entity, strings, record.args),
             )
         )
 
@@ -1751,6 +1769,55 @@ def _step_reference_labels(references: tuple[str, ...], records: dict[str, _Step
         if label and label not in labels:
             labels.append(label)
     return tuple(labels)
+
+
+def _step_resolved_reference_labels(references: tuple[str, ...], records: dict[str, _StepRecord]) -> tuple[str, ...]:
+    labels: list[str] = []
+    visited: set[str] = set()
+
+    def visit(reference: str, depth: int) -> None:
+        if depth > 4 or reference in visited:
+            return
+        visited.add(reference)
+        record = records.get(reference)
+        if record is None:
+            return
+        label = _step_record_label(record)
+        if label and label not in labels:
+            labels.append(label)
+        for child in _step_record_references(record):
+            visit(child, depth + 1)
+
+    for reference in references:
+        visit(reference, 0)
+    return tuple(labels)
+
+
+def _step_effectivity_kind(entity: str) -> str | None:
+    if "EFFECTIVITY" not in entity:
+        return None
+    if "SERIAL" in entity:
+        return "serial"
+    if "LOT" in entity:
+        return "lot"
+    if "DATED" in entity:
+        return "date"
+    if "TIME_INTERVAL" in entity:
+        return "time_interval"
+    if "CONFIGURATION" in entity:
+        return "configuration"
+    if "PRODUCT_DEFINITION" in entity:
+        return "product_definition"
+    return "generic"
+
+
+def _step_effectivity_values(entity: str, strings: list[str], args: str) -> tuple[str, ...]:
+    if "EFFECTIVITY" not in entity:
+        return ()
+    values: list[str] = [item for item in strings if item]
+    if not values:
+        values.extend(str(value) for value in _step_number_values(args))
+    return tuple(dict.fromkeys(values))
 
 
 def _apply_step_design_variant_selection(
@@ -1868,7 +1935,16 @@ def _design_variant_selector_terms(
     for record in records:
         haystack = _normalize_variant_term(
             " ".join(
-                (record.id, record.entity, record.kind, record.label, *record.references, *record.reference_labels)
+                (
+                    record.id,
+                    record.entity,
+                    record.kind,
+                    record.label,
+                    *(record.effectivity_values or ()),
+                    *record.references,
+                    *record.reference_labels,
+                    *record.resolved_reference_labels,
+                )
             )
         )
         if not any(
@@ -1880,6 +1956,9 @@ def _design_variant_selector_terms(
         terms.extend(_design_variant_label_terms(record.label))
         for label in record.reference_labels:
             terms.extend(_design_variant_label_terms(label))
+        for label in record.resolved_reference_labels:
+            terms.extend(_design_variant_label_terms(label))
+        terms.extend(record.effectivity_values)
         terms.extend(record.references)
     return tuple(dict.fromkeys(matched)), tuple(
         item for item in dict.fromkeys(term.strip() for term in terms if term.strip()) if _normalize_variant_term(item)
