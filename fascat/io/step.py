@@ -101,6 +101,8 @@ _STEP_PMI_ENTITY_KINDS = {
 _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "APPLIED_EFFECTIVITY_ASSIGNMENT": "applied_effectivity_assignment",
     "APPLIEDEFFECTIVITYASSIGNMENT": "applied_effectivity_assignment",
+    "APPLIED_INEFFECTIVITY_ASSIGNMENT": "applied_ineffectivity_assignment",
+    "APPLIEDINEFFECTIVITYASSIGNMENT": "applied_ineffectivity_assignment",
     "CONFIGURATION_DESIGN": "configuration_design",
     "CONFIGURATION_EFFECTIVITY": "configuration_effectivity",
     "CONFIGURATION_ITEM": "configuration_item",
@@ -1936,6 +1938,8 @@ def _step_condition_operator(entity: str) -> str | None:
         return "conditional"
     if normalized in {"APPLIEDEFFECTIVITYASSIGNMENT", "CONFIGUREDEFFECTIVITYASSIGNMENT", "EFFECTIVITYASSIGNMENT"}:
         return "effectivity_assignment"
+    if normalized == "APPLIEDINEFFECTIVITYASSIGNMENT":
+        return "ineffectivity_assignment"
     if normalized in {"BOOLEANVARIABLE", "MATHSBOOLEANVARIABLE"}:
         return "variable"
     if normalized in {
@@ -2143,6 +2147,7 @@ def _design_variant_selector_terms(
             direct_match = record.condition_operator not in {
                 "conditional",
                 "effectivity_assignment",
+                "ineffectivity_assignment",
                 "numeric_literal",
                 "numeric_variable",
             } and _design_variant_record_self_matches_requested(record, normalized_requested)
@@ -2204,6 +2209,7 @@ def _conditional_dependency_references(
         "not_equals",
         "conditional",
         "effectivity_assignment",
+        "ineffectivity_assignment",
     }
     dependencies: set[str] = {
         reference
@@ -2293,7 +2299,7 @@ def _condition_record_matches_requested(
                     or any(child.positive for child in target_children)
                 ),
             )
-    if operator == "effectivity_assignment":
+    if operator in {"effectivity_assignment", "ineffectivity_assignment"}:
         effectivity_condition_children: list[_StepConditionMatch] = []
         effectivity_target_children: list[_StepConditionMatch] = []
         for child_record, child_match in zip(child_records, children, strict=False):
@@ -2310,6 +2316,8 @@ def _condition_record_matches_requested(
                 effectivity_target_children.append(child_match)
         if effectivity_condition_children:
             matched = all(child.matched for child in effectivity_condition_children)
+            if operator == "ineffectivity_assignment":
+                return _StepConditionMatch(matched=matched, positive=False)
             return _StepConditionMatch(
                 matched=matched,
                 positive=matched

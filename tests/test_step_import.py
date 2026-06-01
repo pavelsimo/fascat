@@ -624,6 +624,94 @@ def test_step_design_variant_selection_resolves_applied_effectivity_assignment_t
     assert "condition expression was not satisfied" in target_selection.warnings[0]
 
 
+def test_step_design_variant_selection_suppresses_applied_ineffectivity_assignment_targets(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=EFFECTIVITY('service window');\n"
+        "#20=PRODUCT_DEFINITION('current panel','selected active occurrence',#1,#2);\n"
+        "#21=PRODUCT_DEFINITION('obsolete panel','assigned inactive occurrence',#1,#2);\n"
+        "#30=APPLIED_EFFECTIVITY_ASSIGNMENT(#10,(#20));\n"
+        "#31=APPLIED_INEFFECTIVITY_ASSIGNMENT(#10,(#21));\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="current-node", name="Current Panel", part_id="current"),
+            fc.Node(id="obsolete-node", name="Obsolete Panel", part_id="obsolete"),
+        ],
+    )
+    parts = {
+        "current": fc.Part(
+            id="current",
+            name="Current Panel",
+            material_ids=["current-mat"],
+            metadata={"source_name": "current panel"},
+        ),
+        "obsolete": fc.Part(
+            id="obsolete",
+            name="Obsolete Panel",
+            material_ids=["obsolete-mat"],
+            metadata={"source_name": "obsolete panel"},
+        ),
+    }
+    materials = {
+        "current-mat": fc.Material(id="current-mat", name="Current Paint", base_color=(1.0, 0.0, 0.0, 1.0)),
+        "obsolete-mat": fc.Material(id="obsolete-mat", name="Obsolete Paint", base_color=(0.0, 0.0, 1.0, 1.0)),
+    }
+
+    effectivity_options = StepReadOptions(design_variant_selection=("service window",))
+    effectivity_extraction = _extract_step_design_variants(source, effectivity_options)
+    effectivity_root = root.copy()
+    effectivity_parts = {key: part.copy() for key, part in parts.items()}
+    effectivity_materials = dict(materials)
+
+    effectivity_selection = _apply_step_design_variant_selection(
+        effectivity_root,
+        effectivity_parts,
+        effectivity_materials,
+        effectivity_extraction,
+        effectivity_options,
+    )
+
+    assert [record.kind for record in effectivity_extraction.records] == [
+        "effectivity",
+        "applied_effectivity_assignment",
+        "applied_ineffectivity_assignment",
+    ]
+    assert effectivity_extraction.records[2].condition_operator == "ineffectivity_assignment"
+    assert effectivity_extraction.records[2].reference_labels == (
+        "service window",
+        "obsolete panel / assigned inactive occurrence",
+    )
+    assert effectivity_selection.status == "applied"
+    assert effectivity_selection.matched_records == ("step_variant_30",)
+    assert "current panel" in [term.lower() for term in effectivity_selection.selector_terms]
+    assert "obsolete panel" not in [term.lower() for term in effectivity_selection.selector_terms]
+    assert [child.name for child in effectivity_root.children] == ["Current Panel"]
+    assert set(effectivity_parts) == {"current"}
+
+    inactive_target_options = StepReadOptions(design_variant_selection=("obsolete panel",))
+    inactive_target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, inactive_target_options),
+        inactive_target_options,
+    )
+
+    assert inactive_target_selection.status == "unmatched_geometry"
+    assert inactive_target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in inactive_target_selection.warnings[0]
+
+
 def test_step_design_variant_selection_requires_supported_boolean_conditions(tmp_path: Path) -> None:
     source = tmp_path / "variants.step"
     source.write_text(
