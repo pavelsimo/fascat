@@ -318,9 +318,10 @@ simple AP242 boolean condition records such as `AND_EXPRESSION`,
 `OR_EXPRESSION`, `XOR_EXPRESSION`, `NOT_EXPRESSION`, `EQUALS_EXPRESSION`,
 `COMPARISON_EQUAL`, `COMPARISON_NOT_EQUAL`, `COMPARISON_GREATER`,
 `COMPARISON_GREATER_EQUAL`, `COMPARISON_LESS`, `COMPARISON_LESS_EQUAL`,
-`INTERVAL_EXPRESSION`, `BOOLEAN_LITERAL`, `BOOLEAN_REPRESENTATION_ITEM`,
-`BOOLEAN_VARIABLE`, `MATHS_BOOLEAN_VARIABLE`, numeric literals, and named
-maths numeric variables, plus wrappers such as
+`INTERVAL_EXPRESSION`, `LIKE_EXPRESSION`, `BOOLEAN_LITERAL`,
+`BOOLEAN_REPRESENTATION_ITEM`, `BOOLEAN_VARIABLE`, `MATHS_BOOLEAN_VARIABLE`,
+numeric literals, string literals, and named maths numeric/string variables,
+plus wrappers such as
 `CONDITIONAL_CONFIGURATION`, `CONDITIONAL_CONCEPT_FEATURE`,
 `CONDITIONAL_EFFECTIVITY`, `CONFIGURED_EFFECTIVITY_ASSIGNMENT`, and
 `APPLIED_EFFECTIVITY_ASSIGNMENT` / `APPLIED_INEFFECTIVITY_ASSIGNMENT`, plus
@@ -343,6 +344,8 @@ operand participates and all operands resolve to the same boolean selection
 state. `COMPARISON_NOT_EQUAL` selects when participating operand states differ,
 numeric comparison and interval records select when named numeric variables are
 supplied as selection values such as `load rating=15`, and
+`LIKE_EXPRESSION` records select when named string variables are supplied as
+selection values such as `finish=black anodized`.
 `EFFECTIVITY_ASSIGNMENT` /
 `APPLIED_EFFECTIVITY_ASSIGNMENT` records only select assigned geometry when the
 assigned effectivity matches. `APPLIED_INEFFECTIVITY_ASSIGNMENT` records are
@@ -361,8 +364,10 @@ condition. Boolean literal records, including named
 `BOOLEAN_REPRESENTATION_ITEM` records, are evaluated
 from STEP `.T.` / `.F.` arguments, and boolean variables including
 `MATHS_BOOLEAN_VARIABLE` act as named operands selected by their label or STEP
-record id. This is useful for STEP files whose configuration labels line up
-with loaded product names; full AP242 conditional/effectivity geometry
+record id. `STRING_LITERAL` and `MATHS_STRING_VARIABLE` / `STRING_VARIABLE`
+records can participate in simple string `LIKE_EXPRESSION` conditions with
+`*`/`%` and `?`/`_` wildcard matching. This is useful for STEP files whose
+configuration labels line up with loaded product names; full AP242 conditional/effectivity geometry
 evaluation remains planned backend work.
 
 STEP and IGES import can scan source-file string references for sidecar PNG, JPEG, and KTX2 textures, load them as first-class `ImageResource` objects, and bind semantic names such as `baseColor`, `normal`, `ao`, or `emissive` to material texture metadata. XDE visual material PBR/common values are preserved where exposed, and common CAD material names such as steel, aluminum, brass, copper, glass, plastic, rubber, and paint are mapped to deterministic PBR defaults with diagnostics in material metadata. Supported vendor material libraries can also be supplied explicitly, or referenced from the CAD source, as JSON/MTL files, ZIP packages containing JSON/MTL records plus textures, or folders containing those files; imported records update matching CAD materials with PBR factors and texture slots while reporting resolved, missing, unreadable, matched, and unmatched counts.
@@ -395,7 +400,7 @@ Metadata and PMI parameters:
 | `StepReadOptions` | `validation_properties` | Request STEP validation properties. Current reports approximate this with source topology counts rather than typed validation-property entities. |
 | `StepReadOptions` | `pmi` | Import common typed AP242 PMI text records, including dimension, location, geometric tolerance, plus/minus tolerance, datum, datum-reference, feature-control-frame, and note entities, into `PmiAnnotation` objects and report a textual semantic reference graph; AP242 PMI markers are reported when no supported typed record can be extracted. |
 | `StepReadOptions` | `design_variants` | Scan common STEP configuration/design-variant/effectivity and simple boolean condition records into metadata and import reports. |
-| `StepReadOptions` | `design_variant_selection` | Select one or more variant labels, effectivity values/ranges, STEP record ids, referenced labels, or numeric assignments such as `load rating=15`, and prune imported geometry by matching node/part/source-name metadata. Effectivity selections follow resolved STEP references back to configuration/design feature labels, effectivity relationship links, product-definition/configuration effectivity usage targets, applied product-definition assignment targets, and gated effectivity context-assignment target labels when present; supported serial/date/time-interval ranges match values inside their bounds, simple `AND`/`OR`/`XOR`/`NOT`/equality/not-equality/numeric-comparison/numeric-interval condition records gate operand labels before pruning, boolean literals including `BOOLEAN_REPRESENTATION_ITEM` evaluate `.T.` / `.F.` values, boolean variables including `MATHS_BOOLEAN_VARIABLE` evaluate as named operands selected by label or STEP record id, named maths numeric variables evaluate from selected `label=value` assignments, applied ineffectivity assignments suppress assigned target labels, and conditional/effectivity-assignment wrappers gate their configured target labels. Full AP242 conditional/effectivity geometry evaluation remains planned. |
+| `StepReadOptions` | `design_variant_selection` | Select one or more variant labels, effectivity values/ranges, STEP record ids, referenced labels, or numeric/string assignments such as `load rating=15` or `finish=black anodized`, and prune imported geometry by matching node/part/source-name metadata. Effectivity selections follow resolved STEP references back to configuration/design feature labels, effectivity relationship links, product-definition/configuration effectivity usage targets, applied product-definition assignment targets, and gated effectivity context-assignment target labels when present; supported serial/date/time-interval ranges match values inside their bounds, simple `AND`/`OR`/`XOR`/`NOT`/equality/not-equality/numeric-comparison/numeric-interval/string-like condition records gate operand labels before pruning, boolean literals including `BOOLEAN_REPRESENTATION_ITEM` evaluate `.T.` / `.F.` values, boolean variables including `MATHS_BOOLEAN_VARIABLE` evaluate as named operands selected by label or STEP record id, named maths numeric variables evaluate from selected `label=value` assignments, named string variables evaluate from selected `label=value` assignments for `LIKE_EXPRESSION`, applied ineffectivity assignments suppress assigned target labels, and conditional/effectivity-assignment wrappers gate their configured target labels. Full AP242 conditional/effectivity geometry evaluation remains planned. |
 | `StepReadOptions` | `existing_meshes` | Prefer existing tessellation payloads from the source file when the importer exposes them. Tessellation `reuse_existing_meshes` still controls whether loaded meshes are retessellated later. |
 | `StepReadOptions` | `multi_file` | Request multi-file STEP assembly import. `read_step_many()` honors explicit member lists; single-path STEP imports recursively resolve quoted external `.step` / `.stp` references, preserve repeated references as member occurrences, and report the `external_reference_graph`. |
 | `StepReadOptions` | `source_textures` | Scan STEP/IGES source text for referenced sidecar PNG/JPEG/KTX2 texture files, load resolved files into `asset.images`, and report resolved/missing/unreadable counts. |

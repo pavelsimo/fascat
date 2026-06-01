@@ -148,6 +148,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "INTEGERREPRESENTATIONITEM": "integer_representation_item",
     "INTERVAL_EXPRESSION": "interval_expression",
     "INTERVALEXPRESSION": "interval_expression",
+    "LIKE_EXPRESSION": "like_expression",
+    "LIKEEXPRESSION": "like_expression",
     "LOT_EFFECTIVITY": "lot_effectivity",
     "LITERAL_NUMBER": "literal_number",
     "LITERALNUMBER": "literal_number",
@@ -157,6 +159,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "MATHSINTEGERVARIABLE": "maths_integer_variable",
     "MATHS_REAL_VARIABLE": "maths_real_variable",
     "MATHSREALVARIABLE": "maths_real_variable",
+    "MATHS_STRING_VARIABLE": "maths_string_variable",
+    "MATHSSTRINGVARIABLE": "maths_string_variable",
     "NUMERIC_VARIABLE": "numeric_variable",
     "NUMERICVARIABLE": "numeric_variable",
     "PRODUCT_CONCEPT": "product_concept",
@@ -174,6 +178,10 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "REAL_REPRESENTATION_ITEM": "real_representation_item",
     "REALREPRESENTATIONITEM": "real_representation_item",
     "SERIAL_NUMBERED_EFFECTIVITY": "serial_numbered_effectivity",
+    "STRING_LITERAL": "string_literal",
+    "STRINGLITERAL": "string_literal",
+    "STRING_VARIABLE": "string_variable",
+    "STRINGVARIABLE": "string_variable",
     "TIME_INTERVAL_BASED_EFFECTIVITY": "time_interval_based_effectivity",
     "AND_CONDITION": "and_condition",
     "AND_EXPRESSION": "and_expression",
@@ -342,6 +350,7 @@ class _StepDesignVariantRecord:
     condition_operator: str | None = None
     condition_value: bool | None = None
     condition_number: float | None = None
+    condition_text: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         data: dict[str, object] = {
@@ -365,6 +374,8 @@ class _StepDesignVariantRecord:
             data["condition_value"] = self.condition_value
         if self.condition_number is not None:
             data["condition_number"] = self.condition_number
+        if self.condition_text is not None:
+            data["condition_text"] = self.condition_text
         return data
 
 
@@ -1845,6 +1856,7 @@ def _extract_step_design_variants(source: Path, options: StepReadOptions) -> _St
                 condition_operator=_step_condition_operator(record.entity),
                 condition_value=_step_condition_value(record.entity, record.args),
                 condition_number=_step_condition_number(record.entity, record.args),
+                condition_text=_step_condition_text(record.entity, record.args),
             )
         )
 
@@ -1939,6 +1951,8 @@ def _step_condition_operator(entity: str) -> str | None:
         return "not_equals"
     if normalized == "INTERVALEXPRESSION":
         return "interval"
+    if normalized == "LIKEEXPRESSION":
+        return "like"
     if normalized in {"BOOLEANLITERAL", "BOOLEANREPRESENTATIONITEM"}:
         return "literal"
     if normalized in {
@@ -1949,6 +1963,8 @@ def _step_condition_operator(entity: str) -> str | None:
         "REALREPRESENTATIONITEM",
     }:
         return "numeric_literal"
+    if normalized == "STRINGLITERAL":
+        return "string_literal"
     if normalized in {"CONDITIONALCONFIGURATION", "CONDITIONALCONCEPTFEATURE"}:
         return "conditional"
     if normalized in {"APPLIEDEFFECTIVITYASSIGNMENT", "CONFIGUREDEFFECTIVITYASSIGNMENT", "EFFECTIVITYASSIGNMENT"}:
@@ -1975,6 +1991,8 @@ def _step_condition_operator(entity: str) -> str | None:
         "REALNUMERICVARIABLE",
     }:
         return "numeric_variable"
+    if normalized in {"MATHSSTRINGVARIABLE", "STRINGVARIABLE"}:
+        return "string_variable"
     return None
 
 
@@ -1995,6 +2013,13 @@ def _step_condition_number(entity: str, args: str) -> float | None:
     if _step_condition_operator(entity) != "numeric_literal":
         return None
     values = _step_number_values(args)
+    return values[-1] if values else None
+
+
+def _step_condition_text(entity: str, args: str) -> str | None:
+    if _step_condition_operator(entity) != "string_literal":
+        return None
+    values = _step_string_values(args)
     return values[-1] if values else None
 
 
@@ -2164,7 +2189,8 @@ def _design_variant_selector_terms(
         )
         condition_applies = (
             record.condition_operator is not None
-            and record.condition_operator not in {"numeric_literal", "numeric_variable"}
+            and record.condition_operator
+            not in {"numeric_literal", "numeric_variable", "string_literal", "string_variable"}
             and condition_match.matched
             and condition_match.positive
         )
@@ -2178,6 +2204,8 @@ def _design_variant_selector_terms(
                 "ineffectivity_assignment",
                 "numeric_literal",
                 "numeric_variable",
+                "string_literal",
+                "string_variable",
             } and _design_variant_record_self_matches_requested(record, normalized_requested)
             condition_blocked = condition_blocked or (
                 not direct_id_match
@@ -2195,6 +2223,17 @@ def _design_variant_selector_terms(
             record.condition_operator in {"greater", "greater_equal", "less", "less_equal", "interval"}
             and not condition_applies
             and _condition_record_has_requested_numeric_operand(
+                record,
+                records_by_reference,
+                requested,
+                normalized_requested,
+                visited=set(),
+            )
+        )
+        condition_blocked = condition_blocked or (
+            record.condition_operator == "like"
+            and not condition_applies
+            and _condition_record_has_requested_string_operand(
                 record,
                 records_by_reference,
                 requested,
@@ -2236,6 +2275,7 @@ def _conditional_dependency_references(
         "less_equal",
         "not_equals",
         "interval",
+        "like",
         "conditional",
         "effectivity_assignment",
         "effectivity_context_assignment",
@@ -2289,6 +2329,11 @@ def _condition_record_matches_requested(
         return _StepConditionMatch(matched=record.condition_number is not None)
     if operator == "numeric_variable":
         matched = _design_variant_record_requested_number(record, requested, normalized_requested) is not None
+        return _StepConditionMatch(matched=matched, positive=matched)
+    if operator == "string_literal":
+        return _StepConditionMatch(matched=record.condition_text is not None)
+    if operator == "string_variable":
+        matched = _design_variant_record_requested_text(record, requested, normalized_requested) is not None
         return _StepConditionMatch(matched=matched, positive=matched)
     if operator == "effectivity_usage":
         matched = _effectivity_condition_record_matches_requested(
@@ -2440,6 +2485,24 @@ def _condition_record_matches_requested(
         values = [item[0] for item in numeric_children if item[0] is not None]
         matched = len(values) == len(numeric_children) and len(values) >= 3 and _numeric_interval_matches(values)
         return _StepConditionMatch(matched=matched, positive=matched and any(item[1] for item in numeric_children))
+    if operator == "like":
+        string_children = [
+            _condition_record_string_value(
+                child_record,
+                records_by_reference,
+                requested,
+                normalized_requested,
+                visited=set(visited),
+            )
+            for child_record in child_records
+        ]
+        string_values = [item[0] for item in string_children if item[0] is not None]
+        matched = (
+            len(string_values) == len(string_children)
+            and len(string_values) >= 2
+            and _string_like_matches(string_values[0], string_values[1])
+        )
+        return _StepConditionMatch(matched=matched, positive=matched and any(item[1] for item in string_children))
     if operator == "equals":
         matched = (
             len(children) >= 2
@@ -2482,6 +2545,26 @@ def _condition_record_numeric_value(
     return None, False
 
 
+def _condition_record_string_value(
+    record: _StepDesignVariantRecord,
+    records_by_reference: dict[str, _StepDesignVariantRecord],
+    requested: tuple[str, ...],
+    normalized_requested: tuple[str, ...],
+    *,
+    visited: set[str],
+) -> tuple[str | None, bool]:
+    record_reference = _design_variant_record_step_reference(record)
+    if record_reference in visited:
+        return None, False
+    visited.add(record_reference)
+    if record.condition_operator == "string_literal":
+        return record.condition_text, False
+    if record.condition_operator == "string_variable":
+        value = _design_variant_record_requested_text(record, requested, normalized_requested)
+        return value, value is not None
+    return None, False
+
+
 def _condition_record_has_requested_numeric_operand(
     record: _StepDesignVariantRecord,
     records_by_reference: dict[str, _StepDesignVariantRecord],
@@ -2509,6 +2592,33 @@ def _condition_record_has_requested_numeric_operand(
     )
 
 
+def _condition_record_has_requested_string_operand(
+    record: _StepDesignVariantRecord,
+    records_by_reference: dict[str, _StepDesignVariantRecord],
+    requested: tuple[str, ...],
+    normalized_requested: tuple[str, ...],
+    *,
+    visited: set[str],
+) -> bool:
+    record_reference = _design_variant_record_step_reference(record)
+    if record_reference in visited:
+        return False
+    visited.add(record_reference)
+    if record.condition_operator == "string_variable":
+        return _design_variant_record_requested_text(record, requested, normalized_requested) is not None
+    return any(
+        _condition_record_has_requested_string_operand(
+            child_record,
+            records_by_reference,
+            requested,
+            normalized_requested,
+            visited=set(visited),
+        )
+        for reference in record.references
+        if (child_record := records_by_reference.get(reference)) is not None
+    )
+
+
 def _numeric_comparison_matches(operator: str, values: list[float]) -> bool:
     pairs = zip(values, values[1:], strict=False)
     if operator == "greater":
@@ -2525,6 +2635,31 @@ def _numeric_comparison_matches(operator: str, values: list[float]) -> bool:
 def _numeric_interval_matches(values: list[float]) -> bool:
     low, item, high = values[:3]
     return low <= item <= high
+
+
+def _string_like_matches(value: str, pattern: str) -> bool:
+    normalized_value = _normalize_condition_text(value)
+    normalized_pattern = _normalize_condition_text(pattern)
+    if not normalized_value or not normalized_pattern:
+        return False
+    wildcard = object()
+    single = object()
+    tokens: list[str | object] = []
+    for char in normalized_pattern:
+        if char in {"*", "%"}:
+            tokens.append(wildcard)
+        elif char in {"?", "_"}:
+            tokens.append(single)
+        else:
+            tokens.append(re.escape(char))
+    pattern_re = (
+        "^" + "".join(".*" if token is wildcard else "." if token is single else str(token) for token in tokens) + "$"
+    )
+    return re.fullmatch(pattern_re, normalized_value) is not None
+
+
+def _normalize_condition_text(value: str) -> str:
+    return " ".join(value.lower().split())
 
 
 def _design_variant_record_matches_requested(
@@ -2584,6 +2719,34 @@ def _design_variant_record_requested_number(
         numbers = _step_number_values(value_text)
         if numbers:
             return numbers[-1]
+    return None
+
+
+def _design_variant_record_requested_text(
+    record: _StepDesignVariantRecord,
+    requested: tuple[str, ...],
+    normalized_requested: tuple[str, ...],
+) -> str | None:
+    selectors = tuple(
+        dict.fromkeys(
+            selector
+            for value in (record.label, record.id, _design_variant_record_step_reference(record))
+            if (selector := _normalize_variant_term(value))
+        )
+    )
+    for raw, normalized in zip(requested, normalized_requested, strict=False):
+        if not any(selector and selector in normalized for selector in selectors):
+            continue
+        for separator in ("=", ":"):
+            if separator not in raw:
+                continue
+            left, right = raw.split(separator, 1)
+            normalized_left = _normalize_variant_term(left)
+            if any(selector and selector in normalized_left for selector in selectors):
+                value = " ".join(right.split())
+                return value if value else None
+        value = " ".join(raw.split())
+        return value if value else None
     return None
 
 

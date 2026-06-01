@@ -1704,6 +1704,111 @@ def test_step_design_variant_selection_evaluates_numeric_interval_expression(tmp
     assert "condition expression was not satisfied" in target_selection.warnings[0]
 
 
+@pytest.mark.parametrize(
+    ("variable_record", "expected_kind"),
+    (
+        ("#10=STRING_VARIABLE('finish');\n", "string_variable"),
+        ("#10=MATHS_STRING_VARIABLE(#1,'finish');\n", "maths_string_variable"),
+    ),
+)
+def test_step_design_variant_selection_evaluates_like_expression_string_assignment(
+    tmp_path: Path,
+    variable_record: str,
+    expected_kind: str,
+) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        f"{variable_record}"
+        "#11=STRING_LITERAL('black*');\n"
+        "#12=PRODUCT_CONCEPT_FEATURE('black package','select black panel',#1);\n"
+        "#20=LIKE_EXPRESSION(#10,#11);\n"
+        "#21=CONDITIONAL_CONFIGURATION('finish condition',#20,#12);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="black-node", name="Black Panel", part_id="black"),
+            fc.Node(id="silver-node", name="Silver Panel", part_id="silver"),
+        ],
+    )
+    parts = {
+        "black": fc.Part(
+            id="black",
+            name="Black Panel",
+            material_ids=["black-mat"],
+            metadata={"source_name": "black panel"},
+        ),
+        "silver": fc.Part(
+            id="silver",
+            name="Silver Panel",
+            material_ids=["silver-mat"],
+            metadata={"source_name": "silver panel"},
+        ),
+    }
+    materials = {
+        "black-mat": fc.Material(id="black-mat", name="Black Paint", base_color=(0.0, 0.0, 0.0, 1.0)),
+        "silver-mat": fc.Material(id="silver-mat", name="Silver Paint", base_color=(0.7, 0.7, 0.7, 1.0)),
+    }
+
+    matching_options = StepReadOptions(design_variant_selection=("finish=black anodized",))
+    matching_extraction = _extract_step_design_variants(source, matching_options)
+    matching_root = root.copy()
+    matching_parts = {key: part.copy() for key, part in parts.items()}
+    matching_materials = dict(materials)
+
+    matching_result = _apply_step_design_variant_selection(
+        matching_root,
+        matching_parts,
+        matching_materials,
+        matching_extraction,
+        matching_options,
+    )
+
+    assert matching_extraction.records[0].kind == expected_kind
+    assert matching_extraction.records[0].condition_operator == "string_variable"
+    assert matching_extraction.records[1].kind == "string_literal"
+    assert matching_extraction.records[1].condition_operator == "string_literal"
+    assert matching_extraction.records[1].condition_text == "black*"
+    assert matching_extraction.records[3].kind == "like_expression"
+    assert matching_extraction.records[3].condition_operator == "like"
+    assert matching_result.status == "applied"
+    assert matching_result.matched_records == ("step_variant_20", "step_variant_21")
+    assert [child.name for child in matching_root.children] == ["Black Panel"]
+    assert set(matching_parts) == {"black"}
+
+    blocked_options = StepReadOptions(design_variant_selection=("finish=silver anodized",))
+    blocked_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, blocked_options),
+        blocked_options,
+    )
+
+    assert blocked_selection.status == "unmatched_geometry"
+    assert blocked_selection.matched_records == ()
+    assert "condition expression was not satisfied" in blocked_selection.warnings[0]
+
+    target_options = StepReadOptions(design_variant_selection=("black package",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+
 def test_step_design_variant_selection_gates_conditional_concept_feature_label(tmp_path: Path) -> None:
     source = tmp_path / "variants.step"
     source.write_text(
