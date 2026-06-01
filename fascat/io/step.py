@@ -2326,6 +2326,26 @@ def _design_variant_selector_terms(
             )
         )
         condition_blocked = condition_blocked or (
+            record.condition_operator in {"equals", "not_equals"}
+            and not condition_applies
+            and (
+                _condition_record_has_requested_numeric_operand(
+                    record,
+                    records_by_reference,
+                    requested,
+                    normalized_requested,
+                    visited=set(),
+                )
+                or _condition_record_has_requested_string_operand(
+                    record,
+                    records_by_reference,
+                    requested,
+                    normalized_requested,
+                    visited=set(),
+                )
+            )
+        )
+        condition_blocked = condition_blocked or (
             record.condition_operator == "like"
             and not condition_applies
             and _condition_record_has_requested_string_operand(
@@ -2703,6 +2723,44 @@ def _condition_record_matches_requested(
         )
         return _StepConditionMatch(matched=matched, positive=matched and any(item[1] for item in string_children))
     if operator == "equals":
+        numeric_children = [
+            _condition_record_numeric_value(
+                child_record,
+                records_by_reference,
+                requested,
+                normalized_requested,
+                visited=set(visited),
+            )
+            for child_record in child_records
+        ]
+        numeric_values = [item[0] for item in numeric_children if item[0] is not None]
+        if any(_condition_record_produces_numeric_value(child_record) for child_record in child_records):
+            if len(numeric_values) != len(numeric_children) or len(numeric_values) < 2:
+                return _StepConditionMatch(matched=False)
+            matched = _numeric_equality_matches(numeric_values)
+            return _StepConditionMatch(
+                matched=matched,
+                positive=matched and any(item[1] for item in numeric_children),
+            )
+        string_children = [
+            _condition_record_string_value(
+                child_record,
+                records_by_reference,
+                requested,
+                normalized_requested,
+                visited=set(visited),
+            )
+            for child_record in child_records
+        ]
+        string_values = [item[0] for item in string_children if item[0] is not None]
+        if any(_condition_record_produces_string_value(child_record) for child_record in child_records):
+            if len(string_values) != len(string_children) or len(string_values) < 2:
+                return _StepConditionMatch(matched=False)
+            matched = _string_equality_matches(string_values)
+            return _StepConditionMatch(
+                matched=matched,
+                positive=matched and any(item[1] for item in string_children),
+            )
         matched = (
             len(children) >= 2
             and any(child.matched for child in children)
@@ -2710,6 +2768,44 @@ def _condition_record_matches_requested(
         )
         return _StepConditionMatch(matched=matched, positive=matched and any(child.positive for child in children))
     if operator == "not_equals":
+        numeric_children = [
+            _condition_record_numeric_value(
+                child_record,
+                records_by_reference,
+                requested,
+                normalized_requested,
+                visited=set(visited),
+            )
+            for child_record in child_records
+        ]
+        numeric_values = [item[0] for item in numeric_children if item[0] is not None]
+        if any(_condition_record_produces_numeric_value(child_record) for child_record in child_records):
+            if len(numeric_values) != len(numeric_children) or len(numeric_values) < 2:
+                return _StepConditionMatch(matched=False)
+            matched = not _numeric_equality_matches(numeric_values)
+            return _StepConditionMatch(
+                matched=matched,
+                positive=matched and any(item[1] for item in numeric_children),
+            )
+        string_children = [
+            _condition_record_string_value(
+                child_record,
+                records_by_reference,
+                requested,
+                normalized_requested,
+                visited=set(visited),
+            )
+            for child_record in child_records
+        ]
+        string_values = [item[0] for item in string_children if item[0] is not None]
+        if any(_condition_record_produces_string_value(child_record) for child_record in child_records):
+            if len(string_values) != len(string_children) or len(string_values) < 2:
+                return _StepConditionMatch(matched=False)
+            matched = not _string_equality_matches(string_values)
+            return _StepConditionMatch(
+                matched=matched,
+                positive=matched and any(item[1] for item in string_children),
+            )
         matched = (
             len(children) >= 2
             and any(child.matched for child in children)
@@ -2920,6 +3016,16 @@ def _condition_record_has_requested_numeric_operand(
     )
 
 
+def _condition_record_produces_numeric_value(record: _StepDesignVariantRecord) -> bool:
+    return record.condition_operator in {
+        "numeric_literal",
+        "numeric_variable",
+        *_STEP_NUMERIC_ARITHMETIC_OPERATORS,
+        *_STEP_NUMERIC_FUNCTION_OPERATORS,
+        *_STEP_NUMERIC_STRING_FUNCTION_OPERATORS,
+    }
+
+
 def _condition_record_has_requested_string_operand(
     record: _StepDesignVariantRecord,
     records_by_reference: dict[str, _StepDesignVariantRecord],
@@ -2947,6 +3053,14 @@ def _condition_record_has_requested_string_operand(
     )
 
 
+def _condition_record_produces_string_value(record: _StepDesignVariantRecord) -> bool:
+    return record.condition_operator in {
+        "string_literal",
+        "string_variable",
+        *_STEP_STRING_EXPRESSION_OPERATORS,
+    }
+
+
 def _numeric_comparison_matches(operator: str, values: list[float]) -> bool:
     pairs = zip(values, values[1:], strict=False)
     if operator == "greater":
@@ -2963,6 +3077,13 @@ def _numeric_comparison_matches(operator: str, values: list[float]) -> bool:
 def _numeric_interval_matches(values: list[float]) -> bool:
     low, item, high = values[:3]
     return low <= item <= high
+
+
+def _numeric_equality_matches(values: list[float]) -> bool:
+    if len(values) < 2 or not all(np.isfinite(value) for value in values):
+        return False
+    first = values[0]
+    return all(np.isclose(first, value, rtol=1e-12, atol=1e-12) for value in values[1:])
 
 
 def _numeric_arithmetic_value(operator: str, values: list[float]) -> float | None:
@@ -3043,6 +3164,14 @@ def _string_like_matches(value: str, pattern: str) -> bool:
         "^" + "".join(".*" if token is wildcard else "." if token is single else str(token) for token in tokens) + "$"
     )
     return re.fullmatch(pattern_re, normalized_value) is not None
+
+
+def _string_equality_matches(values: list[str]) -> bool:
+    if len(values) < 2:
+        return False
+    normalized = [_normalize_condition_text(value) for value in values]
+    first = normalized[0]
+    return bool(first) and all(value == first for value in normalized[1:])
 
 
 def _string_substring_value(value: str, start: float, end: float) -> str | None:

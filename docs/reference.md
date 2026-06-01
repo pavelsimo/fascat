@@ -102,15 +102,14 @@ literals include parsed true/false values. Numeric literals include parsed
 numeric values; string literals include parsed text values. Supported
 conditions gate their operand labels before those labels can drive geometry
 pruning; expression-only operand labels are not promoted as geometry targets;
-equality/not-equality records compare selected boolean
-operand states, named maths numeric variables evaluate from selected
-`label=value` assignments for numeric comparisons and intervals, simple numeric
-arithmetic and numeric function expressions can feed those comparisons and
-intervals, `ODD_FUNCTION` tests selected integer numeric assignments, string
-variables evaluate from selected `label=value` assignments for simple
-`LIKE_EXPRESSION`, `CONCAT_EXPRESSION`, `SUBSTRING_EXPRESSION`, and
-`LENGTH_FUNCTION` / `VALUE_FUNCTION` / `INT_VALUE_FUNCTION`, numeric function,
-and `ODD_FUNCTION` matching,
+equality/not-equality records compare resolved numeric/string operand values
+and fall back to selected boolean operand states for non-value operands. Named
+maths numeric variables evaluate from selected `label=value` assignments for
+numeric comparisons, intervals, equality/not-equality, numeric function
+expressions, and `ODD_FUNCTION` integer tests. String variables evaluate from
+selected `label=value` assignments for equality/not-equality,
+`LIKE_EXPRESSION`, `CONCAT_EXPRESSION`, `SUBSTRING_EXPRESSION`,
+`LENGTH_FUNCTION`, `VALUE_FUNCTION`, and `INT_VALUE_FUNCTION` matching,
 boolean variables act as named operands
 selected by label or STEP record id, and conditional/effectivity-assignment
 wrappers, including `CONDITIONAL_CONCEPT_FEATURE`,

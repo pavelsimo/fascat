@@ -1507,6 +1507,153 @@ def test_step_design_variant_selection_evaluates_comparison_not_equal(tmp_path: 
 
 
 @pytest.mark.parametrize(
+    (
+        "variable_record",
+        "literal_record",
+        "comparison_record",
+        "matching_selection",
+        "blocked_selection",
+        "expected_variable_kind",
+        "expected_operator",
+    ),
+    [
+        (
+            "#10=MATHS_REAL_VARIABLE(#1,'load rating');\n",
+            "#11=REAL_LITERAL(15.0);\n",
+            "#20=COMPARISON_EQUAL(#10,#11);\n",
+            "load rating=15",
+            "load rating=12",
+            "maths_real_variable",
+            "equals",
+        ),
+        (
+            "#10=MATHS_REAL_VARIABLE(#1,'load rating');\n",
+            "#11=REAL_LITERAL(15.0);\n",
+            "#20=COMPARISON_NOT_EQUAL(#10,#11);\n",
+            "load rating=12",
+            "load rating=15",
+            "maths_real_variable",
+            "not_equals",
+        ),
+        (
+            "#10=MATHS_STRING_VARIABLE(#1,'finish');\n",
+            "#11=STRING_LITERAL('black anodized');\n",
+            "#20=EQUALS_EXPRESSION(#10,#11);\n",
+            "finish=black anodized",
+            "finish=silver anodized",
+            "maths_string_variable",
+            "equals",
+        ),
+        (
+            "#10=MATHS_STRING_VARIABLE(#1,'finish');\n",
+            "#11=STRING_LITERAL('black anodized');\n",
+            "#20=COMPARISON_NOT_EQUAL(#10,#11);\n",
+            "finish=silver anodized",
+            "finish=black anodized",
+            "maths_string_variable",
+            "not_equals",
+        ),
+    ],
+)
+def test_step_design_variant_selection_evaluates_value_equality_conditions(
+    tmp_path: Path,
+    variable_record: str,
+    literal_record: str,
+    comparison_record: str,
+    matching_selection: str,
+    blocked_selection: str,
+    expected_variable_kind: str,
+    expected_operator: str,
+) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        f"{variable_record}"
+        f"{literal_record}"
+        "#12=PRODUCT_CONCEPT_FEATURE('value package','select value panel',#1);\n"
+        f"{comparison_record}"
+        "#21=CONDITIONAL_CONFIGURATION('value equality condition',#20,#12);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="value-node", name="Value Panel", part_id="value"),
+            fc.Node(id="fallback-node", name="Fallback Panel", part_id="fallback"),
+        ],
+    )
+    parts = {
+        "value": fc.Part(
+            id="value",
+            name="Value Panel",
+            material_ids=["value-mat"],
+            metadata={"source_name": "value panel"},
+        ),
+        "fallback": fc.Part(
+            id="fallback",
+            name="Fallback Panel",
+            material_ids=["fallback-mat"],
+            metadata={"source_name": "fallback panel"},
+        ),
+    }
+    materials = {
+        "value-mat": fc.Material(id="value-mat", name="Value Paint", base_color=(1.0, 0.0, 0.0, 1.0)),
+        "fallback-mat": fc.Material(id="fallback-mat", name="Fallback Paint", base_color=(0.0, 0.0, 1.0, 1.0)),
+    }
+
+    matching_options = StepReadOptions(design_variant_selection=(matching_selection,))
+    matching_extraction = _extract_step_design_variants(source, matching_options)
+    matching_root = root.copy()
+    matching_parts = {key: part.copy() for key, part in parts.items()}
+    matching_materials = dict(materials)
+
+    matching_result = _apply_step_design_variant_selection(
+        matching_root,
+        matching_parts,
+        matching_materials,
+        matching_extraction,
+        matching_options,
+    )
+
+    assert matching_extraction.records[0].kind == expected_variable_kind
+    assert matching_extraction.records[3].condition_operator == expected_operator
+    assert matching_result.status == "applied"
+    assert matching_result.matched_records == ("step_variant_20", "step_variant_21")
+    assert [child.name for child in matching_root.children] == ["Value Panel"]
+    assert set(matching_parts) == {"value"}
+
+    blocked_options = StepReadOptions(design_variant_selection=(blocked_selection,))
+    blocked_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, blocked_options),
+        blocked_options,
+    )
+
+    assert blocked_selection.status == "unmatched_geometry"
+    assert blocked_selection.matched_records == ()
+    assert "condition expression was not satisfied" in blocked_selection.warnings[0]
+
+    target_options = StepReadOptions(design_variant_selection=("value package",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+
+@pytest.mark.parametrize(
     ("comparison_record", "matching_selection", "blocked_selection", "expected_operator"),
     (
         ("#20=COMPARISON_GREATER(#10,#11);\n", "load rating=15", "load rating=12", "greater"),
