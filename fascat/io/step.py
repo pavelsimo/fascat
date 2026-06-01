@@ -101,8 +101,12 @@ _STEP_PMI_ENTITY_KINDS = {
 _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "APPLIED_EFFECTIVITY_ASSIGNMENT": "applied_effectivity_assignment",
     "APPLIEDEFFECTIVITYASSIGNMENT": "applied_effectivity_assignment",
+    "APPLIED_EFFECTIVITY_CONTEXT_ASSIGNMENT": "applied_effectivity_context_assignment",
+    "APPLIEDEFFECTIVITYCONTEXTASSIGNMENT": "applied_effectivity_context_assignment",
     "APPLIED_INEFFECTIVITY_ASSIGNMENT": "applied_ineffectivity_assignment",
     "APPLIEDINEFFECTIVITYASSIGNMENT": "applied_ineffectivity_assignment",
+    "CLASS_USAGE_EFFECTIVITY_CONTEXT_ASSIGNMENT": "class_usage_effectivity_context_assignment",
+    "CLASSUSAGEEFFECTIVITYCONTEXTASSIGNMENT": "class_usage_effectivity_context_assignment",
     "CONFIGURATION_DESIGN": "configuration_design",
     "CONFIGURATION_EFFECTIVITY": "configuration_effectivity",
     "CONFIGURATION_ITEM": "configuration_item",
@@ -124,6 +128,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "CONDITIONALCONFIGURATION": "conditional_configuration",
     "CONDITIONAL_EFFECTIVITY": "conditional_effectivity",
     "CONFIGURED_EFFECTIVITY_ASSIGNMENT": "configured_effectivity_assignment",
+    "CONFIGURED_EFFECTIVITY_CONTEXT_ASSIGNMENT": "configured_effectivity_context_assignment",
+    "CONFIGUREDEFFECTIVITYCONTEXTASSIGNMENT": "configured_effectivity_context_assignment",
     "DATED_EFFECTIVITY": "dated_effectivity",
     "EFFECTIVITY": "effectivity",
     "EFFECTIVITYASSIGNMENT": "effectivity_assignment",
@@ -1938,6 +1944,12 @@ def _step_condition_operator(entity: str) -> str | None:
         return "conditional"
     if normalized in {"APPLIEDEFFECTIVITYASSIGNMENT", "CONFIGUREDEFFECTIVITYASSIGNMENT", "EFFECTIVITYASSIGNMENT"}:
         return "effectivity_assignment"
+    if normalized in {
+        "APPLIEDEFFECTIVITYCONTEXTASSIGNMENT",
+        "CLASSUSAGEEFFECTIVITYCONTEXTASSIGNMENT",
+        "CONFIGUREDEFFECTIVITYCONTEXTASSIGNMENT",
+    }:
+        return "effectivity_context_assignment"
     if normalized == "APPLIEDINEFFECTIVITYASSIGNMENT":
         return "ineffectivity_assignment"
     if normalized in {"BOOLEANVARIABLE", "MATHSBOOLEANVARIABLE"}:
@@ -2147,6 +2159,7 @@ def _design_variant_selector_terms(
             direct_match = record.condition_operator not in {
                 "conditional",
                 "effectivity_assignment",
+                "effectivity_context_assignment",
                 "ineffectivity_assignment",
                 "numeric_literal",
                 "numeric_variable",
@@ -2209,6 +2222,7 @@ def _conditional_dependency_references(
         "not_equals",
         "conditional",
         "effectivity_assignment",
+        "effectivity_context_assignment",
         "ineffectivity_assignment",
     }
     dependencies: set[str] = {
@@ -2325,6 +2339,19 @@ def _condition_record_matches_requested(
                     any(child.positive for child in effectivity_condition_children)
                     or any(child.positive for child in effectivity_target_children)
                 ),
+            )
+    if operator == "effectivity_context_assignment":
+        assignment_operator_kinds = ("effectivity_assignment", "ineffectivity_assignment")
+        assignment_children = [
+            child_match
+            for child_record, child_match in zip(child_records, children, strict=False)
+            if child_record.condition_operator in assignment_operator_kinds
+        ]
+        if assignment_children:
+            matched = all(child.matched for child in assignment_children)
+            return _StepConditionMatch(
+                matched=matched,
+                positive=matched and any(child.positive for child in assignment_children),
             )
     if operator == "and":
         matched = all(child.matched for child in children)

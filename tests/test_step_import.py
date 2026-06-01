@@ -624,6 +624,97 @@ def test_step_design_variant_selection_resolves_applied_effectivity_assignment_t
     assert "condition expression was not satisfied" in target_selection.warnings[0]
 
 
+def test_step_design_variant_selection_resolves_effectivity_context_assignment_targets(tmp_path: Path) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=EFFECTIVITY('service window');\n"
+        "#20=PRODUCT_CONCEPT_FEATURE('service package','service condition',#1);\n"
+        "#30=PRODUCT_DEFINITION('context panel','selected context occurrence',#1,#2);\n"
+        "#40=CONFIGURED_EFFECTIVITY_ASSIGNMENT(#10,#20);\n"
+        "#41=CONFIGURED_EFFECTIVITY_CONTEXT_ASSIGNMENT(#40,(#30));\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="context-node", name="Context Panel", part_id="context"),
+            fc.Node(id="other-node", name="Other Panel", part_id="other"),
+        ],
+    )
+    parts = {
+        "context": fc.Part(
+            id="context",
+            name="Context Panel",
+            material_ids=["context-mat"],
+            metadata={"source_name": "context panel"},
+        ),
+        "other": fc.Part(
+            id="other",
+            name="Other Panel",
+            material_ids=["other-mat"],
+            metadata={"source_name": "other panel"},
+        ),
+    }
+    materials = {
+        "context-mat": fc.Material(
+            id="context-mat",
+            name="Context Paint",
+            base_color=(1.0, 0.0, 0.0, 1.0),
+        ),
+        "other-mat": fc.Material(id="other-mat", name="Other Paint", base_color=(0.0, 0.0, 1.0, 1.0)),
+    }
+
+    effectivity_options = StepReadOptions(design_variant_selection=("service window",))
+    effectivity_extraction = _extract_step_design_variants(source, effectivity_options)
+    effectivity_root = root.copy()
+    effectivity_parts = {key: part.copy() for key, part in parts.items()}
+    effectivity_materials = dict(materials)
+
+    effectivity_selection = _apply_step_design_variant_selection(
+        effectivity_root,
+        effectivity_parts,
+        effectivity_materials,
+        effectivity_extraction,
+        effectivity_options,
+    )
+
+    assert [record.kind for record in effectivity_extraction.records] == [
+        "effectivity",
+        "product_concept_feature",
+        "configured_effectivity_assignment",
+        "configured_effectivity_context_assignment",
+    ]
+    assert effectivity_extraction.records[3].condition_operator == "effectivity_context_assignment"
+    assert effectivity_extraction.records[3].reference_labels == (
+        "configured effectivity assignment",
+        "context panel / selected context occurrence",
+    )
+    assert "context panel / selected context occurrence" in effectivity_extraction.records[3].resolved_reference_labels
+    assert effectivity_selection.status == "applied"
+    assert effectivity_selection.matched_records == ("step_variant_40", "step_variant_41")
+    assert "context panel" in [term.lower() for term in effectivity_selection.selector_terms]
+    assert [child.name for child in effectivity_root.children] == ["Context Panel"]
+    assert set(effectivity_parts) == {"context"}
+
+    target_options = StepReadOptions(design_variant_selection=("context panel",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+
 def test_step_design_variant_selection_suppresses_applied_ineffectivity_assignment_targets(
     tmp_path: Path,
 ) -> None:
