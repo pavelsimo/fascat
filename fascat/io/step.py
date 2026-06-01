@@ -103,10 +103,16 @@ _STEP_PMI_ENTITY_KINDS = {
 _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "ABS_FUNCTION": "abs_function",
     "ABSFUNCTION": "abs_function",
+    "ACOS_FUNCTION": "acos_function",
+    "ACOSFUNCTION": "acos_function",
     "APPLIED_EFFECTIVITY_ASSIGNMENT": "applied_effectivity_assignment",
     "APPLIEDEFFECTIVITYASSIGNMENT": "applied_effectivity_assignment",
     "APPLIED_EFFECTIVITY_CONTEXT_ASSIGNMENT": "applied_effectivity_context_assignment",
     "APPLIEDEFFECTIVITYCONTEXTASSIGNMENT": "applied_effectivity_context_assignment",
+    "ASIN_FUNCTION": "asin_function",
+    "ASINFUNCTION": "asin_function",
+    "ATAN_FUNCTION": "atan_function",
+    "ATANFUNCTION": "atan_function",
     "APPLIED_INEFFECTIVITY_ASSIGNMENT": "applied_ineffectivity_assignment",
     "APPLIEDINEFFECTIVITYASSIGNMENT": "applied_ineffectivity_assignment",
     "CLASS_USAGE_EFFECTIVITY_CONTEXT_ASSIGNMENT": "class_usage_effectivity_context_assignment",
@@ -137,6 +143,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "CONFIGURED_EFFECTIVITY_CONTEXT_ASSIGNMENT": "configured_effectivity_context_assignment",
     "CONFIGUREDEFFECTIVITYCONTEXTASSIGNMENT": "configured_effectivity_context_assignment",
     "CONFIGURATIONEFFECTIVITY": "configuration_effectivity",
+    "COS_FUNCTION": "cos_function",
+    "COSFUNCTION": "cos_function",
     "DATED_EFFECTIVITY": "dated_effectivity",
     "DATEDEFFECTIVITY": "dated_effectivity",
     "DIV_EXPRESSION": "div_expression",
@@ -148,6 +156,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "EFFECTIVITY_RELATIONSHIP": "effectivity_relationship",
     "EQUALS_EXPRESSION": "equals_expression",
     "EQUALSEXPRESSION": "equals_expression",
+    "EXP_FUNCTION": "exp_function",
+    "EXPFUNCTION": "exp_function",
     "INT_LITERAL": "int_literal",
     "INTLITERAL": "int_literal",
     "INT_NUMERIC_VARIABLE": "int_numeric_variable",
@@ -162,6 +172,12 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "LIKEEXPRESSION": "like_expression",
     "LENGTH_FUNCTION": "length_function",
     "LENGTHFUNCTION": "length_function",
+    "LOG10_FUNCTION": "log10_function",
+    "LOG10FUNCTION": "log10_function",
+    "LOG2_FUNCTION": "log2_function",
+    "LOG2FUNCTION": "log2_function",
+    "LOG_FUNCTION": "log_function",
+    "LOGFUNCTION": "log_function",
     "LOT_EFFECTIVITY": "lot_effectivity",
     "LITERAL_NUMBER": "literal_number",
     "LITERALNUMBER": "literal_number",
@@ -208,6 +224,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "REAL_REPRESENTATION_ITEM": "real_representation_item",
     "REALREPRESENTATIONITEM": "real_representation_item",
     "SERIAL_NUMBERED_EFFECTIVITY": "serial_numbered_effectivity",
+    "SIN_FUNCTION": "sin_function",
+    "SINFUNCTION": "sin_function",
     "SLASH_EXPRESSION": "slash_expression",
     "SLASHEXPRESSION": "slash_expression",
     "SQUARE_ROOT_FUNCTION": "square_root_function",
@@ -218,6 +236,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "STRINGVARIABLE": "string_variable",
     "SUBSTRING_EXPRESSION": "substring_expression",
     "SUBSTRINGEXPRESSION": "substring_expression",
+    "TAN_FUNCTION": "tan_function",
+    "TANFUNCTION": "tan_function",
     "TIME_INTERVAL_BASED_EFFECTIVITY": "time_interval_based_effectivity",
     "VALUE_FUNCTION": "value_function",
     "VALUEFUNCTION": "value_function",
@@ -252,10 +272,20 @@ _STEP_NUMERIC_ARITHMETIC_OPERATORS = {
 }
 _STEP_NUMERIC_FUNCTION_OPERATORS = {
     "numeric_abs",
+    "numeric_acos",
+    "numeric_asin",
+    "numeric_atan",
+    "numeric_cos",
+    "numeric_exp",
+    "numeric_log",
+    "numeric_log10",
+    "numeric_log2",
     "numeric_max",
     "numeric_min",
     "numeric_negate",
+    "numeric_sin",
     "numeric_sqrt",
+    "numeric_tan",
 }
 _STEP_STRING_EXPRESSION_OPERATORS = {"string_concat", "string_substring"}
 _STEP_NUMERIC_STRING_FUNCTION_OPERATORS = {"string_integer_value", "string_length", "string_value"}
@@ -2032,6 +2062,22 @@ def _step_condition_operator(entity: str) -> str | None:
         return "numeric_power"
     if normalized == "ABSFUNCTION":
         return "numeric_abs"
+    if normalized == "ACOSFUNCTION":
+        return "numeric_acos"
+    if normalized == "ASINFUNCTION":
+        return "numeric_asin"
+    if normalized == "ATANFUNCTION":
+        return "numeric_atan"
+    if normalized == "COSFUNCTION":
+        return "numeric_cos"
+    if normalized == "EXPFUNCTION":
+        return "numeric_exp"
+    if normalized == "LOGFUNCTION":
+        return "numeric_log"
+    if normalized == "LOG2FUNCTION":
+        return "numeric_log2"
+    if normalized == "LOG10FUNCTION":
+        return "numeric_log10"
     if normalized == "MINUSFUNCTION":
         return "numeric_negate"
     if normalized == "SQUAREROOTFUNCTION":
@@ -2040,6 +2086,10 @@ def _step_condition_operator(entity: str) -> str | None:
         return "numeric_max"
     if normalized == "MINIMUMFUNCTION":
         return "numeric_min"
+    if normalized == "SINFUNCTION":
+        return "numeric_sin"
+    if normalized == "TANFUNCTION":
+        return "numeric_tan"
     if normalized == "ODDFUNCTION":
         return "numeric_odd"
     if normalized == "LENGTHFUNCTION":
@@ -3128,17 +3178,51 @@ def _numeric_function_value(operator: str, values: list[float]) -> float | None:
         return None
     if operator == "numeric_abs" and len(values) == 1:
         return abs(values[0])
+    if operator == "numeric_acos" and len(values) == 1:
+        if not -1.0 <= values[0] <= 1.0:
+            return None
+        return _finite_numeric_result(float(np.arccos(values[0])))
+    if operator == "numeric_asin" and len(values) == 1:
+        if not -1.0 <= values[0] <= 1.0:
+            return None
+        return _finite_numeric_result(float(np.arcsin(values[0])))
+    if operator == "numeric_atan" and len(values) == 1:
+        return _finite_numeric_result(float(np.arctan(values[0])))
+    if operator == "numeric_cos" and len(values) == 1:
+        return _finite_numeric_result(float(np.cos(values[0])))
+    if operator == "numeric_exp" and len(values) == 1:
+        return _finite_numeric_result(float(np.exp(values[0])))
+    if operator == "numeric_log" and len(values) == 1:
+        if values[0] <= 0:
+            return None
+        return _finite_numeric_result(float(np.log(values[0])))
+    if operator == "numeric_log2" and len(values) == 1:
+        if values[0] <= 0:
+            return None
+        return _finite_numeric_result(float(np.log2(values[0])))
+    if operator == "numeric_log10" and len(values) == 1:
+        if values[0] <= 0:
+            return None
+        return _finite_numeric_result(float(np.log10(values[0])))
     if operator == "numeric_negate" and len(values) == 1:
         return -values[0]
+    if operator == "numeric_sin" and len(values) == 1:
+        return _finite_numeric_result(float(np.sin(values[0])))
     if operator == "numeric_sqrt" and len(values) == 1:
         if values[0] < 0:
             return None
         return float(values[0] ** 0.5)
+    if operator == "numeric_tan" and len(values) == 1:
+        return _finite_numeric_result(float(np.tan(values[0])))
     if operator == "numeric_max":
         return max(values)
     if operator == "numeric_min":
         return min(values)
     return None
+
+
+def _finite_numeric_result(value: float) -> float | None:
+    return value if np.isfinite(value) else None
 
 
 def _numeric_odd_matches(value: float) -> bool:

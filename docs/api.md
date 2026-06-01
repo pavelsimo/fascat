@@ -322,8 +322,11 @@ simple AP242 condition/expression records such as `AND_EXPRESSION`,
 as `PLUS_EXPRESSION`, `MINUS_EXPRESSION`, `MULT_EXPRESSION`,
 `DIV_EXPRESSION`, `SLASH_EXPRESSION`, `MOD_EXPRESSION`, and
 `POWER_EXPRESSION`, numeric functions such as `ABS_FUNCTION`,
-`MINUS_FUNCTION`, `SQUARE_ROOT_FUNCTION`, `MAXIMUM_FUNCTION`, and
-`MINIMUM_FUNCTION`, simple string expressions such as `CONCAT_EXPRESSION` and
+`MINUS_FUNCTION`, `SQUARE_ROOT_FUNCTION`, `MAXIMUM_FUNCTION`,
+`MINIMUM_FUNCTION`, `SIN_FUNCTION`, `COS_FUNCTION`, `TAN_FUNCTION`,
+`ASIN_FUNCTION`, `ACOS_FUNCTION`, `ATAN_FUNCTION`, `EXP_FUNCTION`,
+`LOG_FUNCTION`, `LOG2_FUNCTION`, and `LOG10_FUNCTION`, simple string
+expressions such as `CONCAT_EXPRESSION` and
 `SUBSTRING_EXPRESSION`, and string-derived numeric functions such as
 `LENGTH_FUNCTION`, `VALUE_FUNCTION`, and `INT_VALUE_FUNCTION`,
 `ODD_FUNCTION`, `BOOLEAN_LITERAL`, `BOOLEAN_REPRESENTATION_ITEM`,
@@ -354,8 +357,8 @@ non-value operand states differ. Numeric comparison and interval records select
 when named numeric variables are
 supplied as selection values such as `load rating=15`, including when those
 variables flow through simple numeric arithmetic or numeric function expression
-operands. `ODD_FUNCTION` selects when a named integer numeric variable is
-supplied as an odd integer assignment.
+operands, including elementary trig/log/exp functions. `ODD_FUNCTION` selects
+when a named integer numeric variable is supplied as an odd integer assignment.
 `LIKE_EXPRESSION` records select when named string variables are supplied as
 selection values such as `finish=black anodized`, including when those values
 flow through simple `CONCAT_EXPRESSION` or `SUBSTRING_EXPRESSION` operands.

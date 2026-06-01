@@ -2716,6 +2716,197 @@ def test_step_design_variant_selection_evaluates_numeric_functions_in_numeric_co
     assert "condition expression was not satisfied" in target_selection.warnings[0]
 
 
+@pytest.mark.parametrize(
+    (
+        "function_record",
+        "threshold_record",
+        "matching_selection",
+        "blocked_selection",
+        "expected_kind",
+        "expected_operator",
+    ),
+    [
+        (
+            "#20=SIN_FUNCTION(#10);\n",
+            "#11=REAL_LITERAL(0.5);\n",
+            "function input=1.57079632679",
+            "function input=0",
+            "sin_function",
+            "numeric_sin",
+        ),
+        (
+            "#20=COS_FUNCTION(#10);\n",
+            "#11=REAL_LITERAL(0.5);\n",
+            "function input=0",
+            "function input=1.57079632679",
+            "cos_function",
+            "numeric_cos",
+        ),
+        (
+            "#20=TAN_FUNCTION(#10);\n",
+            "#11=REAL_LITERAL(0.5);\n",
+            "function input=0.78539816339",
+            "function input=0.25",
+            "tan_function",
+            "numeric_tan",
+        ),
+        (
+            "#20=ASIN_FUNCTION(#10);\n",
+            "#11=REAL_LITERAL(0.5);\n",
+            "function input=1",
+            "function input=0.25",
+            "asin_function",
+            "numeric_asin",
+        ),
+        (
+            "#20=ACOS_FUNCTION(#10);\n",
+            "#11=REAL_LITERAL(1.0);\n",
+            "function input=0",
+            "function input=1",
+            "acos_function",
+            "numeric_acos",
+        ),
+        (
+            "#20=ATAN_FUNCTION(#10);\n",
+            "#11=REAL_LITERAL(0.5);\n",
+            "function input=1",
+            "function input=0.25",
+            "atan_function",
+            "numeric_atan",
+        ),
+        (
+            "#20=EXP_FUNCTION(#10);\n",
+            "#11=REAL_LITERAL(2.0);\n",
+            "function input=1",
+            "function input=0",
+            "exp_function",
+            "numeric_exp",
+        ),
+        (
+            "#20=LOG_FUNCTION(#10);\n",
+            "#11=REAL_LITERAL(1.0);\n",
+            "function input=3",
+            "function input=1",
+            "log_function",
+            "numeric_log",
+        ),
+        (
+            "#20=LOG2_FUNCTION(#10);\n",
+            "#11=REAL_LITERAL(3.0);\n",
+            "function input=8",
+            "function input=4",
+            "log2_function",
+            "numeric_log2",
+        ),
+        (
+            "#20=LOG10_FUNCTION(#10);\n",
+            "#11=REAL_LITERAL(2.0);\n",
+            "function input=100",
+            "function input=10",
+            "log10_function",
+            "numeric_log10",
+        ),
+    ],
+)
+def test_step_design_variant_selection_evaluates_elementary_numeric_functions(
+    tmp_path: Path,
+    function_record: str,
+    threshold_record: str,
+    matching_selection: str,
+    blocked_selection: str,
+    expected_kind: str,
+    expected_operator: str,
+) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=MATHS_REAL_VARIABLE(#1,'function input');\n"
+        f"{threshold_record}"
+        "#13=PRODUCT_CONCEPT_FEATURE('elementary function package','select elementary function panel',#1);\n"
+        f"{function_record}"
+        "#21=COMPARISON_GREATER_EQUAL(#20,#11);\n"
+        "#22=CONDITIONAL_CONFIGURATION('elementary function condition',#21,#13);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="function-node", name="Elementary Function Panel", part_id="function"),
+            fc.Node(id="fallback-node", name="Fallback Function Panel", part_id="fallback"),
+        ],
+    )
+    parts = {
+        "function": fc.Part(
+            id="function",
+            name="Elementary Function Panel",
+            material_ids=["function-mat"],
+            metadata={"source_name": "elementary function panel"},
+        ),
+        "fallback": fc.Part(
+            id="fallback",
+            name="Fallback Function Panel",
+            material_ids=["fallback-mat"],
+            metadata={"source_name": "fallback function panel"},
+        ),
+    }
+    materials = {
+        "function-mat": fc.Material(id="function-mat", name="Function Paint", base_color=(0.0, 0.0, 0.0, 1.0)),
+        "fallback-mat": fc.Material(id="fallback-mat", name="Fallback Paint", base_color=(0.7, 0.7, 0.7, 1.0)),
+    }
+
+    matching_options = StepReadOptions(design_variant_selection=(matching_selection,))
+    matching_extraction = _extract_step_design_variants(source, matching_options)
+    matching_root = root.copy()
+    matching_parts = {key: part.copy() for key, part in parts.items()}
+    matching_materials = dict(materials)
+
+    matching_result = _apply_step_design_variant_selection(
+        matching_root,
+        matching_parts,
+        matching_materials,
+        matching_extraction,
+        matching_options,
+    )
+
+    function = next(record for record in matching_extraction.records if record.kind == expected_kind)
+    assert function.condition_operator == expected_operator
+    assert any(record.condition_operator == "greater_equal" for record in matching_extraction.records)
+    assert matching_result.status == "applied"
+    assert matching_result.matched_records == ("step_variant_21", "step_variant_22")
+    assert [child.name for child in matching_root.children] == ["Elementary Function Panel"]
+    assert set(matching_parts) == {"function"}
+
+    blocked_options = StepReadOptions(design_variant_selection=(blocked_selection,))
+    blocked_selection_result = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, blocked_options),
+        blocked_options,
+    )
+
+    assert blocked_selection_result.status == "unmatched_geometry"
+    assert blocked_selection_result.matched_records == ()
+    assert "condition expression was not satisfied" in blocked_selection_result.warnings[0]
+
+    target_options = StepReadOptions(design_variant_selection=("elementary function package",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+
 def test_step_design_variant_selection_evaluates_odd_function_condition(tmp_path: Path) -> None:
     source = tmp_path / "variants.step"
     source.write_text(
