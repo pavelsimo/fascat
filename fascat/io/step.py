@@ -1827,6 +1827,7 @@ def _import_decisions(
                 "deleted_vertices": cleanup_counts["deleted_line_vertices"],
             },
         ),
+        "construction_curves": _construction_curve_import_decision(options, cleanup_counts),
         "space_normalization": _import_decision(
             requested={
                 "source_units": options.source_units,
@@ -1928,6 +1929,42 @@ def _design_variant_import_decision(options: StepReadOptions, summary: dict[str,
     )
 
 
+def _construction_curve_import_decision(options: StepReadOptions, cleanup_counts: dict[str, int]) -> dict[str, object]:
+    policy = _construction_curve_policy(options)
+    counts = {
+        "preserved_parts": cleanup_counts["construction_line_parts"],
+        "deleted_parts": cleanup_counts["deleted_line_parts"],
+        "deleted_edges": cleanup_counts["deleted_line_edges"],
+        "deleted_vertices": cleanup_counts["deleted_line_vertices"],
+    }
+    if policy == "delete":
+        return _import_decision(
+            requested=policy,
+            effective=counts["deleted_parts"] > 0,
+            state="honored" if counts["deleted_parts"] > 0 else "not_present",
+            detail="construction-only line shapes are deleted during import",
+            counts=counts,
+        )
+    if policy == "tessellate_tubes":
+        return _import_decision(
+            requested=policy,
+            effective=counts["preserved_parts"] > 0,
+            state="approximated" if counts["preserved_parts"] > 0 else "not_present",
+            detail=(
+                "construction-only line shapes are preserved with tube tessellation metadata; "
+                "the tessellation step converts them to triangle tubes"
+            ),
+            counts=counts,
+        )
+    return _import_decision(
+        requested=policy,
+        effective=counts["preserved_parts"] > 0,
+        state="honored" if counts["preserved_parts"] > 0 else "not_present",
+        detail="construction-only line shapes are preserved as source-shape metadata without mesh geometry",
+        counts=counts,
+    )
+
+
 def _loaded_representation_report(asset: Asset) -> dict[str, object]:
     parts = [_part_representation_record(part) for part in sorted(asset.parts.values(), key=lambda item: item.id)]
     deleted_nodes = [
@@ -1943,7 +1980,7 @@ def _loaded_representation_report(asset: Asset) -> dict[str, object]:
 
 
 def _part_representation_record(part: Part) -> dict[str, object]:
-    return {
+    record: dict[str, object] = {
         "part_id": part.id,
         "name": part.name,
         "loaded_representation": str(part.metadata.get("loaded_representation", "unknown")),
@@ -1953,10 +1990,15 @@ def _part_representation_record(part: Part) -> dict[str, object]:
         "source_faces": _metadata_int(part.metadata.get("source_faces")),
         "source_name": str(part.metadata.get("source_name", "")),
     }
+    if "construction_curve_policy" in part.metadata:
+        record["construction_curve_policy"] = str(part.metadata["construction_curve_policy"])
+    if "construction_curve_tube_radius" in part.metadata:
+        record["construction_curve_tube_radius"] = _metadata_float(part.metadata["construction_curve_tube_radius"])
+    return record
 
 
 def _deleted_node_representation_record(node: Node) -> dict[str, object]:
-    return {
+    record: dict[str, object] = {
         "node_id": node.id,
         "name": node.name,
         "loaded_representation": str(node.metadata.get("loaded_representation", "unknown")),
@@ -1965,6 +2007,9 @@ def _deleted_node_representation_record(node: Node) -> dict[str, object]:
         "source_edges": _metadata_int(node.metadata.get("source_edges")),
         "source_faces": _metadata_int(node.metadata.get("source_faces")),
     }
+    if "construction_curve_policy" in node.metadata:
+        record["construction_curve_policy"] = str(node.metadata["construction_curve_policy"])
+    return record
 
 
 def _representation_summary(
@@ -2013,6 +2058,17 @@ def _metadata_int(value: object) -> int:
     return 0
 
 
+def _metadata_float(value: object) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
 def _loaded_representation(counts: _ShapeTopologyCounts) -> str:
     if counts.faces > 0:
         return "brep"
@@ -2026,11 +2082,24 @@ def _loaded_representation(counts: _ShapeTopologyCounts) -> str:
 def _cleanup_action(counts: _ShapeTopologyCounts, options: StepReadOptions) -> str | None:
     if counts.faces > 0:
         return None
-    if counts.edges > 0 and options.delete_lines:
+    if counts.edges > 0 and _construction_curve_policy(options) == "delete":
         return "delete_lines"
     if counts.edges == 0 and counts.vertices > 0 and options.delete_free_vertices:
         return "delete_free_vertices"
     return None
+
+
+def _construction_curve_policy(options: StepReadOptions) -> str:
+    return "delete" if options.delete_lines else options.construction_curve_policy
+
+
+def _construction_curve_metadata(options: StepReadOptions, representation: str) -> dict[str, str]:
+    if representation != "construction_lines":
+        return {}
+    metadata = {"construction_curve_policy": _construction_curve_policy(options)}
+    if metadata["construction_curve_policy"] == "tessellate_tubes":
+        metadata["construction_curve_tube_radius"] = str(options.construction_curve_tube_radius)
+    return metadata
 
 
 def _metadata_count(asset: Asset) -> int:
@@ -2104,6 +2173,7 @@ def _build_node(
                 "source_vertices": str(topology.vertices),
                 "source_edges": str(topology.edges),
                 "source_faces": str(topology.faces),
+                **_construction_curve_metadata(options, representation),
             }
         )
         return node
@@ -2153,6 +2223,7 @@ def _build_node(
             "source_vertices": str(topology.vertices),
             "source_edges": str(topology.edges),
             "source_faces": str(topology.faces),
+            **_construction_curve_metadata(options, representation),
         }
         if any(index != 0 for index in face_material_indices):
             metadata["occt_face_material_indices"] = ",".join(str(index) for index in face_material_indices)

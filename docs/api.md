@@ -310,6 +310,14 @@ selection is still planned backend work.
 
 STEP and IGES import can scan source-file string references for sidecar PNG, JPEG, and KTX2 textures, load them as first-class `ImageResource` objects, and bind semantic names such as `baseColor`, `normal`, `ao`, or `emissive` to material texture metadata. XDE visual material PBR/common values are preserved where exposed, and common CAD material names such as steel, aluminum, brass, copper, glass, plastic, rubber, and paint are mapped to deterministic PBR defaults with diagnostics in material metadata. Supported vendor material libraries can also be supplied explicitly, or referenced from the CAD source, as JSON/MTL files, ZIP packages containing JSON/MTL records plus textures, or folders containing those files; imported records update matching CAD materials with PBR factors and texture slots while reporting resolved, missing, unreadable, matched, and unmatched counts.
 
+Construction-only STEP/IGES line shapes use an explicit construction-curve
+policy. The default `preserve_metadata` keeps the source shape and reports that
+it has no triangle mesh. `delete` drops construction-only line nodes during
+import. `tessellate_tubes` preserves the source curve metadata and, during
+tessellation, converts curve segments into deterministic low-sided triangle
+tubes using `construction_curve_tube_radius` in source units. Legacy
+`delete_lines=True` remains a delete-policy alias.
+
 STEP import reports also include `import_decisions`, which records each import toggle as requested, effective, and `honored`, `approximated`, `unsupported`, `disabled`, `not_present`, or `backend_default`. The same report step includes `loaded_representations`, a per-part list of BREP, construction-point, construction-line, or empty-shape inputs plus deleted construction-only nodes and source topology counts.
 
 Use `fc.read_step_many([...])`, `fc.convert([...], "out.glb")`, or `fascat convert root-a.step out.glb --input root-b.step` when an assembly is delivered as several root STEP files rather than one file. Fascat imports each member through the normal STEP path, namespaces nodes, parts, materials, images, and PMI IDs with a deterministic member prefix, keeps each member root under a shared multi-file root node, and prefixes warnings with the member index and path. `continue_on_error=True` keeps successfully imported members and records failed members in the import report.
@@ -334,7 +342,9 @@ Metadata and PMI parameters:
 | `StepReadOptions` | `material_library_mapping` | Apply deterministic CAD material-name mapping rules to PBR metallic, roughness, opacity, and default color values when source visual material names are available. |
 | `StepReadOptions` | `material_library_paths` | Explicit vendor material-library JSON/MTL/ZIP files or folders to load during STEP/IGES import. Referenced library files are resolved relative to the CAD source and texture search paths. |
 | `StepReadOptions` | `delete_free_vertices` | Drop construction-only point shapes during import and record deletion counts in the import report. |
-| `StepReadOptions` | `delete_lines` | Drop construction-only line shapes during import and record deleted edge and vertex counts. Mixed BREP parts with faces are preserved. |
+| `StepReadOptions` | `delete_lines` | Legacy alias for deleting construction-only line shapes during import. Mixed BREP parts with faces are preserved. |
+| `StepReadOptions` | `construction_curve_policy` | Construction-only line policy: `preserve_metadata`, `delete`, or `tessellate_tubes`. Tube tessellation happens when the asset is tessellated. |
+| `StepReadOptions` | `construction_curve_tube_radius` | Tube radius in source units for `construction_curve_policy="tessellate_tubes"`. |
 | `StepReadOptions` | `source_units`, `source_meters_per_unit` | Override the source unit declaration when the STEP header is wrong or ambiguous. Known unit names include `metre`, `centimetre`, `millimetre`, `inch`, and `foot`; custom factors use meters per source unit. |
 | `StepReadOptions` | `source_up_axis`, `source_handedness` | Declare the source coordinate basis before normalization. Defaults are STEP-style `Z` up and `right` handed. |
 | `StepReadOptions` | `target_units`, `target_meters_per_unit` | Normalize the imported asset to a target unit by applying a root transform and updating the asset's declared units. |
@@ -935,6 +945,8 @@ multi_file = false
 material_library_paths = ["vendor-materials.json"]
 delete_free_vertices = false
 delete_lines = false
+construction_curve_policy = "preserve_metadata"
+construction_curve_tube_radius = 0.01
 target_units = "metre"
 target_up_axis = "Y"
 target_handedness = "right"

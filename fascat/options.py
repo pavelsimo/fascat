@@ -56,6 +56,7 @@ GltfExportPreset = Literal["desktop", "web", "mobile", "vr", "ar"]
 UsdPackageMode = Literal["default", "usdz"]
 MetadataExportMode = Literal["none", "summary", "full"]
 PmiExportMode = Literal["none", "summary", "metadata", "metadata_and_visuals", "full"]
+ConstructionCurvePolicy = Literal["preserve_metadata", "delete", "tessellate_tubes"]
 Axis = Literal["Y", "Z"]
 Handedness = Literal["right", "left"]
 WorkflowRecipeStatus = Literal["honored", "approximated", "unsupported", "disabled", "metadata_only"]
@@ -295,6 +296,8 @@ class StepReadOptions:
     material_library_paths: tuple[str, ...] = ()
     delete_free_vertices: bool = False
     delete_lines: bool = False
+    construction_curve_policy: ConstructionCurvePolicy = "preserve_metadata"
+    construction_curve_tube_radius: float = 0.01
     source_units: str | None = None
     source_meters_per_unit: float | None = None
     source_up_axis: Axis = "Z"
@@ -309,6 +312,11 @@ class StepReadOptions:
             raise ValueError("source_meters_per_unit must be greater than 0 when set")
         if self.target_meters_per_unit is not None and self.target_meters_per_unit <= 0.0:
             raise ValueError("target_meters_per_unit must be greater than 0 when set")
+        normalized_construction_curve_policy = str(self.construction_curve_policy).replace("-", "_")
+        if normalized_construction_curve_policy not in {"preserve_metadata", "delete", "tessellate_tubes"}:
+            raise ValueError("construction_curve_policy must be one of: preserve_metadata, delete, tessellate_tubes")
+        if self.construction_curve_tube_radius <= 0.0:
+            raise ValueError("construction_curve_tube_radius must be greater than 0")
         if self.source_up_axis not in {"Y", "Z"}:
             raise ValueError("source_up_axis must be one of: Y, Z")
         if self.target_up_axis not in {None, "Y", "Z"}:
@@ -326,6 +334,11 @@ class StepReadOptions:
             self,
             "material_library_paths",
             _normalize_path_tuple(self.material_library_paths, "material_library_paths"),
+        )
+        object.__setattr__(
+            self,
+            "construction_curve_policy",
+            cast(ConstructionCurvePolicy, normalized_construction_curve_policy),
         )
 
     def to_dict(self) -> dict[str, object]:

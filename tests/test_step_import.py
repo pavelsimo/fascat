@@ -237,7 +237,18 @@ def test_step_import_cleanup_actions_cover_construction_only_shapes() -> None:
     assert _loaded_representation(brep_counts) == "brep"
     assert _cleanup_action(point_counts, StepReadOptions(delete_free_vertices=True)) == "delete_free_vertices"
     assert _cleanup_action(line_counts, StepReadOptions(delete_lines=True)) == "delete_lines"
+    assert _cleanup_action(line_counts, StepReadOptions(construction_curve_policy="delete")) == "delete_lines"
+    assert _cleanup_action(line_counts, StepReadOptions(construction_curve_policy="tessellate_tubes")) is None
     assert _cleanup_action(brep_counts, StepReadOptions(delete_free_vertices=True, delete_lines=True)) is None
+
+
+def test_step_read_options_normalize_construction_curve_policy() -> None:
+    options = StepReadOptions(construction_curve_policy="tessellate-tubes")
+
+    assert options.construction_curve_policy == "tessellate_tubes"
+
+    with pytest.raises(ValueError, match="construction_curve_tube_radius"):
+        StepReadOptions(construction_curve_policy="tessellate_tubes", construction_curve_tube_radius=0.0)
 
 
 def test_step_import_decisions_report_requested_effective_states() -> None:
@@ -276,6 +287,9 @@ def test_step_import_decisions_report_requested_effective_states() -> None:
         "deleted_edges": 2,
         "deleted_vertices": 4,
     }
+    assert decisions["construction_curves"]["requested"] == "delete"
+    assert decisions["construction_curves"]["state"] == "honored"
+    assert decisions["construction_curves"]["counts"]["deleted_parts"] == 1
     assert decisions["space_normalization"]["state"] == "honored"
 
 

@@ -41,6 +41,9 @@ _DETAIL_METADATA_VALUES = frozenset(
     {"1", "critical", "detailed", "fine", "high", "high_detail", "inspection", "true", "yes"}
 )
 _SHINY_MATERIAL_VALUES = frozenset({"chrome", "gloss", "glossy", "mirror", "polished", "shiny"})
+_CONSTRUCTION_CURVE_TUBE_SIDES = 8
+_CONSTRUCTION_CURVE_SAMPLE_SEGMENTS = 8
+_CONSTRUCTION_CURVE_MIN_SEGMENT_LENGTH = 1e-12
 
 
 @dataclass(frozen=True)
@@ -75,6 +78,48 @@ def tessellate_asset(asset: Asset, options: TessellationOptions, *, selected_par
                 result.report.add_warning(
                     f"part has existing mesh but no source shape and cannot be retessellated: {part.name}"
                 )
+            continue
+        construction_curve_policy = _part_construction_curve_policy(part)
+        if construction_curve_policy == "preserve_metadata":
+            part.metadata["tessellation_construction_curve_policy"] = "preserve_metadata"
+            result.report.add_warning(
+                f"construction curve part preserved as metadata without mesh geometry: {part.name}"
+            )
+            continue
+        if construction_curve_policy == "tessellate_tubes":
+            radius = _part_construction_curve_tube_radius(part)
+            construction_cache_key = (
+                shape_fingerprint(part.source_shape),
+                tuple(part.material_ids),
+                None,
+                ("construction_curve_tubes", radius, part_options.create_normals),
+            )
+            cached_mesh = mesh_by_source.get(construction_cache_key)
+            if cached_mesh is None:
+                part.mesh = tessellate_construction_curve_shape(
+                    part.source_shape,
+                    radius=radius,
+                    sides=_CONSTRUCTION_CURVE_TUBE_SIDES,
+                    create_normals=part_options.create_normals,
+                )
+                if part.material_ids and part.mesh.material_indices is None and part.mesh.triangle_count:
+                    part.mesh.material_indices = np.zeros(part.mesh.triangle_count, dtype=np.int64)
+                part.mesh.validate()
+                mesh_by_source[construction_cache_key] = part.mesh.copy()
+            else:
+                part.mesh = cached_mesh.copy()
+            if part.mesh.triangle_count == 0:
+                result.report.add_warning(f"construction curve part did not produce tube mesh geometry: {part.name}")
+            part.fingerprint = part.mesh.fingerprint()
+            _record_detail_adaptive_selection(result, part, options, part_options)
+            _record_tessellation_attribute_sources(result, part, part_options, geometry_source="tessellation")
+            _record_tessellation_diagnostics(result, part, part_options)
+            part.metadata["tessellation_construction_curve_policy"] = "tessellate_tubes"
+            part.metadata["tessellation_construction_curve_tube_radius"] = _format_metadata_value(radius)
+            part.metadata["tessellation_construction_curve_tube_sides"] = str(_CONSTRUCTION_CURVE_TUBE_SIDES)
+            part.mesh.metadata["tessellation_construction_curve_policy"] = "tessellate_tubes"
+            if not part_options.keep_brep:
+                part.source_shape = None
             continue
         face_material_indices = _face_material_indices_from_metadata(part.metadata)
         cache_key = _tessellation_cache_key(
@@ -235,6 +280,128 @@ def tessellate_shape(
     return mesh
 
 
+def tessellate_construction_curve_shape(
+    shape: object,
+    *,
+    radius: float,
+    sides: int = _CONSTRUCTION_CURVE_TUBE_SIDES,
+    create_normals: bool = True,
+) -> Mesh:
+    segments = _construction_curve_segments(shape)
+    mesh = _tube_mesh_from_segments(segments, radius=radius, sides=sides)
+    if create_normals:
+        mesh = mesh.compute_normals()
+    mesh.validate()
+    return mesh
+
+
+def _construction_curve_segments(shape: object) -> list[tuple[np.ndarray, np.ndarray]]:
+    try:
+        from OCP.BRep import BRep_Tool
+        from OCP.TopAbs import TopAbs_EDGE
+        from OCP.TopExp import TopExp_Explorer
+        from OCP.TopoDS import TopoDS
+    except ImportError as exc:
+        raise RuntimeError("STEP construction curve tessellation requires cadquery-ocp") from exc
+
+    segments: list[tuple[np.ndarray, np.ndarray]] = []
+    explorer = TopExp_Explorer(shape, TopAbs_EDGE)
+    while explorer.More():
+        edge = TopoDS.Edge_s(explorer.Current())
+        first, last = BRep_Tool.Range_s(edge)
+        curve = BRep_Tool.Curve_s(edge, first, last)
+        if curve is None:
+            explorer.Next()
+            continue
+        samples = [
+            _occt_curve_point(curve, first + (last - first) * index / _CONSTRUCTION_CURVE_SAMPLE_SEGMENTS)
+            for index in range(_CONSTRUCTION_CURVE_SAMPLE_SEGMENTS + 1)
+        ]
+        for start, end in zip(samples, samples[1:], strict=False):
+            if float(np.linalg.norm(end - start)) > _CONSTRUCTION_CURVE_MIN_SEGMENT_LENGTH:
+                segments.append((start, end))
+        explorer.Next()
+    return segments
+
+
+def _occt_curve_point(curve: object, parameter: float) -> np.ndarray:
+    point = cast(Any, curve).Value(float(parameter))
+    return np.asarray([point.X(), point.Y(), point.Z()], dtype=np.float64)
+
+
+def _tube_mesh_from_segments(
+    segments: list[tuple[np.ndarray, np.ndarray]],
+    *,
+    radius: float,
+    sides: int,
+) -> Mesh:
+    if radius <= 0.0:
+        raise ValueError("construction curve tube radius must be greater than 0")
+    if sides < 3:
+        raise ValueError("construction curve tube sides must be at least 3")
+
+    points: list[np.ndarray] = []
+    faces: list[tuple[int, int, int]] = []
+    face_groups: dict[str, np.ndarray] = {}
+    for segment_index, (start, end) in enumerate(segments):
+        direction = end - start
+        length = float(np.linalg.norm(direction))
+        if length <= _CONSTRUCTION_CURVE_MIN_SEGMENT_LENGTH:
+            continue
+        direction = direction / length
+        u_axis, v_axis = _tube_frame(direction)
+        start_offset = len(points)
+        for center in (start, end):
+            for side in range(sides):
+                angle = 2.0 * math.pi * side / sides
+                points.append(center + radius * (math.cos(angle) * u_axis + math.sin(angle) * v_axis))
+        start_center = len(points)
+        points.append(start)
+        end_center = len(points)
+        points.append(end)
+
+        group_start = len(faces)
+        for side in range(sides):
+            next_side = (side + 1) % sides
+            a0 = start_offset + side
+            a1 = start_offset + next_side
+            b0 = start_offset + sides + side
+            b1 = start_offset + sides + next_side
+            faces.append((a0, a1, b1))
+            faces.append((a0, b1, b0))
+            faces.append((start_center, a0, a1))
+            faces.append((end_center, b1, b0))
+        face_groups[f"construction_curve_segment_{segment_index}"] = np.arange(
+            group_start,
+            len(faces),
+            dtype=np.int64,
+        )
+
+    points_array = np.asarray(points, dtype=np.float64).reshape((-1, 3))
+    faces_array = np.asarray(faces, dtype=np.int64).reshape((-1, 3))
+    return Mesh(
+        points=points_array,
+        faces=faces_array,
+        face_groups=face_groups,
+        metadata={
+            "construction_curve_tube_segments": str(len(segments)),
+            "construction_curve_tube_radius": _format_metadata_value(radius),
+            "construction_curve_tube_sides": str(sides),
+        },
+    )
+
+
+def _tube_frame(direction: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    helper = np.asarray([0.0, 0.0, 1.0], dtype=np.float64)
+    if abs(float(np.dot(direction, helper))) > 0.9:
+        helper = np.asarray([0.0, 1.0, 0.0], dtype=np.float64)
+    u_axis = np.cross(direction, helper)
+    u_axis = u_axis / float(np.linalg.norm(u_axis))
+    v_axis = np.cross(direction, u_axis)
+    v_axis = v_axis / float(np.linalg.norm(v_axis))
+    return u_axis, v_axis
+
+
 def _triangulation_uv_nodes(triangulation: Any, node_count: int) -> np.ndarray | None:
     try:
         has_uv_nodes = triangulation.HasUVNodes()
@@ -295,6 +462,24 @@ def _face_material_indices_from_metadata(metadata: Metadata) -> list[int] | None
     if not value:
         return None
     return [int(item) for item in str(value).split(",") if item]
+
+
+def _part_construction_curve_policy(part: Part) -> str | None:
+    if part.metadata.get("loaded_representation") != "construction_lines":
+        return None
+    return str(part.metadata.get("construction_curve_policy", "preserve_metadata"))
+
+
+def _part_construction_curve_tube_radius(part: Part) -> float:
+    value = part.metadata.get("construction_curve_tube_radius", 0.01)
+    if isinstance(value, (int, float)):
+        radius = float(value)
+    else:
+        try:
+            radius = float(str(value))
+        except ValueError:
+            radius = 0.01
+    return radius if radius > 0.0 else 0.01
 
 
 def _options_for_part(options: TessellationOptions, part: Part, asset: Asset) -> TessellationOptions:

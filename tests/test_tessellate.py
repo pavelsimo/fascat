@@ -12,6 +12,7 @@ from fascat.ops.tessellate import (
     _apply_cad_uvs,
     _apply_mesh_tessellation_controls,
     _store_free_edge_geometry,
+    _tube_mesh_from_segments,
     tessellate_shape,
 )
 from fascat.options import TessellationOptions
@@ -285,6 +286,93 @@ def test_tessellate_source_shape_cache_respects_face_material_assignments(monkey
     assert calls == [[0], [1]]
     assert tessellated.part_count == 2
     assert part_ids == ["part_a", "part_b"]
+
+
+def test_tube_mesh_from_construction_curve_segments_builds_triangle_tubes() -> None:
+    mesh = _tube_mesh_from_segments(
+        [(np.array([0.0, 0.0, 0.0]), np.array([1.0, 0.0, 0.0]))],
+        radius=0.1,
+        sides=8,
+    )
+
+    assert mesh.vertex_count == 18
+    assert mesh.triangle_count == 32
+    assert mesh.face_groups["construction_curve_segment_0"].shape == (32,)
+    assert mesh.metadata["construction_curve_tube_segments"] == "1"
+    assert mesh.metadata["construction_curve_tube_radius"] == "0.1"
+
+
+def test_tessellation_preserves_construction_curves_as_metadata_by_default(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import fascat.ops.tessellate as tessellate_module
+
+    source_shape = object()
+    root = Node(id="root", name="root", children=[Node(id="node", name="Curve", part_id="curve")])
+    asset = Asset(
+        root=root,
+        parts={
+            "curve": Part(
+                id="curve",
+                name="Curve",
+                source_shape=source_shape,
+                metadata={
+                    "loaded_representation": "construction_lines",
+                    "construction_curve_policy": "preserve_metadata",
+                },
+            )
+        },
+    )
+
+    def fail_tessellate_shape(*_args: object, **_kwargs: object) -> Mesh:
+        raise AssertionError("construction metadata policy should not call BREP tessellation")
+
+    monkeypatch.setattr(tessellate_module, "tessellate_shape", fail_tessellate_shape)
+
+    tessellated = asset.tessellate(TessellationOptions())
+
+    assert tessellated.parts["curve"].mesh is None
+    assert tessellated.parts["curve"].source_shape is source_shape
+    assert tessellated.parts["curve"].metadata["tessellation_construction_curve_policy"] == "preserve_metadata"
+    assert tessellated.report.warnings == ["construction curve part preserved as metadata without mesh geometry: Curve"]
+
+
+def test_tessellation_converts_construction_curves_to_tubes(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import fascat.ops.tessellate as tessellate_module
+
+    source_shape = object()
+    root = Node(id="root", name="root", children=[Node(id="node", name="Curve", part_id="curve")])
+    asset = Asset(
+        root=root,
+        parts={
+            "curve": Part(
+                id="curve",
+                name="Curve",
+                source_shape=source_shape,
+                material_ids=["mat"],
+                metadata={
+                    "loaded_representation": "construction_lines",
+                    "construction_curve_policy": "tessellate_tubes",
+                    "construction_curve_tube_radius": "0.05",
+                },
+            )
+        },
+    )
+
+    monkeypatch.setattr(
+        tessellate_module,
+        "_construction_curve_segments",
+        lambda shape: [(np.array([0.0, 0.0, 0.0]), np.array([1.0, 0.0, 0.0]))],
+    )
+
+    tessellated = asset.tessellate(TessellationOptions())
+    part = tessellated.parts["curve"]
+
+    assert part.mesh is not None
+    assert part.mesh.triangle_count == 32
+    assert part.mesh.material_indices is not None
+    assert part.source_shape is None
+    assert part.metadata["tessellation_construction_curve_policy"] == "tessellate_tubes"
+    assert part.metadata["tessellation_construction_curve_tube_radius"] == "0.05"
+    assert part.mesh.metadata["tessellation_construction_curve_policy"] == "tessellate_tubes"
 
 
 def test_tessellation_keep_brep_controls_source_shape_retention(monkeypatch) -> None:  # type: ignore[no-untyped-def]

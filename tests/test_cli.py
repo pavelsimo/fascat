@@ -722,6 +722,8 @@ existing_meshes = false
 multi_file = true
 delete_free_vertices = true
 delete_lines = true
+construction_curve_policy = "tessellate_tubes"
+construction_curve_tube_radius = 0.025
 source_units = "millimetre"
 source_up_axis = "Z"
 source_handedness = "right"
@@ -770,6 +772,8 @@ target_triangles = 80000
     assert payload["pipeline_import"]["multi_file"] is True
     assert payload["pipeline_import"]["delete_free_vertices"] is True
     assert payload["pipeline_import"]["delete_lines"] is True
+    assert payload["pipeline_import"]["construction_curve_policy"] == "tessellate_tubes"
+    assert payload["pipeline_import"]["construction_curve_tube_radius"] == 0.025
     assert payload["pipeline_import"]["source_units"] == "millimetre"
     assert payload["pipeline_import"]["target_units"] == "metre"
     assert payload["pipeline_import"]["target_up_axis"] == "Y"

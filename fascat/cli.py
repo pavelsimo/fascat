@@ -165,6 +165,12 @@ class HandednessMode(str, Enum):
     LEFT = "left"
 
 
+class ConstructionCurvePolicyMode(str, Enum):
+    PRESERVE_METADATA = "preserve-metadata"
+    DELETE = "delete"
+    TESSELLATE_TUBES = "tessellate-tubes"
+
+
 class UV0Mode(str, Enum):
     NONE = "none"
     BOX = "box"
@@ -445,6 +451,20 @@ def cmd_inspect(
         bool,
         typer.Option("--delete-lines/--keep-lines", help="Drop construction-only line shapes during STEP import."),
     ] = False,
+    construction_curve_policy: Annotated[
+        ConstructionCurvePolicyMode,
+        typer.Option(
+            "--construction-curve-policy",
+            help="Construction-only line policy: preserve-metadata, delete, or tessellate-tubes.",
+        ),
+    ] = ConstructionCurvePolicyMode.PRESERVE_METADATA,
+    construction_curve_tube_radius: Annotated[
+        float,
+        typer.Option(
+            "--construction-curve-tube-radius",
+            help="Tube radius in source units when --construction-curve-policy=tessellate-tubes.",
+        ),
+    ] = 0.01,
     source_units: Annotated[
         str | None,
         typer.Option("--source-units", help="Override source STEP units for normalization, for example millimetre."),
@@ -521,6 +541,8 @@ def cmd_inspect(
         "material_libraries": [str(path) for path in material_libraries or []],
         "delete_free_vertices": delete_free_vertices,
         "delete_lines": delete_lines,
+        "construction_curve_policy": construction_curve_policy.value,
+        "construction_curve_tube_radius": construction_curve_tube_radius,
         "source_units": source_units,
         "source_meters_per_unit": source_meters_per_unit,
         "source_up_axis": source_up_axis.value,
@@ -550,6 +572,8 @@ def cmd_inspect(
         _fail(ctx, payload, "--source-meters-per-unit must be greater than 0.", code=2)
     if target_meters_per_unit is not None and target_meters_per_unit <= 0.0:
         _fail(ctx, payload, "--target-meters-per-unit must be greater than 0.", code=2)
+    if construction_curve_tube_radius <= 0.0:
+        _fail(ctx, payload, "--construction-curve-tube-radius must be greater than 0.", code=2)
     _validate_cad_input(input_path, ctx, payload)
     if state.dry_run:
         _emit(ctx, payload, f"Would inspect {input_path} with profile {profile.value}.")
@@ -564,6 +588,8 @@ def cmd_inspect(
         material_library_paths=material_libraries,
         delete_free_vertices=delete_free_vertices,
         delete_lines=delete_lines,
+        construction_curve_policy=construction_curve_policy.value,
+        construction_curve_tube_radius=construction_curve_tube_radius,
         source_units=source_units,
         source_meters_per_unit=source_meters_per_unit,
         source_up_axis=source_up_axis.value,
@@ -972,6 +998,20 @@ def cmd_convert(
         bool,
         typer.Option("--delete-lines/--keep-lines", help="Drop construction-only line shapes during STEP import."),
     ] = False,
+    construction_curve_policy: Annotated[
+        ConstructionCurvePolicyMode,
+        typer.Option(
+            "--construction-curve-policy",
+            help="Construction-only line policy: preserve-metadata, delete, or tessellate-tubes.",
+        ),
+    ] = ConstructionCurvePolicyMode.PRESERVE_METADATA,
+    construction_curve_tube_radius: Annotated[
+        float,
+        typer.Option(
+            "--construction-curve-tube-radius",
+            help="Tube radius in source units when --construction-curve-policy=tessellate-tubes.",
+        ),
+    ] = 0.01,
     source_units: Annotated[
         str | None,
         typer.Option("--source-units", help="Override source STEP units for normalization, for example millimetre."),
@@ -1440,6 +1480,8 @@ def cmd_convert(
         "material_libraries": [str(path) for path in material_libraries or []],
         "delete_free_vertices": delete_free_vertices,
         "delete_lines": delete_lines,
+        "construction_curve_policy": construction_curve_policy.value,
+        "construction_curve_tube_radius": construction_curve_tube_radius,
         "source_units": source_units,
         "source_meters_per_unit": source_meters_per_unit,
         "source_up_axis": source_up_axis.value,
@@ -1650,6 +1692,8 @@ def cmd_convert(
         _fail(ctx, payload, "--source-meters-per-unit must be greater than 0.", code=2)
     if target_meters_per_unit is not None and target_meters_per_unit <= 0.0:
         _fail(ctx, payload, "--target-meters-per-unit must be greater than 0.", code=2)
+    if construction_curve_tube_radius <= 0.0:
+        _fail(ctx, payload, "--construction-curve-tube-radius must be greater than 0.", code=2)
     if occlusion_precision <= 0:
         _fail(ctx, payload, "--occlusion-precision must be greater than 0.", code=2)
     if neighbors_preservation < 0:
@@ -1838,6 +1882,8 @@ def cmd_convert(
                 material_library_paths=material_libraries,
                 delete_free_vertices=delete_free_vertices,
                 delete_lines=delete_lines,
+                construction_curve_policy=construction_curve_policy.value,
+                construction_curve_tube_radius=construction_curve_tube_radius,
                 source_units=source_units,
                 source_meters_per_unit=source_meters_per_unit,
                 source_up_axis=source_up_axis.value,
@@ -2955,6 +3001,8 @@ def _step_read_options(
     material_library_paths: list[Path] | tuple[str, ...] | None = None,
     delete_free_vertices: bool = False,
     delete_lines: bool = False,
+    construction_curve_policy: str = "preserve_metadata",
+    construction_curve_tube_radius: float = 0.01,
     source_units: str | None = None,
     source_meters_per_unit: float | None = None,
     source_up_axis: str = "Z",
@@ -2979,6 +3027,8 @@ def _step_read_options(
         material_library_paths=tuple(str(path) for path in material_library_paths or ()),
         delete_free_vertices=delete_free_vertices,
         delete_lines=delete_lines,
+        construction_curve_policy=cast(Any, construction_curve_policy.replace("-", "_")),
+        construction_curve_tube_radius=construction_curve_tube_radius,
         source_units=source_units,
         source_meters_per_unit=source_meters_per_unit,
         source_up_axis=cast(Any, source_up_axis),

@@ -160,12 +160,14 @@ the native source shape retained for tessellation and healing.
 | `--atlas-size` | `4096` | Maximum atlas texture size |
 | `--metadata` | `full` | Metadata import/export mode: `none`, `summary`, or `full` |
 | `--pmi` | `metadata` | PMI import/export mode: `none`, `metadata`, or `metadata-and-visuals` |
-| `--design-variants / --no-design-variants` | `false` | Request STEP design variant import; unsupported requests are reported as import warnings |
+| `--design-variants / --no-design-variants` | `false` | Scan STEP design variant records into metadata and import reports |
 | `--import-existing-meshes / --no-import-existing-meshes` | `true` | Prefer existing STEP tessellation payloads when the importer exposes them |
 | `--multi-file-import / --single-file-import` | `false` | Resolve quoted external STEP references from a master STEP file |
 | `--material-library` | unset | Vendor material-library JSON/MTL/ZIP file or folder to apply during import; may be passed more than once |
 | `--delete-free-vertices / --keep-free-vertices` | `false` | Drop construction-only point shapes during STEP import |
 | `--delete-lines / --keep-lines` | `false` | Drop construction-only line shapes during STEP import |
+| `--construction-curve-policy` | `preserve-metadata` | Construction-only line policy: `preserve-metadata`, `delete`, or `tessellate-tubes` |
+| `--construction-curve-tube-radius` | `0.01` | Tube radius in source units when construction curves are tessellated as tubes |
 | `--source-units` | STEP header | Override source units for normalization |
 | `--source-meters-per-unit` | STEP header | Override source meters per unit for normalization |
 | `--source-up-axis` | `Z` | Declared source up axis: `Y` or `Z` |
@@ -303,12 +305,14 @@ Units and behavior notes:
 | `--profile` | `inspect-only` | Inspection profile to show in output |
 | `--metadata` | `summary` | Metadata output mode: `none`, `summary`, or `full` |
 | `--pmi` | `summary` | PMI output mode: `none`, `summary`, `full`, `metadata`, or `metadata-and-visuals` |
-| `--design-variants / --no-design-variants` | `false` | Request STEP design variant import; unsupported requests are reported as import warnings |
+| `--design-variants / --no-design-variants` | `false` | Scan STEP design variant records into metadata and import reports |
 | `--import-existing-meshes / --no-import-existing-meshes` | `true` | Prefer existing STEP tessellation payloads when the importer exposes them |
 | `--multi-file-import / --single-file-import` | `false` | Resolve quoted external STEP references from a master STEP file |
 | `--material-library` | unset | Vendor material-library JSON/MTL/ZIP file or folder to apply during import; may be passed more than once |
 | `--delete-free-vertices / --keep-free-vertices` | `false` | Drop construction-only point shapes during STEP import |
 | `--delete-lines / --keep-lines` | `false` | Drop construction-only line shapes during STEP import |
+| `--construction-curve-policy` | `preserve-metadata` | Construction-only line policy: `preserve-metadata`, `delete`, or `tessellate-tubes` |
+| `--construction-curve-tube-radius` | `0.01` | Tube radius in source units when construction curves are tessellated as tubes |
 | `--source-units` | STEP header | Override source units for normalization |
 | `--source-meters-per-unit` | STEP header | Override source meters per unit for normalization |
 | `--source-up-axis` | `Z` | Declared source up axis: `Y` or `Z` |
@@ -356,6 +360,8 @@ multi_file = false
 material_library_paths = ["vendor-materials.json"]
 delete_free_vertices = false
 delete_lines = false
+construction_curve_policy = "preserve_metadata"
+construction_curve_tube_radius = 0.01
 target_units = "metre"
 target_up_axis = "Y"
 target_handedness = "right"
@@ -427,7 +433,7 @@ fallbacks.
 
 | Capability | Fascat status | Report or diagnostic | Next step |
 |------------|---------------|----------------------|-----------|
-| CAD import, hierarchy, names, transforms, colors, metadata | Implemented for STEP and IGES; native BREP imports as a single source-shape part; explicit multi-root STEP path lists and master STEP quoted external-reference graphs are imported with deterministic member namespaces and repeated external-file occurrences | `import` report stats, cleanup counts, STEP import decisions, pipeline import options, per-part loaded-representation reports, space normalization transforms, source texture resolved/missing counts, CAD material PBR mapping metadata, AP242 PMI warnings when typed PMI import is unavailable, design-variant metadata counts/records, `read_step_many` member records/warnings, and `external_reference_graph` unique-source/resolved-occurrence records for master STEP assemblies | Add variant-specific geometry selection, full PMI semantic graph/visual annotation geometry, mixed BREP construction-curve cleanup, richer vendor-specific external-reference placement transforms, and closed vendor material-library containers |
+| CAD import, hierarchy, names, transforms, colors, metadata | Implemented for STEP and IGES; native BREP imports as a single source-shape part; explicit multi-root STEP path lists and master STEP quoted external-reference graphs are imported with deterministic member namespaces and repeated external-file occurrences | `import` report stats, cleanup counts, STEP import decisions, pipeline import options, per-part loaded-representation reports, construction-curve delete/preserve/tube policy, space normalization transforms, source texture resolved/missing counts, CAD material PBR mapping metadata, AP242 PMI warnings when typed PMI import is unavailable, design-variant metadata counts/records, `read_step_many` member records/warnings, and `external_reference_graph` unique-source/resolved-occurrence records for master STEP assemblies | Add variant-specific geometry selection, full PMI semantic graph/visual annotation geometry, mixed face+construction-curve compound splitting, richer vendor-specific external-reference placement transforms, and closed vendor material-library containers |
 | BREP healing | Partial | `heal_brep`; records open shells, free/unstitched edges, small edges, sliver counts, same-domain face/edge reductions, overlap/z-fighting face-pair counts, resolved overlap counts, OCCT same-domain cleanup status, and OCCT overlap cleanup status; sliver removal warns that the backend leaves shapes unchanged | Implement sliver-face removal and deeper face/wire repair |
 | Tessellation | Implemented | `tessellate` report options, unit-aware tolerance policy with source/local/target unit conversions and normalized-tolerance warnings, explicit sag-ratio, existing mesh reuse/retessellation controls, size-adaptive `part_settings` helpers, material/metadata-driven `detail_adaptive` per-part criteria, conditional edge-control cleanup pass metadata, max-polygon-length diagnostics, free-edge diagnostics, retained-patch/submesh risk warnings, quality advisories for coarse absolute sag and aggressive polygon-length settings, attribute-provenance metadata, and quality metadata | Add intrinsic/conformal CAD UV solving and deeper curvature-targeted profiles |
 | Mesh repair | Implemented for core cleanup | `repair` report step; mesh metadata always records face-orientation strategy/status and normal-orientation strategy/status, while `RepairOptions.quality_report=True` adds before/after duplicate polygon, degenerate triangle, boundary edge, boundary gap, non-manifold edge, T-junction, flipped closed-component, and non-orientable shared-edge counts; standalone `merge_vertices` and `delete_degenerate_polygons` are available through Python, CLI flags, and TOML pipelines with before/after reports; vertex-merge reports use Euclidean tolerance matching across spatial bucket boundaries and always include removed counts and tolerance-risk warnings, while `MergeVerticesOptions.quality_report=True` adds same-position candidates, exact-duplicate, boundary, non-manifold, hard-edge, T-junction, boundary-gap, and near-duplicate candidate counts plus skipped normal, tangent, UV, and material-boundary protection reasons; degenerate-polygon reports include duplicate-vertex, collapsed-edge, near-flat, and exact duplicate-polygon removal reasons | Add T-junction sewing, boundary-gap stitching, non-manifold cracking, topology-only merge connectivity, tolerance-overlap cleanup, and backend implementation for viewer/open-shell orientation strategies |
