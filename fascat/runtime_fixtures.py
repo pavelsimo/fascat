@@ -30,6 +30,7 @@ RuntimeParityTarget = Literal["browser", "unity", "unreal"]
 
 _SUITE_SCHEMA = "fascat.runtime-parity-suite.v1"
 _CAPTURE_SCHEMA = "fascat.runtime-parity-captures.v1"
+_GOLDEN_COVERAGE_SCHEMA = "fascat.runtime-parity-golden-coverage.v1"
 _DEFAULT_TARGETS: tuple[RuntimeParityTarget, ...] = ("browser", "unity", "unreal")
 _KHR_TEXTURE_BASISU = "KHR_texture_basisu"
 _GLB_JSON_CHUNK = 0x4E4F534A
@@ -143,6 +144,77 @@ class RuntimeParityCaptureReport:
             "required_goldens": self.required_goldens,
             "passed": self.passed,
             "captures": [capture.to_dict() for capture in self.captures],
+        }
+
+
+@dataclass(frozen=True)
+class RuntimeParityGolden:
+    fixture: str
+    target: RuntimeParityTarget
+    path: str
+    status: str
+    width: int | None = None
+    height: int | None = None
+    expected_width: int | None = None
+    expected_height: int | None = None
+    bytes: int | None = None
+    error: str | None = None
+
+    @property
+    def passed(self) -> bool:
+        return self.status == "present"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "fixture": self.fixture,
+            "target": self.target,
+            "path": self.path,
+            "status": self.status,
+            "passed": self.passed,
+            "width": self.width,
+            "height": self.height,
+            "expected_width": self.expected_width,
+            "expected_height": self.expected_height,
+            "bytes": self.bytes,
+            "error": self.error,
+        }
+
+
+@dataclass(frozen=True)
+class RuntimeParityGoldenCoverageReport:
+    directory: str
+    manifest_path: str
+    results_path: str
+    targets: tuple[RuntimeParityTarget, ...]
+    goldens: tuple[RuntimeParityGolden, ...]
+
+    @property
+    def present_count(self) -> int:
+        return sum(1 for golden in self.goldens if golden.status == "present")
+
+    @property
+    def missing_count(self) -> int:
+        return sum(1 for golden in self.goldens if golden.status == "missing")
+
+    @property
+    def invalid_count(self) -> int:
+        return sum(1 for golden in self.goldens if golden.status not in {"present", "missing"})
+
+    @property
+    def passed(self) -> bool:
+        return all(golden.passed for golden in self.goldens)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "directory": self.directory,
+            "manifest_path": self.manifest_path,
+            "results_path": self.results_path,
+            "targets": list(self.targets),
+            "passed": self.passed,
+            "present_count": self.present_count,
+            "missing_count": self.missing_count,
+            "invalid_count": self.invalid_count,
+            "goldens": [golden.to_dict() for golden in self.goldens],
         }
 
 
@@ -316,6 +388,55 @@ def capture_runtime_parity_suite(
     results_payload = {"schema": _CAPTURE_SCHEMA, **capture_report.to_dict()}
     results_path.write_text(json.dumps(results_payload, indent=2, sort_keys=False) + "\n", encoding="utf-8")
     return capture_report
+
+
+def audit_runtime_parity_goldens(
+    directory: str | Path,
+    *,
+    targets: tuple[RuntimeParityTarget, ...] = _DEFAULT_TARGETS,
+) -> RuntimeParityGoldenCoverageReport:
+    """Audit checked-in target golden coverage for an existing runtime parity fixture suite."""
+
+    if not targets:
+        raise ValueError("runtime parity golden audit requires at least one target")
+    if any(target not in _DEFAULT_TARGETS for target in targets):
+        raise ValueError("runtime parity golden audit targets must be one of: browser, unity, unreal")
+
+    output_dir = Path(directory)
+    manifest_path = output_dir / "runtime-parity-suite.json"
+    if not manifest_path.exists():
+        write_runtime_parity_suite(output_dir)
+    manifest = _load_runtime_parity_manifest(manifest_path)
+
+    goldens: list[RuntimeParityGolden] = []
+    for fixture in _manifest_fixtures(manifest):
+        name = _manifest_string(fixture, "name")
+        baseline_path = output_dir / _manifest_string(fixture, "software_baseline")
+        expected_width, expected_height, baseline_error = _png_dimensions(baseline_path)
+        for target in targets:
+            golden_path = output_dir / _manifest_target_golden(fixture, target)
+            goldens.append(
+                _inspect_runtime_parity_golden(
+                    fixture=name,
+                    target=target,
+                    golden_path=golden_path,
+                    expected_width=expected_width,
+                    expected_height=expected_height,
+                    baseline_error=baseline_error,
+                )
+            )
+
+    results_path = output_dir / "runtime-parity-golden-coverage.json"
+    report = RuntimeParityGoldenCoverageReport(
+        directory=str(output_dir),
+        manifest_path=str(manifest_path),
+        results_path=str(results_path),
+        targets=targets,
+        goldens=tuple(goldens),
+    )
+    results_payload = {"schema": _GOLDEN_COVERAGE_SCHEMA, **report.to_dict()}
+    results_path.write_text(json.dumps(results_payload, indent=2, sort_keys=False) + "\n", encoding="utf-8")
+    return report
 
 
 def _capture_runtime_parity_target(
@@ -923,6 +1044,102 @@ def _manifest_fixtures(manifest: dict[str, Any]) -> list[dict[str, Any]]:
             raise RuntimeError("runtime parity fixture entries must be objects")
         result.append(fixture)
     return result
+
+
+def _manifest_target_golden(fixture: dict[str, Any], target: RuntimeParityTarget) -> str:
+    name = _manifest_string(fixture, "name")
+    goldens = fixture.get("target_goldens")
+    if isinstance(goldens, dict):
+        value = goldens.get(target)
+        if isinstance(value, str) and value:
+            return value
+    return f"goldens/{target}/{name}.png"
+
+
+def _inspect_runtime_parity_golden(
+    *,
+    fixture: str,
+    target: RuntimeParityTarget,
+    golden_path: Path,
+    expected_width: int | None,
+    expected_height: int | None,
+    baseline_error: str | None,
+) -> RuntimeParityGolden:
+    if not golden_path.exists():
+        return RuntimeParityGolden(
+            fixture=fixture,
+            target=target,
+            path=str(golden_path),
+            status="missing",
+            expected_width=expected_width,
+            expected_height=expected_height,
+            error=f"runtime parity target golden is missing: {golden_path}",
+        )
+    width, height, image_error = _png_dimensions(golden_path)
+    if image_error is not None:
+        return RuntimeParityGolden(
+            fixture=fixture,
+            target=target,
+            path=str(golden_path),
+            status="invalid",
+            width=width,
+            height=height,
+            expected_width=expected_width,
+            expected_height=expected_height,
+            bytes=golden_path.stat().st_size,
+            error=image_error,
+        )
+    if baseline_error is not None:
+        return RuntimeParityGolden(
+            fixture=fixture,
+            target=target,
+            path=str(golden_path),
+            status="invalid",
+            width=width,
+            height=height,
+            expected_width=expected_width,
+            expected_height=expected_height,
+            bytes=golden_path.stat().st_size,
+            error=baseline_error,
+        )
+    if width != expected_width or height != expected_height:
+        return RuntimeParityGolden(
+            fixture=fixture,
+            target=target,
+            path=str(golden_path),
+            status="dimension_mismatch",
+            width=width,
+            height=height,
+            expected_width=expected_width,
+            expected_height=expected_height,
+            bytes=golden_path.stat().st_size,
+            error=f"runtime parity target golden dimensions must match software baseline: {golden_path}",
+        )
+    return RuntimeParityGolden(
+        fixture=fixture,
+        target=target,
+        path=str(golden_path),
+        status="present",
+        width=width,
+        height=height,
+        expected_width=expected_width,
+        expected_height=expected_height,
+        bytes=golden_path.stat().st_size,
+    )
+
+
+def _png_dimensions(path: Path) -> tuple[int | None, int | None, str | None]:
+    if not path.exists():
+        return None, None, f"image is missing: {path}"
+    try:
+        with Image.open(path) as image:
+            width, height = image.size
+            if image.format != "PNG":
+                return width, height, f"image must be a PNG: {path}"
+            image.verify()
+            return width, height, None
+    except Exception as exc:
+        return None, None, f"image is not a valid PNG: {path}: {exc}"
 
 
 def _manifest_string(payload: dict[str, Any], key: str) -> str:

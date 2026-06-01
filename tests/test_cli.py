@@ -293,6 +293,7 @@ def test_runtime_fixtures_can_capture_targets(
 
     class FakeCaptureReport:
         captures = (object(), object())
+        passed = True
 
         def to_dict(self) -> dict[str, object]:
             return {"passed": True, "captures": [{"target": "browser"}, {"target": "unity"}]}
@@ -332,6 +333,68 @@ def test_runtime_fixtures_can_capture_targets(
     assert payload["capture"] == ["browser", "unity"]
     assert payload["captures"]["passed"] is True
     assert len(payload["captures"]["captures"]) == 2
+
+
+def test_runtime_fixtures_can_require_capture_goldens(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    suite_dir = tmp_path / "runtime-parity"
+
+    class FakeCaptureReport:
+        captures = (object(),)
+        passed = False
+
+        def to_dict(self) -> dict[str, object]:
+            return {
+                "passed": False,
+                "captures": [{"target": "browser", "status": "missing_golden"}],
+            }
+
+    def fake_capture(directory: str | Path, **kwargs: object) -> FakeCaptureReport:
+        assert Path(directory) == suite_dir
+        assert kwargs["targets"] == ("browser",)
+        assert kwargs["require_goldens"] is True
+        return FakeCaptureReport()
+
+    monkeypatch.setattr("fascat.cli.capture_runtime_parity_suite", fake_capture)
+
+    result = runner.invoke(
+        app,
+        ["--json", "runtime-fixtures", str(suite_dir), "--capture", "browser", "--require-goldens"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error"] == "runtime parity target captures failed required golden validation."
+    assert payload["captures"]["passed"] is False
+
+
+def test_runtime_fixtures_can_check_golden_coverage(tmp_path: Path) -> None:
+    suite_dir = tmp_path / "runtime-parity"
+
+    result = runner.invoke(app, ["--json", "runtime-fixtures", str(suite_dir), "--check-goldens"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["check_goldens"] is True
+    assert payload["golden_coverage"]["passed"] is False
+    assert payload["golden_coverage"]["missing_count"] == 18
+    assert (suite_dir / "runtime-parity-golden-coverage.json").is_file()
+
+
+def test_runtime_fixtures_can_require_checked_goldens(tmp_path: Path) -> None:
+    suite_dir = tmp_path / "runtime-parity"
+
+    result = runner.invoke(
+        app,
+        ["--json", "runtime-fixtures", str(suite_dir), "--check-goldens", "--require-goldens"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error"] == "runtime parity target goldens are missing or invalid."
+    assert payload["golden_coverage"]["missing_count"] == 18
 
 
 def test_convert_dry_run_json() -> None:

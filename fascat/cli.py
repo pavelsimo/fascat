@@ -72,7 +72,11 @@ from fascat.runtime import (
     measure_engine_runtime,
     write_browser_render_preview,
 )
-from fascat.runtime_fixtures import capture_runtime_parity_suite, write_runtime_parity_suite
+from fascat.runtime_fixtures import (
+    audit_runtime_parity_goldens,
+    capture_runtime_parity_suite,
+    write_runtime_parity_suite,
+)
 from fascat.visual import VisualDiffOptions, compare_images, write_output_lod_switch_previews, write_output_preview
 
 DOCS_URL = "https://pavelsimo.github.io/fascat"
@@ -2519,7 +2523,14 @@ def cmd_runtime_fixtures(
         bool,
         typer.Option(
             "--require-goldens/--no-require-goldens",
-            help="Require existing goldens/<target>/<fixture>.png files for captured parity targets.",
+            help="Require existing goldens/<target>/<fixture>.png files for captured or checked parity targets.",
+        ),
+    ] = False,
+    check_goldens: Annotated[
+        bool,
+        typer.Option(
+            "--check-goldens/--no-check-goldens",
+            help="Audit existing goldens/<target>/<fixture>.png coverage after writing fixtures.",
         ),
     ] = False,
 ) -> None:
@@ -2539,6 +2550,7 @@ def cmd_runtime_fixtures(
         "runtime_engine_timeout": runtime_engine_timeout,
         "promote_goldens": promote_goldens,
         "require_goldens": require_goldens,
+        "check_goldens": check_goldens,
     }
     if runtime_engine_timeout <= 0.0:
         _fail(ctx, payload, "--runtime-engine-timeout must be greater than 0.", code=2)
@@ -2565,6 +2577,14 @@ def cmd_runtime_fixtures(
             if capture_targets
             else None
         )
+        golden_coverage = (
+            audit_runtime_parity_goldens(
+                output_dir,
+                targets=cast(Any, capture_targets or ("browser", "unity", "unreal")),
+            )
+            if check_goldens
+            else None
+        )
     except Exception as exc:
         _fail(ctx, payload, str(exc))
         raise AssertionError("unreachable") from exc
@@ -2572,9 +2592,20 @@ def cmd_runtime_fixtures(
     json_payload = {**payload, "suite": suite.to_dict()}
     if capture_report is not None:
         json_payload["captures"] = capture_report.to_dict()
+        if require_goldens and not capture_report.passed:
+            _fail(ctx, json_payload, "runtime parity target captures failed required golden validation.")
+    if golden_coverage is not None:
+        json_payload["golden_coverage"] = golden_coverage.to_dict()
+        if require_goldens and not golden_coverage.passed:
+            _fail(ctx, json_payload, "runtime parity target goldens are missing or invalid.")
     message = f"Wrote runtime parity fixtures to {suite.directory} ({len(suite.fixtures)} fixtures)."
     if capture_report is not None:
         message = f"{message} Captured {len(capture_report.captures)} preview(s)."
+    if golden_coverage is not None:
+        message = (
+            f"{message} Golden coverage: {golden_coverage.present_count} present, "
+            f"{golden_coverage.missing_count} missing, {golden_coverage.invalid_count} invalid."
+        )
     _emit(
         ctx,
         json_payload,

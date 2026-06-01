@@ -1242,6 +1242,10 @@ fascat runtime-fixtures runtime-parity/ \
   --capture unity \
   --unity-command Unity \
   --require-goldens
+
+fascat runtime-fixtures runtime-parity/ \
+  --check-goldens \
+  --require-goldens
 ```
 
 Validation-time geometry reports use the same filter selectors as conversion
@@ -1321,7 +1325,10 @@ preview captures for the suite and write `runtime-parity-captures.json`;
 `--promote-goldens` copies rendered captures into `goldens/<target>/`. Existing
 `goldens/<target>/<fixture>.png` files become target-specific comparison
 baselines on later captures, and `--require-goldens` fails the suite when any
-requested target golden is missing.
+requested target golden is missing. Add `--check-goldens` to write
+`runtime-parity-golden-coverage.json` without rendering; with
+`--require-goldens`, the command fails when any expected target PNG is missing,
+invalid, or has dimensions that differ from the software baseline.
 Engine-specific checked-in golden corpora and full Unreal scene-rendered
 screenshots/FPS remain open. Set
 `FASCAT_UNITY`, `UNITY_EDITOR`,

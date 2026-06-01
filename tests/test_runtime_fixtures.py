@@ -11,7 +11,11 @@ from PIL import Image
 import fascat as fc
 from fascat.io.gltf import validate_gltf
 from fascat.runtime import RuntimeBrowserRenderReport, RuntimeEngineReport
-from fascat.runtime_fixtures import capture_runtime_parity_suite, write_runtime_parity_suite
+from fascat.runtime_fixtures import (
+    audit_runtime_parity_goldens,
+    capture_runtime_parity_suite,
+    write_runtime_parity_suite,
+)
 
 
 def test_runtime_parity_suite_writes_assets_baselines_and_manifest(tmp_path: Path) -> None:
@@ -278,6 +282,52 @@ def test_runtime_parity_capture_can_require_target_goldens(
     assert all(capture.passed is False for capture in report.captures)
     assert all(capture.baseline_kind == "missing_target_golden" for capture in report.captures)
     assert all(capture.golden_path is not None for capture in report.captures)
+
+
+def test_runtime_parity_golden_audit_reports_missing_and_present_goldens(tmp_path: Path) -> None:
+    suite_dir = tmp_path / "runtime-parity"
+    write_runtime_parity_suite(suite_dir)
+    target_golden = suite_dir / "goldens" / "unity" / "pbr-material-grid.png"
+    target_golden.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(suite_dir / "baselines" / "pbr-material-grid.png", target_golden)
+
+    report = audit_runtime_parity_goldens(suite_dir, targets=("unity",))
+
+    assert isinstance(report, fc.RuntimeParityGoldenCoverageReport)
+    assert report.passed is False
+    assert report.present_count == 1
+    assert report.missing_count == 5
+    assert report.invalid_count == 0
+    assert Path(report.results_path).is_file()
+    present = next(golden for golden in report.goldens if golden.status == "present")
+    assert isinstance(present, fc.RuntimeParityGolden)
+    assert present.fixture == "pbr-material-grid"
+    assert present.target == "unity"
+    assert present.width == 512
+    assert present.expected_width == 512
+
+    payload = json.loads(Path(report.results_path).read_text(encoding="utf-8"))
+    assert payload["schema"] == "fascat.runtime-parity-golden-coverage.v1"
+    assert payload["present_count"] == 1
+    assert payload["missing_count"] == 5
+    assert payload["goldens"][0]["target"] == "unity"
+
+
+def test_runtime_parity_golden_audit_rejects_invalid_or_wrong_size_png(tmp_path: Path) -> None:
+    suite_dir = tmp_path / "runtime-parity"
+    write_runtime_parity_suite(suite_dir)
+    target_golden = suite_dir / "goldens" / "browser" / "pbr-material-grid.png"
+    target_golden.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGBA", (64, 64), (255, 0, 0, 255)).save(target_golden)
+
+    report = audit_runtime_parity_goldens(suite_dir, targets=("browser",))
+
+    mismatch = next(golden for golden in report.goldens if golden.fixture == "pbr-material-grid")
+    assert mismatch.status == "dimension_mismatch"
+    assert mismatch.passed is False
+    assert mismatch.width == 64
+    assert mismatch.expected_width == 512
+    assert report.invalid_count == 1
 
 
 def _read_glb_document(path: Path) -> dict[str, Any]:
