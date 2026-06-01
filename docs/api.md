@@ -298,8 +298,11 @@ STEP AP242 import includes a textual PMI scan for common typed records such as
 typed `PmiAnnotation` objects with source STEP entity ids and references. If a
 file advertises AP242 PMI but no supported typed record is extracted, the import
 report records `pmi_present=true`, `unsupported_pmi_count=1`, and a warning
-instead of silently implying that PMI was imported. Visual annotation geometry
-and full AP242 semantic graph reconstruction are still planned backend work.
+instead of silently implying that PMI was imported. Import reports and asset
+metadata also include `pmi_semantic_graph`, a textual STEP reference graph with
+PMI entity nodes, referenced STEP entity nodes, reference edges, and missing
+reference counts. Visual annotation geometry and full AP242 coverage beyond the
+supported textual records are still planned backend work.
 
 STEP design variant import can scan common configuration and effectivity records
 such as `CONFIGURATION_ITEM`, `PRODUCT_CONCEPT_FEATURE`,
@@ -336,7 +339,7 @@ Metadata and PMI parameters:
 | `StepReadOptions` | `properties` | Import user and product properties. |
 | `StepReadOptions` | `layers` | Request layer assignments as metadata. Current normalized layer extraction is reported as unsupported in `import_decisions` when requested. |
 | `StepReadOptions` | `validation_properties` | Request STEP validation properties. Current reports approximate this with source topology counts rather than typed validation-property entities. |
-| `StepReadOptions` | `pmi` | Import common typed AP242 PMI text records into `PmiAnnotation` objects; AP242 PMI markers are reported when no supported typed record can be extracted. |
+| `StepReadOptions` | `pmi` | Import common typed AP242 PMI text records into `PmiAnnotation` objects and report a textual semantic reference graph; AP242 PMI markers are reported when no supported typed record can be extracted. |
 | `StepReadOptions` | `design_variants` | Scan common STEP configuration/design-variant/effectivity records into metadata and import reports. Variant-specific geometry selection remains planned backend work. |
 | `StepReadOptions` | `existing_meshes` | Prefer existing tessellation payloads from the source file when the importer exposes them. Tessellation `reuse_existing_meshes` still controls whether loaded meshes are retessellated later. |
 | `StepReadOptions` | `multi_file` | Request multi-file STEP assembly import. `read_step_many()` honors explicit member lists; single-path STEP imports recursively resolve quoted external `.step` / `.stp` references, preserve repeated references as member occurrences, and report the `external_reference_graph`. |

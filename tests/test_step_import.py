@@ -24,6 +24,7 @@ from fascat.io.step import (
     _extract_source_textures,
     _extract_step_design_variants,
     _extract_step_pmi_annotations,
+    _extract_step_pmi_semantic_graph,
     _import_decisions,
     _import_warnings,
     _ImportCleanupStats,
@@ -172,11 +173,44 @@ def test_step_text_pmi_extraction_reads_common_ap242_records(tmp_path: Path) -> 
     assert annotations[3].text == "inspect after plating"
 
 
+def test_step_pmi_semantic_graph_records_referenced_entities(tmp_path: Path) -> None:
+    source = tmp_path / "pmi-graph.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#20=PRODUCT_DEFINITION_SHAPE('bracket','',#19);\n"
+        "#21=SHAPE_ASPECT('hole face','',#20,.T.);\n"
+        "#30=DIMENSIONAL_SIZE(#21,'hole diameter 12.5 mm',12.5);\n"
+        "#31=GEOMETRIC_TOLERANCE('position tolerance',0.2,#20,#999);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    graph = _extract_step_pmi_semantic_graph(source, StepReadOptions(pmi=True))
+    payload = graph.to_dict()
+
+    assert graph.summary == {
+        "nodes": 4,
+        "pmi_nodes": 2,
+        "referenced_nodes": 2,
+        "edges": 3,
+        "missing_references": 1,
+    }
+    assert [node["id"] for node in payload["nodes"]] == ["#20", "#21", "#30", "#31"]
+    assert payload["nodes"][2]["kind"] == "pmi_dimension"
+    assert payload["nodes"][2]["references"] == ["#21"]
+    assert payload["nodes"][3]["kind"] == "pmi_tolerance"
+    assert payload["edges"][-1] == {"source": "#31", "target": "#999", "relationship": "step_reference"}
+    assert graph.warnings == ("STEP PMI semantic graph has 1 reference(s) to records that were not found",)
+
+
 def test_step_text_pmi_extraction_respects_disabled_pmi(tmp_path: Path) -> None:
     source = tmp_path / "pmi.step"
     source.write_text("#1=GEOMETRIC_TOLERANCE('flatness',0.05,#2);\n", encoding="utf-8")
 
     assert _extract_step_pmi_annotations(source, StepReadOptions(pmi=False)) == []
+    assert _extract_step_pmi_semantic_graph(source, StepReadOptions(pmi=False)).summary["nodes"] == 0
 
 
 def test_step_design_variant_extraction_reads_configuration_records(tmp_path: Path) -> None:
@@ -383,11 +417,24 @@ def test_step_import_decisions_report_extracted_typed_pmi() -> None:
         unsupported_pmi_count=0,
         cleanup=_ImportCleanupStats(),
         space=space,
+        pmi_semantic_graph_summary={
+            "nodes": 4,
+            "pmi_nodes": 2,
+            "referenced_nodes": 2,
+            "edges": 3,
+            "missing_references": 0,
+        },
     )
 
     assert decisions["pmi"]["state"] == "honored"
     assert decisions["pmi"]["effective"] is True
-    assert decisions["pmi"]["counts"] == {"imported": 2, "unsupported": 0}
+    assert decisions["pmi"]["counts"] == {
+        "imported": 2,
+        "unsupported": 0,
+        "semantic_graph_nodes": 4,
+        "semantic_graph_edges": 3,
+        "semantic_graph_missing_references": 0,
+    }
 
 
 def test_step_import_decisions_report_detected_design_variants() -> None:

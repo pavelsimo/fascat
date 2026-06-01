@@ -262,6 +262,54 @@ class _StepDesignVariantExtraction:
 
 
 @dataclass(frozen=True)
+class _StepPmiSemanticGraphNode:
+    id: str
+    entity: str
+    kind: str
+    label: str
+    references: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "entity": self.entity,
+            "kind": self.kind,
+            "label": self.label,
+            "references": list(self.references),
+        }
+
+
+@dataclass(frozen=True)
+class _StepPmiSemanticGraphEdge:
+    source: str
+    target: str
+    relationship: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "source": self.source,
+            "target": self.target,
+            "relationship": self.relationship,
+        }
+
+
+@dataclass(frozen=True)
+class _StepPmiSemanticGraphExtraction:
+    nodes: tuple[_StepPmiSemanticGraphNode, ...]
+    edges: tuple[_StepPmiSemanticGraphEdge, ...]
+    summary: dict[str, int]
+    warnings: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "summary": self.summary,
+            "nodes": [node.to_dict() for node in self.nodes],
+            "edges": [edge.to_dict() for edge in self.edges],
+            "warnings": list(self.warnings),
+        }
+
+
+@dataclass(frozen=True)
 class _StepNamespaceMaps:
     nodes: dict[str, str]
     parts: dict[str, str]
@@ -631,6 +679,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         material_library_binding_summary = _apply_material_libraries_to_materials(materials, material_libraries)
         images = {**source_textures.images, **material_libraries.images}
         pmi = _extract_step_pmi_annotations(source, options)
+        pmi_semantic_graph = _extract_step_pmi_semantic_graph(source, options)
         design_variants = _extract_step_design_variants(source, options)
 
     report = Report(source_path=str(source))
@@ -670,6 +719,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         texture_binding_summary=texture_binding_summary,
         material_library_summary=material_libraries.summary,
         material_library_binding_summary=material_library_binding_summary,
+        pmi_semantic_graph_summary=pmi_semantic_graph.summary,
         design_variant_summary=design_variants.summary,
     )
     loaded_representations = _loaded_representation_report(asset)
@@ -680,6 +730,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         asset.metadata["source_texture_bindings"] = texture_binding_summary
         asset.metadata["material_library_import"] = material_libraries.summary
         asset.metadata["material_library_bindings"] = material_library_binding_summary
+        asset.metadata["pmi_semantic_graph"] = pmi_semantic_graph.to_dict()
         asset.metadata["design_variant_import"] = design_variants.summary
         if design_variants.records:
             asset.metadata["design_variants"] = [record.to_dict() for record in design_variants.records]
@@ -692,6 +743,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         ),
         *source_textures.warnings,
         *material_libraries.warnings,
+        *pmi_semantic_graph.warnings,
         *design_variants.warnings,
     ]
     for warning in import_warnings:
@@ -705,6 +757,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
             "metadata_count": metadata_count,
             "pmi_count": len(asset.pmi),
             "unsupported_pmi_count": unsupported_pmi_count,
+            "pmi_semantic_graph": pmi_semantic_graph.to_dict(),
             "design_variants": design_variants.to_dict(),
             "pmi_schema": header_info.schema,
             "pmi_present": header_info.pmi_present,
@@ -1481,10 +1534,115 @@ def _extract_step_pmi_annotations(source: Path, options: StepReadOptions) -> lis
                     "step_entity": record.entity,
                     "step_references": list(references),
                     "step_pmi_import": "textual_ap242_entity_scan",
+                    "step_semantic_graph_node": f"#{record.number}",
                 },
             )
         )
     return annotations
+
+
+def _extract_step_pmi_semantic_graph(source: Path, options: StepReadOptions) -> _StepPmiSemanticGraphExtraction:
+    if not options.pmi:
+        return _StepPmiSemanticGraphExtraction(
+            nodes=(),
+            edges=(),
+            summary=_empty_pmi_semantic_graph_summary(),
+            warnings=(),
+        )
+
+    text = source.read_text(encoding="utf-8", errors="ignore")
+    records = {f"#{record.number}": record for record in _iter_step_records(text)}
+    pmi_ids = tuple(record_id for record_id, record in records.items() if record.entity in _STEP_PMI_ENTITY_KINDS)
+    if not pmi_ids:
+        return _StepPmiSemanticGraphExtraction(
+            nodes=(),
+            edges=(),
+            summary=_empty_pmi_semantic_graph_summary(),
+            warnings=(),
+        )
+
+    referenced_ids: set[str] = set()
+    edges: list[_StepPmiSemanticGraphEdge] = []
+    missing_references = 0
+    for record_id in pmi_ids:
+        for reference in _step_record_references(records[record_id]):
+            edges.append(
+                _StepPmiSemanticGraphEdge(
+                    source=record_id,
+                    target=reference,
+                    relationship="step_reference",
+                )
+            )
+            if reference in records:
+                referenced_ids.add(reference)
+            else:
+                missing_references += 1
+
+    node_ids = sorted(set(pmi_ids) | referenced_ids, key=_step_entity_sort_key)
+    nodes = tuple(
+        _StepPmiSemanticGraphNode(
+            id=record_id,
+            entity=records[record_id].entity,
+            kind=_step_pmi_graph_node_kind(records[record_id]),
+            label=_step_record_label(records[record_id]),
+            references=_step_record_references(records[record_id]),
+        )
+        for record_id in node_ids
+    )
+    summary = {
+        "nodes": len(nodes),
+        "pmi_nodes": len(pmi_ids),
+        "referenced_nodes": len(nodes) - len(pmi_ids),
+        "edges": len(edges),
+        "missing_references": missing_references,
+    }
+    warnings = (
+        (f"STEP PMI semantic graph has {missing_references} reference(s) to records that were not found",)
+        if missing_references
+        else ()
+    )
+    return _StepPmiSemanticGraphExtraction(
+        nodes=nodes,
+        edges=tuple(edges),
+        summary=summary,
+        warnings=warnings,
+    )
+
+
+def _empty_pmi_semantic_graph_summary() -> dict[str, int]:
+    return {
+        "nodes": 0,
+        "pmi_nodes": 0,
+        "referenced_nodes": 0,
+        "edges": 0,
+        "missing_references": 0,
+    }
+
+
+def _step_record_references(record: _StepRecord) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(f"#{item}" for item in _STEP_REFERENCE_RE.findall(record.args)))
+
+
+def _step_entity_sort_key(record_id: str) -> int:
+    try:
+        return int(record_id.removeprefix("#"))
+    except ValueError:
+        return 0
+
+
+def _step_pmi_graph_node_kind(record: _StepRecord) -> str:
+    kind = _STEP_PMI_ENTITY_KINDS.get(record.entity)
+    return f"pmi_{kind}" if kind is not None else "referenced_step_entity"
+
+
+def _step_record_label(record: _StepRecord) -> str:
+    strings = _step_string_values(record.args)
+    value = _step_number_values(record.args)
+    if record.entity in _STEP_PMI_ENTITY_KINDS:
+        return _step_pmi_text(record, strings, value[0] if value else None)
+    if strings:
+        return " / ".join(strings)
+    return record.entity.lower().replace("_", " ")
 
 
 def _extract_step_design_variants(source: Path, options: StepReadOptions) -> _StepDesignVariantExtraction:
@@ -1715,6 +1873,7 @@ def _import_decisions(
     texture_binding_summary: dict[str, int] | None = None,
     material_library_summary: dict[str, int] | None = None,
     material_library_binding_summary: dict[str, int] | None = None,
+    pmi_semantic_graph_summary: dict[str, int] | None = None,
     design_variant_summary: dict[str, int] | None = None,
 ) -> dict[str, object]:
     cleanup_counts = cleanup.to_dict()
@@ -1728,6 +1887,7 @@ def _import_decisions(
     binding_summary = texture_binding_summary or {"bound_images": 0, "bound_materials": 0, "unbound_images": 0}
     library_summary = material_library_summary or _empty_material_library_summary()
     library_binding_summary = material_library_binding_summary or _empty_material_library_binding_summary()
+    pmi_graph_summary = {**_empty_pmi_semantic_graph_summary(), **(pmi_semantic_graph_summary or {})}
     variant_summary = {**_empty_design_variant_summary(), **(design_variant_summary or {})}
     return {
         "metadata": _import_decision(
@@ -1758,7 +1918,7 @@ def _import_decisions(
             state="approximated" if options.validation_properties else "disabled",
             detail="source topology counts are derived after transfer; typed STEP validation properties are not extracted",
         ),
-        "pmi": _pmi_import_decision(options, header_info, pmi_count, unsupported_pmi_count),
+        "pmi": _pmi_import_decision(options, header_info, pmi_count, unsupported_pmi_count, pmi_graph_summary),
         "design_variants": _design_variant_import_decision(options, variant_summary),
         "existing_meshes": _import_decision(
             requested=options.existing_meshes,
@@ -1870,7 +2030,15 @@ def _pmi_import_decision(
     header_info: _StepHeaderInfo,
     pmi_count: int,
     unsupported_pmi_count: int,
+    semantic_graph_summary: dict[str, int],
 ) -> dict[str, object]:
+    counts = {
+        "imported": pmi_count,
+        "unsupported": unsupported_pmi_count,
+        "semantic_graph_nodes": semantic_graph_summary["nodes"],
+        "semantic_graph_edges": semantic_graph_summary["edges"],
+        "semantic_graph_missing_references": semantic_graph_summary["missing_references"],
+    }
     if not options.pmi:
         return _import_decision(requested=False, effective=False, state="disabled")
     if pmi_count:
@@ -1878,8 +2046,8 @@ def _pmi_import_decision(
             requested=True,
             effective=True,
             state="honored",
-            detail="common STEP AP242 PMI entities were extracted into typed metadata annotations",
-            counts={"imported": pmi_count, "unsupported": unsupported_pmi_count},
+            detail="common STEP AP242 PMI entities were extracted into typed metadata annotations and a semantic reference graph",
+            counts=counts,
         )
     if unsupported_pmi_count:
         return _import_decision(
@@ -1887,7 +2055,7 @@ def _pmi_import_decision(
             effective=False,
             state="unsupported",
             detail="STEP AP242 PMI markers were detected, but typed PMI entity extraction is not implemented",
-            counts={"imported": pmi_count, "unsupported": unsupported_pmi_count},
+            counts=counts,
         )
     if not header_info.pmi_present:
         return _import_decision(
@@ -1895,13 +2063,13 @@ def _pmi_import_decision(
             effective=False,
             state="not_present",
             detail="PMI import was requested, but the STEP header did not advertise PMI content",
-            counts={"imported": pmi_count, "unsupported": unsupported_pmi_count},
+            counts=counts,
         )
     return _import_decision(
         requested=True,
         effective=True,
         state="honored",
-        counts={"imported": pmi_count, "unsupported": unsupported_pmi_count},
+        counts=counts,
     )
 
 
