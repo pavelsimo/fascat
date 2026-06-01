@@ -136,6 +136,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "EFFECTIVITY": "effectivity",
     "EFFECTIVITYASSIGNMENT": "effectivity_assignment",
     "EFFECTIVITY_ASSIGNMENT": "effectivity_assignment",
+    "EFFECTIVITYRELATIONSHIP": "effectivity_relationship",
+    "EFFECTIVITY_RELATIONSHIP": "effectivity_relationship",
     "EQUALS_EXPRESSION": "equals_expression",
     "EQUALSEXPRESSION": "equals_expression",
     "INT_LITERAL": "int_literal",
@@ -1957,6 +1959,8 @@ def _step_condition_operator(entity: str) -> str | None:
         return "ineffectivity_assignment"
     if normalized in {"CONFIGURATIONEFFECTIVITY", "PRODUCTDEFINITIONEFFECTIVITY"}:
         return "effectivity_usage"
+    if normalized == "EFFECTIVITYRELATIONSHIP":
+        return "effectivity_relationship"
     if normalized in {"BOOLEANVARIABLE", "MATHSBOOLEANVARIABLE"}:
         return "variable"
     if normalized in {
@@ -2165,6 +2169,7 @@ def _design_variant_selector_terms(
                 "conditional",
                 "effectivity_assignment",
                 "effectivity_context_assignment",
+                "effectivity_relationship",
                 "effectivity_usage",
                 "ineffectivity_assignment",
                 "numeric_literal",
@@ -2229,6 +2234,7 @@ def _conditional_dependency_references(
         "conditional",
         "effectivity_assignment",
         "effectivity_context_assignment",
+        "effectivity_relationship",
         "effectivity_usage",
         "ineffectivity_assignment",
     }
@@ -2366,6 +2372,18 @@ def _condition_record_matches_requested(
             return _StepConditionMatch(
                 matched=matched,
                 positive=matched and any(child.positive for child in assignment_children),
+            )
+    if operator == "effectivity_relationship":
+        effectivity_children = [
+            child_match
+            for child_record, child_match in zip(child_records, children, strict=False)
+            if child_record.effectivity_kind is not None
+        ]
+        if effectivity_children:
+            matched_children = [child for child in effectivity_children if child.matched]
+            return _StepConditionMatch(
+                matched=bool(matched_children),
+                positive=any(child.positive for child in matched_children),
             )
     if operator == "and":
         matched = all(child.matched for child in children)

@@ -548,6 +548,100 @@ def test_step_design_variant_selection_gates_product_definition_effectivity_usag
     assert "condition expression was not satisfied" in target_selection.warnings[0]
 
 
+def test_step_design_variant_selection_resolves_effectivity_relationship_usage(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=SERIAL_NUMBERED_EFFECTIVITY('SN-A-001','SN-A-099',#1);\n"
+        "#20=PRODUCT_DEFINITION('assembly','source assembly',#1,#2);\n"
+        "#21=PRODUCT_DEFINITION('relationship panel','selected occurrence',#1,#2);\n"
+        "#30=PRODUCT_DEFINITION_RELATIONSHIP('relationship option','effectivity usage',#20,#21);\n"
+        "#40=PRODUCT_DEFINITION_EFFECTIVITY('release 2',#30);\n"
+        "#50=EFFECTIVITY_RELATIONSHIP('serial release link','serial gates release',#40,#10);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="relationship-node", name="Relationship Panel", part_id="relationship"),
+            fc.Node(id="blank-node", name="Blank Panel", part_id="blank"),
+        ],
+    )
+    parts = {
+        "relationship": fc.Part(
+            id="relationship",
+            name="Relationship Panel",
+            material_ids=["relationship-mat"],
+            metadata={"source_name": "relationship panel"},
+        ),
+        "blank": fc.Part(
+            id="blank",
+            name="Blank Panel",
+            material_ids=["blank-mat"],
+            metadata={"source_name": "blank panel"},
+        ),
+    }
+    materials = {
+        "relationship-mat": fc.Material(
+            id="relationship-mat",
+            name="Relationship Paint",
+            base_color=(1.0, 0.0, 0.0, 1.0),
+        ),
+        "blank-mat": fc.Material(id="blank-mat", name="Blank Paint", base_color=(0.0, 0.0, 1.0, 1.0)),
+    }
+
+    serial_options = StepReadOptions(design_variant_selection=("SN-A-050",))
+    serial_extraction = _extract_step_design_variants(source, serial_options)
+    serial_root = root.copy()
+    serial_parts = {key: part.copy() for key, part in parts.items()}
+    serial_materials = dict(materials)
+
+    serial_selection = _apply_step_design_variant_selection(
+        serial_root,
+        serial_parts,
+        serial_materials,
+        serial_extraction,
+        serial_options,
+    )
+
+    assert [record.kind for record in serial_extraction.records] == [
+        "serial_numbered_effectivity",
+        "product_definition_effectivity",
+        "effectivity_relationship",
+    ]
+    assert serial_extraction.records[1].condition_operator == "effectivity_usage"
+    assert serial_extraction.records[2].condition_operator == "effectivity_relationship"
+    assert serial_extraction.records[2].reference_labels == (
+        "release 2",
+        "SN-A-001 / SN-A-099",
+    )
+    assert "relationship panel / selected occurrence" in serial_extraction.records[2].resolved_reference_labels
+    assert serial_selection.status == "applied"
+    assert serial_selection.matched_records == ("step_variant_50",)
+    assert "relationship panel" in [term.lower() for term in serial_selection.selector_terms]
+    assert [child.name for child in serial_root.children] == ["Relationship Panel"]
+    assert set(serial_parts) == {"relationship"}
+
+    target_options = StepReadOptions(design_variant_selection=("relationship panel",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+
 def test_step_design_variant_selection_gates_effectivity_assignment_targets(tmp_path: Path) -> None:
     source = tmp_path / "variants.step"
     source.write_text(
