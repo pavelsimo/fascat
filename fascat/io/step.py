@@ -99,6 +99,8 @@ _STEP_PMI_ENTITY_KINDS = {
     "ANNOTATION_PLANE": "annotation_plane",
 }
 _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
+    "APPLIED_EFFECTIVITY_ASSIGNMENT": "applied_effectivity_assignment",
+    "APPLIEDEFFECTIVITYASSIGNMENT": "applied_effectivity_assignment",
     "CONFIGURATION_DESIGN": "configuration_design",
     "CONFIGURATION_EFFECTIVITY": "configuration_effectivity",
     "CONFIGURATION_ITEM": "configuration_item",
@@ -1932,7 +1934,7 @@ def _step_condition_operator(entity: str) -> str | None:
         return "numeric_literal"
     if normalized in {"CONDITIONALCONFIGURATION", "CONDITIONALCONCEPTFEATURE"}:
         return "conditional"
-    if normalized in {"CONFIGUREDEFFECTIVITYASSIGNMENT", "EFFECTIVITYASSIGNMENT"}:
+    if normalized in {"APPLIEDEFFECTIVITYASSIGNMENT", "CONFIGUREDEFFECTIVITYASSIGNMENT", "EFFECTIVITYASSIGNMENT"}:
         return "effectivity_assignment"
     if normalized in {"BOOLEANVARIABLE", "MATHSBOOLEANVARIABLE"}:
         return "variable"
