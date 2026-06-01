@@ -1568,6 +1568,102 @@ def test_step_design_variant_selection_evaluates_boolean_variables(
     assert "condition expression was not satisfied" in target_selection.warnings[0]
 
 
+def test_step_design_variant_selection_evaluates_boolean_variable_assignments(tmp_path: Path) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=MATHS_BOOLEAN_VARIABLE(#1,'service enabled');\n"
+        "#11=PRODUCT_CONCEPT_FEATURE('enabled package','select enabled panel',#1);\n"
+        "#12=PRODUCT_CONCEPT_FEATURE('disabled package','select disabled panel',#1);\n"
+        "#20=CONDITIONAL_CONFIGURATION('enabled condition',#10,#11);\n"
+        "#21=NOT_EXPRESSION(#10);\n"
+        "#22=CONDITIONAL_CONFIGURATION('disabled condition',#21,#12);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="enabled-node", name="Enabled Panel", part_id="enabled"),
+            fc.Node(id="disabled-node", name="Disabled Panel", part_id="disabled"),
+        ],
+    )
+    parts = {
+        "enabled": fc.Part(
+            id="enabled",
+            name="Enabled Panel",
+            material_ids=["enabled-mat"],
+            metadata={"source_name": "enabled panel"},
+        ),
+        "disabled": fc.Part(
+            id="disabled",
+            name="Disabled Panel",
+            material_ids=["disabled-mat"],
+            metadata={"source_name": "disabled panel"},
+        ),
+    }
+    materials = {
+        "enabled-mat": fc.Material(id="enabled-mat", name="Enabled Paint", base_color=(1.0, 0.0, 0.0, 1.0)),
+        "disabled-mat": fc.Material(id="disabled-mat", name="Disabled Paint", base_color=(0.0, 0.0, 1.0, 1.0)),
+    }
+
+    true_options = StepReadOptions(design_variant_selection=("service enabled=true",))
+    true_extraction = _extract_step_design_variants(source, true_options)
+    true_root = root.copy()
+    true_parts = {key: part.copy() for key, part in parts.items()}
+    true_materials = dict(materials)
+
+    true_selection = _apply_step_design_variant_selection(
+        true_root,
+        true_parts,
+        true_materials,
+        true_extraction,
+        true_options,
+    )
+
+    assert true_extraction.records[0].kind == "maths_boolean_variable"
+    assert true_extraction.records[0].condition_operator == "variable"
+    assert true_selection.status == "applied"
+    assert true_selection.matched_records == ("step_variant_10", "step_variant_20")
+    assert [child.name for child in true_root.children] == ["Enabled Panel"]
+    assert set(true_parts) == {"enabled"}
+
+    false_options = StepReadOptions(design_variant_selection=("service enabled=false",))
+    false_extraction = _extract_step_design_variants(source, false_options)
+    false_root = root.copy()
+    false_parts = {key: part.copy() for key, part in parts.items()}
+    false_materials = dict(materials)
+
+    false_selection = _apply_step_design_variant_selection(
+        false_root,
+        false_parts,
+        false_materials,
+        false_extraction,
+        false_options,
+    )
+
+    assert false_selection.status == "applied"
+    assert false_selection.matched_records == ("step_variant_21", "step_variant_22")
+    assert [child.name for child in false_root.children] == ["Disabled Panel"]
+    assert set(false_parts) == {"disabled"}
+
+    target_options = StepReadOptions(design_variant_selection=("enabled package",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+
 def test_step_design_variant_selection_evaluates_equals_expression(tmp_path: Path) -> None:
     source = tmp_path / "variants.step"
     source.write_text(

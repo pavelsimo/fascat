@@ -2540,15 +2540,18 @@ def _design_variant_selector_terms(
             and condition_match.positive
         )
         if record.condition_operator is not None:
-            direct_match = record.condition_operator not in {
-                "conditional",
-                "effectivity_assignment",
-                "effectivity_context_assignment",
-                "effectivity_relationship",
-                "effectivity_usage",
-                "ineffectivity_assignment",
-                *_STEP_CONDITION_OPERAND_OPERATORS,
-            } and _design_variant_record_self_matches_requested(record, normalized_requested)
+            if record.condition_operator == "variable":
+                direct_match = _design_variant_record_requested_boolean(record, requested, normalized_requested) is True
+            else:
+                direct_match = record.condition_operator not in {
+                    "conditional",
+                    "effectivity_assignment",
+                    "effectivity_context_assignment",
+                    "effectivity_relationship",
+                    "effectivity_usage",
+                    "ineffectivity_assignment",
+                    *_STEP_CONDITION_OPERAND_OPERATORS,
+                } and _design_variant_record_self_matches_requested(record, normalized_requested)
             condition_blocked = condition_blocked or (
                 not direct_id_match
                 and not direct_match
@@ -2743,8 +2746,8 @@ def _condition_record_matches_requested(
     if operator == "literal":
         return _StepConditionMatch(matched=bool(record.condition_value))
     if operator == "variable":
-        matched = _design_variant_record_self_matches_requested(record, normalized_requested)
-        return _StepConditionMatch(matched=matched, positive=matched)
+        bool_value = _design_variant_record_requested_boolean(record, requested, normalized_requested)
+        return _StepConditionMatch(matched=bool_value is True, positive=bool_value is not None)
     if operator == "numeric_literal":
         return _StepConditionMatch(matched=record.condition_number is not None)
     if operator == "numeric_variable":
@@ -2836,7 +2839,7 @@ def _condition_record_matches_requested(
         return _StepConditionMatch(matched=matched, positive=matched)
     if operator == "not":
         child_match = children[0]
-        return _StepConditionMatch(matched=not child_match.matched, positive=False)
+        return _StepConditionMatch(matched=not child_match.matched, positive=child_match.positive)
     if operator == "conditional":
         condition_children = [
             child_match
@@ -3584,6 +3587,20 @@ def _numeric_value_from_condition_text(value: str, *, integer: bool) -> float | 
     return parsed if np.isfinite(parsed) else None
 
 
+def _boolean_value_from_condition_text(value: str) -> bool | None:
+    stripped = value.strip()
+    if not stripped:
+        return None
+    if match := _STEP_BOOLEAN_TOKEN_RE.search(stripped.upper()):
+        return match.group(1) in {"T", "TRUE"}
+    normalized = _normalize_condition_text(stripped)
+    if normalized in {"1", "on", "t", "true", "yes"}:
+        return True
+    if normalized in {"0", "f", "false", "no", "off"}:
+        return False
+    return None
+
+
 def _normalize_condition_text(value: str) -> str:
     return " ".join(value.lower().split())
 
@@ -3671,6 +3688,32 @@ def _design_variant_record_requested_text(
             if any(selector and selector in normalized_left for selector in selectors):
                 value = " ".join(right.split())
                 return value if value else None
+    return None
+
+
+def _design_variant_record_requested_boolean(
+    record: _StepDesignVariantRecord,
+    requested: tuple[str, ...],
+    normalized_requested: tuple[str, ...],
+) -> bool | None:
+    selectors = tuple(
+        dict.fromkeys(
+            selector
+            for value in (record.label, record.id, _design_variant_record_step_reference(record))
+            if (selector := _normalize_variant_term(value))
+        )
+    )
+    for raw, normalized in zip(requested, normalized_requested, strict=False):
+        if not any(selector and selector in normalized for selector in selectors):
+            continue
+        for separator in ("=", ":"):
+            if separator not in raw:
+                continue
+            left, right = raw.split(separator, 1)
+            normalized_left = _normalize_variant_term(left)
+            if any(selector and selector in normalized_left for selector in selectors):
+                return _boolean_value_from_condition_text(right)
+        return True
     return None
 
 
