@@ -285,6 +285,7 @@ def test_step_design_variant_extraction_reads_configuration_records(tmp_path: Pa
     )
     assert extraction.records[4].effectivity_kind == "serial"
     assert extraction.records[4].effectivity_values == ("SN-A-001", "SN-A-099")
+    assert extraction.records[4].effectivity_range == ("SN-A-001", "SN-A-099")
     assert extraction.warnings == (
         "STEP design variant records were detected and reported as metadata; "
         "pass design_variant_selection to filter geometry by selected variant labels",
@@ -361,7 +362,7 @@ def test_step_design_variant_selection_filters_matching_geometry(tmp_path: Path)
     assert parts["left"].metadata["design_variant_selected"] == "true"
 
 
-def test_step_design_variant_selection_resolves_effectivity_references(tmp_path: Path) -> None:
+def test_step_design_variant_selection_resolves_serial_effectivity_range(tmp_path: Path) -> None:
     source = tmp_path / "variants.step"
     source.write_text(
         "ISO-10303-21;\n"
@@ -374,7 +375,7 @@ def test_step_design_variant_selection_resolves_effectivity_references(tmp_path:
         "END-ISO-10303-21;\n",
         encoding="utf-8",
     )
-    options = StepReadOptions(design_variant_selection=("SN-A-001",))
+    options = StepReadOptions(design_variant_selection=("SN-A-050",))
     extraction = _extract_step_design_variants(source, options)
     root = fc.Node(
         id="root",
@@ -410,6 +411,58 @@ def test_step_design_variant_selection_resolves_effectivity_references(tmp_path:
     assert "left housing" in [term.lower() for term in selection.selector_terms]
     assert [child.name for child in root.children] == ["Left Housing"]
     assert set(parts) == {"left"}
+
+
+def test_step_design_variant_selection_resolves_dated_effectivity_range(tmp_path: Path) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=CONFIGURATION_ITEM('release window','date gated option',#1);\n"
+        "#11=PRODUCT_CONCEPT_FEATURE('inspection cover','select inspection cover',#2);\n"
+        "#12=CONFIGURATION_DESIGN(#10,#11);\n"
+        "#13=DATED_EFFECTIVITY('release A','2026-12-31','2026-01-01',#12);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    options = StepReadOptions(design_variant_selection=("2026-06-01",))
+    extraction = _extract_step_design_variants(source, options)
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="cover-node", name="Inspection Cover", part_id="cover"),
+            fc.Node(id="plug-node", name="Blanking Plug", part_id="plug"),
+        ],
+    )
+    parts = {
+        "cover": fc.Part(
+            id="cover",
+            name="Inspection Cover",
+            material_ids=["cover-mat"],
+            metadata={"source_name": "inspection cover"},
+        ),
+        "plug": fc.Part(
+            id="plug",
+            name="Blanking Plug",
+            material_ids=["plug-mat"],
+            metadata={"source_name": "blanking plug"},
+        ),
+    }
+    materials = {
+        "cover-mat": fc.Material(id="cover-mat", name="Cover Paint", base_color=(1.0, 0.0, 0.0, 1.0)),
+        "plug-mat": fc.Material(id="plug-mat", name="Plug Paint", base_color=(0.0, 0.0, 1.0, 1.0)),
+    }
+
+    selection = _apply_step_design_variant_selection(root, parts, materials, extraction, options)
+
+    assert extraction.records[3].effectivity_kind == "date"
+    assert extraction.records[3].effectivity_range == ("2026-01-01", "2026-12-31")
+    assert selection.status == "applied"
+    assert selection.matched_records == ("step_variant_13",)
+    assert [child.name for child in root.children] == ["Inspection Cover"]
+    assert set(parts) == {"cover"}
 
 
 def test_step_import_cleanup_actions_cover_construction_only_shapes() -> None:

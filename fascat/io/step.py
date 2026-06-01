@@ -6,6 +6,7 @@ import tempfile
 import zipfile
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
+from datetime import date
 from io import BytesIO
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
@@ -257,6 +258,7 @@ class _StepDesignVariantRecord:
     resolved_reference_labels: tuple[str, ...] = ()
     effectivity_kind: str | None = None
     effectivity_values: tuple[str, ...] = ()
+    effectivity_range: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         data: dict[str, object] = {
@@ -272,6 +274,8 @@ class _StepDesignVariantRecord:
             data["effectivity_kind"] = self.effectivity_kind
         if self.effectivity_values:
             data["effectivity_values"] = list(self.effectivity_values)
+        if self.effectivity_range:
+            data["effectivity_range"] = list(self.effectivity_range)
         return data
 
 
@@ -1730,6 +1734,7 @@ def _extract_step_design_variants(source: Path, options: StepReadOptions) -> _St
             continue
         strings = _step_string_values(record.args)
         references = tuple(f"#{item}" for item in _STEP_REFERENCE_RE.findall(record.args))
+        effectivity_values = _step_effectivity_values(record.entity, strings, record.args)
         records.append(
             _StepDesignVariantRecord(
                 id=f"step_variant_{record.number}",
@@ -1740,7 +1745,8 @@ def _extract_step_design_variants(source: Path, options: StepReadOptions) -> _St
                 reference_labels=_step_reference_labels(references, step_records),
                 resolved_reference_labels=_step_resolved_reference_labels(references, step_records),
                 effectivity_kind=_step_effectivity_kind(record.entity),
-                effectivity_values=_step_effectivity_values(record.entity, strings, record.args),
+                effectivity_values=effectivity_values,
+                effectivity_range=_step_effectivity_range(record.entity, effectivity_values),
             )
         )
 
@@ -1818,6 +1824,27 @@ def _step_effectivity_values(entity: str, strings: list[str], args: str) -> tupl
     if not values:
         values.extend(str(value) for value in _step_number_values(args))
     return tuple(dict.fromkeys(values))
+
+
+def _step_effectivity_range(entity: str, values: tuple[str, ...]) -> tuple[str, ...]:
+    if not values:
+        return ()
+    if entity == "SERIAL_NUMBERED_EFFECTIVITY":
+        if len(values) >= 3:
+            return values[1:3]
+        return values[:2]
+    if entity in {"DATED_EFFECTIVITY", "TIME_INTERVAL_BASED_EFFECTIVITY"}:
+        date_values: list[tuple[date, str]] = []
+        for value in values:
+            parsed = _parse_effectivity_date(value)
+            if parsed is not None:
+                date_values.append((parsed, value))
+        if date_values:
+            date_values.sort(key=lambda item: item[0])
+            return tuple(value for _, value in date_values[:2])
+        if len(values) >= 2:
+            return values[-2:]
+    return ()
 
 
 def _apply_step_design_variant_selection(
@@ -1950,7 +1977,7 @@ def _design_variant_selector_terms(
         if not any(
             query and (query == _normalize_variant_term(record.id) or query in haystack)
             for query in normalized_requested
-        ):
+        ) and not _effectivity_record_matches_requested(record, requested):
             continue
         matched.append(record.id)
         terms.extend(_design_variant_label_terms(record.label))
@@ -1963,6 +1990,68 @@ def _design_variant_selector_terms(
     return tuple(dict.fromkeys(matched)), tuple(
         item for item in dict.fromkeys(term.strip() for term in terms if term.strip()) if _normalize_variant_term(item)
     )
+
+
+def _effectivity_record_matches_requested(record: _StepDesignVariantRecord, requested: tuple[str, ...]) -> bool:
+    if not record.effectivity_range:
+        return False
+    return any(
+        _effectivity_range_contains(record.effectivity_kind, record.effectivity_range, item) for item in requested
+    )
+
+
+def _effectivity_range_contains(kind: str | None, bounds: tuple[str, ...], value: str) -> bool:
+    if not bounds or not value.strip():
+        return False
+    start = bounds[0] if len(bounds) >= 1 else ""
+    end = bounds[1] if len(bounds) >= 2 else ""
+    if kind in {"date", "time_interval"}:
+        target_date = _parse_effectivity_date(value)
+        start_date = _parse_effectivity_date(start)
+        end_date = _parse_effectivity_date(end)
+        if target_date is not None and (start_date is not None or end_date is not None):
+            return (start_date is None or target_date >= start_date) and (end_date is None or target_date <= end_date)
+    return (not start or _compare_ordered_identifier(value, start) >= 0) and (
+        not end or _compare_ordered_identifier(value, end) <= 0
+    )
+
+
+def _parse_effectivity_date(value: str) -> date | None:
+    stripped = value.strip()
+    if not stripped:
+        return None
+    iso_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", stripped)
+    if iso_match is not None:
+        try:
+            return date.fromisoformat(iso_match.group(1))
+        except ValueError:
+            return None
+    compact_match = re.fullmatch(r"\D*(\d{4})(\d{2})(\d{2})\D*", stripped)
+    if compact_match is None:
+        return None
+    try:
+        return date(int(compact_match.group(1)), int(compact_match.group(2)), int(compact_match.group(3)))
+    except ValueError:
+        return None
+
+
+def _compare_ordered_identifier(left: str, right: str) -> int:
+    left_key = _ordered_identifier_key(left)
+    right_key = _ordered_identifier_key(right)
+    if left_key is not None and right_key is not None and left_key[:2] == right_key[:2]:
+        left_number = left_key[2]
+        right_number = right_key[2]
+        return (left_number > right_number) - (left_number < right_number)
+    normalized_left = left.strip().lower()
+    normalized_right = right.strip().lower()
+    return (normalized_left > normalized_right) - (normalized_left < normalized_right)
+
+
+def _ordered_identifier_key(value: str) -> tuple[str, str, int] | None:
+    match = re.fullmatch(r"(\D*?)(\d+)(\D*)", value.strip().lower())
+    if match is None:
+        return None
+    return (match.group(1), match.group(3), int(match.group(2)))
 
 
 def _design_variant_label_terms(label: str) -> tuple[str, ...]:
@@ -2435,7 +2524,7 @@ def _design_variant_import_decision(
         if status == "applied":
             detail = (
                 "supported STEP configuration/design-variant records were scanned and the imported geometry tree "
-                "was filtered using selected variant record labels and referenced STEP labels"
+                "was filtered using selected variant record labels, effectivity values/ranges, and referenced STEP labels"
             )
         else:
             detail = (

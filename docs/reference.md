@@ -81,9 +81,10 @@ with simple vector text glyphs linked to those records; full AP242 visual
 presentation reconstruction remains planned. Report steps also include detected
 STEP design variant configuration/effectivity metadata when
 `design_variants` is enabled; `design_variant_selection` can prune imported
-geometry by selected variant labels, effectivity values, or STEP record ids
-when those records resolve to labels that match imported node, part, or
-source-name metadata. Report steps also include
+geometry by selected variant labels, STEP record ids, exact effectivity values,
+or values inside supported serial/date/time-interval effectivity ranges when
+those records resolve to labels that match imported node, part, or source-name
+metadata. Report steps also include
 `loaded_representations`, a per-part
 BREP/construction-shape summary plus deleted construction-only nodes and source
 topology counts. Free construction edges split from mixed face+curve STEP shapes
