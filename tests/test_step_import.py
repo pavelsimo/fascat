@@ -264,6 +264,7 @@ def test_step_design_variant_extraction_reads_configuration_records(tmp_path: Pa
         "configuration_items": 1,
         "product_concept_features": 1,
         "effectivity_records": 3,
+        "conditional_records": 0,
     }
     assert [record.kind for record in extraction.records] == [
         "configuration_item",
@@ -304,6 +305,7 @@ def test_step_design_variant_extraction_respects_disabled_option(tmp_path: Path)
         "configuration_items": 0,
         "product_concept_features": 0,
         "effectivity_records": 0,
+        "conditional_records": 0,
     }
     assert extraction.warnings == ()
 
@@ -463,6 +465,158 @@ def test_step_design_variant_selection_resolves_dated_effectivity_range(tmp_path
     assert selection.matched_records == ("step_variant_13",)
     assert [child.name for child in root.children] == ["Inspection Cover"]
     assert set(parts) == {"cover"}
+
+
+def test_step_design_variant_selection_requires_supported_boolean_conditions(tmp_path: Path) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=PRODUCT_CONCEPT_FEATURE('left hand','left condition',#1);\n"
+        "#11=PRODUCT_CONCEPT_FEATURE('premium trim','premium condition',#1);\n"
+        "#12=PRODUCT_CONCEPT_FEATURE('left premium package','select left housing',#1);\n"
+        "#13=CONFIGURATION_DESIGN(#12,#10);\n"
+        "#20=AND_EXPRESSION((#10,#11));\n"
+        "#21=CONDITIONAL_CONFIGURATION('left premium condition',#20,#12);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="left-node", name="Left Housing", part_id="left"),
+            fc.Node(id="right-node", name="Right Housing", part_id="right"),
+        ],
+    )
+    parts = {
+        "left": fc.Part(
+            id="left",
+            name="Left Housing",
+            material_ids=["left-mat"],
+            metadata={"source_name": "left housing"},
+        ),
+        "right": fc.Part(
+            id="right",
+            name="Right Housing",
+            material_ids=["right-mat"],
+            metadata={"source_name": "right housing"},
+        ),
+    }
+    materials = {
+        "left-mat": fc.Material(id="left-mat", name="Left Paint", base_color=(1.0, 0.0, 0.0, 1.0)),
+        "right-mat": fc.Material(id="right-mat", name="Right Paint", base_color=(0.0, 0.0, 1.0, 1.0)),
+    }
+
+    partial_options = StepReadOptions(design_variant_selection=("left hand",))
+    partial_extraction = _extract_step_design_variants(source, partial_options)
+    partial_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        dict(parts),
+        dict(materials),
+        partial_extraction,
+        partial_options,
+    )
+
+    assert partial_extraction.summary["conditional_records"] == 2
+    assert partial_extraction.records[4].condition_operator == "and"
+    assert partial_selection.status == "unmatched_geometry"
+    assert partial_selection.matched_records == ()
+
+    full_options = StepReadOptions(design_variant_selection=("left hand", "premium trim"))
+    full_extraction = _extract_step_design_variants(source, full_options)
+    full_root = root.copy()
+    full_parts = dict(parts)
+    full_materials = dict(materials)
+
+    full_selection = _apply_step_design_variant_selection(
+        full_root,
+        full_parts,
+        full_materials,
+        full_extraction,
+        full_options,
+    )
+
+    assert full_selection.status == "applied"
+    assert full_selection.matched_records == ("step_variant_20", "step_variant_21")
+    assert "left housing" in [term.lower() for term in full_selection.selector_terms]
+    assert [child.name for child in full_root.children] == ["Left Housing"]
+    assert set(full_parts) == {"left"}
+
+
+def test_step_design_variant_selection_supports_not_condition(tmp_path: Path) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=PRODUCT_CONCEPT_FEATURE('left hand','left condition',#1);\n"
+        "#11=PRODUCT_CONCEPT_FEATURE('premium trim','premium condition',#1);\n"
+        "#12=PRODUCT_CONCEPT_FEATURE('left standard package','select standard housing',#1);\n"
+        "#20=NOT_EXPRESSION(#11);\n"
+        "#21=AND_EXPRESSION((#10,#20));\n"
+        "#22=CONDITIONAL_CONFIGURATION('left standard condition',#21,#12);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="standard-node", name="Standard Housing", part_id="standard"),
+            fc.Node(id="premium-node", name="Premium Housing", part_id="premium"),
+        ],
+    )
+    parts = {
+        "standard": fc.Part(
+            id="standard",
+            name="Standard Housing",
+            material_ids=["standard-mat"],
+            metadata={"source_name": "standard housing"},
+        ),
+        "premium": fc.Part(
+            id="premium",
+            name="Premium Housing",
+            material_ids=["premium-mat"],
+            metadata={"source_name": "premium housing"},
+        ),
+    }
+    materials = {
+        "standard-mat": fc.Material(id="standard-mat", name="Standard Paint", base_color=(1.0, 0.0, 0.0, 1.0)),
+        "premium-mat": fc.Material(id="premium-mat", name="Premium Paint", base_color=(0.0, 0.0, 1.0, 1.0)),
+    }
+    standard_options = StepReadOptions(design_variant_selection=("left hand",))
+    standard_extraction = _extract_step_design_variants(source, standard_options)
+    standard_root = root.copy()
+    standard_parts = {key: part.copy() for key, part in parts.items()}
+    standard_materials = dict(materials)
+
+    standard_selection = _apply_step_design_variant_selection(
+        standard_root,
+        standard_parts,
+        standard_materials,
+        standard_extraction,
+        standard_options,
+    )
+
+    assert standard_extraction.summary["conditional_records"] == 3
+    assert standard_selection.status == "applied"
+    assert standard_selection.matched_records == ("step_variant_21", "step_variant_22")
+    assert [child.name for child in standard_root.children] == ["Standard Housing"]
+    assert set(standard_parts) == {"standard"}
+
+    premium_options = StepReadOptions(design_variant_selection=("left hand", "premium trim"))
+    premium_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, premium_options),
+        premium_options,
+    )
+
+    assert premium_selection.status == "unmatched_geometry"
+    assert premium_selection.matched_records == ()
 
 
 def test_step_import_cleanup_actions_cover_construction_only_shapes() -> None:
@@ -652,6 +806,7 @@ def test_step_import_decisions_report_detected_design_variants() -> None:
             "configuration_items": 1,
             "product_concept_features": 1,
             "effectivity_records": 1,
+            "conditional_records": 0,
         },
     )
 
@@ -662,6 +817,7 @@ def test_step_import_decisions_report_detected_design_variants() -> None:
         "configuration_items": 1,
         "product_concept_features": 1,
         "effectivity_records": 1,
+        "conditional_records": 0,
     }
 
 

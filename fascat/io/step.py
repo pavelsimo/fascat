@@ -101,9 +101,12 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "CONFIGURATION_DESIGN": "configuration_design",
     "CONFIGURATION_EFFECTIVITY": "configuration_effectivity",
     "CONFIGURATION_ITEM": "configuration_item",
+    "CONDITIONAL_CONFIGURATION": "conditional_configuration",
+    "CONDITIONALCONFIGURATION": "conditional_configuration",
     "CONFIGURED_EFFECTIVITY_ASSIGNMENT": "configured_effectivity_assignment",
     "DATED_EFFECTIVITY": "dated_effectivity",
     "EFFECTIVITY": "effectivity",
+    "EFFECTIVITYASSIGNMENT": "effectivity_assignment",
     "EFFECTIVITY_ASSIGNMENT": "effectivity_assignment",
     "LOT_EFFECTIVITY": "lot_effectivity",
     "PRODUCT_CONCEPT": "product_concept",
@@ -115,6 +118,19 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "PRODUCT_DEFINITION_EFFECTIVITY": "product_definition_effectivity",
     "SERIAL_NUMBERED_EFFECTIVITY": "serial_numbered_effectivity",
     "TIME_INTERVAL_BASED_EFFECTIVITY": "time_interval_based_effectivity",
+    "AND_EXPRESSION": "and_expression",
+    "ANDEXPRESSION": "and_expression",
+    "ANDCONDITION": "and_condition",
+    "BOOLEAN_LITERAL": "boolean_literal",
+    "BOOLEAN_VARIABLE": "boolean_variable",
+    "NOT_EXPRESSION": "not_expression",
+    "NOTEXPRESSION": "not_expression",
+    "NOTCONDITION": "not_condition",
+    "OR_EXPRESSION": "or_expression",
+    "OREXPRESSION": "or_expression",
+    "ORCONDITION": "or_condition",
+    "XOR_EXPRESSION": "xor_expression",
+    "XOREXPRESSION": "xor_expression",
 }
 _STEP_UNIT_RE = re.compile(r"\b(mm|millimet(?:er|re)|cm|centimet(?:er|re)|m|met(?:er|re)|in|inch|deg|degree)\b", re.I)
 _GENERIC_MATERIAL_TOKENS = {"cad", "color", "material", "mat", "texture", "map", "source"}
@@ -259,6 +275,7 @@ class _StepDesignVariantRecord:
     effectivity_kind: str | None = None
     effectivity_values: tuple[str, ...] = ()
     effectivity_range: tuple[str, ...] = ()
+    condition_operator: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         data: dict[str, object] = {
@@ -276,7 +293,15 @@ class _StepDesignVariantRecord:
             data["effectivity_values"] = list(self.effectivity_values)
         if self.effectivity_range:
             data["effectivity_range"] = list(self.effectivity_range)
+        if self.condition_operator is not None:
+            data["condition_operator"] = self.condition_operator
         return data
+
+
+@dataclass(frozen=True)
+class _StepConditionMatch:
+    matched: bool
+    positive: bool = False
 
 
 @dataclass(frozen=True)
@@ -1747,6 +1772,7 @@ def _extract_step_design_variants(source: Path, options: StepReadOptions) -> _St
                 effectivity_kind=_step_effectivity_kind(record.entity),
                 effectivity_values=effectivity_values,
                 effectivity_range=_step_effectivity_range(record.entity, effectivity_values),
+                condition_operator=_step_condition_operator(record.entity),
             )
         )
 
@@ -1815,6 +1841,23 @@ def _step_effectivity_kind(entity: str) -> str | None:
     if "PRODUCT_DEFINITION" in entity:
         return "product_definition"
     return "generic"
+
+
+def _step_condition_operator(entity: str) -> str | None:
+    normalized = entity.replace("_", "")
+    if normalized in {"ANDEXPRESSION", "ANDCONDITION"}:
+        return "and"
+    if normalized in {"OREXPRESSION", "ORCONDITION"}:
+        return "or"
+    if normalized == "XOREXPRESSION":
+        return "xor"
+    if normalized in {"NOTEXPRESSION", "NOTCONDITION"}:
+        return "not"
+    if normalized == "BOOLEANLITERAL":
+        return "literal"
+    if normalized in {"CONDITIONALCONFIGURATION", "EFFECTIVITYASSIGNMENT"}:
+        return "conditional"
+    return None
 
 
 def _step_effectivity_values(entity: str, strings: list[str], args: str) -> tuple[str, ...]:
@@ -1957,27 +2000,34 @@ def _design_variant_selector_terms(
     requested: tuple[str, ...],
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     normalized_requested = tuple(_normalize_variant_term(item) for item in requested)
+    records_by_reference = {_design_variant_record_step_reference(record): record for record in records}
+    conditional_dependency_refs = _conditional_dependency_references(records, records_by_reference)
     matched: list[str] = []
     terms: list[str] = list(requested)
     for record in records:
-        haystack = _normalize_variant_term(
-            " ".join(
-                (
-                    record.id,
-                    record.entity,
-                    record.kind,
-                    record.label,
-                    *(record.effectivity_values or ()),
-                    *record.references,
-                    *record.reference_labels,
-                    *record.resolved_reference_labels,
-                )
-            )
+        direct_id_match = _design_variant_record_id_matches(record, normalized_requested)
+        condition_match = _condition_record_matches_requested(
+            record,
+            records_by_reference,
+            requested,
+            normalized_requested,
+            visited=set(),
         )
-        if not any(
-            query and (query == _normalize_variant_term(record.id) or query in haystack)
-            for query in normalized_requested
-        ) and not _effectivity_record_matches_requested(record, requested):
+        suppress_direct_match = (
+            record.condition_operator is None
+            and not direct_id_match
+            and _design_variant_record_step_reference(record) in conditional_dependency_refs
+        )
+        condition_applies = (
+            record.condition_operator is not None and condition_match.matched and condition_match.positive
+        )
+        if record.condition_operator is not None:
+            direct_match = _design_variant_record_self_matches_requested(record, normalized_requested)
+        else:
+            direct_match = not suppress_direct_match and _design_variant_record_matches_requested(
+                record, requested, normalized_requested
+            )
+        if not direct_id_match and not direct_match and not condition_applies:
             continue
         matched.append(record.id)
         terms.extend(_design_variant_label_terms(record.label))
@@ -1990,6 +2040,152 @@ def _design_variant_selector_terms(
     return tuple(dict.fromkeys(matched)), tuple(
         item for item in dict.fromkeys(term.strip() for term in terms if term.strip()) if _normalize_variant_term(item)
     )
+
+
+def _conditional_dependency_references(
+    records: tuple[_StepDesignVariantRecord, ...],
+    records_by_reference: dict[str, _StepDesignVariantRecord],
+) -> set[str]:
+    dependencies: set[str] = {
+        reference
+        for record in records
+        if record.condition_operator in {"and", "or", "xor", "not"}
+        for reference in record.references
+    }
+    changed = True
+    while changed:
+        changed = False
+        for record in records:
+            record_reference = _design_variant_record_step_reference(record)
+            if (
+                record.condition_operator is None
+                and record_reference not in dependencies
+                and any(reference in dependencies for reference in record.references)
+            ):
+                dependencies.add(record_reference)
+                changed = True
+    return {reference for reference in dependencies if reference in records_by_reference}
+
+
+def _condition_record_matches_requested(
+    record: _StepDesignVariantRecord,
+    records_by_reference: dict[str, _StepDesignVariantRecord],
+    requested: tuple[str, ...],
+    normalized_requested: tuple[str, ...],
+    *,
+    visited: set[str],
+) -> _StepConditionMatch:
+    record_reference = _design_variant_record_step_reference(record)
+    if record_reference in visited:
+        return _StepConditionMatch(matched=False)
+    visited.add(record_reference)
+    operator = record.condition_operator
+    if operator is None:
+        matched = _design_variant_record_matches_requested(record, requested, normalized_requested)
+        return _StepConditionMatch(matched=matched, positive=matched)
+    if operator == "literal":
+        return _StepConditionMatch(matched=".T." in record.label.upper() or "TRUE" in record.label.upper())
+
+    children = [
+        _condition_record_matches_requested(
+            child,
+            records_by_reference,
+            requested,
+            normalized_requested,
+            visited=set(visited),
+        )
+        for reference in record.references
+        if (child := records_by_reference.get(reference)) is not None
+    ]
+    if not children:
+        matched = _design_variant_record_matches_requested(record, requested, normalized_requested)
+        return _StepConditionMatch(matched=matched, positive=matched)
+    if operator == "not":
+        child_match = children[0]
+        return _StepConditionMatch(matched=not child_match.matched, positive=False)
+    if operator == "and":
+        matched = all(child.matched for child in children)
+        return _StepConditionMatch(matched=matched, positive=matched and any(child.positive for child in children))
+    if operator == "or":
+        matched_children = [child for child in children if child.matched]
+        return _StepConditionMatch(
+            matched=bool(matched_children),
+            positive=any(child.positive for child in matched_children),
+        )
+    if operator == "xor":
+        matched_children = [child for child in children if child.matched]
+        return _StepConditionMatch(
+            matched=len(matched_children) == 1,
+            positive=any(child.positive for child in matched_children),
+        )
+
+    matched_children = [child for child in children if child.matched]
+    return _StepConditionMatch(
+        matched=bool(matched_children),
+        positive=any(child.positive for child in matched_children),
+    )
+
+
+def _design_variant_record_matches_requested(
+    record: _StepDesignVariantRecord,
+    requested: tuple[str, ...],
+    normalized_requested: tuple[str, ...],
+) -> bool:
+    haystack = _normalize_variant_term(_design_variant_record_haystack(record))
+    return any(query and query in haystack for query in normalized_requested) or _effectivity_record_matches_requested(
+        record, requested
+    )
+
+
+def _design_variant_record_self_matches_requested(
+    record: _StepDesignVariantRecord,
+    normalized_requested: tuple[str, ...],
+) -> bool:
+    haystack = _normalize_variant_term(
+        " ".join(
+            (
+                record.id,
+                _design_variant_record_step_reference(record),
+                record.entity,
+                record.kind,
+                record.label,
+                *(record.effectivity_values or ()),
+            )
+        )
+    )
+    return any(query and query in haystack for query in normalized_requested)
+
+
+def _design_variant_record_id_matches(
+    record: _StepDesignVariantRecord,
+    normalized_requested: tuple[str, ...],
+) -> bool:
+    normalized_ids = {
+        _normalize_variant_term(record.id),
+        _normalize_variant_term(_design_variant_record_step_reference(record)),
+    }
+    return any(query and query in normalized_ids for query in normalized_requested)
+
+
+def _design_variant_record_haystack(record: _StepDesignVariantRecord) -> str:
+    return " ".join(
+        (
+            record.id,
+            _design_variant_record_step_reference(record),
+            record.entity,
+            record.kind,
+            record.label,
+            *(record.effectivity_values or ()),
+            *record.references,
+            *record.reference_labels,
+            *record.resolved_reference_labels,
+        )
+    )
+
+
+def _design_variant_record_step_reference(record: _StepDesignVariantRecord) -> str:
+    suffix = record.id.removeprefix("step_variant_")
+    return f"#{suffix}" if suffix.isdigit() else record.id
 
 
 def _effectivity_record_matches_requested(record: _StepDesignVariantRecord, requested: tuple[str, ...]) -> bool:
@@ -2111,6 +2307,7 @@ def _design_variant_summary(records: Iterable[_StepDesignVariantRecord]) -> dict
             if "EFFECTIVITY" in item.entity
             or item.entity in {"CONFIGURATION_DESIGN", "CONFIGURED_EFFECTIVITY_ASSIGNMENT"}
         ),
+        "conditional_records": sum(1 for item in items if item.condition_operator is not None),
     }
 
 
@@ -2120,6 +2317,7 @@ def _empty_design_variant_summary() -> dict[str, int]:
         "configuration_items": 0,
         "product_concept_features": 0,
         "effectivity_records": 0,
+        "conditional_records": 0,
     }
 
 
@@ -2524,7 +2722,8 @@ def _design_variant_import_decision(
         if status == "applied":
             detail = (
                 "supported STEP configuration/design-variant records were scanned and the imported geometry tree "
-                "was filtered using selected variant record labels, effectivity values/ranges, and referenced STEP labels"
+                "was filtered using selected variant record labels, effectivity values/ranges, simple condition "
+                "records, and referenced STEP labels"
             )
         else:
             detail = (
@@ -2544,7 +2743,7 @@ def _design_variant_import_decision(
         state="approximated",
         detail=(
             "supported STEP configuration/design-variant records are reported as metadata; "
-            "pass design_variant_selection to apply name/reference-based geometry filtering"
+            "pass design_variant_selection to apply name/reference/condition-based geometry filtering"
         ),
         counts=counts,
     )
