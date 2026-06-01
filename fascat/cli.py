@@ -2503,6 +2503,13 @@ def cmd_runtime_fixtures(
             help="Copy rendered parity captures into goldens/<target>/ for review or future baselines.",
         ),
     ] = False,
+    require_goldens: Annotated[
+        bool,
+        typer.Option(
+            "--require-goldens/--no-require-goldens",
+            help="Require existing goldens/<target>/<fixture>.png files for captured parity targets.",
+        ),
+    ] = False,
 ) -> None:
     """Write bundled runtime parity fixtures for browser, Unity, and Unreal preview checks."""
     state = _state(ctx)
@@ -2519,6 +2526,7 @@ def cmd_runtime_fixtures(
         "unreal_project": str(unreal_project) if unreal_project else None,
         "runtime_engine_timeout": runtime_engine_timeout,
         "promote_goldens": promote_goldens,
+        "require_goldens": require_goldens,
     }
     if runtime_engine_timeout <= 0.0:
         _fail(ctx, payload, "--runtime-engine-timeout must be greater than 0.", code=2)
@@ -2540,6 +2548,7 @@ def cmd_runtime_fixtures(
                 unreal_project=unreal_project,
                 engine_timeout_seconds=runtime_engine_timeout,
                 promote_goldens=promote_goldens,
+                require_goldens=require_goldens,
             )
             if capture_targets
             else None

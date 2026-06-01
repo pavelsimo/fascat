@@ -301,6 +301,7 @@ def test_runtime_fixtures_can_capture_targets(
         assert kwargs["browser_command"] == "Chrome"
         assert kwargs["unity_command"] == "Unity"
         assert kwargs["promote_goldens"] is True
+        assert kwargs["require_goldens"] is True
         return FakeCaptureReport()
 
     monkeypatch.setattr("fascat.cli.capture_runtime_parity_suite", fake_capture)
@@ -320,6 +321,7 @@ def test_runtime_fixtures_can_capture_targets(
             "--unity-command",
             "Unity",
             "--promote-goldens",
+            "--require-goldens",
         ],
     )
 

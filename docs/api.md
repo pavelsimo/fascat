@@ -1153,6 +1153,7 @@ captures = fc.capture_runtime_parity_suite(
     targets=("browser", "unity"),
     unity_command="Unity",
     promote_goldens=True,
+    require_goldens=False,
 )
 ```
 
@@ -1168,7 +1169,10 @@ PNGs, and a manifest for browser, Unity, and Unreal material/lighting and
 compressed-texture preview comparisons. `capture_runtime_parity_suite()` runs
 selected browser or engine preview targets for that suite, writes
 `runtime-parity-captures.json`, and can promote rendered previews into
-`goldens/<target>/` for review.
+`goldens/<target>/` for review. When `goldens/<target>/<fixture>.png` already
+exists, captures compare against that target-specific golden instead of the
+software baseline. Set `require_goldens=True` when a CI job should fail if the
+checked-in target golden corpus is incomplete.
 
 ## Validation
 
@@ -1233,6 +1237,11 @@ fascat runtime-fixtures runtime-parity/ \
   --capture unity \
   --unity-command Unity \
   --promote-goldens
+
+fascat runtime-fixtures runtime-parity/ \
+  --capture unity \
+  --unity-command Unity \
+  --require-goldens
 ```
 
 Validation-time geometry reports use the same filter selectors as conversion
@@ -1307,7 +1316,10 @@ normal/lighting GLB fixtures with software baseline PNGs and a manifest
 containing browser, Unity, and Unreal preview commands. Add
 `--capture browser`, `--capture unity`, or `--capture unreal` to run local
 preview captures for the suite and write `runtime-parity-captures.json`;
-`--promote-goldens` copies rendered captures into `goldens/<target>/`.
+`--promote-goldens` copies rendered captures into `goldens/<target>/`. Existing
+`goldens/<target>/<fixture>.png` files become target-specific comparison
+baselines on later captures, and `--require-goldens` fails the suite when any
+requested target golden is missing.
 Engine-specific checked-in golden corpora and full Unreal scene-rendered
 screenshots/FPS remain open. Set
 `FASCAT_UNITY`, `UNITY_EDITOR`,

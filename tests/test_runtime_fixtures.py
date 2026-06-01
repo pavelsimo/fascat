@@ -29,6 +29,7 @@ def test_runtime_parity_suite_writes_assets_baselines_and_manifest(tmp_path: Pat
     manifest = json.loads(Path(report.manifest_path).read_text(encoding="utf-8"))
     assert manifest["schema"] == "fascat.runtime-parity-suite.v1"
     assert manifest["targets"] == ["browser", "unity", "unreal"]
+    assert manifest["layout"]["target_goldens"] == "goldens/{target}/{fixture}.png"
     assert [fixture["name"] for fixture in manifest["fixtures"]] == [
         "pbr-material-grid",
         "texture-map-grid",
@@ -48,6 +49,11 @@ def test_runtime_parity_suite_writes_assets_baselines_and_manifest(tmp_path: Pat
     texture_manifest = manifest["fixtures"][1]
     assert texture_manifest["asset"] == "assets/texture-map-grid.glb"
     assert texture_manifest["software_baseline"] == "baselines/texture-map-grid.png"
+    assert texture_manifest["target_goldens"] == {
+        "browser": "goldens/browser/texture-map-grid.png",
+        "unity": "goldens/unity/texture-map-grid.png",
+        "unreal": "goldens/unreal/texture-map-grid.png",
+    }
     assert "runtime-browser-preview" in texture_manifest["commands"]["browser"]
     assert "--runtime-engine unity" in texture_manifest["commands"]["unity"]
     assert "--runtime-engine-baseline baselines/texture-map-grid.png" in texture_manifest["commands"]["unity"]
@@ -177,6 +183,71 @@ def test_runtime_parity_capture_records_previews_diffs_and_goldens(
     assert payload["schema"] == "fascat.runtime-parity-captures.v1"
     assert payload["passed"] is True
     assert payload["targets"] == ["browser", "unity"]
+    assert payload["required_goldens"] is False
+
+
+def test_runtime_parity_capture_uses_existing_target_goldens(
+    monkeypatch,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    suite_dir = tmp_path / "runtime-parity"
+    write_runtime_parity_suite(suite_dir)
+    fixture_name = "pbr-material-grid"
+    target_golden = suite_dir / "goldens" / "browser" / f"{fixture_name}.png"
+    target_golden.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(suite_dir / "baselines" / f"{fixture_name}.png", target_golden)
+
+    def fake_browser(path: str | Path, preview_path: str | Path, _options: object = None) -> RuntimeBrowserRenderReport:
+        baseline = Path(path).parent.parent / "baselines" / f"{Path(path).stem}.png"
+        Path(preview_path).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(baseline, preview_path)
+        return RuntimeBrowserRenderReport(
+            path=str(path),
+            status="rendered",
+            browser="fake-browser",
+            preview_path=str(preview_path),
+            width=512,
+            height=512,
+            meshes=1,
+            triangles=1,
+        )
+
+    monkeypatch.setattr("fascat.runtime_fixtures.write_browser_render_preview", fake_browser)
+
+    report = capture_runtime_parity_suite(suite_dir, targets=("browser",))
+
+    target_capture = next(capture for capture in report.captures if capture.fixture == fixture_name)
+    other_capture = next(capture for capture in report.captures if capture.fixture == "texture-map-grid")
+    assert target_capture.baseline_kind == "target_golden"
+    assert target_capture.baseline_path == str(target_golden)
+    assert target_capture.golden_path == str(target_golden)
+    assert target_capture.diff is not None
+    assert target_capture.diff["baseline_path"] == str(target_golden)
+    assert other_capture.baseline_kind == "software_baseline"
+
+
+def test_runtime_parity_capture_can_require_target_goldens(
+    monkeypatch,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    suite_dir = tmp_path / "runtime-parity"
+    write_runtime_parity_suite(suite_dir)
+
+    def fail_browser(*_args: object, **_kwargs: object) -> RuntimeBrowserRenderReport:
+        raise AssertionError("browser capture should not run when required goldens are missing")
+
+    monkeypatch.setattr("fascat.runtime_fixtures.write_browser_render_preview", fail_browser)
+
+    report = capture_runtime_parity_suite(suite_dir, targets=("browser",), require_goldens=True)
+
+    assert report.passed is False
+    assert report.required_goldens is True
+    assert len(report.captures) == 4
+    assert all(capture.status == "missing_golden" for capture in report.captures)
+    assert all(capture.render_status == "not_rendered" for capture in report.captures)
+    assert all(capture.passed is False for capture in report.captures)
+    assert all(capture.baseline_kind == "missing_target_golden" for capture in report.captures)
+    assert all(capture.golden_path is not None for capture in report.captures)
 
 
 def _read_glb_document(path: Path) -> dict[str, Any]:

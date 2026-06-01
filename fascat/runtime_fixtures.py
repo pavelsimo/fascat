@@ -95,6 +95,7 @@ class RuntimeParityCapture:
     status: str
     render_status: str
     passed: bool | None
+    baseline_kind: str = "software_baseline"
     diff: dict[str, object] | None = None
     runtime_report: dict[str, object] | None = None
     golden_path: str | None = None
@@ -110,6 +111,7 @@ class RuntimeParityCapture:
             "status": self.status,
             "render_status": self.render_status,
             "passed": self.passed,
+            "baseline_kind": self.baseline_kind,
             "diff": self.diff,
             "runtime_report": self.runtime_report,
             "golden_path": self.golden_path,
@@ -124,6 +126,7 @@ class RuntimeParityCaptureReport:
     results_path: str
     targets: tuple[RuntimeParityTarget, ...]
     promoted_goldens: bool
+    required_goldens: bool
     captures: tuple[RuntimeParityCapture, ...]
 
     @property
@@ -137,6 +140,7 @@ class RuntimeParityCaptureReport:
             "results_path": self.results_path,
             "targets": list(self.targets),
             "promoted_goldens": self.promoted_goldens,
+            "required_goldens": self.required_goldens,
             "passed": self.passed,
             "captures": [capture.to_dict() for capture in self.captures],
         }
@@ -203,6 +207,7 @@ def write_runtime_parity_suite(
                 "purpose": spec.purpose,
                 "asset": _relative_posix(asset_path, output_dir),
                 "software_baseline": _relative_posix(baseline_path, output_dir),
+                "target_goldens": {target: f"goldens/{target}/{spec.name}.png" for target in _DEFAULT_TARGETS},
                 "checks": list(spec.checks),
                 "materials": len(asset.materials),
                 "textures": len(asset.images),
@@ -220,6 +225,7 @@ def write_runtime_parity_suite(
         "layout": {
             "assets": "assets",
             "baselines": "baselines",
+            "target_goldens": "goldens/{target}/{fixture}.png",
             "engine_previews": "previews/{fixture}-{engine}.png",
             "browser_previews": "previews/{fixture}-browser.png",
         },
@@ -247,6 +253,7 @@ def capture_runtime_parity_suite(
     engine_timeout_seconds: float = 120.0,
     diff_options: VisualDiffOptions | None = None,
     promote_goldens: bool = False,
+    require_goldens: bool = False,
 ) -> RuntimeParityCaptureReport:
     """Capture browser/engine previews for an existing runtime parity fixture suite."""
 
@@ -291,6 +298,7 @@ def capture_runtime_parity_suite(
                     unreal_project=unreal_project,
                     engine_timeout_seconds=engine_timeout_seconds,
                     promote_goldens=promote_goldens,
+                    require_goldens=require_goldens,
                     output_dir=output_dir,
                 )
             )
@@ -302,6 +310,7 @@ def capture_runtime_parity_suite(
         results_path=str(results_path),
         targets=targets,
         promoted_goldens=promote_goldens,
+        required_goldens=require_goldens,
         captures=tuple(captures),
     )
     results_payload = {"schema": _CAPTURE_SCHEMA, **capture_report.to_dict()}
@@ -324,9 +333,29 @@ def _capture_runtime_parity_target(
     unreal_project: str | Path | None,
     engine_timeout_seconds: float,
     promote_goldens: bool,
+    require_goldens: bool,
     output_dir: Path,
 ) -> RuntimeParityCapture:
     preview_path.parent.mkdir(parents=True, exist_ok=True)
+    target_golden_path = output_dir / "goldens" / target / f"{fixture}.png"
+    target_golden_exists = target_golden_path.exists()
+    comparison_baseline_path = target_golden_path if target_golden_exists else baseline_path
+    baseline_kind = "target_golden" if target_golden_exists else "software_baseline"
+    if require_goldens and not target_golden_exists:
+        return RuntimeParityCapture(
+            fixture=fixture,
+            target=target,
+            asset_path=str(asset_path),
+            baseline_path=str(target_golden_path),
+            preview_path=str(preview_path),
+            status="missing_golden",
+            render_status="not_rendered",
+            passed=False,
+            baseline_kind="missing_target_golden",
+            golden_path=str(target_golden_path),
+            error=f"runtime parity target golden is missing: {target_golden_path}",
+        )
+
     if target == "browser":
         browser_report = write_browser_render_preview(
             asset_path,
@@ -360,13 +389,15 @@ def _capture_runtime_parity_target(
     passed: bool | None = None
     golden_path: Path | None = None
     if rendered:
-        diff_report = compare_images(baseline_path, preview_path, diff_options)
+        diff_report = compare_images(comparison_baseline_path, preview_path, diff_options)
         diff_payload = diff_report.to_dict()
         passed = diff_report.passed
         if promote_goldens:
-            golden_path = output_dir / "goldens" / target / f"{fixture}.png"
+            golden_path = target_golden_path
             golden_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(preview_path, golden_path)
+        elif target_golden_exists:
+            golden_path = target_golden_path
     elif error is None:
         error = "runtime parity target did not write a preview"
 
@@ -374,11 +405,12 @@ def _capture_runtime_parity_target(
         fixture=fixture,
         target=target,
         asset_path=str(asset_path),
-        baseline_path=str(baseline_path),
+        baseline_path=str(comparison_baseline_path),
         preview_path=str(preview_path),
         status=status,
         render_status=render_status,
         passed=passed,
+        baseline_kind=baseline_kind,
         diff=diff_payload,
         runtime_report=runtime_report,
         golden_path=None if golden_path is None else str(golden_path),
