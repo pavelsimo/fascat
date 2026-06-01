@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import json
+import shutil
 import struct
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from PIL import Image
 
 import fascat as fc
 from fascat.io.gltf import validate_gltf
-from fascat.runtime_fixtures import write_runtime_parity_suite
+from fascat.runtime import RuntimeBrowserRenderReport, RuntimeEngineReport
+from fascat.runtime_fixtures import capture_runtime_parity_suite, write_runtime_parity_suite
 
 
 def test_runtime_parity_suite_writes_assets_baselines_and_manifest(tmp_path: Path) -> None:
@@ -79,6 +81,82 @@ def test_runtime_parity_pbr_fixture_marks_alpha_material(tmp_path: Path) -> None
     assert materials_by_name["Polished Blue Metal"]["pbrMetallicRoughness"]["metallicFactor"] == 1.0
     assert pbr_fixture.materials == 4
     assert pbr_fixture.triangles == 8
+
+
+def test_runtime_parity_capture_records_previews_diffs_and_goldens(
+    monkeypatch,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    suite_dir = tmp_path / "runtime-parity"
+    write_runtime_parity_suite(suite_dir)
+
+    def copy_baseline(asset_path: Path, preview_path: Path) -> None:
+        baseline = asset_path.parent.parent / "baselines" / f"{asset_path.stem}.png"
+        preview_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(baseline, preview_path)
+
+    def fake_browser(path: str | Path, preview_path: str | Path, _options: object = None) -> RuntimeBrowserRenderReport:
+        copy_baseline(Path(path), Path(preview_path))
+        return RuntimeBrowserRenderReport(
+            path=str(path),
+            status="rendered",
+            browser="fake-browser",
+            preview_path=str(preview_path),
+            width=512,
+            height=512,
+            meshes=1,
+            triangles=1,
+        )
+
+    def fake_engine(path: str | Path, options: object) -> RuntimeEngineReport:
+        engine_options = cast(Any, options)
+        preview_path = Path(engine_options.preview_path)
+        copy_baseline(Path(path), preview_path)
+        return RuntimeEngineReport(
+            path=str(path),
+            status="measured",
+            engine=engine_options.engine,
+            executable="fake-engine",
+            project=str(tmp_path / "Harness"),
+            engine_version="test-engine",
+            load_time_ms=10,
+            measured_fps=60.0,
+            frame_count=30,
+            measurement_duration_ms=500,
+            memory_bytes=4096,
+            meshes=1,
+            triangles=1,
+            preview_path=str(preview_path),
+            render_status="rendered",
+            render_time_ms=5,
+            rendered_frames=30,
+        )
+
+    monkeypatch.setattr("fascat.runtime_fixtures.write_browser_render_preview", fake_browser)
+    monkeypatch.setattr("fascat.runtime_fixtures.measure_engine_runtime", fake_engine)
+
+    report = capture_runtime_parity_suite(
+        suite_dir,
+        targets=("browser", "unity"),
+        browser_command="fake-browser",
+        unity_command="Unity",
+        promote_goldens=True,
+    )
+
+    assert isinstance(report, fc.RuntimeParityCaptureReport)
+    assert report.passed is True
+    assert len(report.captures) == 6
+    assert Path(report.results_path).is_file()
+    assert all(capture.passed is True for capture in report.captures)
+    assert all(capture.diff is not None for capture in report.captures)
+    assert (suite_dir / "previews" / "texture-map-grid-unity.png").is_file()
+    assert (suite_dir / "goldens" / "browser" / "texture-map-grid.png").is_file()
+    assert (suite_dir / "goldens" / "unity" / "texture-map-grid.png").is_file()
+
+    payload = json.loads(Path(report.results_path).read_text(encoding="utf-8"))
+    assert payload["schema"] == "fascat.runtime-parity-captures.v1"
+    assert payload["passed"] is True
+    assert payload["targets"] == ["browser", "unity"]
 
 
 def _read_glb_document(path: Path) -> dict[str, Any]:

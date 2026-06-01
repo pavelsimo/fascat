@@ -1148,6 +1148,12 @@ comparison = fc.write_before_after_previews(before_asset, after_asset, "visual-r
 lod_contact_sheet = fc.write_lod_switch_previews(asset_with_lods, "lod-previews/")
 diff = fc.compare_images("baseline.png", "preview.png", fc.VisualDiffOptions(pixel_tolerance=2))
 suite = fc.write_runtime_parity_suite("runtime-parity/")
+captures = fc.capture_runtime_parity_suite(
+    "runtime-parity/",
+    targets=("browser", "unity"),
+    unity_command="Unity",
+    promote_goldens=True,
+)
 ```
 
 The preview renderer is a local orthographic software renderer. It writes PNGs,
@@ -1159,7 +1165,9 @@ thresholds can gate engine preview baselines through `fascat validate`, but the
 helper itself remains a general image-diff primitive. Use
 `write_runtime_parity_suite()` to write bundled GLB fixtures, software baseline
 PNGs, and a manifest for browser, Unity, and Unreal material/lighting preview
-comparisons.
+comparisons. `capture_runtime_parity_suite()` runs selected browser or engine
+preview targets for that suite, writes `runtime-parity-captures.json`, and can
+promote rendered previews into `goldens/<target>/` for review.
 
 ## Validation
 
@@ -1218,6 +1226,12 @@ fascat validate motor.glb \
   --lod-preview-dir lod-previews/
 
 fascat runtime-fixtures runtime-parity/
+
+fascat runtime-fixtures runtime-parity/ \
+  --capture browser \
+  --capture unity \
+  --unity-command Unity \
+  --promote-goldens
 ```
 
 Validation-time geometry reports use the same filter selectors as conversion
@@ -1280,8 +1294,12 @@ preview path is requested it writes a deterministic PNG plus fixed-frame
 software benchmark fields. That Unreal packaged preview is not a full scene or
 material renderer. `fascat runtime-fixtures DIR` writes bundled PBR material,
 texture-map, and normal/lighting GLB fixtures with software baseline PNGs and a
-manifest containing browser, Unity, and Unreal preview commands. Engine-specific
-golden captures and full Unreal scene-rendered screenshots/FPS remain open. Set
+manifest containing browser, Unity, and Unreal preview commands. Add
+`--capture browser`, `--capture unity`, or `--capture unreal` to run local
+preview captures for the suite and write `runtime-parity-captures.json`;
+`--promote-goldens` copies rendered captures into `goldens/<target>/`.
+Engine-specific checked-in golden corpora and full Unreal scene-rendered
+screenshots/FPS remain open. Set
 `FASCAT_UNITY`, `UNITY_EDITOR`,
 `FASCAT_UNREAL`, or `UNREAL_EDITOR`, or pass `--runtime-engine-command`, when
 the engine executable is not on `PATH`. If the executable is missing, or an

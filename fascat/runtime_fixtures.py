@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 from PIL import Image
@@ -16,11 +17,18 @@ from fascat.io.gltf import validate_gltf
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.options import GltfExportOptions
-from fascat.visual import VisualDiffOptions, VisualPreviewOptions, write_preview
+from fascat.runtime import (
+    RuntimeBrowserRenderOptions,
+    RuntimeEngineOptions,
+    measure_engine_runtime,
+    write_browser_render_preview,
+)
+from fascat.visual import VisualDiffOptions, VisualPreviewOptions, compare_images, write_preview
 
 RuntimeParityTarget = Literal["browser", "unity", "unreal"]
 
 _SUITE_SCHEMA = "fascat.runtime-parity-suite.v1"
+_CAPTURE_SCHEMA = "fascat.runtime-parity-captures.v1"
 _DEFAULT_TARGETS: tuple[RuntimeParityTarget, ...] = ("browser", "unity", "unreal")
 
 
@@ -63,6 +71,63 @@ class RuntimeParitySuiteReport:
             "targets": list(self.targets),
             "recommended_diff": self.recommended_diff.to_dict(),
             "fixtures": [fixture.to_dict() for fixture in self.fixtures],
+        }
+
+
+@dataclass(frozen=True)
+class RuntimeParityCapture:
+    fixture: str
+    target: RuntimeParityTarget
+    asset_path: str
+    baseline_path: str
+    preview_path: str
+    status: str
+    render_status: str
+    passed: bool | None
+    diff: dict[str, object] | None = None
+    runtime_report: dict[str, object] | None = None
+    golden_path: str | None = None
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "fixture": self.fixture,
+            "target": self.target,
+            "asset_path": self.asset_path,
+            "baseline_path": self.baseline_path,
+            "preview_path": self.preview_path,
+            "status": self.status,
+            "render_status": self.render_status,
+            "passed": self.passed,
+            "diff": self.diff,
+            "runtime_report": self.runtime_report,
+            "golden_path": self.golden_path,
+            "error": self.error,
+        }
+
+
+@dataclass(frozen=True)
+class RuntimeParityCaptureReport:
+    directory: str
+    manifest_path: str
+    results_path: str
+    targets: tuple[RuntimeParityTarget, ...]
+    promoted_goldens: bool
+    captures: tuple[RuntimeParityCapture, ...]
+
+    @property
+    def passed(self) -> bool:
+        return all(capture.passed is True for capture in self.captures)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "directory": self.directory,
+            "manifest_path": self.manifest_path,
+            "results_path": self.results_path,
+            "targets": list(self.targets),
+            "promoted_goldens": self.promoted_goldens,
+            "passed": self.passed,
+            "captures": [capture.to_dict() for capture in self.captures],
         }
 
 
@@ -153,6 +218,157 @@ def write_runtime_parity_suite(
         targets=_DEFAULT_TARGETS,
         recommended_diff=diff_opts,
         fixtures=tuple(fixtures),
+    )
+
+
+def capture_runtime_parity_suite(
+    directory: str | Path,
+    *,
+    targets: tuple[RuntimeParityTarget, ...] = _DEFAULT_TARGETS,
+    browser_command: str | None = None,
+    unity_command: str | None = None,
+    unreal_command: str | None = None,
+    unity_project: str | Path | None = None,
+    unreal_project: str | Path | None = None,
+    engine_timeout_seconds: float = 120.0,
+    diff_options: VisualDiffOptions | None = None,
+    promote_goldens: bool = False,
+) -> RuntimeParityCaptureReport:
+    """Capture browser/engine previews for an existing runtime parity fixture suite."""
+
+    if not targets:
+        raise ValueError("runtime parity capture requires at least one target")
+    if any(target not in _DEFAULT_TARGETS for target in targets):
+        raise ValueError("runtime parity capture targets must be one of: browser, unity, unreal")
+    if engine_timeout_seconds <= 0.0:
+        raise ValueError("runtime parity engine timeout must be greater than 0")
+
+    output_dir = Path(directory)
+    manifest_path = output_dir / "runtime-parity-suite.json"
+    if not manifest_path.exists():
+        write_runtime_parity_suite(output_dir)
+    manifest = _load_runtime_parity_manifest(manifest_path)
+    diff_opts = diff_options or _manifest_diff_options(manifest)
+
+    previews_dir = output_dir / "previews"
+    previews_dir.mkdir(parents=True, exist_ok=True)
+    captures: list[RuntimeParityCapture] = []
+    for fixture in _manifest_fixtures(manifest):
+        name = _manifest_string(fixture, "name")
+        asset_path = output_dir / _manifest_string(fixture, "asset")
+        baseline_path = output_dir / _manifest_string(fixture, "software_baseline")
+        if not asset_path.exists():
+            raise FileNotFoundError(f"runtime parity fixture asset is missing: {asset_path}")
+        if not baseline_path.exists():
+            raise FileNotFoundError(f"runtime parity software baseline is missing: {baseline_path}")
+        for target in targets:
+            captures.append(
+                _capture_runtime_parity_target(
+                    name,
+                    target,
+                    asset_path,
+                    baseline_path,
+                    previews_dir / f"{name}-{target}.png",
+                    diff_opts,
+                    browser_command=browser_command,
+                    unity_command=unity_command,
+                    unreal_command=unreal_command,
+                    unity_project=unity_project,
+                    unreal_project=unreal_project,
+                    engine_timeout_seconds=engine_timeout_seconds,
+                    promote_goldens=promote_goldens,
+                    output_dir=output_dir,
+                )
+            )
+
+    results_path = output_dir / "runtime-parity-captures.json"
+    capture_report = RuntimeParityCaptureReport(
+        directory=str(output_dir),
+        manifest_path=str(manifest_path),
+        results_path=str(results_path),
+        targets=targets,
+        promoted_goldens=promote_goldens,
+        captures=tuple(captures),
+    )
+    results_payload = {"schema": _CAPTURE_SCHEMA, **capture_report.to_dict()}
+    results_path.write_text(json.dumps(results_payload, indent=2, sort_keys=False) + "\n", encoding="utf-8")
+    return capture_report
+
+
+def _capture_runtime_parity_target(
+    fixture: str,
+    target: RuntimeParityTarget,
+    asset_path: Path,
+    baseline_path: Path,
+    preview_path: Path,
+    diff_options: VisualDiffOptions,
+    *,
+    browser_command: str | None,
+    unity_command: str | None,
+    unreal_command: str | None,
+    unity_project: str | Path | None,
+    unreal_project: str | Path | None,
+    engine_timeout_seconds: float,
+    promote_goldens: bool,
+    output_dir: Path,
+) -> RuntimeParityCapture:
+    preview_path.parent.mkdir(parents=True, exist_ok=True)
+    if target == "browser":
+        browser_report = write_browser_render_preview(
+            asset_path,
+            preview_path,
+            RuntimeBrowserRenderOptions(browser=browser_command),
+        )
+        status = browser_report.status
+        render_status = browser_report.status
+        error = browser_report.error
+        runtime_report = browser_report.to_dict()
+        rendered = browser_report.status in {"rendered", "rendered_partial"} and preview_path.exists()
+    else:
+        engine_target: Literal["unity", "unreal"] = "unity" if target == "unity" else "unreal"
+        engine_report = measure_engine_runtime(
+            asset_path,
+            RuntimeEngineOptions(
+                engine=engine_target,
+                executable=unity_command if engine_target == "unity" else unreal_command,
+                project=unity_project if engine_target == "unity" else unreal_project,
+                preview_path=preview_path,
+                timeout_seconds=engine_timeout_seconds,
+            ),
+        )
+        status = engine_report.status
+        render_status = engine_report.render_status
+        error = engine_report.render_error or engine_report.error
+        runtime_report = engine_report.to_dict()
+        rendered = engine_report.render_status == "rendered" and preview_path.exists()
+
+    diff_payload: dict[str, object] | None = None
+    passed: bool | None = None
+    golden_path: Path | None = None
+    if rendered:
+        diff_report = compare_images(baseline_path, preview_path, diff_options)
+        diff_payload = diff_report.to_dict()
+        passed = diff_report.passed
+        if promote_goldens:
+            golden_path = output_dir / "goldens" / target / f"{fixture}.png"
+            golden_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(preview_path, golden_path)
+    elif error is None:
+        error = "runtime parity target did not write a preview"
+
+    return RuntimeParityCapture(
+        fixture=fixture,
+        target=target,
+        asset_path=str(asset_path),
+        baseline_path=str(baseline_path),
+        preview_path=str(preview_path),
+        status=status,
+        render_status=render_status,
+        passed=passed,
+        diff=diff_payload,
+        runtime_report=runtime_report,
+        golden_path=None if golden_path is None else str(golden_path),
+        error=error,
     )
 
 
@@ -493,6 +709,58 @@ def _fixture_commands(name: str, diff_options: VisualDiffOptions) -> dict[str, o
             f"--runtime-engine-baseline baselines/{name}.png {diff_args}"
         ),
     }
+
+
+def _load_runtime_parity_manifest(manifest_path: Path) -> dict[str, Any]:
+    try:
+        loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"runtime parity manifest is not valid JSON: {manifest_path}") from exc
+    if not isinstance(loaded, dict):
+        raise RuntimeError("runtime parity manifest must be a JSON object")
+    if loaded.get("schema") != _SUITE_SCHEMA:
+        raise RuntimeError(f"unsupported runtime parity manifest schema: {loaded.get('schema')!r}")
+    return loaded
+
+
+def _manifest_diff_options(manifest: dict[str, Any]) -> VisualDiffOptions:
+    value = manifest.get("recommended_diff")
+    if not isinstance(value, dict):
+        return VisualDiffOptions(pixel_tolerance=8, max_mean_absolute_error=18.0, max_changed_pixel_ratio=0.35)
+    return VisualDiffOptions(
+        pixel_tolerance=_manifest_int(value, "pixel_tolerance", 8),
+        max_mean_absolute_error=_manifest_float(value, "max_mean_absolute_error", 18.0),
+        max_changed_pixel_ratio=_manifest_float(value, "max_changed_pixel_ratio", 0.35),
+    )
+
+
+def _manifest_fixtures(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    fixtures = manifest.get("fixtures")
+    if not isinstance(fixtures, list):
+        raise RuntimeError("runtime parity manifest must contain a fixtures array")
+    result: list[dict[str, Any]] = []
+    for fixture in fixtures:
+        if not isinstance(fixture, dict):
+            raise RuntimeError("runtime parity fixture entries must be objects")
+        result.append(fixture)
+    return result
+
+
+def _manifest_string(payload: dict[str, Any], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise RuntimeError(f"runtime parity manifest field {key!r} must be a non-empty string")
+    return value
+
+
+def _manifest_int(payload: dict[str, Any], key: str, default: int) -> int:
+    value = payload.get(key, default)
+    return int(value) if isinstance(value, int | float | str) and not isinstance(value, bool) else default
+
+
+def _manifest_float(payload: dict[str, Any], key: str, default: float) -> float:
+    value = payload.get(key, default)
+    return float(value) if isinstance(value, int | float | str) and not isinstance(value, bool) else default
 
 
 def _relative_posix(path: Path, root: Path) -> str:

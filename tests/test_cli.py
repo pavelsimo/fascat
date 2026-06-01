@@ -282,6 +282,53 @@ def test_runtime_fixtures_dry_run_does_not_write(tmp_path: Path) -> None:
     assert not suite_dir.exists()
 
 
+def test_runtime_fixtures_can_capture_targets(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    suite_dir = tmp_path / "runtime-parity"
+
+    class FakeCaptureReport:
+        captures = (object(), object())
+
+        def to_dict(self) -> dict[str, object]:
+            return {"passed": True, "captures": [{"target": "browser"}, {"target": "unity"}]}
+
+    def fake_capture(directory: str | Path, **kwargs: object) -> FakeCaptureReport:
+        assert Path(directory) == suite_dir
+        assert kwargs["targets"] == ("browser", "unity")
+        assert kwargs["browser_command"] == "Chrome"
+        assert kwargs["unity_command"] == "Unity"
+        assert kwargs["promote_goldens"] is True
+        return FakeCaptureReport()
+
+    monkeypatch.setattr("fascat.cli.capture_runtime_parity_suite", fake_capture)
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "runtime-fixtures",
+            str(suite_dir),
+            "--capture",
+            "browser",
+            "--capture",
+            "unity",
+            "--runtime-browser-command",
+            "Chrome",
+            "--unity-command",
+            "Unity",
+            "--promote-goldens",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["capture"] == ["browser", "unity"]
+    assert payload["captures"]["passed"] is True
+    assert len(payload["captures"]["captures"]) == 2
+
+
 def test_convert_dry_run_json() -> None:
     result = runner.invoke(
         app,
