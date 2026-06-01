@@ -21,6 +21,7 @@ from fascat.io.step import (
     _color_material_spec,
     _extract_material_libraries,
     _extract_source_textures,
+    _extract_step_design_variants,
     _extract_step_pmi_annotations,
     _import_decisions,
     _import_warnings,
@@ -130,7 +131,7 @@ def test_step_import_warnings_report_unsupported_import_intent() -> None:
 
     assert warnings == [
         "STEP file advertises AP242 PMI, but no supported typed PMI entities were extracted; annotations are omitted",
-        "STEP design variant import is not implemented; variants are omitted",
+        "STEP design variant import was requested, but no supported design variant records were detected",
         "multi-file STEP assembly import is not implemented; external references are not loaded",
     ]
 
@@ -174,6 +175,58 @@ def test_step_text_pmi_extraction_respects_disabled_pmi(tmp_path: Path) -> None:
     assert _extract_step_pmi_annotations(source, StepReadOptions(pmi=False)) == []
 
 
+def test_step_design_variant_extraction_reads_configuration_records(tmp_path: Path) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=CONFIGURATION_ITEM('mounting side','left/right handed option',#1);\n"
+        "#11=PRODUCT_CONCEPT_FEATURE('left hand','select left mounting side',#2);\n"
+        "#12=CONFIGURATION_DESIGN(#10,#11);\n"
+        "#13=CONFIGURATION_EFFECTIVITY('serial range A',#12);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    extraction = _extract_step_design_variants(source, StepReadOptions(design_variants=True))
+
+    assert extraction.summary == {
+        "records": 4,
+        "configuration_items": 1,
+        "product_concept_features": 1,
+        "effectivity_records": 2,
+    }
+    assert [record.kind for record in extraction.records] == [
+        "configuration_item",
+        "product_concept_feature",
+        "configuration_design",
+        "configuration_effectivity",
+    ]
+    assert extraction.records[0].label == "mounting side / left/right handed option"
+    assert extraction.records[2].references == ("#10", "#11")
+    assert extraction.warnings == (
+        "STEP design variant records were detected and reported as metadata; "
+        "variant-specific geometry selection is not implemented",
+    )
+
+
+def test_step_design_variant_extraction_respects_disabled_option(tmp_path: Path) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text("#10=CONFIGURATION_ITEM('mounting side','left/right handed option',#1);\n", encoding="utf-8")
+
+    extraction = _extract_step_design_variants(source, StepReadOptions(design_variants=False))
+
+    assert extraction.records == ()
+    assert extraction.summary == {
+        "records": 0,
+        "configuration_items": 0,
+        "product_concept_features": 0,
+        "effectivity_records": 0,
+    }
+    assert extraction.warnings == ()
+
+
 def test_step_import_cleanup_actions_cover_construction_only_shapes() -> None:
     point_counts = _ShapeTopologyCounts(vertices=3)
     line_counts = _ShapeTopologyCounts(vertices=4, edges=2)
@@ -211,7 +264,8 @@ def test_step_import_decisions_report_requested_effective_states() -> None:
     )
 
     assert decisions["pmi"]["state"] == "unsupported"
-    assert decisions["design_variants"]["state"] == "unsupported"
+    assert decisions["design_variants"]["state"] == "not_present"
+    assert decisions["design_variants"]["counts"]["records"] == 0
     assert decisions["multi_file"]["state"] == "unsupported"
     assert decisions["source_textures"]["state"] == "honored"
     assert decisions["material_library_mapping"]["state"] == "honored"
@@ -240,6 +294,34 @@ def test_step_import_decisions_report_extracted_typed_pmi() -> None:
     assert decisions["pmi"]["state"] == "honored"
     assert decisions["pmi"]["effective"] is True
     assert decisions["pmi"]["counts"] == {"imported": 2, "unsupported": 0}
+
+
+def test_step_import_decisions_report_detected_design_variants() -> None:
+    space = _space_normalization("millimetre", 0.001, StepReadOptions())
+
+    decisions = _import_decisions(
+        StepReadOptions(design_variants=True),
+        _StepHeaderInfo(schema="AP242", pmi_present=False),
+        pmi_count=0,
+        unsupported_pmi_count=0,
+        cleanup=_ImportCleanupStats(),
+        space=space,
+        design_variant_summary={
+            "records": 3,
+            "configuration_items": 1,
+            "product_concept_features": 1,
+            "effectivity_records": 1,
+        },
+    )
+
+    assert decisions["design_variants"]["state"] == "approximated"
+    assert decisions["design_variants"]["effective"] is True
+    assert decisions["design_variants"]["counts"] == {
+        "records": 3,
+        "configuration_items": 1,
+        "product_concept_features": 1,
+        "effectivity_records": 1,
+    }
 
 
 def test_step_source_texture_extraction_loads_sidecar_images_and_binds_single_material(tmp_path: Path) -> None:

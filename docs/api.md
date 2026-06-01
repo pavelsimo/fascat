@@ -301,6 +301,13 @@ report records `pmi_present=true`, `unsupported_pmi_count=1`, and a warning
 instead of silently implying that PMI was imported. Visual annotation geometry
 and full AP242 semantic graph reconstruction are still planned backend work.
 
+STEP design variant import can scan common configuration and effectivity records
+such as `CONFIGURATION_ITEM`, `PRODUCT_CONCEPT_FEATURE`,
+`CONFIGURATION_DESIGN`, and `CONFIGURATION_EFFECTIVITY` when
+`design_variants=True`. Detected records are reported in asset metadata and
+import reports with counts and STEP references. Variant-specific geometry
+selection is still planned backend work.
+
 STEP and IGES import can scan source-file string references for sidecar PNG, JPEG, and KTX2 textures, load them as first-class `ImageResource` objects, and bind semantic names such as `baseColor`, `normal`, `ao`, or `emissive` to material texture metadata. XDE visual material PBR/common values are preserved where exposed, and common CAD material names such as steel, aluminum, brass, copper, glass, plastic, rubber, and paint are mapped to deterministic PBR defaults with diagnostics in material metadata. Supported vendor material libraries can also be supplied explicitly, or referenced from the CAD source, as JSON/MTL files, ZIP packages containing JSON/MTL records plus textures, or folders containing those files; imported records update matching CAD materials with PBR factors and texture slots while reporting resolved, missing, unreadable, matched, and unmatched counts.
 
 STEP import reports also include `import_decisions`, which records each import toggle as requested, effective, and `honored`, `approximated`, `unsupported`, `disabled`, `not_present`, or `backend_default`. The same report step includes `loaded_representations`, a per-part list of BREP, construction-point, construction-line, or empty-shape inputs plus deleted construction-only nodes and source topology counts.
@@ -319,7 +326,7 @@ Metadata and PMI parameters:
 | `StepReadOptions` | `layers` | Request layer assignments as metadata. Current normalized layer extraction is reported as unsupported in `import_decisions` when requested. |
 | `StepReadOptions` | `validation_properties` | Request STEP validation properties. Current reports approximate this with source topology counts rather than typed validation-property entities. |
 | `StepReadOptions` | `pmi` | Import common typed AP242 PMI text records into `PmiAnnotation` objects; AP242 PMI markers are reported when no supported typed record can be extracted. |
-| `StepReadOptions` | `design_variants` | Request STEP design variant import. Current backend support is limited and reports a warning when requested variants cannot be loaded. |
+| `StepReadOptions` | `design_variants` | Scan common STEP configuration/design-variant/effectivity records into metadata and import reports. Variant-specific geometry selection remains planned backend work. |
 | `StepReadOptions` | `existing_meshes` | Prefer existing tessellation payloads from the source file when the importer exposes them. Tessellation `reuse_existing_meshes` still controls whether loaded meshes are retessellated later. |
 | `StepReadOptions` | `multi_file` | Request multi-file STEP assembly import. `read_step_many()` honors explicit member lists; single-path STEP imports recursively resolve quoted external `.step` / `.stp` references, preserve repeated references as member occurrences, and report the `external_reference_graph`. |
 | `StepReadOptions` | `source_textures` | Scan STEP/IGES source text for referenced sidecar PNG/JPEG/KTX2 texture files, load resolved files into `asset.images`, and report resolved/missing/unreadable counts. |

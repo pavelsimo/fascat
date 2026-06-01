@@ -85,6 +85,19 @@ _STEP_PMI_ENTITY_KINDS = {
     "SAVED_VIEW": "saved_view",
     "ANNOTATION_PLANE": "annotation_plane",
 }
+_STEP_DESIGN_VARIANT_ENTITY_KINDS = {
+    "CONFIGURATION_DESIGN": "configuration_design",
+    "CONFIGURATION_EFFECTIVITY": "configuration_effectivity",
+    "CONFIGURATION_ITEM": "configuration_item",
+    "CONFIGURED_EFFECTIVITY_ASSIGNMENT": "configured_effectivity_assignment",
+    "PRODUCT_CONCEPT": "product_concept",
+    "PRODUCT_CONCEPT_CONTEXT": "product_concept_context",
+    "PRODUCT_CONCEPT_FEATURE": "product_concept_feature",
+    "PRODUCT_CONCEPT_FEATURE_ASSOCIATION": "product_concept_feature_association",
+    "PRODUCT_CONCEPT_FEATURE_CATEGORY": "product_concept_feature_category",
+    "PRODUCT_CONCEPT_FEATURE_CATEGORY_USAGE": "product_concept_feature_category_usage",
+    "PRODUCT_DEFINITION_EFFECTIVITY": "product_definition_effectivity",
+}
 _STEP_UNIT_RE = re.compile(r"\b(mm|millimet(?:er|re)|cm|centimet(?:er|re)|m|met(?:er|re)|in|inch|deg|degree)\b", re.I)
 _GENERIC_MATERIAL_TOKENS = {"cad", "color", "material", "mat", "texture", "map", "source"}
 _TEXTURE_SLOT_TOKENS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -212,6 +225,38 @@ class _StepExternalReferenceGraph:
             "member_sources": [str(source) for source in self.member_sources],
             "summary": self.summary(),
             "references": [record.to_dict() for record in self.records],
+            "warnings": list(self.warnings),
+        }
+
+
+@dataclass(frozen=True)
+class _StepDesignVariantRecord:
+    id: str
+    kind: str
+    entity: str
+    label: str
+    references: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "entity": self.entity,
+            "label": self.label,
+            "references": list(self.references),
+        }
+
+
+@dataclass(frozen=True)
+class _StepDesignVariantExtraction:
+    records: tuple[_StepDesignVariantRecord, ...]
+    summary: dict[str, int]
+    warnings: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "summary": self.summary,
+            "records": [record.to_dict() for record in self.records],
             "warnings": list(self.warnings),
         }
 
@@ -586,6 +631,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         material_library_binding_summary = _apply_material_libraries_to_materials(materials, material_libraries)
         images = {**source_textures.images, **material_libraries.images}
         pmi = _extract_step_pmi_annotations(source, options)
+        design_variants = _extract_step_design_variants(source, options)
 
     report = Report(source_path=str(source))
     asset = Asset(
@@ -597,7 +643,16 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         meters_per_unit=space.target_meters_per_unit,
         up_axis=cast(Any, space.target_up_axis),
         source_path=source,
-        metadata=_asset_metadata(source, source_identity, options, header_info, cleanup, space, pmi_count=len(pmi)),
+        metadata=_asset_metadata(
+            source,
+            source_identity,
+            options,
+            header_info,
+            cleanup,
+            space,
+            pmi_count=len(pmi),
+            design_variant_summary=design_variants.summary,
+        ),
         pmi=pmi,
         report=report,
     )
@@ -615,6 +670,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         texture_binding_summary=texture_binding_summary,
         material_library_summary=material_libraries.summary,
         material_library_binding_summary=material_library_binding_summary,
+        design_variant_summary=design_variants.summary,
     )
     loaded_representations = _loaded_representation_report(asset)
     if asset.metadata:
@@ -624,10 +680,19 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         asset.metadata["source_texture_bindings"] = texture_binding_summary
         asset.metadata["material_library_import"] = material_libraries.summary
         asset.metadata["material_library_bindings"] = material_library_binding_summary
+        asset.metadata["design_variant_import"] = design_variants.summary
+        if design_variants.records:
+            asset.metadata["design_variants"] = [record.to_dict() for record in design_variants.records]
     import_warnings = [
-        *_import_warnings(options, header_info, unsupported_pmi_count),
+        *_import_warnings(
+            options,
+            header_info,
+            unsupported_pmi_count,
+            design_variant_count=design_variants.summary["records"],
+        ),
         *source_textures.warnings,
         *material_libraries.warnings,
+        *design_variants.warnings,
     ]
     for warning in import_warnings:
         asset.report.add_warning(warning)
@@ -640,6 +705,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
             "metadata_count": metadata_count,
             "pmi_count": len(asset.pmi),
             "unsupported_pmi_count": unsupported_pmi_count,
+            "design_variants": design_variants.to_dict(),
             "pmi_schema": header_info.schema,
             "pmi_present": header_info.pmi_present,
             "cleanup": cleanup.to_dict(),
@@ -1329,6 +1395,7 @@ def _asset_metadata(
     cleanup: _ImportCleanupStats,
     space: _SpaceNormalization,
     pmi_count: int = 0,
+    design_variant_summary: dict[str, int] | None = None,
     source_texture_summary: dict[str, int] | None = None,
     texture_binding_summary: dict[str, int] | None = None,
     material_library_summary: dict[str, int] | None = None,
@@ -1353,6 +1420,8 @@ def _asset_metadata(
     }
     if source_texture_summary is not None:
         metadata["source_texture_import"] = source_texture_summary
+    if design_variant_summary is not None:
+        metadata["design_variant_import"] = design_variant_summary
     if texture_binding_summary is not None:
         metadata["source_texture_bindings"] = texture_binding_summary
     if material_library_summary is not None:
@@ -1416,6 +1485,66 @@ def _extract_step_pmi_annotations(source: Path, options: StepReadOptions) -> lis
             )
         )
     return annotations
+
+
+def _extract_step_design_variants(source: Path, options: StepReadOptions) -> _StepDesignVariantExtraction:
+    if not options.design_variants:
+        return _StepDesignVariantExtraction(records=(), summary=_empty_design_variant_summary(), warnings=())
+
+    text = source.read_text(encoding="utf-8", errors="ignore")
+    records: list[_StepDesignVariantRecord] = []
+    for record in _iter_step_records(text):
+        kind = _STEP_DESIGN_VARIANT_ENTITY_KINDS.get(record.entity)
+        if kind is None:
+            continue
+        strings = _step_string_values(record.args)
+        records.append(
+            _StepDesignVariantRecord(
+                id=f"step_variant_{record.number}",
+                kind=kind,
+                entity=record.entity,
+                label=" / ".join(strings) if strings else record.entity.lower().replace("_", " "),
+                references=tuple(f"#{item}" for item in _STEP_REFERENCE_RE.findall(record.args)),
+            )
+        )
+
+    warnings = (
+        (
+            "STEP design variant records were detected and reported as metadata; "
+            "variant-specific geometry selection is not implemented",
+        )
+        if records
+        else ()
+    )
+    return _StepDesignVariantExtraction(
+        records=tuple(records),
+        summary=_design_variant_summary(records),
+        warnings=warnings,
+    )
+
+
+def _design_variant_summary(records: Iterable[_StepDesignVariantRecord]) -> dict[str, int]:
+    items = list(records)
+    return {
+        "records": len(items),
+        "configuration_items": sum(1 for item in items if item.entity == "CONFIGURATION_ITEM"),
+        "product_concept_features": sum(1 for item in items if item.entity == "PRODUCT_CONCEPT_FEATURE"),
+        "effectivity_records": sum(
+            1
+            for item in items
+            if "EFFECTIVITY" in item.entity
+            or item.entity in {"CONFIGURATION_DESIGN", "CONFIGURED_EFFECTIVITY_ASSIGNMENT"}
+        ),
+    }
+
+
+def _empty_design_variant_summary() -> dict[str, int]:
+    return {
+        "records": 0,
+        "configuration_items": 0,
+        "product_concept_features": 0,
+        "effectivity_records": 0,
+    }
 
 
 def _iter_step_records(text: str) -> list[_StepRecord]:
@@ -1557,14 +1686,18 @@ def _import_warnings(
     options: StepReadOptions,
     header_info: _StepHeaderInfo,
     unsupported_pmi_count: int,
+    *,
+    design_variant_count: int = 0,
 ) -> list[str]:
     warnings: list[str] = []
     if options.pmi and unsupported_pmi_count:
         warnings.append(
             "STEP file advertises AP242 PMI, but no supported typed PMI entities were extracted; annotations are omitted"
         )
-    if options.design_variants:
-        warnings.append("STEP design variant import is not implemented; variants are omitted")
+    if options.design_variants and design_variant_count == 0:
+        warnings.append(
+            "STEP design variant import was requested, but no supported design variant records were detected"
+        )
     if options.multi_file:
         warnings.append("multi-file STEP assembly import is not implemented; external references are not loaded")
     return warnings
@@ -1582,6 +1715,7 @@ def _import_decisions(
     texture_binding_summary: dict[str, int] | None = None,
     material_library_summary: dict[str, int] | None = None,
     material_library_binding_summary: dict[str, int] | None = None,
+    design_variant_summary: dict[str, int] | None = None,
 ) -> dict[str, object]:
     cleanup_counts = cleanup.to_dict()
     texture_summary = source_texture_summary or {
@@ -1594,6 +1728,7 @@ def _import_decisions(
     binding_summary = texture_binding_summary or {"bound_images": 0, "bound_materials": 0, "unbound_images": 0}
     library_summary = material_library_summary or _empty_material_library_summary()
     library_binding_summary = material_library_binding_summary or _empty_material_library_binding_summary()
+    variant_summary = {**_empty_design_variant_summary(), **(design_variant_summary or {})}
     return {
         "metadata": _import_decision(
             requested=options.metadata,
@@ -1624,12 +1759,7 @@ def _import_decisions(
             detail="source topology counts are derived after transfer; typed STEP validation properties are not extracted",
         ),
         "pmi": _pmi_import_decision(options, header_info, pmi_count, unsupported_pmi_count),
-        "design_variants": _import_decision(
-            requested=options.design_variants,
-            effective=False,
-            state="unsupported" if options.design_variants else "disabled",
-            detail="STEP design variant import is not implemented",
-        ),
+        "design_variants": _design_variant_import_decision(options, variant_summary),
         "existing_meshes": _import_decision(
             requested=options.existing_meshes,
             effective=options.existing_meshes,
@@ -1771,6 +1901,30 @@ def _pmi_import_decision(
         effective=True,
         state="honored",
         counts={"imported": pmi_count, "unsupported": unsupported_pmi_count},
+    )
+
+
+def _design_variant_import_decision(options: StepReadOptions, summary: dict[str, int]) -> dict[str, object]:
+    counts = {**_empty_design_variant_summary(), **summary}
+    if not options.design_variants:
+        return _import_decision(requested=False, effective=False, state="disabled")
+    if counts["records"] == 0:
+        return _import_decision(
+            requested=True,
+            effective=False,
+            state="not_present",
+            detail="design variant import was requested, but no supported STEP configuration records were detected",
+            counts=counts,
+        )
+    return _import_decision(
+        requested=True,
+        effective=True,
+        state="approximated",
+        detail=(
+            "supported STEP configuration/design-variant records are reported as metadata; "
+            "variant-specific geometry selection is not implemented"
+        ),
+        counts=counts,
     )
 
 
