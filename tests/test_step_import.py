@@ -264,7 +264,7 @@ def test_step_design_variant_extraction_reads_configuration_records(tmp_path: Pa
         "configuration_items": 1,
         "product_concept_features": 1,
         "effectivity_records": 3,
-        "conditional_records": 0,
+        "conditional_records": 1,
     }
     assert [record.kind for record in extraction.records] == [
         "configuration_item",
@@ -284,6 +284,7 @@ def test_step_design_variant_extraction_reads_configuration_records(tmp_path: Pa
         "mounting side / left/right handed option",
         "left hand / select left mounting side",
     )
+    assert extraction.records[3].condition_operator == "effectivity_usage"
     assert extraction.records[4].effectivity_kind == "serial"
     assert extraction.records[4].effectivity_values == ("SN-A-001", "SN-A-099")
     assert extraction.records[4].effectivity_range == ("SN-A-001", "SN-A-099")
@@ -465,6 +466,86 @@ def test_step_design_variant_selection_resolves_dated_effectivity_range(tmp_path
     assert selection.matched_records == ("step_variant_13",)
     assert [child.name for child in root.children] == ["Inspection Cover"]
     assert set(parts) == {"cover"}
+
+
+def test_step_design_variant_selection_gates_product_definition_effectivity_usage(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=PRODUCT_DEFINITION('assembly','source assembly',#1,#2);\n"
+        "#11=PRODUCT_DEFINITION('service panel','selected occurrence',#1,#2);\n"
+        "#20=PRODUCT_DEFINITION_RELATIONSHIP('service option','effectivity usage',#10,#11);\n"
+        "#30=PRODUCT_DEFINITION_EFFECTIVITY('release 2',#20);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="service-node", name="Service Panel", part_id="service"),
+            fc.Node(id="blank-node", name="Blank Panel", part_id="blank"),
+        ],
+    )
+    parts = {
+        "service": fc.Part(
+            id="service",
+            name="Service Panel",
+            material_ids=["service-mat"],
+            metadata={"source_name": "service panel"},
+        ),
+        "blank": fc.Part(
+            id="blank",
+            name="Blank Panel",
+            material_ids=["blank-mat"],
+            metadata={"source_name": "blank panel"},
+        ),
+    }
+    materials = {
+        "service-mat": fc.Material(id="service-mat", name="Service Paint", base_color=(1.0, 0.0, 0.0, 1.0)),
+        "blank-mat": fc.Material(id="blank-mat", name="Blank Paint", base_color=(0.0, 0.0, 1.0, 1.0)),
+    }
+
+    release_options = StepReadOptions(design_variant_selection=("release 2",))
+    release_extraction = _extract_step_design_variants(source, release_options)
+    release_root = root.copy()
+    release_parts = {key: part.copy() for key, part in parts.items()}
+    release_materials = dict(materials)
+
+    release_selection = _apply_step_design_variant_selection(
+        release_root,
+        release_parts,
+        release_materials,
+        release_extraction,
+        release_options,
+    )
+
+    assert release_extraction.records[0].kind == "product_definition_effectivity"
+    assert release_extraction.records[0].condition_operator == "effectivity_usage"
+    assert release_extraction.records[0].reference_labels == ("service option / effectivity usage",)
+    assert "service panel / selected occurrence" in release_extraction.records[0].resolved_reference_labels
+    assert release_selection.status == "applied"
+    assert release_selection.matched_records == ("step_variant_30",)
+    assert "service panel" in [term.lower() for term in release_selection.selector_terms]
+    assert [child.name for child in release_root.children] == ["Service Panel"]
+    assert set(release_parts) == {"service"}
+
+    target_options = StepReadOptions(design_variant_selection=("service panel",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
 
 
 def test_step_design_variant_selection_gates_effectivity_assignment_targets(tmp_path: Path) -> None:

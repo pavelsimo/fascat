@@ -130,7 +130,9 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "CONFIGURED_EFFECTIVITY_ASSIGNMENT": "configured_effectivity_assignment",
     "CONFIGURED_EFFECTIVITY_CONTEXT_ASSIGNMENT": "configured_effectivity_context_assignment",
     "CONFIGUREDEFFECTIVITYCONTEXTASSIGNMENT": "configured_effectivity_context_assignment",
+    "CONFIGURATIONEFFECTIVITY": "configuration_effectivity",
     "DATED_EFFECTIVITY": "dated_effectivity",
+    "DATEDEFFECTIVITY": "dated_effectivity",
     "EFFECTIVITY": "effectivity",
     "EFFECTIVITYASSIGNMENT": "effectivity_assignment",
     "EFFECTIVITY_ASSIGNMENT": "effectivity_assignment",
@@ -160,6 +162,7 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "PRODUCT_CONCEPT_FEATURE_CATEGORY": "product_concept_feature_category",
     "PRODUCT_CONCEPT_FEATURE_CATEGORY_USAGE": "product_concept_feature_category_usage",
     "PRODUCT_DEFINITION_EFFECTIVITY": "product_definition_effectivity",
+    "PRODUCTDEFINITIONEFFECTIVITY": "product_definition_effectivity",
     "REAL_LITERAL": "real_literal",
     "REALLITERAL": "real_literal",
     "REAL_NUMERIC_VARIABLE": "real_numeric_variable",
@@ -1952,6 +1955,8 @@ def _step_condition_operator(entity: str) -> str | None:
         return "effectivity_context_assignment"
     if normalized == "APPLIEDINEFFECTIVITYASSIGNMENT":
         return "ineffectivity_assignment"
+    if normalized in {"CONFIGURATIONEFFECTIVITY", "PRODUCTDEFINITIONEFFECTIVITY"}:
+        return "effectivity_usage"
     if normalized in {"BOOLEANVARIABLE", "MATHSBOOLEANVARIABLE"}:
         return "variable"
     if normalized in {
@@ -2160,6 +2165,7 @@ def _design_variant_selector_terms(
                 "conditional",
                 "effectivity_assignment",
                 "effectivity_context_assignment",
+                "effectivity_usage",
                 "ineffectivity_assignment",
                 "numeric_literal",
                 "numeric_variable",
@@ -2223,6 +2229,7 @@ def _conditional_dependency_references(
         "conditional",
         "effectivity_assignment",
         "effectivity_context_assignment",
+        "effectivity_usage",
         "ineffectivity_assignment",
     }
     dependencies: set[str] = {
@@ -2271,6 +2278,13 @@ def _condition_record_matches_requested(
         return _StepConditionMatch(matched=record.condition_number is not None)
     if operator == "numeric_variable":
         matched = _design_variant_record_requested_number(record, requested, normalized_requested) is not None
+        return _StepConditionMatch(matched=matched, positive=matched)
+    if operator == "effectivity_usage":
+        matched = _effectivity_condition_record_matches_requested(
+            record,
+            requested,
+            normalized_requested,
+        )
         return _StepConditionMatch(matched=matched, positive=matched)
 
     child_records = [
