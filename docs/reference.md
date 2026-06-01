@@ -87,7 +87,8 @@ those records resolve to labels that match imported node, part, or source-name
 metadata. Simple AP242 boolean condition records such as `AND_EXPRESSION`,
 `OR_EXPRESSION`, `XOR_EXPRESSION`, `NOT_EXPRESSION`, and
 `CONDITIONAL_CONFIGURATION` are reported with condition operators and gate their
-operand labels before those labels can drive geometry pruning. Report steps also include
+operand labels before those labels can drive geometry pruning; conditional
+wrappers also gate their configured target labels. Report steps also include
 `loaded_representations`, a per-part
 BREP/construction-shape summary plus deleted construction-only nodes and source
 topology counts. Free construction edges split from mixed face+curve STEP shapes

@@ -523,6 +523,20 @@ def test_step_design_variant_selection_requires_supported_boolean_conditions(tmp
     assert partial_extraction.records[4].condition_operator == "and"
     assert partial_selection.status == "unmatched_geometry"
     assert partial_selection.matched_records == ()
+    assert "condition expression was not satisfied" in partial_selection.warnings[0]
+
+    target_options = StepReadOptions(design_variant_selection=("left premium package",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
 
     full_options = StepReadOptions(design_variant_selection=("left hand", "premium trim"))
     full_extraction = _extract_step_design_variants(source, full_options)

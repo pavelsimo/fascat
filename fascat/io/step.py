@@ -1914,7 +1914,7 @@ def _apply_step_design_variant_selection(
             removed_parts=0,
         )
 
-    matched_records, selector_terms = _design_variant_selector_terms(extraction.records, requested)
+    matched_records, selector_terms, condition_blocked = _design_variant_selector_terms(extraction.records, requested)
     warnings: list[str] = []
     if not extraction.records:
         warnings.append("STEP design variant selection was requested, but no supported variant records were detected")
@@ -1931,7 +1931,12 @@ def _apply_step_design_variant_selection(
             removed_parts=0,
             warnings=tuple(warnings),
         )
-    if not matched_records:
+    if condition_blocked and not matched_records:
+        warnings.append(
+            "STEP design variant selection matched labels controlled by supported condition records, "
+            "but the condition expression was not satisfied"
+        )
+    elif not matched_records:
         warnings.append(
             "STEP design variant selection did not match any supported variant record; "
             "using requested terms directly against imported geometry names"
@@ -1998,12 +2003,13 @@ def _apply_step_design_variant_selection(
 def _design_variant_selector_terms(
     records: tuple[_StepDesignVariantRecord, ...],
     requested: tuple[str, ...],
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
+) -> tuple[tuple[str, ...], tuple[str, ...], bool]:
     normalized_requested = tuple(_normalize_variant_term(item) for item in requested)
     records_by_reference = {_design_variant_record_step_reference(record): record for record in records}
     conditional_dependency_refs = _conditional_dependency_references(records, records_by_reference)
     matched: list[str] = []
     terms: list[str] = list(requested)
+    condition_blocked = False
     for record in records:
         direct_id_match = _design_variant_record_id_matches(record, normalized_requested)
         condition_match = _condition_record_matches_requested(
@@ -2023,10 +2029,18 @@ def _design_variant_selector_terms(
         )
         if record.condition_operator is not None:
             direct_match = _design_variant_record_self_matches_requested(record, normalized_requested)
+            condition_blocked = condition_blocked or (
+                not direct_id_match
+                and not direct_match
+                and not condition_applies
+                and _design_variant_record_matches_requested(record, requested, normalized_requested)
+            )
         else:
+            requested_record_match = _design_variant_record_matches_requested(record, requested, normalized_requested)
             direct_match = not suppress_direct_match and _design_variant_record_matches_requested(
                 record, requested, normalized_requested
             )
+            condition_blocked = condition_blocked or (suppress_direct_match and requested_record_match)
         if not direct_id_match and not direct_match and not condition_applies:
             continue
         matched.append(record.id)
@@ -2037,9 +2051,12 @@ def _design_variant_selector_terms(
             terms.extend(_design_variant_label_terms(label))
         terms.extend(record.effectivity_values)
         terms.extend(record.references)
-    return tuple(dict.fromkeys(matched)), tuple(
+    selector_terms = tuple(
         item for item in dict.fromkeys(term.strip() for term in terms if term.strip()) if _normalize_variant_term(item)
     )
+    if condition_blocked and not matched:
+        selector_terms = ()
+    return tuple(dict.fromkeys(matched)), selector_terms, condition_blocked
 
 
 def _conditional_dependency_references(
@@ -2049,7 +2066,7 @@ def _conditional_dependency_references(
     dependencies: set[str] = {
         reference
         for record in records
-        if record.condition_operator in {"and", "or", "xor", "not"}
+        if record.condition_operator in {"and", "or", "xor", "not", "conditional"}
         for reference in record.references
     }
     changed = True
@@ -2086,16 +2103,18 @@ def _condition_record_matches_requested(
     if operator == "literal":
         return _StepConditionMatch(matched=".T." in record.label.upper() or "TRUE" in record.label.upper())
 
+    child_records = [
+        child for reference in record.references if (child := records_by_reference.get(reference)) is not None
+    ]
     children = [
         _condition_record_matches_requested(
-            child,
+            child_record,
             records_by_reference,
             requested,
             normalized_requested,
             visited=set(visited),
         )
-        for reference in record.references
-        if (child := records_by_reference.get(reference)) is not None
+        for child_record in child_records
     ]
     if not children:
         matched = _design_variant_record_matches_requested(record, requested, normalized_requested)
@@ -2103,6 +2122,18 @@ def _condition_record_matches_requested(
     if operator == "not":
         child_match = children[0]
         return _StepConditionMatch(matched=not child_match.matched, positive=False)
+    if operator == "conditional":
+        condition_children = [
+            child_match
+            for child_record, child_match in zip(child_records, children, strict=False)
+            if child_record.condition_operator is not None
+        ]
+        if condition_children:
+            matched = all(child.matched for child in condition_children)
+            return _StepConditionMatch(
+                matched=matched,
+                positive=matched and any(child.positive for child in condition_children),
+            )
     if operator == "and":
         matched = all(child.matched for child in children)
         return _StepConditionMatch(matched=matched, positive=matched and any(child.positive for child in children))
