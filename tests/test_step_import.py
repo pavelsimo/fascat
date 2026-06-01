@@ -633,6 +633,85 @@ def test_step_design_variant_selection_supports_not_condition(tmp_path: Path) ->
     assert premium_selection.matched_records == ()
 
 
+def test_step_design_variant_selection_evaluates_boolean_literals(tmp_path: Path) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=PRODUCT_CONCEPT_FEATURE('service package','select service panel',#1);\n"
+        "#11=PRODUCT_CONCEPT_FEATURE('blocked package','select blocked panel',#1);\n"
+        "#20=BOOLEAN_LITERAL(.T.);\n"
+        "#21=BOOLEAN_LITERAL(.F.);\n"
+        "#30=CONDITIONAL_CONFIGURATION('service condition',#20,#10);\n"
+        "#31=CONDITIONAL_CONFIGURATION('blocked condition',#21,#11);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="service-node", name="Service Panel", part_id="service"),
+            fc.Node(id="blocked-node", name="Blocked Panel", part_id="blocked"),
+        ],
+    )
+    parts = {
+        "service": fc.Part(
+            id="service",
+            name="Service Panel",
+            material_ids=["service-mat"],
+            metadata={"source_name": "service panel"},
+        ),
+        "blocked": fc.Part(
+            id="blocked",
+            name="Blocked Panel",
+            material_ids=["blocked-mat"],
+            metadata={"source_name": "blocked panel"},
+        ),
+    }
+    materials = {
+        "service-mat": fc.Material(id="service-mat", name="Service Paint", base_color=(1.0, 0.0, 0.0, 1.0)),
+        "blocked-mat": fc.Material(id="blocked-mat", name="Blocked Paint", base_color=(0.0, 0.0, 1.0, 1.0)),
+    }
+
+    service_options = StepReadOptions(design_variant_selection=("service package",))
+    service_extraction = _extract_step_design_variants(source, service_options)
+    service_root = root.copy()
+    service_parts = {key: part.copy() for key, part in parts.items()}
+    service_materials = dict(materials)
+
+    service_selection = _apply_step_design_variant_selection(
+        service_root,
+        service_parts,
+        service_materials,
+        service_extraction,
+        service_options,
+    )
+
+    assert service_extraction.summary["conditional_records"] == 4
+    assert service_extraction.records[2].condition_operator == "literal"
+    assert service_extraction.records[2].condition_value is True
+    assert service_extraction.records[3].condition_value is False
+    assert service_selection.status == "applied"
+    assert service_selection.matched_records == ("step_variant_30",)
+    assert [child.name for child in service_root.children] == ["Service Panel"]
+    assert set(service_parts) == {"service"}
+
+    blocked_options = StepReadOptions(design_variant_selection=("blocked package",))
+    blocked_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, blocked_options),
+        blocked_options,
+    )
+
+    assert blocked_selection.status == "unmatched_geometry"
+    assert blocked_selection.matched_records == ()
+    assert "condition expression was not satisfied" in blocked_selection.warnings[0]
+
+
 def test_step_import_cleanup_actions_cover_construction_only_shapes() -> None:
     point_counts = _ShapeTopologyCounts(vertices=3)
     line_counts = _ShapeTopologyCounts(vertices=4, edges=2)

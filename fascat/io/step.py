@@ -276,6 +276,7 @@ class _StepDesignVariantRecord:
     effectivity_values: tuple[str, ...] = ()
     effectivity_range: tuple[str, ...] = ()
     condition_operator: str | None = None
+    condition_value: bool | None = None
 
     def to_dict(self) -> dict[str, object]:
         data: dict[str, object] = {
@@ -295,6 +296,8 @@ class _StepDesignVariantRecord:
             data["effectivity_range"] = list(self.effectivity_range)
         if self.condition_operator is not None:
             data["condition_operator"] = self.condition_operator
+        if self.condition_value is not None:
+            data["condition_value"] = self.condition_value
         return data
 
 
@@ -1773,6 +1776,7 @@ def _extract_step_design_variants(source: Path, options: StepReadOptions) -> _St
                 effectivity_values=effectivity_values,
                 effectivity_range=_step_effectivity_range(record.entity, effectivity_values),
                 condition_operator=_step_condition_operator(record.entity),
+                condition_value=_step_condition_value(record.entity, record.args),
             )
         )
 
@@ -1857,6 +1861,17 @@ def _step_condition_operator(entity: str) -> str | None:
         return "literal"
     if normalized in {"CONDITIONALCONFIGURATION", "EFFECTIVITYASSIGNMENT"}:
         return "conditional"
+    return None
+
+
+def _step_condition_value(entity: str, args: str) -> bool | None:
+    if _step_condition_operator(entity) != "literal":
+        return None
+    normalized = args.strip().upper()
+    if normalized.startswith(".T.") or normalized.startswith(".TRUE.") or normalized in {"T", "TRUE"}:
+        return True
+    if normalized.startswith(".F.") or normalized.startswith(".FALSE.") or normalized in {"F", "FALSE"}:
+        return False
     return None
 
 
@@ -2101,7 +2116,7 @@ def _condition_record_matches_requested(
         matched = _design_variant_record_matches_requested(record, requested, normalized_requested)
         return _StepConditionMatch(matched=matched, positive=matched)
     if operator == "literal":
-        return _StepConditionMatch(matched=".T." in record.label.upper() or "TRUE" in record.label.upper())
+        return _StepConditionMatch(matched=bool(record.condition_value))
 
     child_records = [
         child for reference in record.references if (child := records_by_reference.get(reference)) is not None
@@ -2128,11 +2143,20 @@ def _condition_record_matches_requested(
             for child_record, child_match in zip(child_records, children, strict=False)
             if child_record.condition_operator is not None
         ]
+        target_children = [
+            child_match
+            for child_record, child_match in zip(child_records, children, strict=False)
+            if child_record.condition_operator is None
+        ]
         if condition_children:
             matched = all(child.matched for child in condition_children)
             return _StepConditionMatch(
                 matched=matched,
-                positive=matched and any(child.positive for child in condition_children),
+                positive=matched
+                and (
+                    any(child.positive for child in condition_children)
+                    or any(child.positive for child in target_children)
+                ),
             )
     if operator == "and":
         matched = all(child.matched for child in children)

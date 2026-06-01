@@ -315,10 +315,11 @@ such as `CONFIGURATION_ITEM`, `PRODUCT_CONCEPT_FEATURE`,
 `SERIAL_NUMBERED_EFFECTIVITY`, `LOT_EFFECTIVITY`, `DATED_EFFECTIVITY`, and
 simple AP242 boolean condition records such as `AND_EXPRESSION`,
 `OR_EXPRESSION`, `XOR_EXPRESSION`, `NOT_EXPRESSION`, and
-`CONDITIONAL_CONFIGURATION` when `design_variants=True`. Detected records are
-reported in asset metadata and import reports with counts, STEP references,
-referenced record labels, transitively resolved reference labels, common
-effectivity values, and condition operators where present.
+`BOOLEAN_LITERAL`, plus wrappers such as `CONDITIONAL_CONFIGURATION` when
+`design_variants=True`. Detected records are reported in asset metadata and
+import reports with counts, STEP references, referenced record labels,
+transitively resolved reference labels, common effectivity values, condition
+operators, and literal true/false condition values where present.
 `design_variant_selection=("left hand",)` or
 `design_variant_selection=("SN-A-050",)` can select matching variant or
 effectivity records, including values inside supported serial/date/time-interval
@@ -326,7 +327,8 @@ ranges. Supported boolean condition records are evaluated before their operand
 labels can drive geometry pruning, so an `AND_EXPRESSION` only selects geometry
 when all operands match. Conditional wrapper records also gate their configured
 target labels, so the target label alone does not bypass an unsatisfied
-condition. This is useful for STEP files whose configuration labels line up
+condition. Boolean literal records are evaluated from STEP `.T.` / `.F.`
+arguments. This is useful for STEP files whose configuration labels line up
 with loaded product names; full AP242 conditional/effectivity geometry
 evaluation remains planned backend work.
 
@@ -360,7 +362,7 @@ Metadata and PMI parameters:
 | `StepReadOptions` | `validation_properties` | Request STEP validation properties. Current reports approximate this with source topology counts rather than typed validation-property entities. |
 | `StepReadOptions` | `pmi` | Import common typed AP242 PMI text records, including dimension, location, geometric tolerance, plus/minus tolerance, datum, datum-reference, feature-control-frame, and note entities, into `PmiAnnotation` objects and report a textual semantic reference graph; AP242 PMI markers are reported when no supported typed record can be extracted. |
 | `StepReadOptions` | `design_variants` | Scan common STEP configuration/design-variant/effectivity and simple boolean condition records into metadata and import reports. |
-| `StepReadOptions` | `design_variant_selection` | Select one or more variant labels, effectivity values/ranges, STEP record ids, or referenced labels and prune imported geometry by matching node/part/source-name metadata. Effectivity selections follow resolved STEP references back to configuration/design feature labels when present; supported serial/date/time-interval ranges match values inside their bounds, simple `AND`/`OR`/`XOR`/`NOT` condition records gate operand labels before pruning, and conditional wrappers gate their configured target labels. Full AP242 conditional/effectivity geometry evaluation remains planned. |
+| `StepReadOptions` | `design_variant_selection` | Select one or more variant labels, effectivity values/ranges, STEP record ids, or referenced labels and prune imported geometry by matching node/part/source-name metadata. Effectivity selections follow resolved STEP references back to configuration/design feature labels when present; supported serial/date/time-interval ranges match values inside their bounds, simple `AND`/`OR`/`XOR`/`NOT` condition records gate operand labels before pruning, boolean literals evaluate `.T.` / `.F.` values, and conditional wrappers gate their configured target labels. Full AP242 conditional/effectivity geometry evaluation remains planned. |
 | `StepReadOptions` | `existing_meshes` | Prefer existing tessellation payloads from the source file when the importer exposes them. Tessellation `reuse_existing_meshes` still controls whether loaded meshes are retessellated later. |
 | `StepReadOptions` | `multi_file` | Request multi-file STEP assembly import. `read_step_many()` honors explicit member lists; single-path STEP imports recursively resolve quoted external `.step` / `.stp` references, preserve repeated references as member occurrences, and report the `external_reference_graph`. |
 | `StepReadOptions` | `source_textures` | Scan STEP/IGES source text for referenced sidecar PNG/JPEG/KTX2 texture files, load resolved files into `asset.images`, and report resolved/missing/unreadable counts. |
