@@ -1153,10 +1153,10 @@ The preview renderer is a local orthographic software renderer. It writes PNGs,
 uses material base colors when available, respects node transforms, and can
 substitute each part's LOD mesh to build an LOD switching contact sheet.
 `compare_images()` reports mean absolute error, max channel error, changed pixel
-counts, changed pixel ratio, and whether configured thresholds passed. These
-helpers are intended for quick before/after, LOD, and baseline-diff review
-artifacts, not for full material/lighting parity with Unity, Unreal, or a
-browser renderer.
+counts, changed pixel ratio, and whether configured thresholds passed. The same
+thresholds can gate engine preview baselines through `fascat validate`, but the
+helper itself remains a general image-diff primitive rather than a curated
+Unity/Unreal material and lighting parity suite.
 
 ## Validation
 
@@ -1262,6 +1262,9 @@ version, mesh count, and triangle count. `--runtime-engine-preview` also passes
 a requested PNG path to the harness (`-fascatPreview` for Unity or
 `-FascatPreview=` for Unreal) and records `render_status`, `render_time_ms`,
 `rendered_frames`, `render_error`, and `preview_path` from the returned report.
+`--runtime-engine-baseline` compares that rendered engine preview against a PNG
+baseline with the `--visual-diff-*` thresholds and exits non-zero when the
+engine preview drifts beyond the configured tolerance.
 The packaged Unity template includes Unity glTFast, loads and instantiates the
 asset, sets up a camera and key light, renders a fixed multi-frame camera loop,
 and writes the requested preview PNG when Unity can run with graphics enabled.
@@ -1270,9 +1273,9 @@ That packaged path reports `measured_fps`, `frame_count`, and
 validates the engine command contract and glTF/GLB file parsing, and when a
 preview path is requested it writes a deterministic PNG plus fixed-frame
 software benchmark fields. That Unreal packaged preview is not a full scene or
-material renderer; Unreal scene-rendered screenshots/FPS and engine-specific
-material/lighting parity thresholds remain open. Set `FASCAT_UNITY`,
-`UNITY_EDITOR`,
+material renderer; Unreal scene-rendered screenshots/FPS and bundled
+engine-specific material/lighting parity fixture suites remain open. Set
+`FASCAT_UNITY`, `UNITY_EDITOR`,
 `FASCAT_UNREAL`, or `UNREAL_EDITOR`, or pass `--runtime-engine-command`, when
 the engine executable is not on `PATH`. If the executable is missing, or an
 explicitly supplied harness project is missing, the engine report is marked

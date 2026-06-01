@@ -2153,6 +2153,13 @@ def cmd_validate(
             help="Preview PNG path requested from a Unity/Unreal runtime harness.",
         ),
     ] = None,
+    runtime_engine_baseline: Annotated[
+        Path | None,
+        typer.Option(
+            "--runtime-engine-baseline",
+            help="Compare --runtime-engine-preview against this baseline PNG.",
+        ),
+    ] = None,
     runtime_engine_timeout: Annotated[
         float,
         typer.Option("--runtime-engine-timeout", help="Unity/Unreal runtime harness timeout in seconds."),
@@ -2227,6 +2234,7 @@ def cmd_validate(
         "runtime_engine_command": runtime_engine_command,
         "runtime_engine_project": str(runtime_engine_project) if runtime_engine_project else None,
         "runtime_engine_preview": str(runtime_engine_preview) if runtime_engine_preview else None,
+        "runtime_engine_baseline": str(runtime_engine_baseline) if runtime_engine_baseline else None,
         "runtime_engine_timeout": runtime_engine_timeout,
         "visual_preview": str(visual_preview) if visual_preview else None,
         "runtime_browser_preview": str(runtime_browser_preview) if runtime_browser_preview else None,
@@ -2260,6 +2268,8 @@ def cmd_validate(
         _fail(ctx, payload, "--visual-baseline requires --visual-preview.", code=2)
     if runtime_engine_preview is not None and runtime_engine is None:
         _fail(ctx, payload, "--runtime-engine-preview requires --runtime-engine.", code=2)
+    if runtime_engine_baseline is not None and runtime_engine_preview is None:
+        _fail(ctx, payload, "--runtime-engine-baseline requires --runtime-engine-preview.", code=2)
     if _is_stdio(output_path) and (
         visual_preview is not None
         or runtime_browser_preview is not None
@@ -2332,6 +2342,26 @@ def cmd_validate(
             if visual_baseline is not None and visual_preview is not None
             else None
         )
+        runtime_engine_diff_report = None
+        runtime_engine_diff_error = None
+        if runtime_engine_baseline is not None:
+            if runtime_engine_report is None:
+                runtime_engine_diff_error = "--runtime-engine-baseline requires --runtime-engine."
+            elif runtime_engine_report.render_status != "rendered" or runtime_engine_report.preview_path is None:
+                runtime_engine_diff_error = (
+                    "runtime engine baseline requires a rendered engine preview"
+                    f"; render_status={runtime_engine_report.render_status}"
+                )
+            else:
+                runtime_engine_diff_report = compare_images(
+                    runtime_engine_baseline,
+                    runtime_engine_report.preview_path,
+                    VisualDiffOptions(
+                        pixel_tolerance=visual_diff_pixel_tolerance,
+                        max_mean_absolute_error=visual_diff_mean_threshold,
+                        max_changed_pixel_ratio=visual_diff_changed_pixel_ratio,
+                    ),
+                )
         lod_preview_report = (
             write_output_lod_switch_previews(output_path, lod_preview_dir) if lod_preview_dir is not None else None
         )
@@ -2353,6 +2383,10 @@ def cmd_validate(
         json_payload["visual_preview"] = visual_preview_report.to_dict()
     if visual_diff_report is not None:
         json_payload["visual_diff"] = visual_diff_report.to_dict()
+    if runtime_engine_diff_report is not None:
+        json_payload["runtime_engine_diff"] = runtime_engine_diff_report.to_dict()
+    if runtime_engine_diff_error is not None:
+        json_payload["runtime_engine_diff_error"] = runtime_engine_diff_error
     if lod_preview_report is not None:
         json_payload["lod_preview"] = lod_preview_report.to_dict()
     message = f"{output_path}: valid {_export_label(output_path)}, {_format_stats(stats)}."
@@ -2379,6 +2413,14 @@ def cmd_validate(
             )
     if visual_diff_report is not None:
         message = f"{message} Visual diff passed." if visual_diff_report.passed else f"{message} Visual diff failed."
+    if runtime_engine_diff_report is not None:
+        message = (
+            f"{message} Engine preview diff passed."
+            if runtime_engine_diff_report.passed
+            else f"{message} Engine preview diff failed."
+        )
+    if runtime_engine_diff_error is not None:
+        message = f"{message} Engine preview diff failed: {runtime_engine_diff_error}."
     if lod_preview_report is not None:
         message = f"{message} Wrote LOD previews {lod_preview_report.directory}."
     if analysis is not None and "selection" in analysis.summary:
@@ -2390,6 +2432,11 @@ def cmd_validate(
         else:
             message = f"{message} Browser runtime {runtime_report.status}: {runtime_report.error}."
     if visual_diff_report is not None and not visual_diff_report.passed:
+        _emit(ctx, json_payload, message)
+        raise typer.Exit(1)
+    if runtime_engine_diff_error is not None or (
+        runtime_engine_diff_report is not None and not runtime_engine_diff_report.passed
+    ):
         _emit(ctx, json_payload, message)
         raise typer.Exit(1)
     _emit(

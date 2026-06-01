@@ -1665,6 +1665,223 @@ def test_validate_can_include_engine_runtime_measurement(
     assert payload["runtime_engine"]["render_status"] == "rendered"
 
 
+def test_validate_can_compare_engine_preview_against_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_file = tmp_path / "runtime.glb"
+    preview_file = tmp_path / "engine-preview.png"
+    baseline_file = tmp_path / "baseline.png"
+    mesh = Mesh(
+        points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.asarray([[0, 1, 2]], dtype=int),
+    )
+    Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Triangle", part_id="part")]),
+        parts={"part": Part(id="part", name="Triangle", mesh=mesh)},
+        up_axis="Y",
+    ).write_gltf(output_file)
+    Image.new("RGBA", (4, 4), (10, 20, 30, 255)).save(baseline_file)
+
+    def fake_measure(path: str | Path, options: object) -> RuntimeEngineReport:
+        assert Path(path) == output_file
+        assert cast(Any, options).preview_path == preview_file
+        Image.new("RGBA", (4, 4), (10, 20, 30, 255)).save(preview_file)
+        return RuntimeEngineReport(
+            path=str(path),
+            status="measured",
+            engine="unity",
+            executable="Unity",
+            project=str(tmp_path / "UnityProject"),
+            engine_version="Unity 6000.0",
+            load_time_ms=12,
+            measured_fps=72.0,
+            frame_count=144,
+            measurement_duration_ms=2000,
+            memory_bytes=8192,
+            meshes=1,
+            triangles=1,
+            preview_path=str(preview_file),
+            render_status="rendered",
+            render_time_ms=12,
+            rendered_frames=1,
+        )
+
+    monkeypatch.setattr("fascat.cli.measure_engine_runtime", fake_measure)
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "validate",
+            str(output_file),
+            "--runtime-engine",
+            "unity",
+            "--runtime-engine-command",
+            "Unity",
+            "--runtime-engine-preview",
+            str(preview_file),
+            "--runtime-engine-baseline",
+            str(baseline_file),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["runtime_engine_diff"]["passed"] is True
+    assert payload["runtime_engine_diff"]["changed_pixels"] == 0
+    assert payload["runtime_engine_diff"]["candidate_path"] == str(preview_file)
+
+
+def test_validate_fails_when_engine_preview_diff_exceeds_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_file = tmp_path / "runtime.glb"
+    preview_file = tmp_path / "engine-preview.png"
+    baseline_file = tmp_path / "baseline.png"
+    mesh = Mesh(
+        points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.asarray([[0, 1, 2]], dtype=int),
+    )
+    Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Triangle", part_id="part")]),
+        parts={"part": Part(id="part", name="Triangle", mesh=mesh)},
+        up_axis="Y",
+    ).write_gltf(output_file)
+    Image.new("RGBA", (4, 4), (10, 20, 30, 255)).save(baseline_file)
+
+    def fake_measure(path: str | Path, _options: object) -> RuntimeEngineReport:
+        Image.new("RGBA", (4, 4), (250, 250, 250, 255)).save(preview_file)
+        return RuntimeEngineReport(
+            path=str(path),
+            status="measured",
+            engine="unity",
+            executable="Unity",
+            project=str(tmp_path / "UnityProject"),
+            engine_version="Unity 6000.0",
+            load_time_ms=12,
+            measured_fps=72.0,
+            frame_count=144,
+            measurement_duration_ms=2000,
+            memory_bytes=8192,
+            meshes=1,
+            triangles=1,
+            preview_path=str(preview_file),
+            render_status="rendered",
+            render_time_ms=12,
+            rendered_frames=1,
+        )
+
+    monkeypatch.setattr("fascat.cli.measure_engine_runtime", fake_measure)
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "validate",
+            str(output_file),
+            "--runtime-engine",
+            "unity",
+            "--runtime-engine-command",
+            "Unity",
+            "--runtime-engine-preview",
+            str(preview_file),
+            "--runtime-engine-baseline",
+            str(baseline_file),
+        ],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["runtime_engine_diff"]["passed"] is False
+    assert payload["runtime_engine_diff"]["changed_pixels"] > 0
+
+
+def test_validate_fails_engine_baseline_when_preview_is_not_rendered(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_file = tmp_path / "runtime.glb"
+    preview_file = tmp_path / "engine-preview.png"
+    baseline_file = tmp_path / "baseline.png"
+    mesh = Mesh(
+        points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.asarray([[0, 1, 2]], dtype=int),
+    )
+    Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Triangle", part_id="part")]),
+        parts={"part": Part(id="part", name="Triangle", mesh=mesh)},
+        up_axis="Y",
+    ).write_gltf(output_file)
+    Image.new("RGBA", (4, 4), (10, 20, 30, 255)).save(baseline_file)
+
+    def fake_measure(path: str | Path, _options: object) -> RuntimeEngineReport:
+        return RuntimeEngineReport(
+            path=str(path),
+            status="unavailable",
+            engine="unity",
+            executable="Unity",
+            project=str(tmp_path / "UnityProject"),
+            engine_version=None,
+            load_time_ms=None,
+            measured_fps=None,
+            frame_count=0,
+            measurement_duration_ms=None,
+            memory_bytes=None,
+            meshes=1,
+            triangles=1,
+            preview_path=str(preview_file),
+            render_status="unavailable",
+            render_error="graphics unavailable",
+        )
+
+    monkeypatch.setattr("fascat.cli.measure_engine_runtime", fake_measure)
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "validate",
+            str(output_file),
+            "--runtime-engine",
+            "unity",
+            "--runtime-engine-command",
+            "Unity",
+            "--runtime-engine-preview",
+            str(preview_file),
+            "--runtime-engine-baseline",
+            str(baseline_file),
+        ],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["runtime_engine_diff_error"] == (
+        "runtime engine baseline requires a rendered engine preview; render_status=unavailable"
+    )
+
+
+def test_validate_rejects_engine_baseline_without_engine_preview(tmp_path: Path) -> None:
+    output_file = tmp_path / "runtime.glb"
+    baseline_file = tmp_path / "baseline.png"
+
+    result = runner.invoke(
+        app,
+        [
+            "validate",
+            str(output_file),
+            "--runtime-engine",
+            "unity",
+            "--runtime-engine-baseline",
+            str(baseline_file),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "--runtime-engine-baseline requires --runtime-engine-preview" in plain(result.output)
+
+
 def test_validate_rejects_engine_preview_without_engine(tmp_path: Path) -> None:
     output_file = tmp_path / "runtime.glb"
     mesh = Mesh(
