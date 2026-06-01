@@ -6,7 +6,7 @@ import tempfile
 import zipfile
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
-from datetime import date
+from datetime import date, timedelta
 from io import BytesIO
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
@@ -2248,16 +2248,51 @@ def _step_record_date_values(record: _StepRecord) -> tuple[str, ...]:
         parsed = _parse_effectivity_date(value)
         if parsed is not None:
             values.append(parsed.isoformat())
-    if record.entity == "CALENDAR_DATE":
-        numbers = _step_number_values(record.args)
-        if len(numbers) >= 3 and all(float(value).is_integer() for value in numbers[:3]):
-            try:
-                parsed = date(int(numbers[0]), int(numbers[2]), int(numbers[1]))
-            except ValueError:
-                parsed = None
-            if parsed is not None:
-                values.append(parsed.isoformat())
+    if parsed := _step_record_calendar_date(record):
+        values.append(parsed.isoformat())
     return tuple(dict.fromkeys(values))
+
+
+def _step_record_calendar_date(record: _StepRecord) -> date | None:
+    normalized_entity = record.entity.replace("_", "")
+    if normalized_entity == "CALENDARDATE":
+        components = _step_integer_components(record.args, 3)
+        if components is None:
+            return None
+        year, day, month = components
+        try:
+            return date(year, month, day)
+        except ValueError:
+            return None
+    if normalized_entity == "ORDINALDATE":
+        components = _step_integer_components(record.args, 2)
+        if components is None:
+            return None
+        year, day_of_year = components
+        if day_of_year < 1:
+            return None
+        try:
+            parsed = date(year, 1, 1) + timedelta(days=day_of_year - 1)
+        except (OverflowError, ValueError):
+            return None
+        return parsed if parsed.year == year else None
+    if normalized_entity == "WEEKOFYEARANDDAYDATE":
+        components = _step_integer_components(record.args, 3)
+        if components is None:
+            return None
+        year, week, day = components
+        try:
+            return date.fromisocalendar(year, week, day)
+        except ValueError:
+            return None
+    return None
+
+
+def _step_integer_components(args: str, count: int) -> tuple[int, ...] | None:
+    numbers = _step_number_values(args)
+    if len(numbers) < count or not all(value.is_integer() for value in numbers[:count]):
+        return None
+    return tuple(int(value) for value in numbers[:count])
 
 
 def _step_effectivity_range(entity: str, values: tuple[str, ...]) -> tuple[str, ...]:

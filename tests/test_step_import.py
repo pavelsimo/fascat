@@ -565,6 +565,65 @@ def test_step_design_variant_selection_resolves_referenced_time_interval_effecti
     assert "condition expression was not satisfied" in target_selection.warnings[0]
 
 
+def test_step_design_variant_selection_resolves_referenced_step_date_subtypes(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=CONFIGURATION_ITEM('maintenance interval','alternate STEP date types',#1);\n"
+        "#11=PRODUCT_CONCEPT_FEATURE('maintenance cover','select maintenance cover',#2);\n"
+        "#12=CONFIGURATION_DESIGN(#10,#11);\n"
+        "#13=TIME_INTERVAL_BASED_EFFECTIVITY('maintenance interval',#14);\n"
+        "#14=TIME_INTERVAL_WITH_BOUNDS('maintenance bounds',#15,#16);\n"
+        "#15=ORDINAL_DATE(2020,1);\n"
+        "#16=WEEK_OF_YEAR_AND_DAY_DATE(2020,53,4);\n"
+        "#20=EFFECTIVITY_ASSIGNMENT(#13,#11);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="cover-node", name="Maintenance Cover", part_id="cover"),
+            fc.Node(id="plug-node", name="Blanking Plug", part_id="plug"),
+        ],
+    )
+    parts = {
+        "cover": fc.Part(
+            id="cover",
+            name="Maintenance Cover",
+            material_ids=["cover-mat"],
+            metadata={"source_name": "maintenance cover"},
+        ),
+        "plug": fc.Part(
+            id="plug",
+            name="Blanking Plug",
+            material_ids=["plug-mat"],
+            metadata={"source_name": "blanking plug"},
+        ),
+    }
+    materials = {
+        "cover-mat": fc.Material(id="cover-mat", name="Cover Paint", base_color=(1.0, 0.0, 0.0, 1.0)),
+        "plug-mat": fc.Material(id="plug-mat", name="Plug Paint", base_color=(0.0, 0.0, 1.0, 1.0)),
+    }
+    options = StepReadOptions(design_variant_selection=("2020-06-01",))
+    extraction = _extract_step_design_variants(source, options)
+
+    selection = _apply_step_design_variant_selection(root, parts, materials, extraction, options)
+
+    time_effectivity = next(record for record in extraction.records if record.kind == "time_interval_based_effectivity")
+    assert time_effectivity.effectivity_values == ("maintenance interval", "2020-01-01", "2020-12-31")
+    assert time_effectivity.effectivity_range == ("2020-01-01", "2020-12-31")
+    assert selection.status == "applied"
+    assert selection.matched_records == ("step_variant_20",)
+    assert [child.name for child in root.children] == ["Maintenance Cover"]
+    assert set(parts) == {"cover"}
+
+
 def test_step_design_variant_selection_gates_product_definition_effectivity_usage(
     tmp_path: Path,
 ) -> None:
