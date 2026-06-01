@@ -63,6 +63,8 @@ _STEP_EXTERNAL_REF_RE = re.compile(r"'([^']+\.(?:step|stp)(?:[#?][^']*)?)'", re.
 _STEP_RECORD_START_RE = re.compile(r"#(\d+)\s*=\s*([A-Z0-9_]+)\s*\(", re.IGNORECASE)
 _STEP_REFERENCE_RE = re.compile(r"#(\d+)")
 _STEP_NUMBER_RE = re.compile(r"(?<![#A-Za-z0-9_])[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[Ee][-+]?\d+)?")
+_STEP_STRICT_NUMBER_RE = re.compile(r"[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[Ee][-+]?\d+)?")
+_STEP_STRICT_INTEGER_RE = re.compile(r"[-+]?\d+")
 _STEP_BOOLEAN_TOKEN_RE = re.compile(r"\.(TRUE|FALSE|T|F)\.", re.IGNORECASE)
 _STEP_PMI_ENTITY_KINDS = {
     "DIMENSIONAL_SIZE": "dimension",
@@ -148,6 +150,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "INTLITERAL": "int_literal",
     "INT_NUMERIC_VARIABLE": "int_numeric_variable",
     "INTNUMERICVARIABLE": "int_numeric_variable",
+    "INT_VALUE_FUNCTION": "int_value_function",
+    "INTVALUEFUNCTION": "int_value_function",
     "INTEGER_REPRESENTATION_ITEM": "integer_representation_item",
     "INTEGERREPRESENTATIONITEM": "integer_representation_item",
     "INTERVAL_EXPRESSION": "interval_expression",
@@ -203,6 +207,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "SUBSTRING_EXPRESSION": "substring_expression",
     "SUBSTRINGEXPRESSION": "substring_expression",
     "TIME_INTERVAL_BASED_EFFECTIVITY": "time_interval_based_effectivity",
+    "VALUE_FUNCTION": "value_function",
+    "VALUEFUNCTION": "value_function",
     "AND_CONDITION": "and_condition",
     "AND_EXPRESSION": "and_expression",
     "ANDEXPRESSION": "and_expression",
@@ -233,7 +239,7 @@ _STEP_NUMERIC_ARITHMETIC_OPERATORS = {
     "numeric_subtract",
 }
 _STEP_STRING_EXPRESSION_OPERATORS = {"string_concat", "string_substring"}
-_STEP_NUMERIC_STRING_FUNCTION_OPERATORS = {"string_length"}
+_STEP_NUMERIC_STRING_FUNCTION_OPERATORS = {"string_integer_value", "string_length", "string_value"}
 _STEP_CONDITION_OPERAND_OPERATORS = {
     "numeric_literal",
     "numeric_variable",
@@ -2006,6 +2012,10 @@ def _step_condition_operator(entity: str) -> str | None:
         return "numeric_power"
     if normalized == "LENGTHFUNCTION":
         return "string_length"
+    if normalized == "VALUEFUNCTION":
+        return "string_value"
+    if normalized == "INTVALUEFUNCTION":
+        return "string_integer_value"
     if normalized == "CONCATEXPRESSION":
         return "string_concat"
     if normalized == "SUBSTRINGEXPRESSION":
@@ -2704,6 +2714,26 @@ def _condition_record_numeric_value(
         if len(string_values) != len(string_children) or len(string_values) != 1:
             return None, False
         return float(len(string_values[0])), any(item[1] for item in string_children)
+    if record.condition_operator in {"string_integer_value", "string_value"}:
+        string_children = [
+            _condition_record_string_value(
+                child_record,
+                records_by_reference,
+                requested,
+                normalized_requested,
+                visited=set(visited),
+            )
+            for reference in record.references
+            if (child_record := records_by_reference.get(reference)) is not None
+        ]
+        string_values = [item[0] for item in string_children if item[0] is not None]
+        if len(string_values) != len(string_children) or len(string_values) != 1:
+            return None, False
+        value = _numeric_value_from_condition_text(
+            string_values[0],
+            integer=record.condition_operator == "string_integer_value",
+        )
+        return value, value is not None and any(item[1] for item in string_children)
     return None, False
 
 
@@ -2790,7 +2820,7 @@ def _condition_record_has_requested_numeric_operand(
     visited.add(record_reference)
     if record.condition_operator == "numeric_variable":
         return _design_variant_record_requested_number(record, requested, normalized_requested) is not None
-    if record.condition_operator == "string_length":
+    if record.condition_operator in _STEP_NUMERIC_STRING_FUNCTION_OPERATORS:
         return any(
             _condition_record_has_requested_string_operand(
                 child_record,
@@ -2928,6 +2958,18 @@ def _string_substring_value(value: str, start: float, end: float) -> str | None:
     if start_index < 1 or end_index < start_index or end_index > len(value):
         return None
     return value[start_index - 1 : end_index]
+
+
+def _numeric_value_from_condition_text(value: str, *, integer: bool) -> float | None:
+    stripped = value.strip()
+    if integer:
+        if _STEP_STRICT_INTEGER_RE.fullmatch(stripped) is None:
+            return None
+        return float(int(stripped))
+    if _STEP_STRICT_NUMBER_RE.fullmatch(stripped) is None:
+        return None
+    parsed = float(stripped)
+    return parsed if np.isfinite(parsed) else None
 
 
 def _normalize_condition_text(value: str) -> str:
