@@ -200,6 +200,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "STRINGLITERAL": "string_literal",
     "STRING_VARIABLE": "string_variable",
     "STRINGVARIABLE": "string_variable",
+    "SUBSTRING_EXPRESSION": "substring_expression",
+    "SUBSTRINGEXPRESSION": "substring_expression",
     "TIME_INTERVAL_BASED_EFFECTIVITY": "time_interval_based_effectivity",
     "AND_CONDITION": "and_condition",
     "AND_EXPRESSION": "and_expression",
@@ -230,7 +232,7 @@ _STEP_NUMERIC_ARITHMETIC_OPERATORS = {
     "numeric_power",
     "numeric_subtract",
 }
-_STEP_STRING_EXPRESSION_OPERATORS = {"string_concat"}
+_STEP_STRING_EXPRESSION_OPERATORS = {"string_concat", "string_substring"}
 _STEP_NUMERIC_STRING_FUNCTION_OPERATORS = {"string_length"}
 _STEP_CONDITION_OPERAND_OPERATORS = {
     "numeric_literal",
@@ -2006,6 +2008,8 @@ def _step_condition_operator(entity: str) -> str | None:
         return "string_length"
     if normalized == "CONCATEXPRESSION":
         return "string_concat"
+    if normalized == "SUBSTRINGEXPRESSION":
+        return "string_substring"
     if normalized in {"BOOLEANLITERAL", "BOOLEANREPRESENTATIONITEM"}:
         return "literal"
     if normalized in {
@@ -2736,6 +2740,39 @@ def _condition_record_string_value(
         if len(string_values) != len(string_children) or len(string_values) < 2:
             return None, False
         return "".join(string_values), any(item[1] for item in string_children)
+    if record.condition_operator == "string_substring":
+        child_records = [
+            child_record
+            for reference in record.references
+            if (child_record := records_by_reference.get(reference)) is not None
+        ]
+        if len(child_records) != 3:
+            return None, False
+        text, text_positive = _condition_record_string_value(
+            child_records[0],
+            records_by_reference,
+            requested,
+            normalized_requested,
+            visited=set(visited),
+        )
+        start, start_positive = _condition_record_numeric_value(
+            child_records[1],
+            records_by_reference,
+            requested,
+            normalized_requested,
+            visited=set(visited),
+        )
+        end, end_positive = _condition_record_numeric_value(
+            child_records[2],
+            records_by_reference,
+            requested,
+            normalized_requested,
+            visited=set(visited),
+        )
+        if text is None or start is None or end is None:
+            return None, False
+        substring = _string_substring_value(text, start, end)
+        return substring, substring is not None and (text_positive or start_positive or end_positive)
     return None, False
 
 
@@ -2881,6 +2918,18 @@ def _string_like_matches(value: str, pattern: str) -> bool:
     return re.fullmatch(pattern_re, normalized_value) is not None
 
 
+def _string_substring_value(value: str, start: float, end: float) -> str | None:
+    if not (np.isfinite(start) and np.isfinite(end)):
+        return None
+    if not (float(start).is_integer() and float(end).is_integer()):
+        return None
+    start_index = int(start)
+    end_index = int(end)
+    if start_index < 1 or end_index < start_index or end_index > len(value):
+        return None
+    return value[start_index - 1 : end_index]
+
+
 def _normalize_condition_text(value: str) -> str:
     return " ".join(value.lower().split())
 
@@ -2968,8 +3017,6 @@ def _design_variant_record_requested_text(
             if any(selector and selector in normalized_left for selector in selectors):
                 value = " ".join(right.split())
                 return value if value else None
-        value = " ".join(raw.split())
-        return value if value else None
     return None
 
 
