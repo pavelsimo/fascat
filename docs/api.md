@@ -316,9 +316,12 @@ it has no triangle mesh. `delete` drops construction-only line nodes during
 import. `tessellate_tubes` preserves the source curve metadata and, during
 tessellation, converts curve segments into deterministic low-sided triangle
 tubes using `construction_curve_tube_radius` in source units. Legacy
-`delete_lines=True` remains a delete-policy alias.
+`delete_lines=True` remains a delete-policy alias. STEP import also splits free
+construction edges out of mixed face+curve shapes so the same policy applies to
+those curve segments; when `keep_brep=True` later retains source BREP handles,
+the original mixed source topology may still be available on the BREP part.
 
-STEP import reports also include `import_decisions`, which records each import toggle as requested, effective, and `honored`, `approximated`, `unsupported`, `disabled`, `not_present`, or `backend_default`. The same report step includes `loaded_representations`, a per-part list of BREP, construction-point, construction-line, or empty-shape inputs plus deleted construction-only nodes and source topology counts.
+STEP import reports also include `import_decisions`, which records each import toggle as requested, effective, and `honored`, `approximated`, `unsupported`, `disabled`, `not_present`, or `backend_default`. The same report step includes `loaded_representations`, a per-part list of BREP, construction-point, construction-line, split mixed construction-line, or empty-shape inputs plus deleted construction-only nodes and source topology counts.
 
 Use `fc.read_step_many([...])`, `fc.convert([...], "out.glb")`, or `fascat convert root-a.step out.glb --input root-b.step` when an assembly is delivered as several root STEP files rather than one file. Fascat imports each member through the normal STEP path, namespaces nodes, parts, materials, images, and PMI IDs with a deterministic member prefix, keeps each member root under a shared multi-file root node, and prefixes warnings with the member index and path. `continue_on_error=True` keeps successfully imported members and records failed members in the import report.
 
@@ -342,8 +345,8 @@ Metadata and PMI parameters:
 | `StepReadOptions` | `material_library_mapping` | Apply deterministic CAD material-name mapping rules to PBR metallic, roughness, opacity, and default color values when source visual material names are available. |
 | `StepReadOptions` | `material_library_paths` | Explicit vendor material-library JSON/MTL/ZIP files or folders to load during STEP/IGES import. Referenced library files are resolved relative to the CAD source and texture search paths. |
 | `StepReadOptions` | `delete_free_vertices` | Drop construction-only point shapes during import and record deletion counts in the import report. |
-| `StepReadOptions` | `delete_lines` | Legacy alias for deleting construction-only line shapes during import. Mixed BREP parts with faces are preserved. |
-| `StepReadOptions` | `construction_curve_policy` | Construction-only line policy: `preserve_metadata`, `delete`, or `tessellate_tubes`. Tube tessellation happens when the asset is tessellated. |
+| `StepReadOptions` | `delete_lines` | Legacy alias for deleting construction-only line shapes during import. Free construction edges split from mixed face+curve shapes follow the same delete policy. |
+| `StepReadOptions` | `construction_curve_policy` | Construction line policy for construction-only shapes and free construction edges split from mixed face+curve shapes: `preserve_metadata`, `delete`, or `tessellate_tubes`. Tube tessellation happens when the asset is tessellated. |
 | `StepReadOptions` | `construction_curve_tube_radius` | Tube radius in source units for `construction_curve_policy="tessellate_tubes"`. |
 | `StepReadOptions` | `source_units`, `source_meters_per_unit` | Override the source unit declaration when the STEP header is wrong or ambiguous. Known unit names include `metre`, `centimetre`, `millimetre`, `inch`, and `foot`; custom factors use meters per source unit. |
 | `StepReadOptions` | `source_up_axis`, `source_handedness` | Declare the source coordinate basis before normalization. Defaults are STEP-style `Z` up and `right` handed. |

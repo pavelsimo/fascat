@@ -15,6 +15,7 @@ from fascat.io.step import (
     _apply_material_libraries_to_materials,
     _apply_material_library_mapping,
     _attach_source_textures_to_materials,
+    _build_mixed_construction_curve_node,
     _CadMaterialSpec,
     _canonical_part_id,
     _cleanup_action,
@@ -29,8 +30,11 @@ from fascat.io.step import (
     _loaded_representation,
     _loaded_representation_report,
     _material_binding_plan,
+    _mixed_construction_curve_metadata,
+    _mixed_construction_curve_shape,
     _resolve_step_external_reference_graph,
     _shape_fingerprint,
+    _shape_topology_counts,
     _ShapeTopologyCounts,
     _space_normalization,
     _StepHeaderInfo,
@@ -240,6 +244,82 @@ def test_step_import_cleanup_actions_cover_construction_only_shapes() -> None:
     assert _cleanup_action(line_counts, StepReadOptions(construction_curve_policy="delete")) == "delete_lines"
     assert _cleanup_action(line_counts, StepReadOptions(construction_curve_policy="tessellate_tubes")) is None
     assert _cleanup_action(brep_counts, StepReadOptions(delete_free_vertices=True, delete_lines=True)) is None
+
+
+def test_mixed_construction_curve_shape_extracts_edges_not_used_by_faces() -> None:
+    pytest.importorskip("OCP")
+    from OCP.BRep import BRep_Builder
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeEdge
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+    from OCP.TopoDS import TopoDS_Compound
+
+    box = BRepPrimAPI_MakeBox(1.0, 1.0, 1.0).Shape()
+    construction_edge = BRepBuilderAPI_MakeEdge(gp_Pnt(2.0, 0.0, 0.0), gp_Pnt(3.0, 0.0, 0.0)).Edge()
+    compound = TopoDS_Compound()
+    builder = BRep_Builder()
+    builder.MakeCompound(compound)
+    builder.Add(compound, box)
+    builder.Add(compound, construction_edge)
+
+    curve_shape = _mixed_construction_curve_shape(compound, _shape_topology_counts(compound))
+
+    assert curve_shape is not None
+    assert _shape_topology_counts(curve_shape) == _ShapeTopologyCounts(vertices=2, edges=1, faces=0)
+    assert _mixed_construction_curve_shape(box, _shape_topology_counts(box)) is None
+
+
+def test_mixed_construction_curve_metadata_records_policy_and_action() -> None:
+    metadata = _mixed_construction_curve_metadata(
+        StepReadOptions(construction_curve_policy="tessellate_tubes"),
+        "split",
+        _ShapeTopologyCounts(vertices=2, edges=1),
+    )
+
+    assert metadata == {
+        "mixed_construction_curve_policy": "tessellate_tubes",
+        "mixed_construction_curve_action": "split",
+        "mixed_construction_curve_vertices": "2",
+        "mixed_construction_curve_edges": "1",
+        "mixed_construction_curve_split": "true",
+    }
+
+
+def test_mixed_construction_curve_node_preserves_policy_metadata() -> None:
+    pytest.importorskip("OCP")
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeEdge
+    from OCP.gp import gp_Pnt
+
+    curve_shape = BRepBuilderAPI_MakeEdge(gp_Pnt(0.0, 0.0, 0.0), gp_Pnt(1.0, 0.0, 0.0)).Edge()
+    counts = _shape_topology_counts(curve_shape)
+    parts: dict[str, fc.Part] = {}
+    cleanup = _ImportCleanupStats()
+    options = StepReadOptions(construction_curve_policy="tessellate_tubes", construction_curve_tube_radius=0.025)
+
+    node = _build_mixed_construction_curve_node(
+        source_identity="panel.step",
+        occurrence_path="root/1",
+        label_entry="0:1",
+        part_entry="0:1:1",
+        source_name="Panel",
+        shape=curve_shape,
+        counts=counts,
+        material_ids=["mat-default"],
+        part_index={},
+        parts=parts,
+        options=options,
+        cleanup=cleanup,
+    )
+
+    assert cleanup.to_dict()["construction_line_parts"] == 1
+    assert node.part_id in parts
+    assert node.metadata["mixed_construction_curve_split"] == "true"
+    part = parts[str(node.part_id)]
+    assert part.name == "Panel Construction Curves"
+    assert part.metadata["loaded_representation"] == "construction_lines"
+    assert part.metadata["mixed_construction_curve_split"] == "true"
+    assert part.metadata["construction_curve_policy"] == "tessellate_tubes"
+    assert part.metadata["construction_curve_tube_radius"] == "0.025"
 
 
 def test_step_read_options_normalize_construction_curve_policy() -> None:

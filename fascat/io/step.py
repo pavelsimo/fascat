@@ -1994,6 +1994,9 @@ def _part_representation_record(part: Part) -> dict[str, object]:
         record["construction_curve_policy"] = str(part.metadata["construction_curve_policy"])
     if "construction_curve_tube_radius" in part.metadata:
         record["construction_curve_tube_radius"] = _metadata_float(part.metadata["construction_curve_tube_radius"])
+    if "mixed_construction_curve_action" in part.metadata:
+        record["mixed_construction_curve_action"] = str(part.metadata["mixed_construction_curve_action"])
+        record["mixed_construction_curve_edges"] = _metadata_int(part.metadata.get("mixed_construction_curve_edges"))
     return record
 
 
@@ -2009,6 +2012,8 @@ def _deleted_node_representation_record(node: Node) -> dict[str, object]:
     }
     if "construction_curve_policy" in node.metadata:
         record["construction_curve_policy"] = str(node.metadata["construction_curve_policy"])
+    if "mixed_construction_curve_split" in node.metadata:
+        record["mixed_construction_curve_split"] = str(node.metadata["mixed_construction_curve_split"])
     return record
 
 
@@ -2163,6 +2168,10 @@ def _build_node(
         return node
     topology = _shape_topology_counts(shape)
     representation = _loaded_representation(topology)
+    mixed_construction_shape = _mixed_construction_curve_shape(shape, topology)
+    mixed_construction_counts = (
+        _shape_topology_counts(mixed_construction_shape) if mixed_construction_shape is not None else None
+    )
     cleanup_action = _cleanup_action(topology, options)
     if cleanup_action is not None:
         cleanup.record_deleted(cleanup_action, topology)
@@ -2225,6 +2234,14 @@ def _build_node(
             "source_faces": str(topology.faces),
             **_construction_curve_metadata(options, representation),
         }
+        if mixed_construction_counts is not None:
+            metadata.update(
+                _mixed_construction_curve_metadata(
+                    options,
+                    "deleted" if _construction_curve_policy(options) == "delete" else "split",
+                    mixed_construction_counts,
+                )
+            )
         if any(index != 0 for index in face_material_indices):
             metadata["occt_face_material_indices"] = ",".join(str(index) for index in face_material_indices)
         parts[part_id] = Part(
@@ -2235,7 +2252,150 @@ def _build_node(
             metadata=metadata,
             fingerprint=shape_hash,
         )
+    if mixed_construction_shape is not None and mixed_construction_counts is not None:
+        if _construction_curve_policy(options) == "delete":
+            cleanup.record_deleted("delete_lines", mixed_construction_counts)
+        else:
+            curve_node = _build_mixed_construction_curve_node(
+                source_identity=source_identity,
+                occurrence_path=occurrence_path,
+                label_entry=label_entry,
+                part_entry=part_entry,
+                source_name=_label_name(shape_label) or _label_name(label) or f"Part {part_entry}",
+                shape=mixed_construction_shape,
+                counts=mixed_construction_counts,
+                material_ids=material_ids,
+                part_index=part_index,
+                parts=parts,
+                options=options,
+                cleanup=cleanup,
+            )
+            node.children.append(curve_node)
     return node
+
+
+def _mixed_construction_curve_shape(shape: Any, counts: _ShapeTopologyCounts) -> Any | None:
+    if counts.faces == 0 or counts.edges == 0:
+        return None
+    try:
+        from OCP.BRep import BRep_Builder
+        from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
+        from OCP.TopExp import TopExp_Explorer
+        from OCP.TopoDS import TopoDS, TopoDS_Compound
+    except ImportError:
+        return None
+
+    face_edges: list[Any] = []
+    face_explorer = TopExp_Explorer(shape, TopAbs_FACE)
+    while face_explorer.More():
+        face = face_explorer.Current()
+        edge_explorer = TopExp_Explorer(face, TopAbs_EDGE)
+        while edge_explorer.More():
+            face_edges.append(TopoDS.Edge_s(edge_explorer.Current()))
+            edge_explorer.Next()
+        face_explorer.Next()
+    if not face_edges:
+        return None
+
+    free_edges: list[Any] = []
+    edge_explorer = TopExp_Explorer(shape, TopAbs_EDGE)
+    while edge_explorer.More():
+        edge = TopoDS.Edge_s(edge_explorer.Current())
+        if not any(edge.IsSame(face_edge) for face_edge in face_edges) and not any(
+            edge.IsSame(existing) for existing in free_edges
+        ):
+            free_edges.append(edge)
+        edge_explorer.Next()
+    if not free_edges:
+        return None
+
+    compound = TopoDS_Compound()
+    builder = BRep_Builder()
+    builder.MakeCompound(compound)
+    for edge in free_edges:
+        builder.Add(compound, edge)
+    return compound
+
+
+def _build_mixed_construction_curve_node(
+    *,
+    source_identity: str,
+    occurrence_path: str,
+    label_entry: str,
+    part_entry: str,
+    source_name: str,
+    shape: Any,
+    counts: _ShapeTopologyCounts,
+    material_ids: list[str],
+    part_index: _PartIndex,
+    parts: dict[str, Part],
+    options: StepReadOptions,
+    cleanup: _ImportCleanupStats,
+) -> Node:
+    cleanup.record_loaded("construction_lines")
+    curve_entry = f"{part_entry}:construction_curves"
+    shape_hash = _shape_fingerprint(shape)
+    material_signature = "|".join(material_ids)
+    part_id, is_new_part = _canonical_part_id(
+        source_identity=source_identity,
+        part_entry=curve_entry,
+        shape_hash=shape_hash,
+        material_signature=f"{material_signature}:construction_curves",
+        part_index=part_index,
+    )
+    if is_new_part:
+        metadata: Metadata = {
+            "step_label": curve_entry,
+            "occurrence_label": label_entry,
+            "source_identity": source_identity,
+            "source_name": f"{source_name} construction curves",
+            "shape_fingerprint": shape_hash,
+            "loaded_representation": "construction_lines",
+            "source_vertices": str(counts.vertices),
+            "source_edges": str(counts.edges),
+            "source_faces": str(counts.faces),
+            "mixed_construction_curve_split": "true",
+            **_construction_curve_metadata(options, "construction_lines"),
+        }
+        parts[part_id] = Part(
+            id=part_id,
+            name=f"{source_name} Construction Curves",
+            source_shape=shape,
+            material_ids=list(material_ids),
+            metadata=metadata,
+            fingerprint=shape_hash,
+        )
+    return Node(
+        id=_stable_id("node", f"{source_identity}:{occurrence_path}:construction_curves"),
+        name=f"{source_name} Construction Curves",
+        part_id=part_id,
+        metadata={
+            "step_label": curve_entry,
+            "occurrence_label": label_entry,
+            "loaded_representation": "construction_lines",
+            "mixed_construction_curve_split": "true",
+            "source_vertices": str(counts.vertices),
+            "source_edges": str(counts.edges),
+            "source_faces": str(counts.faces),
+            **_construction_curve_metadata(options, "construction_lines"),
+        },
+    )
+
+
+def _mixed_construction_curve_metadata(
+    options: StepReadOptions,
+    action: str,
+    counts: _ShapeTopologyCounts,
+) -> dict[str, str]:
+    metadata = {
+        "mixed_construction_curve_policy": _construction_curve_policy(options),
+        "mixed_construction_curve_action": action,
+        "mixed_construction_curve_vertices": str(counts.vertices),
+        "mixed_construction_curve_edges": str(counts.edges),
+    }
+    if action == "split":
+        metadata["mixed_construction_curve_split"] = "true"
+    return metadata
 
 
 def _canonical_part_id(
