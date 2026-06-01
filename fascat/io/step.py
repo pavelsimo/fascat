@@ -158,6 +158,10 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "EQUALSEXPRESSION": "equals_expression",
     "EXP_FUNCTION": "exp_function",
     "EXPFUNCTION": "exp_function",
+    "EXPRESSION_EXTENSION_NUMERIC": "expression_extension_numeric",
+    "EXPRESSIONEXTENSIONNUMERIC": "expression_extension_numeric",
+    "EXPRESSION_EXTENSION_STRING": "expression_extension_string",
+    "EXPRESSIONEXTENSIONSTRING": "expression_extension_string",
     "FORMAT_FUNCTION": "format_function",
     "FORMATFUNCTION": "format_function",
     "INDEX_EXPRESSION": "index_expression",
@@ -182,6 +186,10 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "LOG2FUNCTION": "log2_function",
     "LOG_FUNCTION": "log_function",
     "LOGFUNCTION": "log_function",
+    "LOGICAL_LITERAL": "logical_literal",
+    "LOGICALLITERAL": "logical_literal",
+    "LOGICAL_REPRESENTATION_ITEM": "logical_representation_item",
+    "LOGICALREPRESENTATIONITEM": "logical_representation_item",
     "LOT_EFFECTIVITY": "lot_effectivity",
     "LITERAL_NUMBER": "literal_number",
     "LITERALNUMBER": "literal_number",
@@ -2062,10 +2070,14 @@ def _step_condition_operator(entity: str) -> str | None:
         return "interval"
     if normalized == "LIKEEXPRESSION":
         return "like"
+    if normalized == "EXPRESSIONEXTENSIONSTRING":
+        return "string_literal"
     if normalized == "INDEXEXPRESSION":
         return "string_index"
     if normalized == "FORMATFUNCTION":
         return "string_format"
+    if normalized == "EXPRESSIONEXTENSIONNUMERIC":
+        return "numeric_literal"
     if normalized == "PLUSEXPRESSION":
         return "numeric_add"
     if normalized == "MINUSEXPRESSION":
@@ -2120,7 +2132,7 @@ def _step_condition_operator(entity: str) -> str | None:
         return "string_concat"
     if normalized == "SUBSTRINGEXPRESSION":
         return "string_substring"
-    if normalized in {"BOOLEANLITERAL", "BOOLEANREPRESENTATIONITEM"}:
+    if normalized in {"BOOLEANLITERAL", "BOOLEANREPRESENTATIONITEM", "LOGICALLITERAL", "LOGICALREPRESENTATIONITEM"}:
         return "literal"
     if normalized in {
         "INTLITERAL",

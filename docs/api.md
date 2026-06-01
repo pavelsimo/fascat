@@ -321,19 +321,22 @@ simple AP242 condition/expression records such as `AND_EXPRESSION`,
 `INTERVAL_EXPRESSION`, `LIKE_EXPRESSION`, numeric arithmetic expressions such
 as `PLUS_EXPRESSION`, `MINUS_EXPRESSION`, `MULT_EXPRESSION`,
 `DIV_EXPRESSION`, `SLASH_EXPRESSION`, `MOD_EXPRESSION`, and
-`POWER_EXPRESSION`, `RATIONAL_REPRESENTATION_ITEM`, numeric functions such as
+`POWER_EXPRESSION`, `RATIONAL_REPRESENTATION_ITEM`,
+`EXPRESSION_EXTENSION_NUMERIC`, numeric functions such as
 `ABS_FUNCTION`,
 `MINUS_FUNCTION`, `SQUARE_ROOT_FUNCTION`, `MAXIMUM_FUNCTION`,
 `MINIMUM_FUNCTION`, `SIN_FUNCTION`, `COS_FUNCTION`, `TAN_FUNCTION`,
 `ASIN_FUNCTION`, `ACOS_FUNCTION`, `ATAN_FUNCTION`, `EXP_FUNCTION`,
 `LOG_FUNCTION`, `LOG2_FUNCTION`, and `LOG10_FUNCTION`, simple string
 expressions such as `CONCAT_EXPRESSION`, `SUBSTRING_EXPRESSION`,
-`INDEX_EXPRESSION`, and `FORMAT_FUNCTION`, and string-derived numeric
+`INDEX_EXPRESSION`, `FORMAT_FUNCTION`, and `EXPRESSION_EXTENSION_STRING`,
+and string-derived numeric
 functions such as
 `LENGTH_FUNCTION`, `VALUE_FUNCTION`, and `INT_VALUE_FUNCTION`,
 `ODD_FUNCTION`, `BOOLEAN_LITERAL`, `BOOLEAN_REPRESENTATION_ITEM`,
-`BOOLEAN_VARIABLE`, `MATHS_BOOLEAN_VARIABLE`, numeric literals, string
-literals, and named maths numeric/string variables, plus wrappers such as
+`LOGICAL_LITERAL`, `LOGICAL_REPRESENTATION_ITEM`, `BOOLEAN_VARIABLE`,
+`MATHS_BOOLEAN_VARIABLE`, numeric literals, string literals, and named maths
+numeric/string variables, plus wrappers such as
 `CONDITIONAL_CONFIGURATION`, `CONDITIONAL_CONCEPT_FEATURE`,
 `CONDITIONAL_EFFECTIVITY`, `CONFIGURED_EFFECTIVITY_ASSIGNMENT`, and
 `APPLIED_EFFECTIVITY_ASSIGNMENT` / `APPLIED_INEFFECTIVITY_ASSIGNMENT`, plus
@@ -359,14 +362,15 @@ non-value operand states differ. Numeric comparison and interval records select
 when named numeric variables are
 supplied as selection values such as `load rating=15`, including when those
 variables flow through simple numeric arithmetic or numeric function expression
-operands, including rational representation items and elementary trig/log/exp
-functions. `ODD_FUNCTION` selects when a named integer numeric variable is
+operands, including rational representation items, expression-extension numeric
+values, and elementary trig/log/exp functions. `ODD_FUNCTION` selects when a
+named integer numeric variable is
 supplied as an odd integer assignment.
 `LIKE_EXPRESSION` records select when named string variables are supplied as
 selection values such as `finish=black anodized`, including when those values
 flow through simple `CONCAT_EXPRESSION`, `SUBSTRING_EXPRESSION`, or
-`INDEX_EXPRESSION` operands, or when numeric variables flow through conservative
-`FORMAT_FUNCTION` operands.
+`INDEX_EXPRESSION` operands, `EXPRESSION_EXTENSION_STRING` values, or when
+numeric variables flow through conservative `FORMAT_FUNCTION` operands.
 `LENGTH_FUNCTION`, `VALUE_FUNCTION`, and `INT_VALUE_FUNCTION` can feed numeric
 comparisons from selected string variables; value functions parse strict numeric
 text, and integer value functions require strict integer text.
@@ -385,13 +389,14 @@ Conditional wrapper records also gate their
 configured target labels, and `CONDITIONAL_CONCEPT_FEATURE` gates its own
 feature label, so the target label alone does not bypass an unsatisfied
 condition. Boolean literal records, including named
-`BOOLEAN_REPRESENTATION_ITEM` records, are evaluated
+`BOOLEAN_REPRESENTATION_ITEM`, `LOGICAL_LITERAL`, and
+`LOGICAL_REPRESENTATION_ITEM` records, are evaluated
 from STEP `.T.` / `.F.` arguments, and boolean variables including
 `MATHS_BOOLEAN_VARIABLE` act as named operands selected by their label or STEP
 record id. Numeric arithmetic/function records can participate in numeric
 comparisons, intervals, and equality/not-equality conditions through selected
 `label=value` assignments.
-`STRING_LITERAL`,
+`STRING_LITERAL`, `EXPRESSION_EXTENSION_STRING`,
 `MATHS_STRING_VARIABLE` / `STRING_VARIABLE`, `CONCAT_EXPRESSION`, and
 `SUBSTRING_EXPRESSION` records can participate in simple string equality,
 not-equality, and
@@ -432,7 +437,7 @@ Metadata and PMI parameters:
 | `StepReadOptions` | `validation_properties` | Request STEP validation properties. Current reports approximate this with source topology counts rather than typed validation-property entities. |
 | `StepReadOptions` | `pmi` | Import common typed AP242 PMI text records, including dimension, location, geometric tolerance, plus/minus tolerance, datum, datum-reference, feature-control-frame, and note entities, into `PmiAnnotation` objects and report a textual semantic reference graph; AP242 PMI markers are reported when no supported typed record can be extracted. |
 | `StepReadOptions` | `design_variants` | Scan common STEP configuration/design-variant/effectivity and simple boolean/numeric/string condition records into metadata and import reports. |
-| `StepReadOptions` | `design_variant_selection` | Select one or more variant labels, effectivity values/ranges, STEP record ids, referenced labels, or numeric/string assignments such as `load rating=15` or `finish=black anodized`, and prune imported geometry by matching node/part/source-name metadata. Effectivity selections follow resolved STEP references back to configuration/design feature labels, effectivity relationship links, product-definition/configuration effectivity usage targets, applied product-definition assignment targets, and gated effectivity context-assignment target labels when present; supported serial/date/time-interval ranges match values inside their bounds, simple `AND`/`OR`/`XOR`/`NOT`/equality/not-equality/numeric-comparison/numeric-interval/string-like/odd-function condition records gate operand labels before pruning, boolean literals including `BOOLEAN_REPRESENTATION_ITEM` evaluate `.T.` / `.F.` values, boolean variables including `MATHS_BOOLEAN_VARIABLE` evaluate as named operands selected by label or STEP record id, named maths numeric variables evaluate from selected `label=value` assignments and can flow through simple numeric arithmetic and function expressions before comparison/interval/equality evaluation, named string variables evaluate from selected `label=value` assignments for `LIKE_EXPRESSION`, equality/not-equality, `CONCAT_EXPRESSION`, `SUBSTRING_EXPRESSION`, `LENGTH_FUNCTION`, `VALUE_FUNCTION`, and `INT_VALUE_FUNCTION`, applied ineffectivity assignments suppress assigned target labels, and conditional/effectivity-assignment wrappers gate their configured target labels while expression-only operand labels are kept out of geometry selectors. Full AP242 conditional/effectivity geometry evaluation remains planned. |
+| `StepReadOptions` | `design_variant_selection` | Select one or more variant labels, effectivity values/ranges, STEP record ids, referenced labels, or numeric/string assignments such as `load rating=15` or `finish=black anodized`, and prune imported geometry by matching node/part/source-name metadata. Effectivity selections follow resolved STEP references back to configuration/design feature labels, effectivity relationship links, product-definition/configuration effectivity usage targets, applied product-definition assignment targets, and gated effectivity context-assignment target labels when present; supported serial/date/time-interval ranges match values inside their bounds, simple `AND`/`OR`/`XOR`/`NOT`/equality/not-equality/numeric-comparison/numeric-interval/string-like/odd-function condition records gate operand labels before pruning, boolean/logical literals including `BOOLEAN_REPRESENTATION_ITEM`, `LOGICAL_LITERAL`, and `LOGICAL_REPRESENTATION_ITEM` evaluate `.T.` / `.F.` values, boolean variables including `MATHS_BOOLEAN_VARIABLE` evaluate as named operands selected by label or STEP record id, named maths numeric variables evaluate from selected `label=value` assignments and can flow through simple numeric arithmetic and function expressions, rational representation items, and expression-extension numeric values before comparison/interval/equality evaluation, named string variables evaluate from selected `label=value` assignments for `LIKE_EXPRESSION`, equality/not-equality, `CONCAT_EXPRESSION`, `SUBSTRING_EXPRESSION`, `EXPRESSION_EXTENSION_STRING`, `LENGTH_FUNCTION`, `VALUE_FUNCTION`, and `INT_VALUE_FUNCTION`, applied ineffectivity assignments suppress assigned target labels, and conditional/effectivity-assignment wrappers gate their configured target labels while expression-only operand labels are kept out of geometry selectors. Full AP242 conditional/effectivity geometry evaluation remains planned. |
 | `StepReadOptions` | `existing_meshes` | Prefer existing tessellation payloads from the source file when the importer exposes them. Tessellation `reuse_existing_meshes` still controls whether loaded meshes are retessellated later. |
 | `StepReadOptions` | `multi_file` | Request multi-file STEP assembly import. `read_step_many()` honors explicit member lists; single-path STEP imports recursively resolve quoted external `.step` / `.stp` references, preserve repeated references as member occurrences, and report the `external_reference_graph`. |
 | `StepReadOptions` | `source_textures` | Scan STEP/IGES source text for referenced sidecar PNG/JPEG/KTX2 texture files, load resolved files into `asset.images`, and report resolved/missing/unreadable counts. |

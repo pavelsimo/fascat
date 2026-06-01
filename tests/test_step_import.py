@@ -1153,6 +1153,12 @@ def test_step_design_variant_selection_supports_not_condition(tmp_path: Path) ->
             "#21=BOOLEAN_REPRESENTATION_ITEM('blocked literal',.F.);\n",
             "boolean_representation_item",
         ),
+        ("#20=LOGICAL_LITERAL(.T.);\n", "#21=LOGICAL_LITERAL(.F.);\n", "logical_literal"),
+        (
+            "#20=LOGICAL_REPRESENTATION_ITEM('service literal',.T.);\n",
+            "#21=LOGICAL_REPRESENTATION_ITEM('blocked literal',.F.);\n",
+            "logical_representation_item",
+        ),
     ),
 )
 def test_step_design_variant_selection_evaluates_boolean_literals(
@@ -1838,6 +1844,100 @@ def test_step_design_variant_selection_evaluates_numeric_interval_expression(tmp
     assert "condition expression was not satisfied" in blocked_selection.warnings[0]
 
     target_options = StepReadOptions(design_variant_selection=("heavy package",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+
+def test_step_design_variant_selection_evaluates_numeric_expression_extension(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=MATHS_REAL_VARIABLE(#1,'load rating');\n"
+        "#11=EXPRESSION_EXTENSION_NUMERIC(12.5,#90);\n"
+        "#12=PRODUCT_CONCEPT_FEATURE('extended load package','select extended load panel',#1);\n"
+        "#20=COMPARISON_EQUAL(#10,#11);\n"
+        "#90=SI_UNIT(.MILLI.,.METRE.);\n"
+        "#21=CONDITIONAL_CONFIGURATION('extended load condition',#20,#12);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="extended-node", name="Extended Load Panel", part_id="extended"),
+            fc.Node(id="fallback-node", name="Fallback Load Panel", part_id="fallback"),
+        ],
+    )
+    parts = {
+        "extended": fc.Part(
+            id="extended",
+            name="Extended Load Panel",
+            material_ids=["extended-mat"],
+            metadata={"source_name": "extended load panel"},
+        ),
+        "fallback": fc.Part(
+            id="fallback",
+            name="Fallback Load Panel",
+            material_ids=["fallback-mat"],
+            metadata={"source_name": "fallback load panel"},
+        ),
+    }
+    materials = {
+        "extended-mat": fc.Material(id="extended-mat", name="Extended Paint", base_color=(0.0, 0.0, 0.0, 1.0)),
+        "fallback-mat": fc.Material(id="fallback-mat", name="Fallback Paint", base_color=(0.7, 0.7, 0.7, 1.0)),
+    }
+
+    matching_options = StepReadOptions(design_variant_selection=("load rating=12.5",))
+    matching_extraction = _extract_step_design_variants(source, matching_options)
+    matching_root = root.copy()
+    matching_parts = {key: part.copy() for key, part in parts.items()}
+    matching_materials = dict(materials)
+
+    matching_result = _apply_step_design_variant_selection(
+        matching_root,
+        matching_parts,
+        matching_materials,
+        matching_extraction,
+        matching_options,
+    )
+
+    assert matching_extraction.records[1].kind == "expression_extension_numeric"
+    assert matching_extraction.records[1].condition_operator == "numeric_literal"
+    assert matching_extraction.records[1].condition_number == 12.5
+    assert matching_extraction.records[3].condition_operator == "equals"
+    assert matching_result.status == "applied"
+    assert matching_result.matched_records == ("step_variant_20", "step_variant_21")
+    assert [child.name for child in matching_root.children] == ["Extended Load Panel"]
+    assert set(matching_parts) == {"extended"}
+
+    blocked_options = StepReadOptions(design_variant_selection=("load rating=8.0",))
+    blocked_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, blocked_options),
+        blocked_options,
+    )
+
+    assert blocked_selection.status == "unmatched_geometry"
+    assert blocked_selection.matched_records == ()
+    assert "condition expression was not satisfied" in blocked_selection.warnings[0]
+
+    target_options = StepReadOptions(design_variant_selection=("extended load package",))
     target_selection = _apply_step_design_variant_selection(
         root.copy(),
         {key: part.copy() for key, part in parts.items()},
@@ -2584,6 +2684,98 @@ def test_step_design_variant_selection_evaluates_format_function_in_like_conditi
     assert "condition expression was not satisfied" in blocked_selection.warnings[0]
 
     target_options = StepReadOptions(design_variant_selection=("formatted load package",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+
+def test_step_design_variant_selection_evaluates_string_expression_extension(tmp_path: Path) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=MATHS_STRING_VARIABLE(#1,'finish');\n"
+        "#11=EXPRESSION_EXTENSION_STRING('black anodized',#90);\n"
+        "#12=PRODUCT_CONCEPT_FEATURE('extended finish package','select extended finish panel',#1);\n"
+        "#20=LIKE_EXPRESSION(#10,#11);\n"
+        "#90=SI_UNIT(.MILLI.,.METRE.);\n"
+        "#21=CONDITIONAL_CONFIGURATION('extended finish condition',#20,#12);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="extended-node", name="Extended Finish Panel", part_id="extended"),
+            fc.Node(id="fallback-node", name="Fallback Finish Panel", part_id="fallback"),
+        ],
+    )
+    parts = {
+        "extended": fc.Part(
+            id="extended",
+            name="Extended Finish Panel",
+            material_ids=["extended-mat"],
+            metadata={"source_name": "extended finish panel"},
+        ),
+        "fallback": fc.Part(
+            id="fallback",
+            name="Fallback Finish Panel",
+            material_ids=["fallback-mat"],
+            metadata={"source_name": "fallback finish panel"},
+        ),
+    }
+    materials = {
+        "extended-mat": fc.Material(id="extended-mat", name="Extended Paint", base_color=(0.0, 0.0, 0.0, 1.0)),
+        "fallback-mat": fc.Material(id="fallback-mat", name="Fallback Paint", base_color=(0.7, 0.7, 0.7, 1.0)),
+    }
+
+    matching_options = StepReadOptions(design_variant_selection=("finish=black anodized",))
+    matching_extraction = _extract_step_design_variants(source, matching_options)
+    matching_root = root.copy()
+    matching_parts = {key: part.copy() for key, part in parts.items()}
+    matching_materials = dict(materials)
+
+    matching_result = _apply_step_design_variant_selection(
+        matching_root,
+        matching_parts,
+        matching_materials,
+        matching_extraction,
+        matching_options,
+    )
+
+    assert matching_extraction.records[1].kind == "expression_extension_string"
+    assert matching_extraction.records[1].condition_operator == "string_literal"
+    assert matching_extraction.records[1].condition_text == "black anodized"
+    assert matching_extraction.records[3].condition_operator == "like"
+    assert matching_result.status == "applied"
+    assert matching_result.matched_records == ("step_variant_20", "step_variant_21")
+    assert [child.name for child in matching_root.children] == ["Extended Finish Panel"]
+    assert set(matching_parts) == {"extended"}
+
+    blocked_options = StepReadOptions(design_variant_selection=("finish=silver anodized",))
+    blocked_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, blocked_options),
+        blocked_options,
+    )
+
+    assert blocked_selection.status == "unmatched_geometry"
+    assert blocked_selection.matched_records == ()
+    assert "condition expression was not satisfied" in blocked_selection.warnings[0]
+
+    target_options = StepReadOptions(design_variant_selection=("extended finish package",))
     target_selection = _apply_step_design_variant_selection(
         root.copy(),
         {key: part.copy() for key, part in parts.items()},
