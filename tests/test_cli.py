@@ -335,7 +335,17 @@ def test_runtime_fixtures_can_capture_targets(
 def test_convert_dry_run_json() -> None:
     result = runner.invoke(
         app,
-        ["--json", "--dry-run", "convert", "input.step", "output.usdc", "--sag-ratio", "0.01"],
+        [
+            "--json",
+            "--dry-run",
+            "convert",
+            "input.step",
+            "output.usdc",
+            "--sag-ratio",
+            "0.01",
+            "--lod-engine-profile",
+            "unreal",
+        ],
     )
     assert result.exit_code == 0
     payload = json.loads(result.output)
@@ -345,6 +355,7 @@ def test_convert_dry_run_json() -> None:
     assert payload["max_polygon_length"] is None
     assert payload["free_edge_report"] is False
     assert payload["reuse_existing_meshes"] is True
+    assert payload["lod_engine_profile"] == "unreal"
     assert payload["unwrap_method"] == "default"
     assert payload["unwrap_iterations"] is None
     assert payload["unwrap_tolerance"] is None

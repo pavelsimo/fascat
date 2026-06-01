@@ -341,6 +341,24 @@ def test_lods_can_bake_far_level_material_policy() -> None:
     assert with_lods.metadata["lod_texture_baked_levels"] == "1"
 
 
+def test_lods_apply_engine_specific_export_modes() -> None:
+    mesh = _triangle_mesh()
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    unity = asset.lods(LODOptions((0.5,), engine_profile="unity", mode="separate"))
+    unreal = asset.lods(LODOptions((0.5,), engine_profile="unreal"))
+
+    assert unity.metadata["lod_mode"] == "separate"
+    assert unity.metadata["lod_export_mode"] == "variants"
+    assert unity.parts["part"].lod_meshes[0].metadata["lod_export_mode"] == "variants"
+    assert unreal.metadata["lod_engine_profile"] == "unreal"
+    assert unreal.metadata["lod_export_mode"] == "separate"
+    assert unreal.parts["part"].lod_meshes[0].metadata["lod_export_mode"] == "separate"
+
+
 def test_lods_can_build_scene_level_far_proxy() -> None:
     translate = np.eye(4, dtype=float)
     translate[0, 3] = 2.0

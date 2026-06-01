@@ -44,6 +44,7 @@ class _LodPartResult:
 def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str] | None = None) -> Asset:
     result = asset.copy(keep_source=True)
     screen_coverage = _screen_coverage(options)
+    export_mode = _lod_export_mode(options)
     level_policy_advisories = _level_policy_advisories(options, screen_coverage)
     occurrence_counts = _occurrence_counts_by_part(result)
     generated_parts = 0
@@ -66,6 +67,7 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
             result.parts[part_id],
             options,
             screen_coverage,
+            export_mode,
             level_policy_advisories,
             part_occurrences=occurrence_counts.get(part_id, 0),
         )
@@ -95,6 +97,7 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
         else None
     )
     result.metadata["lod_mode"] = options.mode
+    result.metadata["lod_export_mode"] = export_mode
     result.metadata["lod_engine_profile"] = options.engine_profile
     result.metadata["lod_far_lod_bake"] = str(options.far_lod_bake).lower()
     result.metadata["lod_scene_far_proxy"] = (
@@ -138,6 +141,7 @@ def _build_part_lods(
     part: Part,
     options: LODOptions,
     screen_coverage: tuple[float, ...],
+    export_mode: str,
     level_policy_advisories: tuple[str, ...],
     *,
     part_occurrences: int,
@@ -211,6 +215,7 @@ def _build_part_lods(
                 "lod_omitted": "tiny_part",
                 "lod_simplification_source": simplification_source,
                 "lod_engine_profile": options.engine_profile,
+                "lod_export_mode": export_mode,
                 "lod_switch_distance": f"{switch_distance:.9g}",
                 **policy_metadata,
             }
@@ -231,6 +236,7 @@ def _build_part_lods(
             "lod_ratio": f"{ratio:.9g}",
             "lod_screen_coverage": f"{coverage:.9g}",
             "lod_mode": options.mode,
+            "lod_export_mode": export_mode,
             "lod_engine_profile": options.engine_profile,
             "lod_switch_distance": f"{switch_distance:.9g}",
             "lod_per_part_budget": str(options.per_part_budget).lower(),
@@ -253,6 +259,7 @@ def _build_part_lods(
         "lod_ratios": ",".join(f"{ratio:.9g}" for ratio in options.ratios),
         "lod_screen_coverage": ",".join(f"{value:.9g}" for value in screen_coverage),
         "lod_mode": options.mode,
+        "lod_export_mode": export_mode,
         "lod_engine_profile": options.engine_profile,
         "lod_far_lod_bake": str(options.far_lod_bake).lower(),
         "lod_per_part_budget": str(options.per_part_budget).lower(),
@@ -349,6 +356,8 @@ def _build_scene_far_proxy(
     proxy_metadata: dict[str, object] = {
         "lod_scene_far_proxy": "true",
         "lod_level": str(len(options.ratios)),
+        "lod_export_mode": _lod_export_mode(options),
+        "lod_engine_profile": options.engine_profile,
         "lod_ratio": f"{options.ratios[-1]:.9g}",
         "lod_screen_coverage": f"{screen_coverage[-1]:.9g}",
         "lod_source_parts": str(len(source_parts)),
@@ -464,6 +473,14 @@ def _level_policy_advisories(options: LODOptions, screen_coverage: tuple[float, 
         else:
             values.append("progressive_geometry")
     return tuple(values)
+
+
+def _lod_export_mode(options: LODOptions) -> str:
+    if options.engine_profile == "unity":
+        return "variants"
+    if options.engine_profile == "unreal":
+        return "separate"
+    return options.mode
 
 
 def _screen_coverage(options: LODOptions) -> tuple[float, ...]:

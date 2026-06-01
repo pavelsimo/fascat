@@ -302,6 +302,12 @@ class LODMode(str, Enum):
     SEPARATE = "separate"
 
 
+class LODEngineProfile(str, Enum):
+    GENERIC = "generic"
+    UNITY = "unity"
+    UNREAL = "unreal"
+
+
 class UsdPackage(str, Enum):
     DEFAULT = "default"
     USDZ = "usdz"
@@ -737,6 +743,10 @@ def cmd_convert(
         LODMode,
         typer.Option("--lod-mode", help="LOD output mode: variants, extras, or separate."),
     ] = LODMode.VARIANTS,
+    lod_engine_profile: Annotated[
+        LODEngineProfile,
+        typer.Option("--lod-engine-profile", help="LOD export profile: generic, unity, or unreal."),
+    ] = LODEngineProfile.GENERIC,
     lod_per_part_budget: Annotated[
         bool,
         typer.Option("--lod-per-part-budget", help="Apply LOD budgets independently per part."),
@@ -1377,6 +1387,7 @@ def cmd_convert(
         "fail_on_open_shells": fail_on_open_shells,
         "lods": None,
         "lod_mode": lod_mode.value,
+        "lod_engine_profile": lod_engine_profile.value,
         "lod_per_part_budget": lod_per_part_budget,
         "lod_drop_tiny_parts": lod_drop_tiny_parts,
         "lod_tiny_part_screen_size": lod_tiny_part_screen_size,
@@ -1968,6 +1979,7 @@ def cmd_convert(
             lod_values,
             lod_coverages,
             lod_mode.value,
+            lod_engine_profile.value,
             lod_per_part_budget,
             lod_drop_tiny_parts,
             lod_tiny_part_screen_size,
@@ -2860,6 +2872,7 @@ def _lod_options_for_cli(
     lod_values: list[float] | None,
     lod_coverages: list[float] | None,
     lod_mode: str,
+    lod_engine_profile: str,
     lod_per_part_budget: bool,
     lod_drop_tiny_parts: bool,
     lod_tiny_part_screen_size: float,
@@ -2876,6 +2889,7 @@ def _lod_options_for_cli(
     return LODOptions(
         ratios=ratios,
         mode=cast(Any, lod_mode),
+        engine_profile=cast(Any, lod_engine_profile),
         screen_coverage=None if lod_coverages is None else tuple(lod_coverages),
         per_part_budget=lod_per_part_budget,
         drop_tiny_parts=lod_drop_tiny_parts,

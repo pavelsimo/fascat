@@ -161,6 +161,48 @@ def test_glb_export_writes_valid_scene_materials_uvs_and_lod_metadata(tmp_path: 
     assert len(binary) >= document["buffers"][0]["byteLength"]
 
 
+def test_glb_export_writes_unreal_lods_as_separate_scene_nodes(tmp_path: Path) -> None:
+    output = tmp_path / "unreal-lods.glb"
+    asset = _asset_with_materials_and_lods().lods(
+        LODOptions(ratios=(0.5,), screen_coverage=(0.35,), engine_profile="unreal")
+    )
+
+    write_gltf(asset, output)
+
+    document, _binary = _read_glb(output)
+    root = document["nodes"][document["scenes"][0]["nodes"][0]]
+    occurrence_index = root["children"][0]
+    separate_lod_index = root["children"][1]
+    occurrence = document["nodes"][occurrence_index]
+    separate_lod = document["nodes"][separate_lod_index]
+
+    assert "MSFT_lod" not in occurrence.get("extensions", {})
+    assert "MSFT_lod" not in document.get("extensionsUsed", [])
+    assert occurrence["extras"]["fascat"]["lodExportMode"] == "separate"
+    assert occurrence["extras"]["fascat"]["lodEngineProfile"] == "unreal"
+    assert occurrence["extras"]["fascat"]["lods"][0]["engineProfile"] == "unreal"
+    assert occurrence["extras"]["fascat"]["lods"][0]["exportMode"] == "separate"
+    assert separate_lod["name"] == "Occurrence_LOD1"
+    assert separate_lod["mesh"] == occurrence["extras"]["fascat"]["lodMeshIndices"][0]
+    assert separate_lod["matrix"] == occurrence["matrix"]
+    assert separate_lod["extras"]["fascat"]["lodExportMode"] == "separate"
+    assert separate_lod["extras"]["fascat"]["lodEngineProfile"] == "unreal"
+
+
+def test_glb_export_can_keep_lods_as_extras_only(tmp_path: Path) -> None:
+    output = tmp_path / "extras-lods.glb"
+    asset = _asset_with_materials_and_lods().lods(LODOptions(ratios=(0.5,), mode="extras"))
+
+    write_gltf(asset, output)
+
+    document, _binary = _read_glb(output)
+    occurrence = next(node for node in document["nodes"] if node.get("mesh") == 0)
+
+    assert occurrence["extras"]["fascat"]["lodExportMode"] == "extras"
+    assert "MSFT_lod" not in occurrence.get("extensions", {})
+    assert "MSFT_lod" not in document.get("extensionsUsed", [])
+
+
 def test_glb_export_writes_embedded_baked_material_textures(tmp_path: Path) -> None:
     output = tmp_path / "baked.glb"
     asset = _asset_with_materials_and_lods().bake_materials(
@@ -265,6 +307,32 @@ def test_glb_export_attaches_scene_far_proxy_as_root_lod(tmp_path: Path) -> None
     assert proxy_node["extras"]["fascat"]["sceneFarProxy"] is True
     assert proxy_node["mesh"] == root["extras"]["fascat"]["sceneFarProxyMeshIndex"]
     assert "MSFT_lod" in document["extensionsUsed"]
+
+
+def test_glb_export_attaches_unreal_scene_far_proxy_as_separate_node(tmp_path: Path) -> None:
+    output = tmp_path / "scene-proxy-unreal.glb"
+    asset = _asset_with_materials_and_lods().lods(
+        LODOptions(
+            ratios=(0.5,),
+            screen_coverage=(0.05,),
+            engine_profile="unreal",
+            scene_far_proxy=True,
+        )
+    )
+
+    write_gltf(asset, output)
+
+    document, _binary = _read_glb(output)
+    root = document["nodes"][document["scenes"][0]["nodes"][0]]
+    scene_nodes = document["scenes"][0]["nodes"]
+    proxy_node_index = root["extras"]["fascat"]["sceneFarProxyNodeIndex"]
+    proxy_node = document["nodes"][proxy_node_index]
+    assert proxy_node_index in scene_nodes
+    assert "MSFT_lod" not in root.get("extensions", {})
+    assert "MSFT_lod" not in document.get("extensionsUsed", [])
+    assert root["extras"]["fascat"]["sceneFarProxyExportMode"] == "separate"
+    assert root["extras"]["fascat"]["sceneFarProxyScreenCoverage"] == 0.05
+    assert proxy_node["extras"]["fascat"]["sceneFarProxy"] is True
 
 
 def test_glb_export_preserves_normals_and_tangent_handedness(tmp_path: Path) -> None:

@@ -640,6 +640,12 @@ class _PartQuantization:
         return matrix
 
 
+@dataclass(frozen=True)
+class _NodeAppendResult:
+    index: int
+    separate_lod_indices: tuple[int, ...] = ()
+
+
 def _build_document(
     asset: Asset,
     *,
@@ -699,15 +705,16 @@ def _build_document(
             part_lods[part.id] = lod_entries
 
     nodes: list[dict[str, Any]] = []
-    root_node = _append_node(nodes, asset.root, part_meshes, part_lods, export_space, metadata_options, quantization)
-    _attach_scene_far_proxy_lod(nodes, root_node, asset, part_meshes)
+    root = _append_node(nodes, asset.root, part_meshes, part_lods, export_space, metadata_options, quantization)
+    scene_nodes = [root.index, *root.separate_lod_indices]
+    _attach_scene_far_proxy_lod(nodes, root.index, scene_nodes, asset, part_meshes)
     binary = builder.data
     buffers: list[dict[str, object]] = [{"byteLength": len(binary)}]
 
     document: dict[str, Any] = {
         "asset": {"version": "2.0", "generator": "fascat"},
         "scene": 0,
-        "scenes": [{"name": asset.root.name or "Scene", "nodes": [root_node]}],
+        "scenes": [{"name": asset.root.name or "Scene", "nodes": scene_nodes}],
         "nodes": nodes,
         "buffers": buffers,
         "bufferViews": builder.buffer_views,
@@ -1396,6 +1403,12 @@ def _lod_entry(mesh_index: int, lod: int, mesh: Mesh) -> dict[str, object]:
         entry["ratio"] = _metadata_float(mesh.metadata["lod_ratio"])
     if "lod_screen_coverage" in mesh.metadata:
         entry["screenCoverage"] = _metadata_float(mesh.metadata["lod_screen_coverage"])
+    if "lod_switch_distance" in mesh.metadata:
+        entry["switchDistance"] = _metadata_float(mesh.metadata["lod_switch_distance"])
+    if "lod_engine_profile" in mesh.metadata:
+        entry["engineProfile"] = str(mesh.metadata["lod_engine_profile"])
+    if "lod_export_mode" in mesh.metadata:
+        entry["exportMode"] = str(mesh.metadata["lod_export_mode"])
     if mesh.metadata.get("lod_omitted"):
         entry["omitted"] = mesh.metadata["lod_omitted"]
     return entry
@@ -1428,7 +1441,7 @@ def _append_node(
     export_space: _ExportSpace,
     metadata_options: MetadataExportOptions,
     quantization: dict[str, _PartQuantization],
-) -> int:
+) -> _NodeAppendResult:
     fascat_extras: dict[str, object] = {"nodeId": node.id}
     if metadata_options.mode == "full":
         fascat_extras.update(node.metadata)
@@ -1437,6 +1450,7 @@ def _append_node(
         "name": node.name or node.id,
         "extras": {"fascat": fascat_extras},
     }
+    separate_lod_indices: list[int] = []
     transform = _node_transform(node, export_space, quantization)
     if not np.allclose(transform, np.eye(4)):
         gltf_node["matrix"] = transform.T.reshape(-1).astype(float).tolist()
@@ -1446,25 +1460,53 @@ def _append_node(
         if lods:
             gltf_node["extras"]["fascat"]["lodMeshIndices"] = [entry["mesh"] for entry in lods]
             gltf_node["extras"]["fascat"]["lods"] = lods
-            msft_lods = [entry for entry in lods if "omitted" not in entry]
-            msft_lod_node_indices = [
-                _append_lod_node(nodes, node, entry, export_space, metadata_options, quantization)
-                for entry in msft_lods
-            ]
-            if msft_lod_node_indices:
-                gltf_node.setdefault("extensions", {})[_MSFT_LOD] = {"ids": msft_lod_node_indices}
-                screen_coverage = [entry["screenCoverage"] for entry in msft_lods if "screenCoverage" in entry]
-                if screen_coverage:
-                    gltf_node["extras"]["MSFT_screencoverage"] = screen_coverage
+            export_mode = _lod_export_mode(lods)
+            gltf_node["extras"]["fascat"]["lodExportMode"] = export_mode
+            gltf_node["extras"]["fascat"]["lodEngineProfile"] = _lod_engine_profile(lods)
+            renderable_lods = [entry for entry in lods if "omitted" not in entry]
+            if export_mode == "separate":
+                separate_lod_indices.extend(
+                    _append_lod_node(
+                        nodes,
+                        node,
+                        entry,
+                        export_space,
+                        metadata_options,
+                        quantization,
+                        export_mode=export_mode,
+                    )
+                    for entry in renderable_lods
+                )
+            elif export_mode == "variants":
+                msft_lod_node_indices = [
+                    _append_lod_node(
+                        nodes,
+                        node,
+                        entry,
+                        export_space,
+                        metadata_options,
+                        quantization,
+                        export_mode=export_mode,
+                    )
+                    for entry in renderable_lods
+                ]
+                if msft_lod_node_indices:
+                    gltf_node.setdefault("extensions", {})[_MSFT_LOD] = {"ids": msft_lod_node_indices}
+                    screen_coverage = [
+                        entry["screenCoverage"] for entry in renderable_lods if "screenCoverage" in entry
+                    ]
+                    if screen_coverage:
+                        gltf_node["extras"]["MSFT_screencoverage"] = screen_coverage
     index = len(nodes)
     nodes.append(gltf_node)
-    children = [
-        _append_node(nodes, child, part_meshes, part_lods, export_space, metadata_options, quantization)
-        for child in node.children
-    ]
+    children: list[int] = []
+    for child in node.children:
+        child_result = _append_node(nodes, child, part_meshes, part_lods, export_space, metadata_options, quantization)
+        children.append(child_result.index)
+        children.extend(child_result.separate_lod_indices)
     if children:
         gltf_node["children"] = children
-    return index
+    return _NodeAppendResult(index=index, separate_lod_indices=tuple(separate_lod_indices))
 
 
 def _append_lod_node(
@@ -1474,20 +1516,28 @@ def _append_lod_node(
     export_space: _ExportSpace,
     metadata_options: MetadataExportOptions,
     quantization: dict[str, _PartQuantization],
+    *,
+    export_mode: str,
 ) -> int:
     level = _int(lod_entry["level"], "LOD level")
     mesh_index = _int(lod_entry["mesh"], "LOD mesh index")
+    suffix = f"_LOD{level}" if export_mode == "separate" else f"_lod{level}"
     gltf_node: dict[str, Any] = {
-        "name": f"{node.name or node.id}_lod{level}",
+        "name": f"{node.name or node.id}{suffix}",
         "mesh": mesh_index,
         "extras": {
             "fascat": {
-                "nodeId": f"{node.id}_lod{level}",
+                "nodeId": f"{node.id}{suffix}",
                 "sourceNodeId": node.id,
                 "lod": level,
             }
         },
     }
+    if export_mode == "separate":
+        gltf_node["extras"]["fascat"]["lodExportMode"] = "separate"
+        gltf_node["extras"]["fascat"]["lodEngineProfile"] = str(lod_entry.get("engineProfile", "generic"))
+        if "switchDistance" in lod_entry:
+            gltf_node["extras"]["fascat"]["lodSwitchDistance"] = lod_entry["switchDistance"]
     if metadata_options.mode == "full" and node.metadata:
         gltf_node["extras"]["fascat"]["metadata"] = dict(node.metadata)
     transform = _node_transform(node, export_space, quantization)
@@ -1497,9 +1547,26 @@ def _append_lod_node(
     return len(nodes) - 1
 
 
+def _lod_export_mode(lods: list[dict[str, object]]) -> str:
+    for entry in lods:
+        value = entry.get("exportMode")
+        if value in {"variants", "extras", "separate"}:
+            return str(value)
+    return "variants"
+
+
+def _lod_engine_profile(lods: list[dict[str, object]]) -> str:
+    for entry in lods:
+        value = entry.get("engineProfile")
+        if isinstance(value, str) and value:
+            return value
+    return "generic"
+
+
 def _attach_scene_far_proxy_lod(
     nodes: list[dict[str, Any]],
     root_node: int,
+    scene_nodes: list[int],
     asset: Asset,
     part_meshes: dict[str, int],
 ) -> None:
@@ -1531,13 +1598,21 @@ def _attach_scene_far_proxy_lod(
     nodes.append(proxy_node)
     proxy_node_index = len(nodes) - 1
     root = nodes[root_node]
-    root.setdefault("extensions", {})[_MSFT_LOD] = {"ids": [proxy_node_index]}
+    export_mode = str(asset.metadata.get("lod_export_mode", "variants"))
     fascat_extras = root.setdefault("extras", {}).setdefault("fascat", {})
     fascat_extras["sceneFarProxyMeshIndex"] = proxy_mesh_index
     fascat_extras["sceneFarProxyPartId"] = proxy_part_id
+    fascat_extras["sceneFarProxyNodeIndex"] = proxy_node_index
     coverage = _metadata_float(proxy_part.mesh.metadata.get("lod_screen_coverage"))
-    if isinstance(coverage, float):
-        root["extras"]["MSFT_screencoverage"] = [coverage]
+    if export_mode == "separate":
+        scene_nodes.append(proxy_node_index)
+        fascat_extras["sceneFarProxyExportMode"] = "separate"
+        if isinstance(coverage, float):
+            fascat_extras["sceneFarProxyScreenCoverage"] = coverage
+    else:
+        root.setdefault("extensions", {})[_MSFT_LOD] = {"ids": [proxy_node_index]}
+        if isinstance(coverage, float):
+            root["extras"]["MSFT_screencoverage"] = [coverage]
 
 
 def _node_transform(
