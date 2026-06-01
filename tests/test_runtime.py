@@ -613,7 +613,9 @@ def test_engine_runtime_parses_unity_harness_measurements(
               "triangles": 1,
               "render_status": "rendered",
               "render_time_ms": 16,
-              "rendered_frames": 1
+              "rendered_frames": 1,
+              "render_backend": "unity_gltfast_camera",
+              "render_limitations": []
             }
             """,
             encoding="utf-8",
@@ -646,7 +648,10 @@ def test_engine_runtime_parses_unity_harness_measurements(
     assert report.render_status == "rendered"
     assert report.render_time_ms == 16
     assert report.rendered_frames == 1
+    assert report.render_backend == "unity_gltfast_camera"
+    assert report.render_limitations == ()
     assert report.to_dict()["render_status"] == "rendered"
+    assert report.to_dict()["render_backend"] == "unity_gltfast_camera"
 
 
 def test_copy_engine_runtime_harness_writes_unity_template(tmp_path: Path) -> None:
@@ -668,6 +673,9 @@ def test_copy_engine_runtime_harness_writes_unity_template(tmp_path: Path) -> No
     assert "PreviewBenchmarkFrames = 30" in harness
     assert "measured_fps" in harness
     assert "MeasuredFps" in harness
+    assert "render_backend" in harness
+    assert "unity_gltfast_camera" in harness
+    assert "render_limitations" in harness
 
 
 def test_copy_engine_runtime_harness_writes_unreal_template(tmp_path: Path) -> None:
@@ -708,9 +716,16 @@ def test_copy_engine_runtime_harness_writes_unreal_template(tmp_path: Path) -> N
     assert "FascatPreview=" in commandlet_text
     assert "PreviewBenchmarkFrames = 30" in commandlet_text
     assert "RenderPreview" in commandlet_text
+    assert "ReadPreviewGeometry" in commandlet_text
+    assert "DrawGeometryPreviewFrame" in commandlet_text
+    assert "unreal_commandlet_geometry_rasterizer" in commandlet_text
+    assert "unreal_commandlet_count_preview" in commandlet_text
+    assert "rendered_partial" in commandlet_text
     assert "FImageUtils::CompressImageArray" in commandlet_text
     assert "measured_fps" in commandlet_text
     assert "render_status" in commandlet_text
+    assert "render_backend" in commandlet_text
+    assert "render_limitations" in commandlet_text
     assert '"ImageWrapper"' in build_text
 
 
@@ -882,6 +897,10 @@ def test_engine_runtime_uses_packaged_unreal_harness_preview_when_project_is_omi
                     "render_status": "rendered",
                     "render_time_ms": 20,
                     "rendered_frames": 30,
+                    "render_backend": "unreal_commandlet_geometry_rasterizer",
+                    "render_limitations": [
+                        "packaged Unreal commandlet rasterizes GLB triangle geometry and baseColorFactor materials; it is not a full Unreal scene renderer"
+                    ],
                 }
             ),
             encoding="utf-8",
@@ -905,6 +924,10 @@ def test_engine_runtime_uses_packaged_unreal_harness_preview_when_project_is_omi
     assert report.measured_fps == 61.5
     assert report.frame_count == 30
     assert report.measurement_duration_ms == 488
+    assert report.render_backend == "unreal_commandlet_geometry_rasterizer"
+    assert report.render_limitations == (
+        "packaged Unreal commandlet rasterizes GLB triangle geometry and baseColorFactor materials; it is not a full Unreal scene renderer",
+    )
     assert report.render_error is None
     assert Image.open(preview).getpixel((0, 0)) == (30, 60, 90, 255)
 

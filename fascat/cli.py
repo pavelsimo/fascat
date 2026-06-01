@@ -2413,8 +2413,11 @@ def cmd_validate(
                 f"{runtime_browser_preview_report.error}."
             )
     if runtime_engine_report is not None and runtime_engine_report.preview_path is not None:
-        if runtime_engine_report.render_status == "rendered":
+        if runtime_engine_report.render_status in {"rendered", "rendered_partial"}:
             message = f"{message} Wrote engine preview {runtime_engine_report.preview_path}."
+            if runtime_engine_report.render_status == "rendered_partial":
+                detail = runtime_engine_report.render_error or "; ".join(runtime_engine_report.render_limitations)
+                message = f"{message} Engine preview partial: {detail}."
         else:
             message = (
                 f"{message} Engine preview {runtime_engine_report.render_status}: {runtime_engine_report.render_error}."

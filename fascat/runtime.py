@@ -237,6 +237,8 @@ class RuntimeEngineReport:
     render_status: str = "not_requested"
     render_time_ms: int | None = None
     rendered_frames: int = 0
+    render_backend: str = "none"
+    render_limitations: tuple[str, ...] = ()
     render_error: str | None = None
     error: str | None = None
 
@@ -259,6 +261,8 @@ class RuntimeEngineReport:
             "render_status": self.render_status,
             "render_time_ms": self.render_time_ms,
             "rendered_frames": self.rendered_frames,
+            "render_backend": self.render_backend,
+            "render_limitations": list(self.render_limitations),
             "render_error": self.render_error,
             "error": self.error,
         }
@@ -1638,6 +1642,8 @@ def _engine_report_from_payload(
         render_status=render_status,
         render_time_ms=_optional_int(payload.get("render_time_ms")),
         rendered_frames=_int(payload.get("rendered_frames"), 0),
+        render_backend=str(payload.get("render_backend", "unspecified")),
+        render_limitations=_string_tuple(payload.get("render_limitations")),
         render_error=str(render_error) if render_error is not None else None,
         error=str(error) if error is not None else None,
     )
@@ -1670,6 +1676,8 @@ def _engine_unavailable_report(
         render_status="not_requested" if options.preview_path is None else "unavailable",
         render_time_ms=None,
         rendered_frames=0,
+        render_backend="none",
+        render_limitations=(),
         render_error=error if options.preview_path is not None else None,
         error=error,
     )
@@ -1702,9 +1710,17 @@ def _engine_failed_report(
         render_status="not_requested" if options.preview_path is None else "failed",
         render_time_ms=None,
         rendered_frames=0,
+        render_backend="none",
+        render_limitations=(),
         render_error=error if options.preview_path is not None else None,
         error=error,
     )
+
+
+def _string_tuple(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list | tuple):
+        return ()
+    return tuple(str(item) for item in value if isinstance(item, str))
 
 
 def _optional_int(value: object) -> int | None:

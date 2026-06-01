@@ -73,6 +73,8 @@ public static class FascatRuntimeHarness
             ["render_status"] = renderResult.Status,
             ["render_time_ms"] = renderResult.RenderTimeMs >= 0 ? new JValue(renderResult.RenderTimeMs) : JValue.CreateNull(),
             ["rendered_frames"] = renderResult.RenderedFrames,
+            ["render_backend"] = renderResult.Backend,
+            ["render_limitations"] = new JArray(renderResult.Limitations),
             ["render_error"] = renderResult.Error,
             ["error"] = error
         };
@@ -182,7 +184,9 @@ public static class FascatRuntimeHarness
                 RenderTimeMs = stopwatch.ElapsedMilliseconds,
                 RenderedFrames = PreviewBenchmarkFrames,
                 BenchmarkTimeMs = benchmarkTimeMs,
-                MeasuredFps = PreviewBenchmarkFrames * 1000.0 / benchmarkTimeMs
+                MeasuredFps = PreviewBenchmarkFrames * 1000.0 / benchmarkTimeMs,
+                Backend = "unity_gltfast_camera",
+                Limitations = new string[0]
             };
         }
         catch (Exception exception)
@@ -195,7 +199,9 @@ public static class FascatRuntimeHarness
                 RenderTimeMs = stopwatch.ElapsedMilliseconds,
                 RenderedFrames = 0,
                 BenchmarkTimeMs = -1,
-                MeasuredFps = -1.0
+                MeasuredFps = -1.0,
+                Backend = "none",
+                Limitations = new string[0]
             };
         }
         finally
@@ -395,6 +401,8 @@ public static class FascatRuntimeHarness
         public int RenderedFrames;
         public long BenchmarkTimeMs;
         public double MeasuredFps;
+        public string Backend;
+        public string[] Limitations;
 
         public static RenderResult NotRequested()
         {
@@ -405,7 +413,9 @@ public static class FascatRuntimeHarness
                 RenderTimeMs = -1,
                 RenderedFrames = 0,
                 BenchmarkTimeMs = -1,
-                MeasuredFps = -1.0
+                MeasuredFps = -1.0,
+                Backend = "none",
+                Limitations = new string[0]
             };
         }
 
@@ -418,7 +428,9 @@ public static class FascatRuntimeHarness
                 RenderTimeMs = renderTimeMs,
                 RenderedFrames = 0,
                 BenchmarkTimeMs = -1,
-                MeasuredFps = -1.0
+                MeasuredFps = -1.0,
+                Backend = "none",
+                Limitations = new string[0]
             };
         }
     }

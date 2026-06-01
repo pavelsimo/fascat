@@ -1280,7 +1280,8 @@ records engine-process load/parse time, frame count, memory bytes, engine
 version, mesh count, and triangle count. `--runtime-engine-preview` also passes
 a requested PNG path to the harness (`-fascatPreview` for Unity or
 `-FascatPreview=` for Unreal) and records `render_status`, `render_time_ms`,
-`rendered_frames`, `render_error`, and `preview_path` from the returned report.
+`rendered_frames`, `render_backend`, `render_limitations`, `render_error`, and
+`preview_path` from the returned report.
 `--runtime-engine-baseline` compares that rendered engine preview against a PNG
 baseline with the `--visual-diff-*` thresholds and exits non-zero when the
 engine preview drifts beyond the configured tolerance.
@@ -1289,10 +1290,15 @@ asset, sets up a camera and key light, renders a fixed multi-frame camera loop,
 and writes the requested preview PNG when Unity can run with graphics enabled.
 That packaged path reports `measured_fps`, `frame_count`, and
 `measurement_duration_ms` from the render loop. The packaged Unreal commandlet
-validates the engine command contract and glTF/GLB file parsing, and when a
-preview path is requested it writes a deterministic PNG plus fixed-frame
-software benchmark fields. That Unreal packaged preview is not a full scene or
-material renderer. `fascat runtime-fixtures DIR` writes bundled PBR material,
+validates the engine command contract and glTF/GLB file parsing. When a preview
+path is requested for GLB assets with supported FLOAT VEC3 positions and
+unsigned indices, it writes an asset-driven deterministic PNG by rasterizing
+triangle geometry with material `baseColorFactor`, and reports
+`render_backend="unreal_commandlet_geometry_rasterizer"`. If the asset cannot
+be rasterized by that limited commandlet path, it falls back to a count-based
+placeholder PNG with `render_status="rendered_partial"` and a limitation
+message. That Unreal packaged preview is still not a full Unreal scene,
+texture, lighting, or material renderer. `fascat runtime-fixtures DIR` writes bundled PBR material,
 texture-map, and normal/lighting GLB fixtures with software baseline PNGs and a
 manifest containing browser, Unity, and Unreal preview commands. Add
 `--capture browser`, `--capture unity`, or `--capture unreal` to run local
