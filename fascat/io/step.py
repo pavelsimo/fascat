@@ -158,6 +158,10 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "EQUALSEXPRESSION": "equals_expression",
     "EXP_FUNCTION": "exp_function",
     "EXPFUNCTION": "exp_function",
+    "FORMAT_FUNCTION": "format_function",
+    "FORMATFUNCTION": "format_function",
+    "INDEX_EXPRESSION": "index_expression",
+    "INDEXEXPRESSION": "index_expression",
     "INT_LITERAL": "int_literal",
     "INTLITERAL": "int_literal",
     "INT_NUMERIC_VARIABLE": "int_numeric_variable",
@@ -223,6 +227,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "REALNUMERICVARIABLE": "real_numeric_variable",
     "REAL_REPRESENTATION_ITEM": "real_representation_item",
     "REALREPRESENTATIONITEM": "real_representation_item",
+    "RATIONAL_REPRESENTATION_ITEM": "rational_representation_item",
+    "RATIONALREPRESENTATIONITEM": "rational_representation_item",
     "SERIAL_NUMBERED_EFFECTIVITY": "serial_numbered_effectivity",
     "SIN_FUNCTION": "sin_function",
     "SINFUNCTION": "sin_function",
@@ -287,8 +293,16 @@ _STEP_NUMERIC_FUNCTION_OPERATORS = {
     "numeric_sqrt",
     "numeric_tan",
 }
-_STEP_STRING_EXPRESSION_OPERATORS = {"string_concat", "string_substring"}
+_STEP_STRING_EXPRESSION_OPERATORS = {"string_concat", "string_format", "string_index", "string_substring"}
 _STEP_NUMERIC_STRING_FUNCTION_OPERATORS = {"string_integer_value", "string_length", "string_value"}
+_STEP_NUMERIC_FORMAT_RE = re.compile(
+    r"^(?:[^%]|%%)*%"
+    r"(?P<flags>[-+ #0]{0,5})"
+    r"(?P<width>\d{0,3})"
+    r"(?:\.(?P<precision>\d{1,3}))?"
+    r"(?P<type>[diouxXeEfFgG])"
+    r"(?:[^%]|%%)*$"
+)
 _STEP_CONDITION_OPERAND_OPERATORS = {
     "numeric_literal",
     "numeric_variable",
@@ -2048,13 +2062,17 @@ def _step_condition_operator(entity: str) -> str | None:
         return "interval"
     if normalized == "LIKEEXPRESSION":
         return "like"
+    if normalized == "INDEXEXPRESSION":
+        return "string_index"
+    if normalized == "FORMATFUNCTION":
+        return "string_format"
     if normalized == "PLUSEXPRESSION":
         return "numeric_add"
     if normalized == "MINUSEXPRESSION":
         return "numeric_subtract"
     if normalized == "MULTEXPRESSION":
         return "numeric_multiply"
-    if normalized in {"DIVEXPRESSION", "SLASHEXPRESSION"}:
+    if normalized in {"DIVEXPRESSION", "RATIONALREPRESENTATIONITEM", "SLASHEXPRESSION"}:
         return "numeric_divide"
     if normalized == "MODEXPRESSION":
         return "numeric_mod"
@@ -2398,12 +2416,21 @@ def _design_variant_selector_terms(
         condition_blocked = condition_blocked or (
             record.condition_operator == "like"
             and not condition_applies
-            and _condition_record_has_requested_string_operand(
-                record,
-                records_by_reference,
-                requested,
-                normalized_requested,
-                visited=set(),
+            and (
+                _condition_record_has_requested_string_operand(
+                    record,
+                    records_by_reference,
+                    requested,
+                    normalized_requested,
+                    visited=set(),
+                )
+                or _condition_record_has_requested_numeric_operand(
+                    record,
+                    records_by_reference,
+                    requested,
+                    normalized_requested,
+                    visited=set(),
+                )
             )
         )
         if not direct_id_match and not direct_match and not condition_applies:
@@ -2991,6 +3018,58 @@ def _condition_record_string_value(
         if len(string_values) != len(string_children) or len(string_values) < 2:
             return None, False
         return "".join(string_values), any(item[1] for item in string_children)
+    if record.condition_operator == "string_format":
+        child_records = [
+            child_record
+            for reference in record.references
+            if (child_record := records_by_reference.get(reference)) is not None
+        ]
+        if len(child_records) != 2:
+            return None, False
+        number, number_positive = _condition_record_numeric_value(
+            child_records[0],
+            records_by_reference,
+            requested,
+            normalized_requested,
+            visited=set(visited),
+        )
+        format_string, format_positive = _condition_record_string_value(
+            child_records[1],
+            records_by_reference,
+            requested,
+            normalized_requested,
+            visited=set(visited),
+        )
+        if number is None or format_string is None:
+            return None, False
+        formatted = _string_format_numeric_value(number, format_string)
+        return formatted, formatted is not None and (number_positive or format_positive)
+    if record.condition_operator == "string_index":
+        child_records = [
+            child_record
+            for reference in record.references
+            if (child_record := records_by_reference.get(reference)) is not None
+        ]
+        if len(child_records) != 2:
+            return None, False
+        text, text_positive = _condition_record_string_value(
+            child_records[0],
+            records_by_reference,
+            requested,
+            normalized_requested,
+            visited=set(visited),
+        )
+        index, index_positive = _condition_record_numeric_value(
+            child_records[1],
+            records_by_reference,
+            requested,
+            normalized_requested,
+            visited=set(visited),
+        )
+        if text is None or index is None:
+            return None, False
+        indexed = _string_index_value(text, index)
+        return indexed, indexed is not None and (text_positive or index_positive)
     if record.condition_operator == "string_substring":
         child_records = [
             child_record
@@ -3268,6 +3347,48 @@ def _string_substring_value(value: str, start: float, end: float) -> str | None:
     if start_index < 1 or end_index < start_index or end_index > len(value):
         return None
     return value[start_index - 1 : end_index]
+
+
+def _string_index_value(value: str, index: float) -> str | None:
+    if not np.isfinite(index) or not float(index).is_integer():
+        return None
+    index_value = int(index)
+    if index_value < 1 or index_value > len(value):
+        return None
+    return value[index_value - 1]
+
+
+def _string_format_numeric_value(value: float, format_string: str) -> str | None:
+    if not np.isfinite(value) or len(format_string) > 128:
+        return None
+    if not format_string:
+        return _condition_number_to_string(value)
+    match = _STEP_NUMERIC_FORMAT_RE.fullmatch(format_string)
+    if match is None:
+        return None
+    width = int(match.group("width") or "0")
+    precision = int(match.group("precision") or "0")
+    if width > 128 or precision > 16:
+        return None
+    format_type = match.group("type")
+    format_value: float | int = value
+    if format_type in "diouxX":
+        if not float(value).is_integer():
+            return None
+        format_value = int(value)
+    try:
+        result = format_string % format_value
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if len(result) > 256:
+        return None
+    return result
+
+
+def _condition_number_to_string(value: float) -> str:
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{value:.12g}"
 
 
 def _numeric_value_from_condition_text(value: str, *, integer: bool) -> float | None:

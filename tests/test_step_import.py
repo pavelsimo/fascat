@@ -1851,6 +1851,100 @@ def test_step_design_variant_selection_evaluates_numeric_interval_expression(tmp
     assert "condition expression was not satisfied" in target_selection.warnings[0]
 
 
+def test_step_design_variant_selection_evaluates_rational_representation_item(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=MATHS_REAL_VARIABLE(#1,'load factor');\n"
+        "#11=INT_LITERAL(1);\n"
+        "#12=INT_LITERAL(2);\n"
+        "#13=PRODUCT_CONCEPT_FEATURE('half load package','select half load panel',#1);\n"
+        "#20=RATIONAL_REPRESENTATION_ITEM('half',(#11,#12));\n"
+        "#21=COMPARISON_EQUAL(#10,#20);\n"
+        "#22=CONDITIONAL_CONFIGURATION('half load condition',#21,#13);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="half-node", name="Half Load Panel", part_id="half"),
+            fc.Node(id="full-node", name="Full Load Panel", part_id="full"),
+        ],
+    )
+    parts = {
+        "half": fc.Part(
+            id="half",
+            name="Half Load Panel",
+            material_ids=["half-mat"],
+            metadata={"source_name": "half load panel"},
+        ),
+        "full": fc.Part(
+            id="full",
+            name="Full Load Panel",
+            material_ids=["full-mat"],
+            metadata={"source_name": "full load panel"},
+        ),
+    }
+    materials = {
+        "half-mat": fc.Material(id="half-mat", name="Half Paint", base_color=(0.0, 0.0, 0.0, 1.0)),
+        "full-mat": fc.Material(id="full-mat", name="Full Paint", base_color=(0.7, 0.7, 0.7, 1.0)),
+    }
+
+    matching_options = StepReadOptions(design_variant_selection=("load factor=0.5",))
+    matching_extraction = _extract_step_design_variants(source, matching_options)
+    matching_root = root.copy()
+    matching_parts = {key: part.copy() for key, part in parts.items()}
+    matching_materials = dict(materials)
+
+    matching_result = _apply_step_design_variant_selection(
+        matching_root,
+        matching_parts,
+        matching_materials,
+        matching_extraction,
+        matching_options,
+    )
+
+    assert matching_extraction.records[4].kind == "rational_representation_item"
+    assert matching_extraction.records[4].condition_operator == "numeric_divide"
+    assert matching_extraction.records[5].condition_operator == "equals"
+    assert matching_result.status == "applied"
+    assert matching_result.matched_records == ("step_variant_21", "step_variant_22")
+    assert [child.name for child in matching_root.children] == ["Half Load Panel"]
+    assert set(matching_parts) == {"half"}
+
+    blocked_options = StepReadOptions(design_variant_selection=("load factor=0.75",))
+    blocked_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, blocked_options),
+        blocked_options,
+    )
+
+    assert blocked_selection.status == "unmatched_geometry"
+    assert blocked_selection.matched_records == ()
+    assert "condition expression was not satisfied" in blocked_selection.warnings[0]
+
+    target_options = StepReadOptions(design_variant_selection=("half load package",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+
 @pytest.mark.parametrize(
     (
         "expression_record",
@@ -2306,6 +2400,190 @@ def test_step_design_variant_selection_evaluates_substring_expression_in_like_co
     assert "condition expression was not satisfied" in blocked_selection.warnings[0]
 
     target_options = StepReadOptions(design_variant_selection=("black finish package",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+
+def test_step_design_variant_selection_evaluates_index_expression_in_like_condition(tmp_path: Path) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=MATHS_STRING_VARIABLE(#1,'finish');\n"
+        "#11=INT_LITERAL(1);\n"
+        "#12=STRING_LITERAL('b');\n"
+        "#13=PRODUCT_CONCEPT_FEATURE('black finish package','select black finish panel',#1);\n"
+        "#20=INDEX_EXPRESSION((#10,#11));\n"
+        "#21=LIKE_EXPRESSION(#20,#12);\n"
+        "#22=CONDITIONAL_CONFIGURATION('indexed finish condition',#21,#13);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="black-node", name="Black Finish Panel", part_id="black"),
+            fc.Node(id="silver-node", name="Silver Finish Panel", part_id="silver"),
+        ],
+    )
+    parts = {
+        "black": fc.Part(
+            id="black",
+            name="Black Finish Panel",
+            material_ids=["black-mat"],
+            metadata={"source_name": "black finish panel"},
+        ),
+        "silver": fc.Part(
+            id="silver",
+            name="Silver Finish Panel",
+            material_ids=["silver-mat"],
+            metadata={"source_name": "silver finish panel"},
+        ),
+    }
+    materials = {
+        "black-mat": fc.Material(id="black-mat", name="Black Paint", base_color=(0.0, 0.0, 0.0, 1.0)),
+        "silver-mat": fc.Material(id="silver-mat", name="Silver Paint", base_color=(0.7, 0.7, 0.7, 1.0)),
+    }
+
+    matching_options = StepReadOptions(design_variant_selection=("finish=black anodized",))
+    matching_extraction = _extract_step_design_variants(source, matching_options)
+    matching_root = root.copy()
+    matching_parts = {key: part.copy() for key, part in parts.items()}
+    matching_materials = dict(materials)
+
+    matching_result = _apply_step_design_variant_selection(
+        matching_root,
+        matching_parts,
+        matching_materials,
+        matching_extraction,
+        matching_options,
+    )
+
+    assert matching_extraction.records[4].kind == "index_expression"
+    assert matching_extraction.records[4].condition_operator == "string_index"
+    assert matching_extraction.records[5].condition_operator == "like"
+    assert matching_result.status == "applied"
+    assert matching_result.matched_records == ("step_variant_21", "step_variant_22")
+    assert [child.name for child in matching_root.children] == ["Black Finish Panel"]
+    assert set(matching_parts) == {"black"}
+
+    blocked_options = StepReadOptions(design_variant_selection=("finish=silver anodized",))
+    blocked_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, blocked_options),
+        blocked_options,
+    )
+
+    assert blocked_selection.status == "unmatched_geometry"
+    assert blocked_selection.matched_records == ()
+    assert "condition expression was not satisfied" in blocked_selection.warnings[0]
+
+    target_options = StepReadOptions(design_variant_selection=("black finish package",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+
+def test_step_design_variant_selection_evaluates_format_function_in_like_condition(tmp_path: Path) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=MATHS_REAL_VARIABLE(#1,'load rating');\n"
+        "#11=STRING_LITERAL('%.1f');\n"
+        "#12=STRING_LITERAL('12.5');\n"
+        "#13=PRODUCT_CONCEPT_FEATURE('formatted load package','select formatted load panel',#1);\n"
+        "#20=FORMAT_FUNCTION((#10,#11));\n"
+        "#21=LIKE_EXPRESSION(#20,#12);\n"
+        "#22=CONDITIONAL_CONFIGURATION('formatted load condition',#21,#13);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="formatted-node", name="Formatted Load Panel", part_id="formatted"),
+            fc.Node(id="fallback-node", name="Fallback Load Panel", part_id="fallback"),
+        ],
+    )
+    parts = {
+        "formatted": fc.Part(
+            id="formatted",
+            name="Formatted Load Panel",
+            material_ids=["formatted-mat"],
+            metadata={"source_name": "formatted load panel"},
+        ),
+        "fallback": fc.Part(
+            id="fallback",
+            name="Fallback Load Panel",
+            material_ids=["fallback-mat"],
+            metadata={"source_name": "fallback load panel"},
+        ),
+    }
+    materials = {
+        "formatted-mat": fc.Material(id="formatted-mat", name="Formatted Paint", base_color=(0.0, 0.0, 0.0, 1.0)),
+        "fallback-mat": fc.Material(id="fallback-mat", name="Fallback Paint", base_color=(0.7, 0.7, 0.7, 1.0)),
+    }
+
+    matching_options = StepReadOptions(design_variant_selection=("load rating=12.5",))
+    matching_extraction = _extract_step_design_variants(source, matching_options)
+    matching_root = root.copy()
+    matching_parts = {key: part.copy() for key, part in parts.items()}
+    matching_materials = dict(materials)
+
+    matching_result = _apply_step_design_variant_selection(
+        matching_root,
+        matching_parts,
+        matching_materials,
+        matching_extraction,
+        matching_options,
+    )
+
+    assert matching_extraction.records[4].kind == "format_function"
+    assert matching_extraction.records[4].condition_operator == "string_format"
+    assert matching_extraction.records[5].condition_operator == "like"
+    assert matching_result.status == "applied"
+    assert matching_result.matched_records == ("step_variant_21", "step_variant_22")
+    assert [child.name for child in matching_root.children] == ["Formatted Load Panel"]
+    assert set(matching_parts) == {"formatted"}
+
+    blocked_options = StepReadOptions(design_variant_selection=("load rating=8.0",))
+    blocked_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, blocked_options),
+        blocked_options,
+    )
+
+    assert blocked_selection.status == "unmatched_geometry"
+    assert blocked_selection.matched_records == ()
+    assert "condition expression was not satisfied" in blocked_selection.warnings[0]
+
+    target_options = StepReadOptions(design_variant_selection=("formatted load package",))
     target_selection = _apply_step_design_variant_selection(
         root.copy(),
         {key: part.copy() for key, part in parts.items()},

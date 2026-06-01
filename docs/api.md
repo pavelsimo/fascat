@@ -321,13 +321,15 @@ simple AP242 condition/expression records such as `AND_EXPRESSION`,
 `INTERVAL_EXPRESSION`, `LIKE_EXPRESSION`, numeric arithmetic expressions such
 as `PLUS_EXPRESSION`, `MINUS_EXPRESSION`, `MULT_EXPRESSION`,
 `DIV_EXPRESSION`, `SLASH_EXPRESSION`, `MOD_EXPRESSION`, and
-`POWER_EXPRESSION`, numeric functions such as `ABS_FUNCTION`,
+`POWER_EXPRESSION`, `RATIONAL_REPRESENTATION_ITEM`, numeric functions such as
+`ABS_FUNCTION`,
 `MINUS_FUNCTION`, `SQUARE_ROOT_FUNCTION`, `MAXIMUM_FUNCTION`,
 `MINIMUM_FUNCTION`, `SIN_FUNCTION`, `COS_FUNCTION`, `TAN_FUNCTION`,
 `ASIN_FUNCTION`, `ACOS_FUNCTION`, `ATAN_FUNCTION`, `EXP_FUNCTION`,
 `LOG_FUNCTION`, `LOG2_FUNCTION`, and `LOG10_FUNCTION`, simple string
-expressions such as `CONCAT_EXPRESSION` and
-`SUBSTRING_EXPRESSION`, and string-derived numeric functions such as
+expressions such as `CONCAT_EXPRESSION`, `SUBSTRING_EXPRESSION`,
+`INDEX_EXPRESSION`, and `FORMAT_FUNCTION`, and string-derived numeric
+functions such as
 `LENGTH_FUNCTION`, `VALUE_FUNCTION`, and `INT_VALUE_FUNCTION`,
 `ODD_FUNCTION`, `BOOLEAN_LITERAL`, `BOOLEAN_REPRESENTATION_ITEM`,
 `BOOLEAN_VARIABLE`, `MATHS_BOOLEAN_VARIABLE`, numeric literals, string
@@ -357,11 +359,14 @@ non-value operand states differ. Numeric comparison and interval records select
 when named numeric variables are
 supplied as selection values such as `load rating=15`, including when those
 variables flow through simple numeric arithmetic or numeric function expression
-operands, including elementary trig/log/exp functions. `ODD_FUNCTION` selects
-when a named integer numeric variable is supplied as an odd integer assignment.
+operands, including rational representation items and elementary trig/log/exp
+functions. `ODD_FUNCTION` selects when a named integer numeric variable is
+supplied as an odd integer assignment.
 `LIKE_EXPRESSION` records select when named string variables are supplied as
 selection values such as `finish=black anodized`, including when those values
-flow through simple `CONCAT_EXPRESSION` or `SUBSTRING_EXPRESSION` operands.
+flow through simple `CONCAT_EXPRESSION`, `SUBSTRING_EXPRESSION`, or
+`INDEX_EXPRESSION` operands, or when numeric variables flow through conservative
+`FORMAT_FUNCTION` operands.
 `LENGTH_FUNCTION`, `VALUE_FUNCTION`, and `INT_VALUE_FUNCTION` can feed numeric
 comparisons from selected string variables; value functions parse strict numeric
 text, and integer value functions require strict integer text.
