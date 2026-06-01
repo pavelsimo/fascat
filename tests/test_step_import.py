@@ -2403,6 +2403,275 @@ def test_step_design_variant_selection_evaluates_value_functions_in_numeric_cond
     assert "condition expression was not satisfied" in target_selection.warnings[0]
 
 
+@pytest.mark.parametrize(
+    (
+        "function_record",
+        "extra_record",
+        "threshold_record",
+        "comparison_record",
+        "matching_selection",
+        "blocked_selection",
+        "expected_kind",
+        "expected_operator",
+    ),
+    [
+        (
+            "#20=ABS_FUNCTION(#10);\n",
+            "",
+            "#11=REAL_LITERAL(5.0);\n",
+            "#21=COMPARISON_GREATER_EQUAL(#20,#11);\n",
+            "load delta=-7",
+            "load delta=-3",
+            "abs_function",
+            "numeric_abs",
+        ),
+        (
+            "#20=MINUS_FUNCTION(#10);\n",
+            "",
+            "#11=REAL_LITERAL(5.0);\n",
+            "#21=COMPARISON_GREATER_EQUAL(#20,#11);\n",
+            "load delta=-7",
+            "load delta=-3",
+            "minus_function",
+            "numeric_negate",
+        ),
+        (
+            "#20=SQUARE_ROOT_FUNCTION(#10);\n",
+            "",
+            "#11=REAL_LITERAL(4.0);\n",
+            "#21=COMPARISON_GREATER_EQUAL(#20,#11);\n",
+            "load delta=25",
+            "load delta=9",
+            "square_root_function",
+            "numeric_sqrt",
+        ),
+        (
+            "#20=MAXIMUM_FUNCTION((#10,#11));\n",
+            "#11=REAL_LITERAL(5.0);\n",
+            "#12=REAL_LITERAL(10.0);\n",
+            "#21=COMPARISON_GREATER_EQUAL(#20,#12);\n",
+            "load delta=12",
+            "load delta=4",
+            "maximum_function",
+            "numeric_max",
+        ),
+        (
+            "#20=MINIMUM_FUNCTION((#10,#11));\n",
+            "#11=REAL_LITERAL(12.0);\n",
+            "#12=REAL_LITERAL(10.0);\n",
+            "#21=COMPARISON_GREATER_EQUAL(#20,#12);\n",
+            "load delta=11",
+            "load delta=8",
+            "minimum_function",
+            "numeric_min",
+        ),
+    ],
+)
+def test_step_design_variant_selection_evaluates_numeric_functions_in_numeric_condition(
+    tmp_path: Path,
+    function_record: str,
+    extra_record: str,
+    threshold_record: str,
+    comparison_record: str,
+    matching_selection: str,
+    blocked_selection: str,
+    expected_kind: str,
+    expected_operator: str,
+) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=MATHS_REAL_VARIABLE(#1,'load delta');\n"
+        f"{extra_record}"
+        f"{threshold_record}"
+        "#13=PRODUCT_CONCEPT_FEATURE('calculated function package','select calculated function panel',#1);\n"
+        f"{function_record}"
+        f"{comparison_record}"
+        "#22=CONDITIONAL_CONFIGURATION('calculated function condition',#21,#13);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="calculated-node", name="Calculated Function Panel", part_id="calculated"),
+            fc.Node(id="baseline-node", name="Baseline Function Panel", part_id="baseline"),
+        ],
+    )
+    parts = {
+        "calculated": fc.Part(
+            id="calculated",
+            name="Calculated Function Panel",
+            material_ids=["calculated-mat"],
+            metadata={"source_name": "calculated function panel"},
+        ),
+        "baseline": fc.Part(
+            id="baseline",
+            name="Baseline Function Panel",
+            material_ids=["baseline-mat"],
+            metadata={"source_name": "baseline function panel"},
+        ),
+    }
+    materials = {
+        "calculated-mat": fc.Material(id="calculated-mat", name="Calculated Paint", base_color=(0.0, 0.0, 0.0, 1.0)),
+        "baseline-mat": fc.Material(id="baseline-mat", name="Baseline Paint", base_color=(0.7, 0.7, 0.7, 1.0)),
+    }
+
+    matching_options = StepReadOptions(design_variant_selection=(matching_selection,))
+    matching_extraction = _extract_step_design_variants(source, matching_options)
+    matching_root = root.copy()
+    matching_parts = {key: part.copy() for key, part in parts.items()}
+    matching_materials = dict(materials)
+
+    matching_result = _apply_step_design_variant_selection(
+        matching_root,
+        matching_parts,
+        matching_materials,
+        matching_extraction,
+        matching_options,
+    )
+
+    function = next(record for record in matching_extraction.records if record.kind == expected_kind)
+    assert function.condition_operator == expected_operator
+    assert any(record.condition_operator == "greater_equal" for record in matching_extraction.records)
+    assert matching_result.status == "applied"
+    assert matching_result.matched_records == ("step_variant_21", "step_variant_22")
+    assert [child.name for child in matching_root.children] == ["Calculated Function Panel"]
+    assert set(matching_parts) == {"calculated"}
+
+    blocked_options = StepReadOptions(design_variant_selection=(blocked_selection,))
+    blocked_selection_result = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, blocked_options),
+        blocked_options,
+    )
+
+    assert blocked_selection_result.status == "unmatched_geometry"
+    assert blocked_selection_result.matched_records == ()
+    assert "condition expression was not satisfied" in blocked_selection_result.warnings[0]
+
+    target_options = StepReadOptions(design_variant_selection=("calculated function package",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+
+def test_step_design_variant_selection_evaluates_odd_function_condition(tmp_path: Path) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=MATHS_INTEGER_VARIABLE(#1,'load count');\n"
+        "#11=PRODUCT_CONCEPT_FEATURE('odd load package','select odd load panel',#1);\n"
+        "#20=ODD_FUNCTION(#10);\n"
+        "#21=CONDITIONAL_CONFIGURATION('odd load condition',#20,#11);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="odd-node", name="Odd Load Panel", part_id="odd"),
+            fc.Node(id="even-node", name="Even Load Panel", part_id="even"),
+        ],
+    )
+    parts = {
+        "odd": fc.Part(
+            id="odd",
+            name="Odd Load Panel",
+            material_ids=["odd-mat"],
+            metadata={"source_name": "odd load panel"},
+        ),
+        "even": fc.Part(
+            id="even",
+            name="Even Load Panel",
+            material_ids=["even-mat"],
+            metadata={"source_name": "even load panel"},
+        ),
+    }
+    materials = {
+        "odd-mat": fc.Material(id="odd-mat", name="Odd Paint", base_color=(0.0, 0.0, 0.0, 1.0)),
+        "even-mat": fc.Material(id="even-mat", name="Even Paint", base_color=(0.7, 0.7, 0.7, 1.0)),
+    }
+
+    matching_options = StepReadOptions(design_variant_selection=("load count=5",))
+    matching_extraction = _extract_step_design_variants(source, matching_options)
+    matching_root = root.copy()
+    matching_parts = {key: part.copy() for key, part in parts.items()}
+    matching_materials = dict(materials)
+
+    matching_result = _apply_step_design_variant_selection(
+        matching_root,
+        matching_parts,
+        matching_materials,
+        matching_extraction,
+        matching_options,
+    )
+
+    assert matching_extraction.records[0].kind == "maths_integer_variable"
+    assert matching_extraction.records[0].condition_operator == "numeric_variable"
+    assert matching_extraction.records[2].kind == "odd_function"
+    assert matching_extraction.records[2].condition_operator == "numeric_odd"
+    assert matching_result.status == "applied"
+    assert matching_result.matched_records == ("step_variant_20", "step_variant_21")
+    assert [child.name for child in matching_root.children] == ["Odd Load Panel"]
+    assert set(matching_parts) == {"odd"}
+
+    blocked_options = StepReadOptions(design_variant_selection=("load count=4",))
+    blocked_selection_result = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, blocked_options),
+        blocked_options,
+    )
+
+    assert blocked_selection_result.status == "unmatched_geometry"
+    assert blocked_selection_result.matched_records == ()
+    assert "condition expression was not satisfied" in blocked_selection_result.warnings[0]
+
+    invalid_options = StepReadOptions(design_variant_selection=("load count=5.5",))
+    invalid_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, invalid_options),
+        invalid_options,
+    )
+
+    assert invalid_selection.status == "unmatched_geometry"
+    assert invalid_selection.matched_records == ()
+    assert "condition expression was not satisfied" in invalid_selection.warnings[0]
+
+    target_options = StepReadOptions(design_variant_selection=("odd load package",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+
 def test_step_design_variant_selection_gates_conditional_concept_feature_label(tmp_path: Path) -> None:
     source = tmp_path / "variants.step"
     source.write_text(

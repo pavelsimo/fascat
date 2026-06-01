@@ -101,6 +101,8 @@ _STEP_PMI_ENTITY_KINDS = {
     "ANNOTATION_PLANE": "annotation_plane",
 }
 _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
+    "ABS_FUNCTION": "abs_function",
+    "ABSFUNCTION": "abs_function",
     "APPLIED_EFFECTIVITY_ASSIGNMENT": "applied_effectivity_assignment",
     "APPLIEDEFFECTIVITYASSIGNMENT": "applied_effectivity_assignment",
     "APPLIED_EFFECTIVITY_CONTEXT_ASSIGNMENT": "applied_effectivity_context_assignment",
@@ -177,8 +179,16 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "MATHSREALVARIABLE": "maths_real_variable",
     "MATHS_STRING_VARIABLE": "maths_string_variable",
     "MATHSSTRINGVARIABLE": "maths_string_variable",
+    "MAXIMUM_FUNCTION": "maximum_function",
+    "MAXIMUMFUNCTION": "maximum_function",
+    "MINIMUM_FUNCTION": "minimum_function",
+    "MINIMUMFUNCTION": "minimum_function",
+    "MINUS_FUNCTION": "minus_function",
+    "MINUSFUNCTION": "minus_function",
     "NUMERIC_VARIABLE": "numeric_variable",
     "NUMERICVARIABLE": "numeric_variable",
+    "ODD_FUNCTION": "odd_function",
+    "ODDFUNCTION": "odd_function",
     "PLUS_EXPRESSION": "plus_expression",
     "PLUSEXPRESSION": "plus_expression",
     "POWER_EXPRESSION": "power_expression",
@@ -200,6 +210,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "SERIAL_NUMBERED_EFFECTIVITY": "serial_numbered_effectivity",
     "SLASH_EXPRESSION": "slash_expression",
     "SLASHEXPRESSION": "slash_expression",
+    "SQUARE_ROOT_FUNCTION": "square_root_function",
+    "SQUAREROOTFUNCTION": "square_root_function",
     "STRING_LITERAL": "string_literal",
     "STRINGLITERAL": "string_literal",
     "STRING_VARIABLE": "string_variable",
@@ -238,6 +250,13 @@ _STEP_NUMERIC_ARITHMETIC_OPERATORS = {
     "numeric_power",
     "numeric_subtract",
 }
+_STEP_NUMERIC_FUNCTION_OPERATORS = {
+    "numeric_abs",
+    "numeric_max",
+    "numeric_min",
+    "numeric_negate",
+    "numeric_sqrt",
+}
 _STEP_STRING_EXPRESSION_OPERATORS = {"string_concat", "string_substring"}
 _STEP_NUMERIC_STRING_FUNCTION_OPERATORS = {"string_integer_value", "string_length", "string_value"}
 _STEP_CONDITION_OPERAND_OPERATORS = {
@@ -246,6 +265,7 @@ _STEP_CONDITION_OPERAND_OPERATORS = {
     "string_literal",
     "string_variable",
     *_STEP_NUMERIC_ARITHMETIC_OPERATORS,
+    *_STEP_NUMERIC_FUNCTION_OPERATORS,
     *_STEP_NUMERIC_STRING_FUNCTION_OPERATORS,
     *_STEP_STRING_EXPRESSION_OPERATORS,
 }
@@ -2010,6 +2030,18 @@ def _step_condition_operator(entity: str) -> str | None:
         return "numeric_mod"
     if normalized == "POWEREXPRESSION":
         return "numeric_power"
+    if normalized == "ABSFUNCTION":
+        return "numeric_abs"
+    if normalized == "MINUSFUNCTION":
+        return "numeric_negate"
+    if normalized == "SQUAREROOTFUNCTION":
+        return "numeric_sqrt"
+    if normalized == "MAXIMUMFUNCTION":
+        return "numeric_max"
+    if normalized == "MINIMUMFUNCTION":
+        return "numeric_min"
+    if normalized == "ODDFUNCTION":
+        return "numeric_odd"
     if normalized == "LENGTHFUNCTION":
         return "string_length"
     if normalized == "VALUEFUNCTION":
@@ -2283,7 +2315,7 @@ def _design_variant_selector_terms(
             )
             condition_blocked = condition_blocked or (suppress_direct_match and requested_record_match)
         condition_blocked = condition_blocked or (
-            record.condition_operator in {"greater", "greater_equal", "less", "less_equal", "interval"}
+            record.condition_operator in {"greater", "greater_equal", "less", "less_equal", "interval", "numeric_odd"}
             and not condition_applies
             and _condition_record_has_requested_numeric_operand(
                 record,
@@ -2384,8 +2416,10 @@ def _conditional_dependency_references(
         "interval",
         "like",
         *_STEP_NUMERIC_ARITHMETIC_OPERATORS,
+        *_STEP_NUMERIC_FUNCTION_OPERATORS,
         *_STEP_NUMERIC_STRING_FUNCTION_OPERATORS,
         *_STEP_STRING_EXPRESSION_OPERATORS,
+        "numeric_odd",
         "conditional",
         "effectivity_assignment",
         "effectivity_context_assignment",
@@ -2455,6 +2489,31 @@ def _condition_record_matches_requested(
         )
         matched = value is not None
         return _StepConditionMatch(matched=matched, positive=matched and positive)
+    if operator in _STEP_NUMERIC_FUNCTION_OPERATORS:
+        value, positive = _condition_record_numeric_value(
+            record,
+            records_by_reference,
+            requested,
+            normalized_requested,
+            visited=set(),
+        )
+        matched = value is not None
+        return _StepConditionMatch(matched=matched, positive=matched and positive)
+    if operator == "numeric_odd":
+        numeric_children = [
+            _condition_record_numeric_value(
+                child_record,
+                records_by_reference,
+                requested,
+                normalized_requested,
+                visited=set(visited),
+            )
+            for reference in record.references
+            if (child_record := records_by_reference.get(reference)) is not None
+        ]
+        values = [item[0] for item in numeric_children if item[0] is not None]
+        matched = len(values) == len(numeric_children) and len(values) == 1 and _numeric_odd_matches(values[0])
+        return _StepConditionMatch(matched=matched, positive=matched and any(item[1] for item in numeric_children))
     if operator in _STEP_NUMERIC_STRING_FUNCTION_OPERATORS:
         value, positive = _condition_record_numeric_value(
             record,
@@ -2698,6 +2757,22 @@ def _condition_record_numeric_value(
         if len(values) != len(numeric_children) or not values:
             return None, False
         return _numeric_arithmetic_value(record.condition_operator, values), any(item[1] for item in numeric_children)
+    if record.condition_operator in _STEP_NUMERIC_FUNCTION_OPERATORS:
+        numeric_children = [
+            _condition_record_numeric_value(
+                child_record,
+                records_by_reference,
+                requested,
+                normalized_requested,
+                visited=set(visited),
+            )
+            for reference in record.references
+            if (child_record := records_by_reference.get(reference)) is not None
+        ]
+        values = [item[0] for item in numeric_children if item[0] is not None]
+        if len(values) != len(numeric_children) or not values:
+            return None, False
+        return _numeric_function_value(record.condition_operator, values), any(item[1] for item in numeric_children)
     if record.condition_operator == "string_length":
         string_children = [
             _condition_record_string_value(
@@ -2925,6 +3000,28 @@ def _numeric_arithmetic_value(operator: str, values: list[float]) -> float | Non
         if isinstance(result, (int, float)) and np.isfinite(result):
             return float(result)
     return None
+
+
+def _numeric_function_value(operator: str, values: list[float]) -> float | None:
+    if not all(np.isfinite(value) for value in values):
+        return None
+    if operator == "numeric_abs" and len(values) == 1:
+        return abs(values[0])
+    if operator == "numeric_negate" and len(values) == 1:
+        return -values[0]
+    if operator == "numeric_sqrt" and len(values) == 1:
+        if values[0] < 0:
+            return None
+        return float(values[0] ** 0.5)
+    if operator == "numeric_max":
+        return max(values)
+    if operator == "numeric_min":
+        return min(values)
+    return None
+
+
+def _numeric_odd_matches(value: float) -> bool:
+    return bool(np.isfinite(value) and value.is_integer() and int(value) % 2 != 0)
 
 
 def _string_like_matches(value: str, pattern: str) -> bool:
