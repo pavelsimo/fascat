@@ -118,8 +118,12 @@ def test_gltf_export_writes_pmi_visual_marker_geometry(tmp_path: Path) -> None:
     assert visual_group["extras"]["fascat"]["pmiVisualCount"] == 1
     assert visual_node["extras"]["fascat"]["pmiId"] == "pmi_001"
     assert visual_node["extras"]["fascat"]["currentPartIds"] == ["part"]
+    assert visual_node["extras"]["fascat"]["textGeometry"] == "block_glyphs"
+    assert visual_node["extras"]["fascat"]["textGlyphCount"] > 0
     assert visual_mesh["extras"]["fascat"]["pmiVisual"] is True
     assert visual_mesh["extras"]["fascat"]["representation"] == "marker_geometry"
+    assert visual_mesh["extras"]["fascat"]["textGeometry"] == "block_glyphs"
+    assert visual_mesh["extras"]["fascat"]["textGlyphCount"] == visual_node["extras"]["fascat"]["textGlyphCount"]
     assert visual_primitive["mode"] == 4
     assert visual_material["doubleSided"] is True
     assert visual_material["extras"]["fascat"]["pmiVisualMaterial"] is True

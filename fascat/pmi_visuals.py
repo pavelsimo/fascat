@@ -24,6 +24,7 @@ class PmiVisualMarker:
     points: FloatArray
     faces: IntArray
     anchor: tuple[float, float, float]
+    text_glyph_count: int
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,51 @@ _MARKER_DIRECTIONS = (
     np.asarray([1.0, -1.0, -1.0], dtype=np.float64),
     np.asarray([-1.0, -1.0, -1.0], dtype=np.float64),
 )
+
+_TEXT_GLYPHS: dict[str, tuple[str, ...]] = {
+    " ": ("000", "000", "000", "000", "000", "000", "000"),
+    "+": ("000", "010", "010", "111", "010", "010", "000"),
+    "-": ("000", "000", "000", "111", "000", "000", "000"),
+    ".": ("000", "000", "000", "000", "000", "110", "110"),
+    "/": ("001", "001", "010", "010", "010", "100", "100"),
+    "0": ("111", "101", "101", "101", "101", "101", "111"),
+    "1": ("010", "110", "010", "010", "010", "010", "111"),
+    "2": ("111", "001", "001", "111", "100", "100", "111"),
+    "3": ("111", "001", "001", "111", "001", "001", "111"),
+    "4": ("101", "101", "101", "111", "001", "001", "001"),
+    "5": ("111", "100", "100", "111", "001", "001", "111"),
+    "6": ("111", "100", "100", "111", "101", "101", "111"),
+    "7": ("111", "001", "001", "010", "010", "100", "100"),
+    "8": ("111", "101", "101", "111", "101", "101", "111"),
+    "9": ("111", "101", "101", "111", "001", "001", "111"),
+    "A": ("111", "101", "101", "111", "101", "101", "101"),
+    "B": ("110", "101", "101", "110", "101", "101", "110"),
+    "C": ("111", "100", "100", "100", "100", "100", "111"),
+    "D": ("110", "101", "101", "101", "101", "101", "110"),
+    "E": ("111", "100", "100", "111", "100", "100", "111"),
+    "F": ("111", "100", "100", "111", "100", "100", "100"),
+    "G": ("111", "100", "100", "101", "101", "101", "111"),
+    "H": ("101", "101", "101", "111", "101", "101", "101"),
+    "I": ("111", "010", "010", "010", "010", "010", "111"),
+    "J": ("001", "001", "001", "001", "101", "101", "111"),
+    "K": ("101", "101", "110", "100", "110", "101", "101"),
+    "L": ("100", "100", "100", "100", "100", "100", "111"),
+    "M": ("101", "111", "111", "101", "101", "101", "101"),
+    "N": ("101", "111", "111", "111", "111", "111", "101"),
+    "O": ("111", "101", "101", "101", "101", "101", "111"),
+    "P": ("111", "101", "101", "111", "100", "100", "100"),
+    "Q": ("111", "101", "101", "101", "111", "001", "001"),
+    "R": ("111", "101", "101", "111", "110", "101", "101"),
+    "S": ("111", "100", "100", "111", "001", "001", "111"),
+    "T": ("111", "010", "010", "010", "010", "010", "010"),
+    "U": ("101", "101", "101", "101", "101", "101", "111"),
+    "V": ("101", "101", "101", "101", "101", "101", "010"),
+    "W": ("101", "101", "101", "101", "111", "111", "101"),
+    "X": ("101", "101", "101", "010", "101", "101", "101"),
+    "Y": ("101", "101", "101", "010", "010", "010", "010"),
+    "Z": ("111", "001", "001", "010", "100", "100", "111"),
+    "?": ("111", "001", "001", "010", "010", "000", "010"),
+}
 
 
 def build_pmi_visual_markers(
@@ -83,7 +129,7 @@ def build_pmi_visual_markers(
         target_bounds = _merge_bounds(part_bounds[part_id] for part_id in current_part_ids if part_id in part_bounds)
         if target_bounds is None:
             target_bounds = scene_bounds
-        points, faces, anchor = _marker_geometry(
+        points, faces, anchor, text_glyph_count = _marker_geometry(
             target_bounds,
             scene_bounds,
             index=index,
@@ -99,6 +145,7 @@ def build_pmi_visual_markers(
                 points=points,
                 faces=faces,
                 anchor=(float(anchor[0]), float(anchor[1]), float(anchor[2])),
+                text_glyph_count=text_glyph_count,
             )
         )
     return markers
@@ -166,7 +213,7 @@ def _marker_geometry(
     *,
     index: int,
     text: str,
-) -> tuple[FloatArray, IntArray, FloatArray]:
+) -> tuple[FloatArray, IntArray, FloatArray, int]:
     if bounds is None:
         minimum = np.zeros(3, dtype=np.float64)
         maximum = np.zeros(3, dtype=np.float64)
@@ -184,8 +231,9 @@ def _marker_geometry(
 
     _append_leader(vertices, faces, bounds.center, anchor, right)
     _append_diamond(vertices, faces, anchor, right, up)
-    _append_label_plate(vertices, faces, anchor, right, up, text)
-    return np.asarray(vertices, dtype=np.float64), np.asarray(faces, dtype=np.int64), anchor
+    plate = _append_label_plate(vertices, faces, anchor, right, up, text)
+    glyph_count = _append_label_text(vertices, faces, plate, text)
+    return np.asarray(vertices, dtype=np.float64), np.asarray(faces, dtype=np.int64), anchor, glyph_count
 
 
 def _append_leader(
@@ -237,6 +285,15 @@ def _append_diamond(
     )
 
 
+@dataclass(frozen=True)
+class _LabelPlate:
+    center: FloatArray
+    right_unit: FloatArray
+    up_unit: FloatArray
+    half_width: float
+    half_height: float
+
+
 def _append_label_plate(
     vertices: list[FloatArray],
     faces: list[tuple[int, int, int]],
@@ -244,11 +301,17 @@ def _append_label_plate(
     right: FloatArray,
     up: FloatArray,
     text: str,
-) -> None:
+) -> _LabelPlate:
     text_width = min(max(len(text), 1), 24)
-    half_width = _normalize(right) * np.linalg.norm(right) * (0.9 + 0.025 * text_width)
-    half_height = _normalize(up) * np.linalg.norm(up) * 0.35
-    center = anchor + _normalize(right) * np.linalg.norm(right) * (1.35 + 0.025 * text_width)
+    right_unit = _normalize(right)
+    up_unit = _normalize(up)
+    right_length = float(np.linalg.norm(right))
+    up_length = float(np.linalg.norm(up))
+    half_width_value = right_length * (0.9 + 0.025 * text_width)
+    half_height_value = up_length * 0.35
+    half_width = right_unit * half_width_value
+    half_height = up_unit * half_height_value
+    center = anchor + right_unit * right_length * (1.35 + 0.025 * text_width)
     start = len(vertices)
     vertices.extend(
         [
@@ -256,6 +319,104 @@ def _append_label_plate(
             center + half_width - half_height,
             center + half_width + half_height,
             center - half_width + half_height,
+        ]
+    )
+    faces.extend([(start, start + 1, start + 2), (start, start + 2, start + 3)])
+    return _LabelPlate(
+        center=center,
+        right_unit=right_unit,
+        up_unit=up_unit,
+        half_width=half_width_value,
+        half_height=half_height_value,
+    )
+
+
+def _append_label_text(
+    vertices: list[FloatArray],
+    faces: list[tuple[int, int, int]],
+    plate: _LabelPlate,
+    text: str,
+) -> int:
+    characters = [_glyph_character(character) for character in text[:24]]
+    if not characters:
+        characters = ["?"]
+    glyphs = [_TEXT_GLYPHS[character] for character in characters]
+    columns = 3
+    rows = 7
+    cell_gap = 0.22
+    desired_cell = plate.half_height * 0.22
+    total_units = len(glyphs) * columns + max(0, len(glyphs) - 1) * 1.0
+    max_cell_by_width = (plate.half_width * 1.62) / max(total_units, 1.0)
+    cell = min(desired_cell, max_cell_by_width)
+    glyph_width = columns * cell
+    glyph_height = rows * cell
+    spacing = cell
+    text_width = len(glyphs) * glyph_width + max(0, len(glyphs) - 1) * spacing
+    origin = (
+        plate.center
+        - plate.right_unit * (text_width * 0.5)
+        - plate.up_unit * (glyph_height * 0.5)
+        + plate.up_unit * (cell * 0.05)
+    )
+    glyph_count = 0
+    for glyph_index, glyph in enumerate(glyphs):
+        glyph_origin = origin + plate.right_unit * glyph_index * (glyph_width + spacing)
+        glyph_count += _append_glyph(
+            vertices, faces, glyph_origin, plate.right_unit, plate.up_unit, cell, cell_gap, glyph
+        )
+    return glyph_count
+
+
+def _glyph_character(character: str) -> str:
+    upper = character.upper()
+    if upper in _TEXT_GLYPHS:
+        return upper
+    return "?"
+
+
+def _append_glyph(
+    vertices: list[FloatArray],
+    faces: list[tuple[int, int, int]],
+    origin: FloatArray,
+    right_unit: FloatArray,
+    up_unit: FloatArray,
+    cell: float,
+    cell_gap: float,
+    glyph: tuple[str, ...],
+) -> int:
+    blocks = 0
+    rows = len(glyph)
+    for row_index, row in enumerate(glyph):
+        for column_index, value in enumerate(row):
+            if value != "1":
+                continue
+            x0 = column_index * cell + (cell * cell_gap * 0.5)
+            x1 = (column_index + 1.0) * cell - (cell * cell_gap * 0.5)
+            y0 = (rows - row_index - 1.0) * cell + (cell * cell_gap * 0.5)
+            y1 = (rows - row_index) * cell - (cell * cell_gap * 0.5)
+            _append_text_quad(vertices, faces, origin, right_unit, up_unit, x0, x1, y0, y1)
+            blocks += 1
+    return 1 if blocks else 0
+
+
+def _append_text_quad(
+    vertices: list[FloatArray],
+    faces: list[tuple[int, int, int]],
+    origin: FloatArray,
+    right_unit: FloatArray,
+    up_unit: FloatArray,
+    x0: float,
+    x1: float,
+    y0: float,
+    y1: float,
+) -> None:
+    start = len(vertices)
+    vertices.extend(
+        [
+            origin + right_unit * x0 + up_unit * y0,
+            origin + right_unit * x1 + up_unit * y0,
+            origin + right_unit * x1 + up_unit * y1,
+            origin + right_unit * x0 + up_unit * y1,
         ]
     )
     faces.extend([(start, start + 1, start + 2), (start, start + 2, start + 3)])

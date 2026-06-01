@@ -229,8 +229,11 @@ def test_usd_export_writes_pmi_visual_marker_geometry(tmp_path: Path) -> None:
     assert visual_group.GetCustomDataByKey("fascat:pmiVisualCount") == 1
     assert marker.GetCustomDataByKey("fascat:pmiId") == "pmi_001"
     assert marker.GetCustomDataByKey("fascat:currentPartIds") == ["cube"]
+    assert marker.GetCustomDataByKey("fascat:textGeometry") == "block_glyphs"
+    assert marker.GetCustomDataByKey("fascat:textGlyphCount") == 2
     assert marker_mesh.IsA(UsdGeom.Mesh)
     assert marker_mesh.GetCustomDataByKey("fascat:pmiVisual") is True
+    assert marker_mesh.GetCustomDataByKey("fascat:textGlyphCount") == 2
     assert len(face_counts) > 0
     assert all(count == 3 for count in face_counts)
     assert validate_usd(output)["meshes"] >= 2

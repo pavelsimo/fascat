@@ -629,6 +629,8 @@ def _write_pmi_visuals(stage: Any, asset: Asset, scene_path: str) -> None:
         marker_prim.SetCustomDataByKey("fascat:appliesTo", Vt.StringArray(marker.applies_to))
         marker_prim.SetCustomDataByKey("fascat:currentPartIds", Vt.StringArray(marker.current_part_ids))
         marker_prim.SetCustomDataByKey("fascat:representation", "marker_geometry")
+        marker_prim.SetCustomDataByKey("fascat:textGeometry", "block_glyphs")
+        marker_prim.SetCustomDataByKey("fascat:textGlyphCount", marker.text_glyph_count)
 
         mesh = UsdGeom.Mesh.Define(stage, f"{marker_path}/Marker")
         mesh.CreateSubdivisionSchemeAttr("none")
@@ -643,6 +645,8 @@ def _write_pmi_visuals(stage: Any, asset: Asset, scene_path: str) -> None:
         mesh.GetPrim().SetCustomDataByKey("fascat:pmiVisual", True)
         mesh.GetPrim().SetCustomDataByKey("fascat:pmiId", marker.annotation_id)
         mesh.GetPrim().SetCustomDataByKey("fascat:representation", "marker_geometry")
+        mesh.GetPrim().SetCustomDataByKey("fascat:textGeometry", "block_glyphs")
+        mesh.GetPrim().SetCustomDataByKey("fascat:textGlyphCount", marker.text_glyph_count)
 
 
 def _pmi_by_part(asset: Asset) -> dict[str, list[str]]:

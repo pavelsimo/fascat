@@ -840,6 +840,8 @@ def _append_pmi_visuals(
                     "currentPartIds": list(marker.current_part_ids),
                     "anchor": list(marker.anchor),
                     "representation": "marker_geometry",
+                    "textGeometry": "block_glyphs",
+                    "textGlyphCount": marker.text_glyph_count,
                 }
             },
         }
@@ -886,6 +888,8 @@ def _append_pmi_visual_mesh(
         "appliesTo": list(marker.applies_to),
         "currentPartIds": list(marker.current_part_ids),
         "representation": "marker_geometry",
+        "textGeometry": "block_glyphs",
+        "textGlyphCount": marker.text_glyph_count,
     }
     meshes.append(
         {

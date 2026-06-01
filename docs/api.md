@@ -302,9 +302,9 @@ instead of silently implying that PMI was imported. Import reports and asset
 metadata also include `pmi_semantic_graph`, a textual STEP reference graph with
 PMI entity nodes, referenced STEP entity nodes, reference edges, and missing
 reference counts. `metadata_and_visuals` export adds deterministic glTF/USD
-PMI marker meshes linked to those records; full AP242 graphical glyph
-reconstruction and semantic coverage beyond the supported textual records are
-still planned backend work.
+PMI marker meshes with simple vector text glyphs linked to those records; full
+AP242 graphical presentation reconstruction and semantic coverage beyond the
+supported textual records are still planned backend work.
 
 STEP design variant import can scan common configuration and effectivity records
 such as `CONFIGURATION_ITEM`, `PRODUCT_CONCEPT_FEATURE`,
@@ -364,7 +364,7 @@ Metadata and PMI parameters:
 | `PmiAnnotation` | `tolerance` | `Tolerance(upper=..., lower=...)` values for dimensional or GD&T annotations. |
 | `PmiAnnotation` | `applies_to` | Target ids such as part ids, node ids, face groups, edge groups, or material ids. |
 | `MetadataExportOptions` | `mode` | Export metadata as `full`, count-only `summary`, or `none`. |
-| `MetadataExportOptions` | `pmi` | Export PMI as `none`, `summary`, `metadata`, `metadata_and_visuals`, or `full`. `metadata_and_visuals` emits metadata records, stable links, and deterministic glTF/USD marker geometry; full AP242 visual glyph reconstruction remains planned. |
+| `MetadataExportOptions` | `pmi` | Export PMI as `none`, `summary`, `metadata`, `metadata_and_visuals`, or `full`. `metadata_and_visuals` emits metadata records, stable links, and deterministic glTF/USD marker geometry with simple vector text glyphs; full AP242 visual presentation reconstruction remains planned. |
 
 ```python
 asset.write_gltf(
