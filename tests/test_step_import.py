@@ -3377,6 +3377,98 @@ def test_step_design_variant_selection_evaluates_elementary_numeric_functions(
     assert "condition expression was not satisfied" in target_selection.warnings[0]
 
 
+def test_step_design_variant_selection_evaluates_binary_atan_function(tmp_path: Path) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=MATHS_REAL_VARIABLE(#1,'rise');\n"
+        "#11=MATHS_REAL_VARIABLE(#1,'run');\n"
+        "#12=REAL_LITERAL(0.7);\n"
+        "#13=PRODUCT_CONCEPT_FEATURE('angle package','select angle panel',#1);\n"
+        "#20=ATAN_FUNCTION((#10,#11));\n"
+        "#21=COMPARISON_GREATER_EQUAL(#20,#12);\n"
+        "#22=CONDITIONAL_CONFIGURATION('angle condition',#21,#13);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="angle-node", name="Angle Panel", part_id="angle"),
+            fc.Node(id="fallback-node", name="Reserve Panel", part_id="fallback"),
+        ],
+    )
+    parts = {
+        "angle": fc.Part(
+            id="angle",
+            name="Angle Panel",
+            material_ids=["angle-mat"],
+            metadata={"source_name": "angle panel"},
+        ),
+        "fallback": fc.Part(
+            id="fallback",
+            name="Reserve Panel",
+            material_ids=["fallback-mat"],
+            metadata={"source_name": "reserve panel"},
+        ),
+    }
+    materials = {
+        "angle-mat": fc.Material(id="angle-mat", name="Angle Paint", base_color=(0.0, 0.0, 0.0, 1.0)),
+        "fallback-mat": fc.Material(id="fallback-mat", name="Fallback Paint", base_color=(0.7, 0.7, 0.7, 1.0)),
+    }
+
+    matching_options = StepReadOptions(design_variant_selection=("rise=1", "run=1"))
+    matching_extraction = _extract_step_design_variants(source, matching_options)
+    matching_root = root.copy()
+    matching_parts = {key: part.copy() for key, part in parts.items()}
+    matching_materials = dict(materials)
+
+    matching_result = _apply_step_design_variant_selection(
+        matching_root,
+        matching_parts,
+        matching_materials,
+        matching_extraction,
+        matching_options,
+    )
+
+    function = next(record for record in matching_extraction.records if record.kind == "atan_function")
+    assert function.condition_operator == "numeric_atan"
+    assert any(record.condition_operator == "greater_equal" for record in matching_extraction.records)
+    assert matching_result.status == "applied"
+    assert matching_result.matched_records == ("step_variant_21", "step_variant_22")
+    assert [child.name for child in matching_root.children] == ["Angle Panel"]
+    assert set(matching_parts) == {"angle"}
+
+    blocked_options = StepReadOptions(design_variant_selection=("rise=0.5", "run=2"))
+    blocked_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, blocked_options),
+        blocked_options,
+    )
+
+    assert blocked_selection.status == "unmatched_geometry"
+    assert blocked_selection.matched_records == ()
+    assert "condition expression was not satisfied" in blocked_selection.warnings[0]
+
+    target_options = StepReadOptions(design_variant_selection=("angle package",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+
 def test_step_design_variant_selection_evaluates_odd_function_condition(tmp_path: Path) -> None:
     source = tmp_path / "variants.step"
     source.write_text(

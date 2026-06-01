@@ -326,7 +326,7 @@ as `PLUS_EXPRESSION`, `MINUS_EXPRESSION`, `MULT_EXPRESSION`,
 `ABS_FUNCTION`,
 `MINUS_FUNCTION`, `SQUARE_ROOT_FUNCTION`, `MAXIMUM_FUNCTION`,
 `MINIMUM_FUNCTION`, `SIN_FUNCTION`, `COS_FUNCTION`, `TAN_FUNCTION`,
-`ASIN_FUNCTION`, `ACOS_FUNCTION`, `ATAN_FUNCTION`, `EXP_FUNCTION`,
+`ASIN_FUNCTION`, `ACOS_FUNCTION`, unary or binary `ATAN_FUNCTION`, `EXP_FUNCTION`,
 `LOG_FUNCTION`, `LOG2_FUNCTION`, and `LOG10_FUNCTION`, simple string
 expressions such as `CONCAT_EXPRESSION`, `SUBSTRING_EXPRESSION`,
 `INDEX_EXPRESSION`, `FORMAT_FUNCTION`, and `EXPRESSION_EXTENSION_STRING`,
@@ -363,8 +363,9 @@ when named numeric variables are
 supplied as selection values such as `load rating=15`, including when those
 variables flow through simple numeric arithmetic or numeric function expression
 operands, including rational representation items, expression-extension numeric
-values, and elementary trig/log/exp functions. `ODD_FUNCTION` selects when a
-named integer numeric variable is
+values, and elementary trig/log/exp functions, with two-operand
+`ATAN_FUNCTION` evaluated as `atan2`. `ODD_FUNCTION` selects when a named
+integer numeric variable is
 supplied as an odd integer assignment.
 `LIKE_EXPRESSION` records select when named string variables are supplied as
 selection values such as `finish=black anodized`, including when those values

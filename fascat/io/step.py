@@ -3279,6 +3279,8 @@ def _numeric_function_value(operator: str, values: list[float]) -> float | None:
         return _finite_numeric_result(float(np.arcsin(values[0])))
     if operator == "numeric_atan" and len(values) == 1:
         return _finite_numeric_result(float(np.arctan(values[0])))
+    if operator == "numeric_atan" and len(values) == 2:
+        return _finite_numeric_result(float(np.arctan2(values[0], values[1])))
     if operator == "numeric_cos" and len(values) == 1:
         return _finite_numeric_result(float(np.cos(values[0])))
     if operator == "numeric_exp" and len(values) == 1:
