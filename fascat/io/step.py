@@ -65,16 +65,27 @@ _STEP_NUMBER_RE = re.compile(r"(?<![#A-Za-z0-9_])[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[
 _STEP_PMI_ENTITY_KINDS = {
     "DIMENSIONAL_SIZE": "dimension",
     "DIMENSIONAL_LOCATION": "dimension",
+    "DIMENSIONAL_LOCATION_WITH_PATH": "dimension",
     "ANGULAR_SIZE": "dimension",
     "ANGULAR_LOCATION": "dimension",
+    "DIMENSIONAL_CHARACTERISTIC_REPRESENTATION": "dimension",
+    "SHAPE_DIMENSION_REPRESENTATION": "dimension",
     "LINEAR_DIMENSION": "dimension",
     "RADIAL_DIMENSION": "dimension",
     "DIAMETER_DIMENSION": "dimension",
+    "PLUS_MINUS_TOLERANCE": "tolerance",
+    "TOLERANCE_VALUE": "tolerance",
+    "LIMITS_AND_FITS": "tolerance",
     "GEOMETRIC_TOLERANCE": "tolerance",
+    "GEOMETRIC_TOLERANCE_RELATIONSHIP": "tolerance",
     "GEOMETRIC_TOLERANCE_WITH_DATUM_REFERENCE": "tolerance",
     "GEOMETRIC_TOLERANCE_WITH_MODIFIERS": "tolerance",
     "DATUM": "datum",
     "DATUM_FEATURE": "datum",
+    "DATUM_REFERENCE": "datum",
+    "DATUM_REFERENCE_COMPARTMENT": "datum",
+    "DATUM_REFERENCE_ELEMENT": "datum",
+    "DATUM_SYSTEM": "datum",
     "DATUM_TARGET": "datum_target",
     "FEATURE_CONTROL_FRAME": "feature_control_frame",
     "ANNOTATION_TEXT": "note",
@@ -1517,6 +1528,7 @@ def _extract_step_pmi_annotations(source: Path, options: StepReadOptions) -> lis
         value = numbers[0] if numbers else None
         text_value = _step_pmi_text(record, strings, value)
         references = tuple(f"#{item}" for item in _STEP_REFERENCE_RE.findall(record.args))
+        tolerance = _step_pmi_tolerance(record.entity, kind, numbers)
         annotations.append(
             PmiAnnotation(
                 id=f"step_pmi_{record.number}",
@@ -1524,11 +1536,7 @@ def _extract_step_pmi_annotations(source: Path, options: StepReadOptions) -> lis
                 text=text_value,
                 value=value,
                 unit=_step_pmi_unit(strings),
-                tolerance=(
-                    Tolerance(upper=value, kind=record.entity.lower())
-                    if kind in {"tolerance", "feature_control_frame"} and value is not None
-                    else None
-                ),
+                tolerance=tolerance,
                 source={
                     "step_entity_id": f"#{record.number}",
                     "step_entity": record.entity,
@@ -1643,6 +1651,16 @@ def _step_record_label(record: _StepRecord) -> str:
     if strings:
         return " / ".join(strings)
     return record.entity.lower().replace("_", " ")
+
+
+def _step_pmi_tolerance(entity: str, kind: str, numbers: list[float]) -> Tolerance | None:
+    if kind not in {"tolerance", "feature_control_frame"} or not numbers:
+        return None
+    if entity == "PLUS_MINUS_TOLERANCE" and len(numbers) >= 2:
+        return Tolerance(upper=numbers[0], lower=numbers[1], kind=entity.lower())
+    if len(numbers) >= 2 and numbers[0] >= 0.0 and numbers[1] <= 0.0:
+        return Tolerance(upper=numbers[0], lower=numbers[1], kind=entity.lower())
+    return Tolerance(upper=numbers[0], kind=entity.lower())
 
 
 def _extract_step_design_variants(source: Path, options: StepReadOptions) -> _StepDesignVariantExtraction:

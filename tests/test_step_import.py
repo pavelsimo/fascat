@@ -155,6 +155,9 @@ def test_step_text_pmi_extraction_reads_common_ap242_records(tmp_path: Path) -> 
         "#31=GEOMETRIC_TOLERANCE('position tolerance',0.2,#20);\n"
         "#32=DATUM('A',#20);\n"
         "#33=ANNOTATION_TEXT_OCCURRENCE('inspect after plating',#20);\n"
+        "#34=DIMENSIONAL_LOCATION(#20,#21,'slot offset 8 mm',8.0);\n"
+        "#35=PLUS_MINUS_TOLERANCE('profile plus minus',0.1,-0.05,#31);\n"
+        "#36=DATUM_REFERENCE_COMPARTMENT('datum A primary',#32);\n"
         "ENDSEC;\n"
         "END-ISO-10303-21;\n",
         encoding="utf-8",
@@ -162,8 +165,24 @@ def test_step_text_pmi_extraction_reads_common_ap242_records(tmp_path: Path) -> 
 
     annotations = _extract_step_pmi_annotations(source, StepReadOptions(pmi=True))
 
-    assert [annotation.kind for annotation in annotations] == ["dimension", "tolerance", "datum", "note"]
-    assert [annotation.id for annotation in annotations] == ["step_pmi_30", "step_pmi_31", "step_pmi_32", "step_pmi_33"]
+    assert [annotation.kind for annotation in annotations] == [
+        "dimension",
+        "tolerance",
+        "datum",
+        "note",
+        "dimension",
+        "tolerance",
+        "datum",
+    ]
+    assert [annotation.id for annotation in annotations] == [
+        "step_pmi_30",
+        "step_pmi_31",
+        "step_pmi_32",
+        "step_pmi_33",
+        "step_pmi_34",
+        "step_pmi_35",
+        "step_pmi_36",
+    ]
     assert annotations[0].text == "hole diameter 12.5 mm"
     assert annotations[0].value == 12.5
     assert annotations[0].unit == "millimetre"
@@ -171,6 +190,12 @@ def test_step_text_pmi_extraction_reads_common_ap242_records(tmp_path: Path) -> 
     assert annotations[1].tolerance.upper == 0.2
     assert annotations[1].source["step_references"] == ["#20"]
     assert annotations[3].text == "inspect after plating"
+    assert annotations[4].text == "slot offset 8 mm"
+    assert annotations[4].unit == "millimetre"
+    assert annotations[5].tolerance is not None
+    assert annotations[5].tolerance.upper == 0.1
+    assert annotations[5].tolerance.lower == -0.05
+    assert annotations[6].text == "datum A primary"
 
 
 def test_step_pmi_semantic_graph_records_referenced_entities(tmp_path: Path) -> None:
@@ -182,6 +207,7 @@ def test_step_pmi_semantic_graph_records_referenced_entities(tmp_path: Path) -> 
         "#21=SHAPE_ASPECT('hole face','',#20,.T.);\n"
         "#30=DIMENSIONAL_SIZE(#21,'hole diameter 12.5 mm',12.5);\n"
         "#31=GEOMETRIC_TOLERANCE('position tolerance',0.2,#20,#999);\n"
+        "#32=PLUS_MINUS_TOLERANCE('profile plus minus',0.1,-0.05,#30);\n"
         "ENDSEC;\n"
         "END-ISO-10303-21;\n",
         encoding="utf-8",
@@ -191,17 +217,19 @@ def test_step_pmi_semantic_graph_records_referenced_entities(tmp_path: Path) -> 
     payload = graph.to_dict()
 
     assert graph.summary == {
-        "nodes": 4,
-        "pmi_nodes": 2,
+        "nodes": 5,
+        "pmi_nodes": 3,
         "referenced_nodes": 2,
-        "edges": 3,
+        "edges": 4,
         "missing_references": 1,
     }
-    assert [node["id"] for node in payload["nodes"]] == ["#20", "#21", "#30", "#31"]
+    assert [node["id"] for node in payload["nodes"]] == ["#20", "#21", "#30", "#31", "#32"]
     assert payload["nodes"][2]["kind"] == "pmi_dimension"
     assert payload["nodes"][2]["references"] == ["#21"]
     assert payload["nodes"][3]["kind"] == "pmi_tolerance"
-    assert payload["edges"][-1] == {"source": "#31", "target": "#999", "relationship": "step_reference"}
+    assert payload["nodes"][4]["kind"] == "pmi_tolerance"
+    assert {"source": "#31", "target": "#999", "relationship": "step_reference"} in payload["edges"]
+    assert {"source": "#32", "target": "#30", "relationship": "step_reference"} in payload["edges"]
     assert graph.warnings == ("STEP PMI semantic graph has 1 reference(s) to records that were not found",)
 
 

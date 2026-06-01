@@ -293,9 +293,11 @@ asset.pmi.append(
 glTF export writes metadata and PMI into `extras.fascat`. USD export writes Fascat metadata into `customData` on the scene, nodes, prototypes, materials, meshes, and `/PMI/*` annotation prims. When merge, explode, or replace operations create new parts, exporters resolve PMI links through `source_part_id` and `source_part_ids` metadata so annotations that targeted the original part still attach to the derived output.
 
 STEP AP242 import includes a textual PMI scan for common typed records such as
-`DIMENSIONAL_SIZE`, `GEOMETRIC_TOLERANCE`, `DATUM`, `DATUM_TARGET`,
+`DIMENSIONAL_SIZE`, `DIMENSIONAL_LOCATION`, `PLUS_MINUS_TOLERANCE`,
+`GEOMETRIC_TOLERANCE`, `DATUM`, `DATUM_REFERENCE`, `DATUM_TARGET`,
 `FEATURE_CONTROL_FRAME`, and annotation text entities. Those records become
-typed `PmiAnnotation` objects with source STEP entity ids and references. If a
+typed `PmiAnnotation` objects with source STEP entity ids, references, and
+numeric tolerance bounds where the textual record exposes them. If a
 file advertises AP242 PMI but no supported typed record is extracted, the import
 report records `pmi_present=true`, `unsupported_pmi_count=1`, and a warning
 instead of silently implying that PMI was imported. Import reports and asset
@@ -341,7 +343,7 @@ Metadata and PMI parameters:
 | `StepReadOptions` | `properties` | Import user and product properties. |
 | `StepReadOptions` | `layers` | Request layer assignments as metadata. Current normalized layer extraction is reported as unsupported in `import_decisions` when requested. |
 | `StepReadOptions` | `validation_properties` | Request STEP validation properties. Current reports approximate this with source topology counts rather than typed validation-property entities. |
-| `StepReadOptions` | `pmi` | Import common typed AP242 PMI text records into `PmiAnnotation` objects and report a textual semantic reference graph; AP242 PMI markers are reported when no supported typed record can be extracted. |
+| `StepReadOptions` | `pmi` | Import common typed AP242 PMI text records, including dimension, location, geometric tolerance, plus/minus tolerance, datum, datum-reference, feature-control-frame, and note entities, into `PmiAnnotation` objects and report a textual semantic reference graph; AP242 PMI markers are reported when no supported typed record can be extracted. |
 | `StepReadOptions` | `design_variants` | Scan common STEP configuration/design-variant/effectivity records into metadata and import reports. Variant-specific geometry selection remains planned backend work. |
 | `StepReadOptions` | `existing_meshes` | Prefer existing tessellation payloads from the source file when the importer exposes them. Tessellation `reuse_existing_meshes` still controls whether loaded meshes are retessellated later. |
 | `StepReadOptions` | `multi_file` | Request multi-file STEP assembly import. `read_step_many()` honors explicit member lists; single-path STEP imports recursively resolve quoted external `.step` / `.stp` references, preserve repeated references as member occurrences, and report the `external_reference_graph`. |
