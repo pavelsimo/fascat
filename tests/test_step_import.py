@@ -467,6 +467,81 @@ def test_step_design_variant_selection_resolves_dated_effectivity_range(tmp_path
     assert set(parts) == {"cover"}
 
 
+def test_step_design_variant_selection_gates_effectivity_assignment_targets(tmp_path: Path) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=PRODUCT_CONCEPT_FEATURE('inspection cover','select inspection cover',#1);\n"
+        "#11=SERIAL_NUMBERED_EFFECTIVITY('SN-A-001','SN-A-099',#10);\n"
+        "#20=EFFECTIVITY_ASSIGNMENT(#11,#10);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="cover-node", name="Inspection Cover", part_id="cover"),
+            fc.Node(id="plug-node", name="Blanking Plug", part_id="plug"),
+        ],
+    )
+    parts = {
+        "cover": fc.Part(
+            id="cover",
+            name="Inspection Cover",
+            material_ids=["cover-mat"],
+            metadata={"source_name": "inspection cover"},
+        ),
+        "plug": fc.Part(
+            id="plug",
+            name="Blanking Plug",
+            material_ids=["plug-mat"],
+            metadata={"source_name": "blanking plug"},
+        ),
+    }
+    materials = {
+        "cover-mat": fc.Material(id="cover-mat", name="Cover Paint", base_color=(1.0, 0.0, 0.0, 1.0)),
+        "plug-mat": fc.Material(id="plug-mat", name="Plug Paint", base_color=(0.0, 0.0, 1.0, 1.0)),
+    }
+
+    serial_options = StepReadOptions(design_variant_selection=("SN-A-050",))
+    serial_extraction = _extract_step_design_variants(source, serial_options)
+    serial_root = root.copy()
+    serial_parts = {key: part.copy() for key, part in parts.items()}
+    serial_materials = dict(materials)
+
+    serial_selection = _apply_step_design_variant_selection(
+        serial_root,
+        serial_parts,
+        serial_materials,
+        serial_extraction,
+        serial_options,
+    )
+
+    assert serial_extraction.summary["effectivity_records"] == 2
+    assert serial_extraction.summary["conditional_records"] == 1
+    assert serial_extraction.records[2].condition_operator == "effectivity_assignment"
+    assert serial_selection.status == "applied"
+    assert serial_selection.matched_records == ("step_variant_20",)
+    assert [child.name for child in serial_root.children] == ["Inspection Cover"]
+    assert set(serial_parts) == {"cover"}
+
+    target_options = StepReadOptions(design_variant_selection=("inspection cover",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+
 def test_step_design_variant_selection_requires_supported_boolean_conditions(tmp_path: Path) -> None:
     source = tmp_path / "variants.step"
     source.write_text(

@@ -1859,8 +1859,10 @@ def _step_condition_operator(entity: str) -> str | None:
         return "not"
     if normalized == "BOOLEANLITERAL":
         return "literal"
-    if normalized in {"CONDITIONALCONFIGURATION", "EFFECTIVITYASSIGNMENT"}:
+    if normalized == "CONDITIONALCONFIGURATION":
         return "conditional"
+    if normalized in {"CONFIGUREDEFFECTIVITYASSIGNMENT", "EFFECTIVITYASSIGNMENT"}:
+        return "effectivity_assignment"
     if normalized == "BOOLEANVARIABLE":
         return "variable"
     return None
@@ -2083,7 +2085,7 @@ def _conditional_dependency_references(
     dependencies: set[str] = {
         reference
         for record in records
-        if record.condition_operator in {"and", "or", "xor", "not", "conditional"}
+        if record.condition_operator in {"and", "or", "xor", "not", "conditional", "effectivity_assignment"}
         for reference in record.references
     }
     changed = True
@@ -2163,6 +2165,31 @@ def _condition_record_matches_requested(
                     or any(child.positive for child in target_children)
                 ),
             )
+    if operator == "effectivity_assignment":
+        effectivity_condition_children: list[_StepConditionMatch] = []
+        effectivity_target_children: list[_StepConditionMatch] = []
+        for child_record, child_match in zip(child_records, children, strict=False):
+            if child_record.effectivity_kind is not None:
+                matched = _effectivity_condition_record_matches_requested(
+                    child_record,
+                    requested,
+                    normalized_requested,
+                )
+                effectivity_condition_children.append(_StepConditionMatch(matched=matched, positive=matched))
+            elif child_record.condition_operator is not None:
+                effectivity_condition_children.append(child_match)
+            else:
+                effectivity_target_children.append(child_match)
+        if effectivity_condition_children:
+            matched = all(child.matched for child in effectivity_condition_children)
+            return _StepConditionMatch(
+                matched=matched,
+                positive=matched
+                and (
+                    any(child.positive for child in effectivity_condition_children)
+                    or any(child.positive for child in effectivity_target_children)
+                ),
+            )
     if operator == "and":
         matched = all(child.matched for child in children)
         return _StepConditionMatch(matched=matched, positive=matched and any(child.positive for child in children))
@@ -2214,6 +2241,19 @@ def _design_variant_record_self_matches_requested(
         )
     )
     return any(query and query in haystack for query in normalized_requested)
+
+
+def _effectivity_condition_record_matches_requested(
+    record: _StepDesignVariantRecord,
+    requested: tuple[str, ...],
+    normalized_requested: tuple[str, ...],
+) -> bool:
+    return _design_variant_record_self_matches_requested(
+        record, normalized_requested
+    ) or _effectivity_record_matches_requested(
+        record,
+        requested,
+    )
 
 
 def _design_variant_record_id_matches(
