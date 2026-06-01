@@ -545,6 +545,8 @@ def test_read_step_multi_file_resolves_master_external_reference_graph(
         "unsupported": 0,
         "sources": 2,
         "resolved_sources": 1,
+        "member_sources": 2,
+        "resolved_occurrences": 1,
     }
     import_options = asset.report.steps[0].options
     assert import_options["external_reference_graph"]["summary"]["resolved_sources"] == 1
@@ -615,8 +617,68 @@ def test_external_step_reference_graph_resolves_nested_references_once(tmp_path:
         "unsupported": 0,
         "sources": 3,
         "resolved_sources": 2,
+        "member_sources": 3,
+        "resolved_occurrences": 2,
     }
     assert any("missing.step" in warning for warning in graph.warnings)
+
+
+def test_external_step_reference_graph_preserves_duplicate_occurrences(tmp_path: Path) -> None:
+    master = tmp_path / "master.step"
+    child = tmp_path / "bolt.step"
+    master.write_text(
+        "ISO-10303-21;\nDATA;\n"
+        "#1=DOCUMENT_FILE('bolt.step');\n"
+        "#2=DOCUMENT_FILE('bolt.step');\n"
+        "ENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    child.write_text("ISO-10303-21;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n", encoding="utf-8")
+
+    graph = _resolve_step_external_reference_graph(master)
+
+    assert graph.sources == [master, child.resolve()]
+    assert graph.member_sources == [master, child.resolve(), child.resolve()]
+    assert graph.summary()["resolved_sources"] == 1
+    assert graph.summary()["resolved_occurrences"] == 2
+
+
+def test_external_step_reference_import_preserves_duplicate_occurrences(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    master = tmp_path / "master.step"
+    child = tmp_path / "bolt.step"
+    master.write_text(
+        "ISO-10303-21;\nDATA;\n"
+        "#1=DOCUMENT_FILE('bolt.step');\n"
+        "#2=DOCUMENT_FILE('bolt.step');\n"
+        "ENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    child.write_text("ISO-10303-21;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n", encoding="utf-8")
+    calls: list[Path] = []
+
+    def fake_read_step_path(source: Path, *, source_identity: str, options: StepReadOptions) -> fc.Asset:
+        _ = source_identity
+        assert options.multi_file is False
+        calls.append(source)
+        report = Report(source_path=str(source))
+        report.add_step("import", options={"read_options": options.to_dict(), "import_decisions": {}})
+        return fc.Asset(
+            root=fc.Node(id="root", name=source.stem),
+            metadata={"import_decisions": {}},
+            report=report,
+        )
+
+    monkeypatch.setattr(step_io, "_read_step_path", fake_read_step_path)
+
+    asset = fc.read_step(master, options=StepReadOptions(multi_file=True))
+
+    assert calls == [master, child.resolve(), child.resolve()]
+    assert len(asset.root.children) == 3
+    assert asset.metadata["external_reference_graph"]["summary"]["resolved_sources"] == 1
+    assert asset.metadata["external_reference_graph"]["summary"]["resolved_occurrences"] == 2
 
 
 def test_material_library_mapping_applies_known_cad_material_rules() -> None:

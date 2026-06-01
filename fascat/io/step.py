@@ -157,6 +157,7 @@ class _StepExternalReferenceRecord:
 class _StepExternalReferenceGraph:
     root: Path
     sources: list[Path]
+    member_sources: list[Path]
     records: list[_StepExternalReferenceRecord]
     warnings: list[str]
 
@@ -173,12 +174,15 @@ class _StepExternalReferenceGraph:
             "unsupported": sum(1 for record in self.records if record.status == "unsupported"),
             "sources": len(self.sources),
             "resolved_sources": len(resolved_sources),
+            "member_sources": len(self.member_sources),
+            "resolved_occurrences": max(0, len(self.member_sources) - 1),
         }
 
     def to_dict(self) -> dict[str, object]:
         return {
             "root": str(self.root),
             "sources": [str(source) for source in self.sources],
+            "member_sources": [str(source) for source in self.member_sources],
             "summary": self.summary(),
             "references": [record.to_dict() for record in self.records],
             "warnings": list(self.warnings),
@@ -380,8 +384,8 @@ def _read_step_many(
 def _read_step_with_external_references(source: Path, options: StepReadOptions) -> Asset:
     graph = _resolve_step_external_reference_graph(source)
     member_options = replace(options, multi_file=False)
-    if len(graph.sources) > 1:
-        return _read_step_many(graph.sources, options=options, reference_graph=graph)
+    if len(graph.member_sources) > 1:
+        return _read_step_many(graph.member_sources, options=options, reference_graph=graph)
 
     asset = _read_step_path(source, source_identity=str(source.resolve()), options=member_options)
     _attach_step_external_reference_graph(asset, graph, options)
@@ -390,8 +394,10 @@ def _read_step_with_external_references(source: Path, options: StepReadOptions) 
 
 def _resolve_step_external_reference_graph(source: Path) -> _StepExternalReferenceGraph:
     root = source
+    root_key = str(root.resolve())
     sources = [root]
-    seen_sources = {str(root.resolve())}
+    member_sources = [root]
+    seen_sources = {root_key}
     records: list[_StepExternalReferenceRecord] = []
     warnings: list[str] = []
     queue = [root]
@@ -437,24 +443,30 @@ def _resolve_step_external_reference_graph(source: Path) -> _StepExternalReferen
                 )
             )
             resolved_key = str(resolved.resolve())
+            if resolved_key != root_key:
+                member_sources.append(resolved)
             if resolved_key in seen_sources:
                 continue
             seen_sources.add(resolved_key)
             sources.append(resolved)
             queue.append(resolved)
 
-    return _StepExternalReferenceGraph(root=root, sources=sources, records=records, warnings=warnings)
+    return _StepExternalReferenceGraph(
+        root=root,
+        sources=sources,
+        member_sources=member_sources,
+        records=records,
+        warnings=warnings,
+    )
 
 
 def _step_external_references(source: Path) -> list[str]:
     text = source.read_text(encoding="utf-8", errors="ignore")
     references: list[str] = []
-    seen: set[str] = set()
     for match in _STEP_EXTERNAL_REF_RE.finditer(text):
         reference = match.group(1).replace("''", "'").strip()
-        if not reference or reference in seen:
+        if not reference:
             continue
-        seen.add(reference)
         references.append(reference)
     return references
 
@@ -1038,13 +1050,14 @@ def _external_reference_import_decision(
     else:
         state = "honored"
     detail = (
-        "external STEP references were resolved from quoted STEP path records and imported as deterministic namespaces"
+        "external STEP references were resolved from quoted STEP path records and imported as deterministic "
+        "member occurrences"
         if summary["references"]
         else "no external STEP references were found in the master STEP file"
     )
     return _import_decision(
         requested=options.multi_file,
-        effective=summary["resolved_sources"] > 0,
+        effective=summary["resolved_occurrences"] > 0,
         state=state,
         detail=detail,
         counts={
