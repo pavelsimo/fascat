@@ -305,11 +305,13 @@ file advertises AP242 PMI but no supported typed record is extracted, the import
 report records `pmi_present=true`, `unsupported_pmi_count=1`, and a warning
 instead of silently implying that PMI was imported. Import reports and asset
 metadata also include `pmi_semantic_graph`, a textual STEP reference graph with
-PMI entity nodes, referenced STEP entity nodes, reference edges, and missing
-reference counts. `metadata_and_visuals` export adds deterministic glTF/USD
-PMI marker meshes with simple vector text glyphs linked to those records; full
-AP242 graphical presentation reconstruction and semantic coverage beyond the
-supported textual records are still planned backend work.
+PMI entity nodes, referenced STEP entity nodes, common shape-aspect/product
+target support nodes, inbound callout/annotation associativity records,
+reference edges, and missing reference counts. `metadata_and_visuals` export
+adds deterministic glTF/USD PMI marker meshes with simple vector text glyphs
+linked to those records; full AP242 graphical presentation reconstruction and
+semantic coverage beyond the supported textual records are still planned
+backend work.
 
 STEP design variant import can scan common configuration and effectivity records
 such as `CONFIGURATION_ITEM`, `PRODUCT_CONCEPT_FEATURE`,
@@ -440,7 +442,7 @@ Metadata and PMI parameters:
 | `StepReadOptions` | `properties` | Import user and product properties. |
 | `StepReadOptions` | `layers` | Request layer assignments as metadata. Current normalized layer extraction is reported as unsupported in `import_decisions` when requested. |
 | `StepReadOptions` | `validation_properties` | Request STEP validation properties. Current reports approximate this with source topology counts rather than typed validation-property entities. |
-| `StepReadOptions` | `pmi` | Import common typed AP242 PMI text records, including dimension, location, geometric tolerance and common named geometric-tolerance subtypes, plus/minus tolerance, datum, datum-reference, feature-control-frame, and note entities, into `PmiAnnotation` objects and report a textual semantic reference graph; AP242 PMI markers are reported when no supported typed record can be extracted. |
+| `StepReadOptions` | `pmi` | Import common typed AP242 PMI text records, including dimension, location, geometric tolerance and common named geometric-tolerance subtypes, plus/minus tolerance, datum, datum-reference, feature-control-frame, and note entities, into `PmiAnnotation` objects and report a textual semantic reference graph with common target, callout, and annotation-associativity support records; AP242 PMI markers are reported when no supported typed record can be extracted. |
 | `StepReadOptions` | `design_variants` | Scan common STEP configuration/design-variant/effectivity and simple boolean/numeric/string condition records into metadata and import reports. |
 | `StepReadOptions` | `design_variant_selection` | Select one or more variant labels, effectivity values/ranges, STEP record ids, referenced labels, or numeric/string assignments such as `load rating=15` or `finish=black anodized`, and prune imported geometry by matching node/part/source-name metadata. Effectivity selections follow resolved STEP references back to configuration/design feature labels, effectivity relationship links, product-definition/configuration effectivity usage targets, applied product-definition assignment targets, and gated effectivity context-assignment target labels when present; supported serial/date/time-interval ranges match values inside their bounds, including referenced `TIME_INTERVAL_WITH_BOUNDS` date bounds using `CALENDAR_DATE`, `ORDINAL_DATE`, or `WEEK_OF_YEAR_AND_DAY_DATE` records, simple `AND`/`OR`/`XOR`/`NOT`/equality/not-equality/numeric-comparison/numeric-interval/string-like/odd-function condition records gate operand labels before pruning, boolean/logical literals including `BOOLEAN_REPRESENTATION_ITEM`, `LOGICAL_LITERAL`, and `LOGICAL_REPRESENTATION_ITEM` evaluate `.T.` / `.F.` values, boolean variables including `MATHS_BOOLEAN_VARIABLE` evaluate as named operands selected by label or STEP record id, named maths numeric variables evaluate from selected `label=value` assignments and can flow through simple numeric arithmetic and function expressions, rational representation items, and expression-extension numeric values before comparison/interval/equality evaluation, named string variables evaluate from selected `label=value` assignments for `LIKE_EXPRESSION`, equality/not-equality, `CONCAT_EXPRESSION`, `SUBSTRING_EXPRESSION`, `EXPRESSION_EXTENSION_STRING`, `LENGTH_FUNCTION`, `VALUE_FUNCTION`, and `INT_VALUE_FUNCTION`, applied ineffectivity assignments suppress assigned target labels, and conditional/effectivity-assignment wrappers gate their configured target labels while expression-only operand labels are kept out of geometry selectors. Full AP242 conditional/effectivity geometry evaluation remains planned. |
 | `StepReadOptions` | `existing_meshes` | Prefer existing tessellation payloads from the source file when the importer exposes them. Tessellation `reuse_existing_meshes` still controls whether loaded meshes are retessellated later. |

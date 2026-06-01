@@ -121,6 +121,23 @@ _STEP_PMI_ENTITY_KINDS = {
     "SAVED_VIEW": "saved_view",
     "ANNOTATION_PLANE": "annotation_plane",
 }
+_STEP_PMI_SEMANTIC_ENTITY_KINDS = {
+    "ANNOTATION_OCCURRENCE_ASSOCIATIVITY": "pmi_association",
+    "DRAUGHTING_CALLOUT_RELATIONSHIP": "pmi_relationship",
+    "GEOMETRIC_ITEM_SPECIFIC_USAGE": "pmi_target_usage",
+    "ID_ATTRIBUTE": "pmi_identifier",
+    "MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION": "pmi_presentation",
+    "PRESENTATION_LAYER_ASSIGNMENT": "pmi_presentation",
+    "PRESENTATION_STYLE_ASSIGNMENT": "pmi_presentation",
+    "PRODUCT_DEFINITION_SHAPE": "pmi_target",
+    "PROPERTY_DEFINITION": "pmi_property",
+    "PROPERTY_DEFINITION_REPRESENTATION": "pmi_property",
+    "REPRESENTATION": "pmi_representation",
+    "SHAPE_ASPECT": "pmi_target",
+    "SHAPE_ASPECT_RELATIONSHIP": "pmi_target_relationship",
+    "SHAPE_DEFINING_RELATIONSHIP": "pmi_target_relationship",
+    "STYLED_ITEM": "pmi_presentation",
+}
 _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "ABS_FUNCTION": "abs_function",
     "ABSFUNCTION": "abs_function",
@@ -1871,24 +1888,67 @@ def _extract_step_pmi_semantic_graph(source: Path, options: StepReadOptions) -> 
             warnings=(),
         )
 
-    referenced_ids: set[str] = set()
-    edges: list[_StepPmiSemanticGraphEdge] = []
-    missing_references = 0
-    for record_id in pmi_ids:
-        for reference in _step_record_references(records[record_id]):
-            edges.append(
-                _StepPmiSemanticGraphEdge(
-                    source=record_id,
-                    target=reference,
-                    relationship="step_reference",
-                )
-            )
-            if reference in records:
-                referenced_ids.add(reference)
-            else:
-                missing_references += 1
+    reverse_references: dict[str, list[str]] = {}
+    for record_id, record in records.items():
+        for reference in _step_record_references(record):
+            reverse_references.setdefault(reference, []).append(record_id)
 
-    node_ids = sorted(set(pmi_ids) | referenced_ids, key=_step_entity_sort_key)
+    included_ids: set[str] = set(pmi_ids)
+    pending_ids: list[str] = list(pmi_ids)
+    edges: list[_StepPmiSemanticGraphEdge] = []
+    edge_keys: set[tuple[str, str, str]] = set()
+    missing_references = 0
+
+    def add_edge(source: str, target: str) -> None:
+        edge_key = (source, target, "step_reference")
+        if edge_key in edge_keys:
+            return
+        edge_keys.add(edge_key)
+        edges.append(
+            _StepPmiSemanticGraphEdge(
+                source=source,
+                target=target,
+                relationship="step_reference",
+            )
+        )
+
+    def include_record(record_id: str) -> None:
+        if record_id in included_ids:
+            return
+        included_ids.add(record_id)
+        pending_ids.append(record_id)
+
+    while pending_ids:
+        record_id = pending_ids.pop(0)
+        record = records[record_id]
+        source_is_pmi = record_id in pmi_ids
+        source_is_semantic = record.entity in _STEP_PMI_SEMANTIC_ENTITY_KINDS
+        for reference in _step_record_references(record):
+            target_record = records.get(reference)
+            if source_is_pmi:
+                add_edge(record_id, reference)
+                if target_record is None:
+                    missing_references += 1
+                else:
+                    include_record(reference)
+            elif (
+                source_is_semantic
+                and target_record is not None
+                and (
+                    target_record.entity in _STEP_PMI_ENTITY_KINDS
+                    or target_record.entity in _STEP_PMI_SEMANTIC_ENTITY_KINDS
+                )
+            ):
+                add_edge(record_id, reference)
+                include_record(reference)
+        for source_id in reverse_references.get(record_id, ()):
+            source_record = records[source_id]
+            if source_record.entity not in _STEP_PMI_SEMANTIC_ENTITY_KINDS:
+                continue
+            add_edge(source_id, record_id)
+            include_record(source_id)
+
+    node_ids = sorted(included_ids, key=_step_entity_sort_key)
     nodes = tuple(
         _StepPmiSemanticGraphNode(
             id=record_id,
@@ -1942,7 +2002,9 @@ def _step_entity_sort_key(record_id: str) -> int:
 
 def _step_pmi_graph_node_kind(record: _StepRecord) -> str:
     kind = _STEP_PMI_ENTITY_KINDS.get(record.entity)
-    return f"pmi_{kind}" if kind is not None else "referenced_step_entity"
+    if kind is not None:
+        return f"pmi_{kind}"
+    return _STEP_PMI_SEMANTIC_ENTITY_KINDS.get(record.entity, "referenced_step_entity")
 
 
 def _step_record_label(record: _StepRecord) -> str:

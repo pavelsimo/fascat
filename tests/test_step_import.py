@@ -261,17 +261,56 @@ def test_step_pmi_semantic_graph_records_referenced_entities(tmp_path: Path) -> 
         "nodes": 5,
         "pmi_nodes": 3,
         "referenced_nodes": 2,
-        "edges": 4,
+        "edges": 5,
         "missing_references": 1,
     }
     assert [node["id"] for node in payload["nodes"]] == ["#20", "#21", "#30", "#31", "#32"]
+    assert payload["nodes"][0]["kind"] == "pmi_target"
+    assert payload["nodes"][1]["kind"] == "pmi_target"
     assert payload["nodes"][2]["kind"] == "pmi_dimension"
     assert payload["nodes"][2]["references"] == ["#21"]
     assert payload["nodes"][3]["kind"] == "pmi_tolerance"
     assert payload["nodes"][4]["kind"] == "pmi_tolerance"
+    assert {"source": "#21", "target": "#20", "relationship": "step_reference"} in payload["edges"]
     assert {"source": "#31", "target": "#999", "relationship": "step_reference"} in payload["edges"]
     assert {"source": "#32", "target": "#30", "relationship": "step_reference"} in payload["edges"]
     assert graph.warnings == ("STEP PMI semantic graph has 1 reference(s) to records that were not found",)
+
+
+def test_step_pmi_semantic_graph_includes_callout_and_associativity_records(tmp_path: Path) -> None:
+    source = tmp_path / "pmi-callout.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#20=PRODUCT_DEFINITION_SHAPE('bracket','',#19);\n"
+        "#21=SHAPE_ASPECT('hole face','',#20,.T.);\n"
+        "#30=DIMENSIONAL_SIZE(#21,'hole diameter 12.5 mm',12.5);\n"
+        "#31=ANNOTATION_TEXT_OCCURRENCE('hole callout text',#21);\n"
+        "#40=DRAUGHTING_CALLOUT('hole callout',(#30,#31));\n"
+        "#41=DRAUGHTING_CALLOUT_RELATIONSHIP('callout relationship','',#40,#30);\n"
+        "#42=ANNOTATION_OCCURRENCE_ASSOCIATIVITY('annotation target',#31,#21);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    graph = _extract_step_pmi_semantic_graph(source, StepReadOptions(pmi=True))
+    payload = graph.to_dict()
+
+    assert graph.summary == {
+        "nodes": 7,
+        "pmi_nodes": 3,
+        "referenced_nodes": 4,
+        "edges": 9,
+        "missing_references": 0,
+    }
+    assert [node["id"] for node in payload["nodes"]] == ["#20", "#21", "#30", "#31", "#40", "#41", "#42"]
+    assert payload["nodes"][5]["kind"] == "pmi_relationship"
+    assert payload["nodes"][6]["kind"] == "pmi_association"
+    assert {"source": "#41", "target": "#40", "relationship": "step_reference"} in payload["edges"]
+    assert {"source": "#41", "target": "#30", "relationship": "step_reference"} in payload["edges"]
+    assert {"source": "#42", "target": "#31", "relationship": "step_reference"} in payload["edges"]
+    assert {"source": "#42", "target": "#21", "relationship": "step_reference"} in payload["edges"]
 
 
 def test_step_text_pmi_extraction_respects_disabled_pmi(tmp_path: Path) -> None:
