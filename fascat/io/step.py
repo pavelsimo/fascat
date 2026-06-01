@@ -122,6 +122,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "COMPARISONLESSEQUAL": "comparison_less_equal",
     "COMPARISON_NOT_EQUAL": "comparison_not_equal",
     "COMPARISONNOTEQUAL": "comparison_not_equal",
+    "CONCAT_EXPRESSION": "concat_expression",
+    "CONCATEXPRESSION": "concat_expression",
     "CONDITIONAL_CONCEPT_FEATURE": "conditional_concept_feature",
     "CONDITIONALCONCEPTFEATURE": "conditional_concept_feature",
     "CONDITIONAL_CONFIGURATION": "conditional_configuration",
@@ -152,6 +154,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "INTERVALEXPRESSION": "interval_expression",
     "LIKE_EXPRESSION": "like_expression",
     "LIKEEXPRESSION": "like_expression",
+    "LENGTH_FUNCTION": "length_function",
+    "LENGTHFUNCTION": "length_function",
     "LOT_EFFECTIVITY": "lot_effectivity",
     "LITERAL_NUMBER": "literal_number",
     "LITERALNUMBER": "literal_number",
@@ -225,6 +229,17 @@ _STEP_NUMERIC_ARITHMETIC_OPERATORS = {
     "numeric_multiply",
     "numeric_power",
     "numeric_subtract",
+}
+_STEP_STRING_EXPRESSION_OPERATORS = {"string_concat"}
+_STEP_NUMERIC_STRING_FUNCTION_OPERATORS = {"string_length"}
+_STEP_CONDITION_OPERAND_OPERATORS = {
+    "numeric_literal",
+    "numeric_variable",
+    "string_literal",
+    "string_variable",
+    *_STEP_NUMERIC_ARITHMETIC_OPERATORS,
+    *_STEP_NUMERIC_STRING_FUNCTION_OPERATORS,
+    *_STEP_STRING_EXPRESSION_OPERATORS,
 }
 _STEP_UNIT_RE = re.compile(r"\b(mm|millimet(?:er|re)|cm|centimet(?:er|re)|m|met(?:er|re)|in|inch|deg|degree)\b", re.I)
 _GENERIC_MATERIAL_TOKENS = {"cad", "color", "material", "mat", "texture", "map", "source"}
@@ -1987,6 +2002,10 @@ def _step_condition_operator(entity: str) -> str | None:
         return "numeric_mod"
     if normalized == "POWEREXPRESSION":
         return "numeric_power"
+    if normalized == "LENGTHFUNCTION":
+        return "string_length"
+    if normalized == "CONCATEXPRESSION":
+        return "string_concat"
     if normalized in {"BOOLEANLITERAL", "BOOLEANREPRESENTATIONITEM"}:
         return "literal"
     if normalized in {
@@ -2223,14 +2242,7 @@ def _design_variant_selector_terms(
         )
         condition_applies = (
             record.condition_operator is not None
-            and record.condition_operator
-            not in {
-                "numeric_literal",
-                "numeric_variable",
-                "string_literal",
-                "string_variable",
-                *_STEP_NUMERIC_ARITHMETIC_OPERATORS,
-            }
+            and record.condition_operator not in _STEP_CONDITION_OPERAND_OPERATORS
             and condition_match.matched
             and condition_match.positive
         )
@@ -2242,11 +2254,7 @@ def _design_variant_selector_terms(
                 "effectivity_relationship",
                 "effectivity_usage",
                 "ineffectivity_assignment",
-                "numeric_literal",
-                "numeric_variable",
-                "string_literal",
-                "string_variable",
-                *_STEP_NUMERIC_ARITHMETIC_OPERATORS,
+                *_STEP_CONDITION_OPERAND_OPERATORS,
             } and _design_variant_record_self_matches_requested(record, normalized_requested)
             condition_blocked = condition_blocked or (
                 not direct_id_match
@@ -2285,19 +2293,63 @@ def _design_variant_selector_terms(
         if not direct_id_match and not direct_match and not condition_applies:
             continue
         matched.append(record.id)
-        terms.extend(_design_variant_label_terms(record.label))
-        for label in record.reference_labels:
-            terms.extend(_design_variant_label_terms(label))
-        for label in record.resolved_reference_labels:
-            terms.extend(_design_variant_label_terms(label))
-        terms.extend(record.effectivity_values)
-        terms.extend(record.references)
+        terms.extend(_design_variant_geometry_selector_terms(record, records_by_reference, visited=set()))
     selector_terms = tuple(
         item for item in dict.fromkeys(term.strip() for term in terms if term.strip()) if _normalize_variant_term(item)
     )
     if condition_blocked and not matched:
         selector_terms = ()
     return tuple(dict.fromkeys(matched)), selector_terms, condition_blocked
+
+
+def _design_variant_geometry_selector_terms(
+    record: _StepDesignVariantRecord,
+    records_by_reference: dict[str, _StepDesignVariantRecord],
+    *,
+    visited: set[str],
+) -> tuple[str, ...]:
+    record_reference = _design_variant_record_step_reference(record)
+    if record_reference in visited or record.condition_operator in _STEP_CONDITION_OPERAND_OPERATORS:
+        return ()
+    visited.add(record_reference)
+    if record.condition_operator is None:
+        return _design_variant_record_selector_terms(record)
+
+    terms: list[str] = []
+    for reference in record.references:
+        child_record = records_by_reference.get(reference)
+        if child_record is None:
+            continue
+        terms.extend(
+            _design_variant_geometry_selector_terms(
+                child_record,
+                records_by_reference,
+                visited=set(visited),
+            )
+        )
+    if record.condition_operator in {
+        "effectivity_assignment",
+        "effectivity_context_assignment",
+        "effectivity_relationship",
+        "effectivity_usage",
+        "ineffectivity_assignment",
+    }:
+        terms.extend(_design_variant_record_selector_terms(record))
+    if record.condition_operator == "conditional" and record.kind == "conditional_concept_feature":
+        terms.extend(_design_variant_record_selector_terms(record))
+    return tuple(dict.fromkeys(terms))
+
+
+def _design_variant_record_selector_terms(record: _StepDesignVariantRecord) -> tuple[str, ...]:
+    terms: list[str] = []
+    terms.extend(_design_variant_label_terms(record.label))
+    for label in record.reference_labels:
+        terms.extend(_design_variant_label_terms(label))
+    for label in record.resolved_reference_labels:
+        terms.extend(_design_variant_label_terms(label))
+    terms.extend(record.effectivity_values)
+    terms.extend(record.references)
+    return tuple(dict.fromkeys(terms))
 
 
 def _conditional_dependency_references(
@@ -2318,6 +2370,8 @@ def _conditional_dependency_references(
         "interval",
         "like",
         *_STEP_NUMERIC_ARITHMETIC_OPERATORS,
+        *_STEP_NUMERIC_STRING_FUNCTION_OPERATORS,
+        *_STEP_STRING_EXPRESSION_OPERATORS,
         "conditional",
         "effectivity_assignment",
         "effectivity_context_assignment",
@@ -2386,6 +2440,26 @@ def _condition_record_matches_requested(
             visited=set(),
         )
         matched = value is not None
+        return _StepConditionMatch(matched=matched, positive=matched and positive)
+    if operator in _STEP_NUMERIC_STRING_FUNCTION_OPERATORS:
+        value, positive = _condition_record_numeric_value(
+            record,
+            records_by_reference,
+            requested,
+            normalized_requested,
+            visited=set(),
+        )
+        matched = value is not None
+        return _StepConditionMatch(matched=matched, positive=matched and positive)
+    if operator in _STEP_STRING_EXPRESSION_OPERATORS:
+        text_value, positive = _condition_record_string_value(
+            record,
+            records_by_reference,
+            requested,
+            normalized_requested,
+            visited=set(),
+        )
+        matched = text_value is not None
         return _StepConditionMatch(matched=matched, positive=matched and positive)
     if operator == "effectivity_usage":
         matched = _effectivity_condition_record_matches_requested(
@@ -2610,6 +2684,22 @@ def _condition_record_numeric_value(
         if len(values) != len(numeric_children) or not values:
             return None, False
         return _numeric_arithmetic_value(record.condition_operator, values), any(item[1] for item in numeric_children)
+    if record.condition_operator == "string_length":
+        string_children = [
+            _condition_record_string_value(
+                child_record,
+                records_by_reference,
+                requested,
+                normalized_requested,
+                visited=set(visited),
+            )
+            for reference in record.references
+            if (child_record := records_by_reference.get(reference)) is not None
+        ]
+        string_values = [item[0] for item in string_children if item[0] is not None]
+        if len(string_values) != len(string_children) or len(string_values) != 1:
+            return None, False
+        return float(len(string_values[0])), any(item[1] for item in string_children)
     return None, False
 
 
@@ -2630,6 +2720,22 @@ def _condition_record_string_value(
     if record.condition_operator == "string_variable":
         value = _design_variant_record_requested_text(record, requested, normalized_requested)
         return value, value is not None
+    if record.condition_operator == "string_concat":
+        string_children = [
+            _condition_record_string_value(
+                child_record,
+                records_by_reference,
+                requested,
+                normalized_requested,
+                visited=set(visited),
+            )
+            for reference in record.references
+            if (child_record := records_by_reference.get(reference)) is not None
+        ]
+        string_values = [item[0] for item in string_children if item[0] is not None]
+        if len(string_values) != len(string_children) or len(string_values) < 2:
+            return None, False
+        return "".join(string_values), any(item[1] for item in string_children)
     return None, False
 
 
@@ -2647,6 +2753,18 @@ def _condition_record_has_requested_numeric_operand(
     visited.add(record_reference)
     if record.condition_operator == "numeric_variable":
         return _design_variant_record_requested_number(record, requested, normalized_requested) is not None
+    if record.condition_operator == "string_length":
+        return any(
+            _condition_record_has_requested_string_operand(
+                child_record,
+                records_by_reference,
+                requested,
+                normalized_requested,
+                visited=set(visited),
+            )
+            for reference in record.references
+            if (child_record := records_by_reference.get(reference)) is not None
+        )
     return any(
         _condition_record_has_requested_numeric_operand(
             child_record,
