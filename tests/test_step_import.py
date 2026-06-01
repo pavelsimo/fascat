@@ -1070,6 +1070,114 @@ def test_step_design_variant_selection_evaluates_comparison_not_equal(tmp_path: 
     assert "condition expression was not satisfied" in target_selection.warnings[0]
 
 
+@pytest.mark.parametrize(
+    ("comparison_record", "matching_selection", "blocked_selection", "expected_operator"),
+    (
+        ("#20=COMPARISON_GREATER(#10,#11);\n", "load rating=15", "load rating=12", "greater"),
+        ("#20=COMPARISON_GREATER_EQUAL(#10,#11);\n", "load rating=12.5", "load rating=12", "greater_equal"),
+        ("#20=COMPARISON_LESS(#10,#11);\n", "load rating=10", "load rating=15", "less"),
+        ("#20=COMPARISON_LESS_EQUAL(#10,#11);\n", "load rating=12.5", "load rating=15", "less_equal"),
+    ),
+)
+def test_step_design_variant_selection_evaluates_numeric_comparisons(
+    tmp_path: Path,
+    comparison_record: str,
+    matching_selection: str,
+    blocked_selection: str,
+    expected_operator: str,
+) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=MATHS_REAL_VARIABLE(#1,'load rating');\n"
+        "#11=REAL_LITERAL(12.5);\n"
+        "#12=PRODUCT_CONCEPT_FEATURE('heavy package','select heavy panel',#1);\n"
+        f"{comparison_record}"
+        "#21=CONDITIONAL_CONFIGURATION('heavy condition',#20,#12);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="heavy-node", name="Heavy Panel", part_id="heavy"),
+            fc.Node(id="light-node", name="Light Panel", part_id="light"),
+        ],
+    )
+    parts = {
+        "heavy": fc.Part(
+            id="heavy",
+            name="Heavy Panel",
+            material_ids=["heavy-mat"],
+            metadata={"source_name": "heavy panel"},
+        ),
+        "light": fc.Part(
+            id="light",
+            name="Light Panel",
+            material_ids=["light-mat"],
+            metadata={"source_name": "light panel"},
+        ),
+    }
+    materials = {
+        "heavy-mat": fc.Material(id="heavy-mat", name="Heavy Paint", base_color=(1.0, 0.0, 0.0, 1.0)),
+        "light-mat": fc.Material(id="light-mat", name="Light Paint", base_color=(0.0, 0.0, 1.0, 1.0)),
+    }
+
+    matching_options = StepReadOptions(design_variant_selection=(matching_selection,))
+    matching_extraction = _extract_step_design_variants(source, matching_options)
+    matching_root = root.copy()
+    matching_parts = {key: part.copy() for key, part in parts.items()}
+    matching_materials = dict(materials)
+
+    matching_result = _apply_step_design_variant_selection(
+        matching_root,
+        matching_parts,
+        matching_materials,
+        matching_extraction,
+        matching_options,
+    )
+
+    assert matching_extraction.records[0].kind == "maths_real_variable"
+    assert matching_extraction.records[0].condition_operator == "numeric_variable"
+    assert matching_extraction.records[1].kind == "real_literal"
+    assert matching_extraction.records[1].condition_operator == "numeric_literal"
+    assert matching_extraction.records[1].condition_number == 12.5
+    assert matching_extraction.records[3].condition_operator == expected_operator
+    assert matching_result.status == "applied"
+    assert matching_result.matched_records == ("step_variant_20", "step_variant_21")
+    assert [child.name for child in matching_root.children] == ["Heavy Panel"]
+    assert set(matching_parts) == {"heavy"}
+
+    blocked_options = StepReadOptions(design_variant_selection=(blocked_selection,))
+    blocked_selection_result = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, blocked_options),
+        blocked_options,
+    )
+
+    assert blocked_selection_result.status == "unmatched_geometry"
+    assert blocked_selection_result.matched_records == ()
+    assert "condition expression was not satisfied" in blocked_selection_result.warnings[0]
+
+    target_options = StepReadOptions(design_variant_selection=("heavy package",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+
 def test_step_design_variant_selection_gates_conditional_concept_feature_label(tmp_path: Path) -> None:
     source = tmp_path / "variants.step"
     source.write_text(

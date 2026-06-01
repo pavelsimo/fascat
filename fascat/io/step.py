@@ -104,6 +104,14 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "CONFIGURATION_ITEM": "configuration_item",
     "COMPARISON_EQUAL": "comparison_equal",
     "COMPARISONEQUAL": "comparison_equal",
+    "COMPARISON_GREATER": "comparison_greater",
+    "COMPARISONGREATER": "comparison_greater",
+    "COMPARISON_GREATER_EQUAL": "comparison_greater_equal",
+    "COMPARISONGREATEREQUAL": "comparison_greater_equal",
+    "COMPARISON_LESS": "comparison_less",
+    "COMPARISONLESS": "comparison_less",
+    "COMPARISON_LESS_EQUAL": "comparison_less_equal",
+    "COMPARISONLESSEQUAL": "comparison_less_equal",
     "COMPARISON_NOT_EQUAL": "comparison_not_equal",
     "COMPARISONNOTEQUAL": "comparison_not_equal",
     "CONDITIONAL_CONCEPT_FEATURE": "conditional_concept_feature",
@@ -118,9 +126,23 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "EFFECTIVITY_ASSIGNMENT": "effectivity_assignment",
     "EQUALS_EXPRESSION": "equals_expression",
     "EQUALSEXPRESSION": "equals_expression",
+    "INT_LITERAL": "int_literal",
+    "INTLITERAL": "int_literal",
+    "INT_NUMERIC_VARIABLE": "int_numeric_variable",
+    "INTNUMERICVARIABLE": "int_numeric_variable",
+    "INTEGER_REPRESENTATION_ITEM": "integer_representation_item",
+    "INTEGERREPRESENTATIONITEM": "integer_representation_item",
     "LOT_EFFECTIVITY": "lot_effectivity",
+    "LITERAL_NUMBER": "literal_number",
+    "LITERALNUMBER": "literal_number",
     "MATHS_BOOLEAN_VARIABLE": "maths_boolean_variable",
     "MATHSBOOLEANVARIABLE": "maths_boolean_variable",
+    "MATHS_INTEGER_VARIABLE": "maths_integer_variable",
+    "MATHSINTEGERVARIABLE": "maths_integer_variable",
+    "MATHS_REAL_VARIABLE": "maths_real_variable",
+    "MATHSREALVARIABLE": "maths_real_variable",
+    "NUMERIC_VARIABLE": "numeric_variable",
+    "NUMERICVARIABLE": "numeric_variable",
     "PRODUCT_CONCEPT": "product_concept",
     "PRODUCT_CONCEPT_CONTEXT": "product_concept_context",
     "PRODUCT_CONCEPT_FEATURE": "product_concept_feature",
@@ -128,6 +150,12 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "PRODUCT_CONCEPT_FEATURE_CATEGORY": "product_concept_feature_category",
     "PRODUCT_CONCEPT_FEATURE_CATEGORY_USAGE": "product_concept_feature_category_usage",
     "PRODUCT_DEFINITION_EFFECTIVITY": "product_definition_effectivity",
+    "REAL_LITERAL": "real_literal",
+    "REALLITERAL": "real_literal",
+    "REAL_NUMERIC_VARIABLE": "real_numeric_variable",
+    "REALNUMERICVARIABLE": "real_numeric_variable",
+    "REAL_REPRESENTATION_ITEM": "real_representation_item",
+    "REALREPRESENTATIONITEM": "real_representation_item",
     "SERIAL_NUMBERED_EFFECTIVITY": "serial_numbered_effectivity",
     "TIME_INTERVAL_BASED_EFFECTIVITY": "time_interval_based_effectivity",
     "AND_CONDITION": "and_condition",
@@ -296,6 +324,7 @@ class _StepDesignVariantRecord:
     effectivity_range: tuple[str, ...] = ()
     condition_operator: str | None = None
     condition_value: bool | None = None
+    condition_number: float | None = None
 
     def to_dict(self) -> dict[str, object]:
         data: dict[str, object] = {
@@ -317,6 +346,8 @@ class _StepDesignVariantRecord:
             data["condition_operator"] = self.condition_operator
         if self.condition_value is not None:
             data["condition_value"] = self.condition_value
+        if self.condition_number is not None:
+            data["condition_number"] = self.condition_number
         return data
 
 
@@ -1796,6 +1827,7 @@ def _extract_step_design_variants(source: Path, options: StepReadOptions) -> _St
                 effectivity_range=_step_effectivity_range(record.entity, effectivity_values),
                 condition_operator=_step_condition_operator(record.entity),
                 condition_value=_step_condition_value(record.entity, record.args),
+                condition_number=_step_condition_number(record.entity, record.args),
             )
         )
 
@@ -1878,16 +1910,40 @@ def _step_condition_operator(entity: str) -> str | None:
         return "not"
     if normalized in {"COMPARISONEQUAL", "EQUALSEXPRESSION"}:
         return "equals"
+    if normalized == "COMPARISONGREATER":
+        return "greater"
+    if normalized == "COMPARISONGREATEREQUAL":
+        return "greater_equal"
+    if normalized == "COMPARISONLESS":
+        return "less"
+    if normalized == "COMPARISONLESSEQUAL":
+        return "less_equal"
     if normalized == "COMPARISONNOTEQUAL":
         return "not_equals"
     if normalized in {"BOOLEANLITERAL", "BOOLEANREPRESENTATIONITEM"}:
         return "literal"
+    if normalized in {
+        "INTLITERAL",
+        "INTEGERREPRESENTATIONITEM",
+        "LITERALNUMBER",
+        "REALLITERAL",
+        "REALREPRESENTATIONITEM",
+    }:
+        return "numeric_literal"
     if normalized in {"CONDITIONALCONFIGURATION", "CONDITIONALCONCEPTFEATURE"}:
         return "conditional"
     if normalized in {"CONFIGUREDEFFECTIVITYASSIGNMENT", "EFFECTIVITYASSIGNMENT"}:
         return "effectivity_assignment"
     if normalized in {"BOOLEANVARIABLE", "MATHSBOOLEANVARIABLE"}:
         return "variable"
+    if normalized in {
+        "INTNUMERICVARIABLE",
+        "MATHSINTEGERVARIABLE",
+        "MATHSREALVARIABLE",
+        "NUMERICVARIABLE",
+        "REALNUMERICVARIABLE",
+    }:
+        return "numeric_variable"
     return None
 
 
@@ -1902,6 +1958,13 @@ def _step_condition_value(entity: str, args: str) -> bool | None:
     if normalized.startswith(".F.") or normalized.startswith(".FALSE.") or normalized in {"F", "FALSE"}:
         return False
     return None
+
+
+def _step_condition_number(entity: str, args: str) -> float | None:
+    if _step_condition_operator(entity) != "numeric_literal":
+        return None
+    values = _step_number_values(args)
+    return values[-1] if values else None
 
 
 def _step_effectivity_values(entity: str, strings: list[str], args: str) -> tuple[str, ...]:
@@ -2069,12 +2132,17 @@ def _design_variant_selector_terms(
             and _design_variant_record_step_reference(record) in conditional_dependency_refs
         )
         condition_applies = (
-            record.condition_operator is not None and condition_match.matched and condition_match.positive
+            record.condition_operator is not None
+            and record.condition_operator not in {"numeric_literal", "numeric_variable"}
+            and condition_match.matched
+            and condition_match.positive
         )
         if record.condition_operator is not None:
             direct_match = record.condition_operator not in {
                 "conditional",
                 "effectivity_assignment",
+                "numeric_literal",
+                "numeric_variable",
             } and _design_variant_record_self_matches_requested(record, normalized_requested)
             condition_blocked = condition_blocked or (
                 not direct_id_match
@@ -2088,6 +2156,17 @@ def _design_variant_selector_terms(
                 record, requested, normalized_requested
             )
             condition_blocked = condition_blocked or (suppress_direct_match and requested_record_match)
+        condition_blocked = condition_blocked or (
+            record.condition_operator in {"greater", "greater_equal", "less", "less_equal"}
+            and not condition_applies
+            and _condition_record_has_requested_numeric_operand(
+                record,
+                records_by_reference,
+                requested,
+                normalized_requested,
+                visited=set(),
+            )
+        )
         if not direct_id_match and not direct_match and not condition_applies:
             continue
         matched.append(record.id)
@@ -2116,6 +2195,10 @@ def _conditional_dependency_references(
         "xor",
         "not",
         "equals",
+        "greater",
+        "greater_equal",
+        "less",
+        "less_equal",
         "not_equals",
         "conditional",
         "effectivity_assignment",
@@ -2161,6 +2244,11 @@ def _condition_record_matches_requested(
         return _StepConditionMatch(matched=bool(record.condition_value))
     if operator == "variable":
         matched = _design_variant_record_self_matches_requested(record, normalized_requested)
+        return _StepConditionMatch(matched=matched, positive=matched)
+    if operator == "numeric_literal":
+        return _StepConditionMatch(matched=record.condition_number is not None)
+    if operator == "numeric_variable":
+        matched = _design_variant_record_requested_number(record, requested, normalized_requested) is not None
         return _StepConditionMatch(matched=matched, positive=matched)
 
     child_records = [
@@ -2243,6 +2331,27 @@ def _condition_record_matches_requested(
             matched=len(matched_children) == 1,
             positive=any(child.positive for child in matched_children),
         )
+    if operator in {"greater", "greater_equal", "less", "less_equal"}:
+        numeric_children = [
+            _condition_record_numeric_value(
+                child_record,
+                records_by_reference,
+                requested,
+                normalized_requested,
+                visited=set(visited),
+            )
+            for child_record in child_records
+        ]
+        values = [item[0] for item in numeric_children if item[0] is not None]
+        matched = (
+            len(values) == len(numeric_children)
+            and len(values) >= 2
+            and _numeric_comparison_matches(
+                operator,
+                values,
+            )
+        )
+        return _StepConditionMatch(matched=matched, positive=matched and any(item[1] for item in numeric_children))
     if operator == "equals":
         matched = (
             len(children) >= 2
@@ -2263,6 +2372,66 @@ def _condition_record_matches_requested(
         matched=bool(matched_children),
         positive=any(child.positive for child in matched_children),
     )
+
+
+def _condition_record_numeric_value(
+    record: _StepDesignVariantRecord,
+    records_by_reference: dict[str, _StepDesignVariantRecord],
+    requested: tuple[str, ...],
+    normalized_requested: tuple[str, ...],
+    *,
+    visited: set[str],
+) -> tuple[float | None, bool]:
+    record_reference = _design_variant_record_step_reference(record)
+    if record_reference in visited:
+        return None, False
+    visited.add(record_reference)
+    if record.condition_operator == "numeric_literal":
+        return record.condition_number, False
+    if record.condition_operator == "numeric_variable":
+        value = _design_variant_record_requested_number(record, requested, normalized_requested)
+        return value, value is not None
+    return None, False
+
+
+def _condition_record_has_requested_numeric_operand(
+    record: _StepDesignVariantRecord,
+    records_by_reference: dict[str, _StepDesignVariantRecord],
+    requested: tuple[str, ...],
+    normalized_requested: tuple[str, ...],
+    *,
+    visited: set[str],
+) -> bool:
+    record_reference = _design_variant_record_step_reference(record)
+    if record_reference in visited:
+        return False
+    visited.add(record_reference)
+    if record.condition_operator == "numeric_variable":
+        return _design_variant_record_requested_number(record, requested, normalized_requested) is not None
+    return any(
+        _condition_record_has_requested_numeric_operand(
+            child_record,
+            records_by_reference,
+            requested,
+            normalized_requested,
+            visited=set(visited),
+        )
+        for reference in record.references
+        if (child_record := records_by_reference.get(reference)) is not None
+    )
+
+
+def _numeric_comparison_matches(operator: str, values: list[float]) -> bool:
+    pairs = zip(values, values[1:], strict=False)
+    if operator == "greater":
+        return all(left > right for left, right in pairs)
+    if operator == "greater_equal":
+        return all(left >= right for left, right in pairs)
+    if operator == "less":
+        return all(left < right for left, right in pairs)
+    if operator == "less_equal":
+        return all(left <= right for left, right in pairs)
+    return False
 
 
 def _design_variant_record_matches_requested(
@@ -2293,6 +2462,36 @@ def _design_variant_record_self_matches_requested(
         )
     )
     return any(query and query in haystack for query in normalized_requested)
+
+
+def _design_variant_record_requested_number(
+    record: _StepDesignVariantRecord,
+    requested: tuple[str, ...],
+    normalized_requested: tuple[str, ...],
+) -> float | None:
+    selectors = tuple(
+        dict.fromkeys(
+            selector
+            for value in (record.label, record.id, _design_variant_record_step_reference(record))
+            if (selector := _normalize_variant_term(value))
+        )
+    )
+    for raw, normalized in zip(requested, normalized_requested, strict=False):
+        if not any(selector and selector in normalized for selector in selectors):
+            continue
+        value_text = raw
+        for separator in ("=", ":"):
+            if separator not in raw:
+                continue
+            left, right = raw.split(separator, 1)
+            normalized_left = _normalize_variant_term(left)
+            if any(selector and selector in normalized_left for selector in selectors):
+                value_text = right
+                break
+        numbers = _step_number_values(value_text)
+        if numbers:
+            return numbers[-1]
+    return None
 
 
 def _effectivity_condition_record_matches_requested(
