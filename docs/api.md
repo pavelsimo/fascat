@@ -314,8 +314,9 @@ such as `CONFIGURATION_ITEM`, `PRODUCT_CONCEPT_FEATURE`,
 `CONFIGURATION_DESIGN`, `CONFIGURATION_EFFECTIVITY`,
 `SERIAL_NUMBERED_EFFECTIVITY`, `LOT_EFFECTIVITY`, `DATED_EFFECTIVITY`, and
 simple AP242 boolean condition records such as `AND_EXPRESSION`,
-`OR_EXPRESSION`, `XOR_EXPRESSION`, `NOT_EXPRESSION`, and
-`BOOLEAN_LITERAL` / `BOOLEAN_VARIABLE`, plus wrappers such as
+`OR_EXPRESSION`, `XOR_EXPRESSION`, `NOT_EXPRESSION`, `EQUALS_EXPRESSION`,
+`COMPARISON_EQUAL`, `COMPARISON_NOT_EQUAL`, and `BOOLEAN_LITERAL` /
+`BOOLEAN_VARIABLE`, plus wrappers such as
 `CONDITIONAL_CONFIGURATION`, `CONDITIONAL_CONCEPT_FEATURE`,
 `CONDITIONAL_EFFECTIVITY`, and `CONFIGURED_EFFECTIVITY_ASSIGNMENT` when
 `design_variants=True`. Detected records are
@@ -329,7 +330,10 @@ effectivity records, including values inside supported serial/date/time-interval
 ranges. Supported boolean condition records and effectivity-assignment wrappers
 are evaluated before their operand labels can drive geometry pruning, so an
 `AND_EXPRESSION` only selects geometry when all operands match and an
-`EFFECTIVITY_ASSIGNMENT` only selects assigned geometry when the assigned
+`EQUALS_EXPRESSION` / `COMPARISON_EQUAL` only select geometry when at least one
+operand participates and all operands resolve to the same boolean selection
+state. `COMPARISON_NOT_EQUAL` selects when participating operand states differ,
+and an `EFFECTIVITY_ASSIGNMENT` only selects assigned geometry when the assigned
 effectivity matches. Conditional wrapper records also gate their configured
 target labels, and `CONDITIONAL_CONCEPT_FEATURE` gates its own feature label, so
 the target label alone does not bypass an unsatisfied condition. Boolean literal

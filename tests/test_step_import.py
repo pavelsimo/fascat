@@ -861,6 +861,185 @@ def test_step_design_variant_selection_evaluates_boolean_variables(tmp_path: Pat
     assert "condition expression was not satisfied" in target_selection.warnings[0]
 
 
+def test_step_design_variant_selection_evaluates_equals_expression(tmp_path: Path) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=PRODUCT_CONCEPT_FEATURE('left hand','left condition',#1);\n"
+        "#11=PRODUCT_CONCEPT_FEATURE('premium trim','premium condition',#1);\n"
+        "#12=PRODUCT_CONCEPT_FEATURE('matched package','select matched panel',#1);\n"
+        "#20=EQUALS_EXPRESSION(#10,#11);\n"
+        "#21=CONDITIONAL_CONFIGURATION('matched condition',#20,#12);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="matched-node", name="Matched Panel", part_id="matched"),
+            fc.Node(id="fallback-node", name="Fallback Panel", part_id="fallback"),
+        ],
+    )
+    parts = {
+        "matched": fc.Part(
+            id="matched",
+            name="Matched Panel",
+            material_ids=["matched-mat"],
+            metadata={"source_name": "matched panel"},
+        ),
+        "fallback": fc.Part(
+            id="fallback",
+            name="Fallback Panel",
+            material_ids=["fallback-mat"],
+            metadata={"source_name": "fallback panel"},
+        ),
+    }
+    materials = {
+        "matched-mat": fc.Material(id="matched-mat", name="Matched Paint", base_color=(1.0, 0.0, 0.0, 1.0)),
+        "fallback-mat": fc.Material(id="fallback-mat", name="Fallback Paint", base_color=(0.0, 0.0, 1.0, 1.0)),
+    }
+
+    partial_options = StepReadOptions(design_variant_selection=("left hand",))
+    partial_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, partial_options),
+        partial_options,
+    )
+
+    assert partial_selection.status == "unmatched_geometry"
+    assert partial_selection.matched_records == ()
+    assert "condition expression was not satisfied" in partial_selection.warnings[0]
+
+    target_options = StepReadOptions(design_variant_selection=("matched package",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+    full_options = StepReadOptions(design_variant_selection=("left hand", "premium trim"))
+    full_extraction = _extract_step_design_variants(source, full_options)
+    full_root = root.copy()
+    full_parts = {key: part.copy() for key, part in parts.items()}
+    full_materials = dict(materials)
+
+    full_selection = _apply_step_design_variant_selection(
+        full_root,
+        full_parts,
+        full_materials,
+        full_extraction,
+        full_options,
+    )
+
+    assert full_extraction.records[3].kind == "equals_expression"
+    assert full_extraction.records[3].condition_operator == "equals"
+    assert full_extraction.summary["conditional_records"] == 2
+    assert full_selection.status == "applied"
+    assert full_selection.matched_records == ("step_variant_20", "step_variant_21")
+    assert [child.name for child in full_root.children] == ["Matched Panel"]
+    assert set(full_parts) == {"matched"}
+
+
+def test_step_design_variant_selection_evaluates_comparison_not_equal(tmp_path: Path) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=PRODUCT_CONCEPT_FEATURE('left hand','left condition',#1);\n"
+        "#11=PRODUCT_CONCEPT_FEATURE('premium trim','premium condition',#1);\n"
+        "#12=PRODUCT_CONCEPT_FEATURE('mismatch package','select mismatch panel',#1);\n"
+        "#20=COMPARISON_NOT_EQUAL(#10,#11);\n"
+        "#21=CONDITIONAL_CONFIGURATION('mismatch condition',#20,#12);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="mismatch-node", name="Mismatch Panel", part_id="mismatch"),
+            fc.Node(id="fallback-node", name="Fallback Panel", part_id="fallback"),
+        ],
+    )
+    parts = {
+        "mismatch": fc.Part(
+            id="mismatch",
+            name="Mismatch Panel",
+            material_ids=["mismatch-mat"],
+            metadata={"source_name": "mismatch panel"},
+        ),
+        "fallback": fc.Part(
+            id="fallback",
+            name="Fallback Panel",
+            material_ids=["fallback-mat"],
+            metadata={"source_name": "fallback panel"},
+        ),
+    }
+    materials = {
+        "mismatch-mat": fc.Material(id="mismatch-mat", name="Mismatch Paint", base_color=(1.0, 0.0, 0.0, 1.0)),
+        "fallback-mat": fc.Material(id="fallback-mat", name="Fallback Paint", base_color=(0.0, 0.0, 1.0, 1.0)),
+    }
+
+    mismatch_options = StepReadOptions(design_variant_selection=("left hand",))
+    mismatch_extraction = _extract_step_design_variants(source, mismatch_options)
+    mismatch_root = root.copy()
+    mismatch_parts = {key: part.copy() for key, part in parts.items()}
+    mismatch_materials = dict(materials)
+
+    mismatch_selection = _apply_step_design_variant_selection(
+        mismatch_root,
+        mismatch_parts,
+        mismatch_materials,
+        mismatch_extraction,
+        mismatch_options,
+    )
+
+    assert mismatch_extraction.records[3].kind == "comparison_not_equal"
+    assert mismatch_extraction.records[3].condition_operator == "not_equals"
+    assert mismatch_selection.status == "applied"
+    assert mismatch_selection.matched_records == ("step_variant_20", "step_variant_21")
+    assert [child.name for child in mismatch_root.children] == ["Mismatch Panel"]
+    assert set(mismatch_parts) == {"mismatch"}
+
+    equal_options = StepReadOptions(design_variant_selection=("left hand", "premium trim"))
+    equal_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, equal_options),
+        equal_options,
+    )
+
+    assert equal_selection.status == "unmatched_geometry"
+    assert equal_selection.matched_records == ()
+    assert "condition expression was not satisfied" in equal_selection.warnings[0]
+
+    target_options = StepReadOptions(design_variant_selection=("mismatch package",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+
 def test_step_design_variant_selection_gates_conditional_concept_feature_label(tmp_path: Path) -> None:
     source = tmp_path / "variants.step"
     source.write_text(

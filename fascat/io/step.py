@@ -101,6 +101,10 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "CONFIGURATION_DESIGN": "configuration_design",
     "CONFIGURATION_EFFECTIVITY": "configuration_effectivity",
     "CONFIGURATION_ITEM": "configuration_item",
+    "COMPARISON_EQUAL": "comparison_equal",
+    "COMPARISONEQUAL": "comparison_equal",
+    "COMPARISON_NOT_EQUAL": "comparison_not_equal",
+    "COMPARISONNOTEQUAL": "comparison_not_equal",
     "CONDITIONAL_CONCEPT_FEATURE": "conditional_concept_feature",
     "CONDITIONALCONCEPTFEATURE": "conditional_concept_feature",
     "CONDITIONAL_CONFIGURATION": "conditional_configuration",
@@ -111,6 +115,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "EFFECTIVITY": "effectivity",
     "EFFECTIVITYASSIGNMENT": "effectivity_assignment",
     "EFFECTIVITY_ASSIGNMENT": "effectivity_assignment",
+    "EQUALS_EXPRESSION": "equals_expression",
+    "EQUALSEXPRESSION": "equals_expression",
     "LOT_EFFECTIVITY": "lot_effectivity",
     "PRODUCT_CONCEPT": "product_concept",
     "PRODUCT_CONCEPT_CONTEXT": "product_concept_context",
@@ -1865,6 +1871,10 @@ def _step_condition_operator(entity: str) -> str | None:
         return "xor"
     if normalized in {"NOTEXPRESSION", "NOTCONDITION"}:
         return "not"
+    if normalized in {"COMPARISONEQUAL", "EQUALSEXPRESSION"}:
+        return "equals"
+    if normalized == "COMPARISONNOTEQUAL":
+        return "not_equals"
     if normalized == "BOOLEANLITERAL":
         return "literal"
     if normalized in {"CONDITIONALCONFIGURATION", "CONDITIONALCONCEPTFEATURE"}:
@@ -2093,10 +2103,20 @@ def _conditional_dependency_references(
     records: tuple[_StepDesignVariantRecord, ...],
     records_by_reference: dict[str, _StepDesignVariantRecord],
 ) -> set[str]:
+    dependency_operators = {
+        "and",
+        "or",
+        "xor",
+        "not",
+        "equals",
+        "not_equals",
+        "conditional",
+        "effectivity_assignment",
+    }
     dependencies: set[str] = {
         reference
         for record in records
-        if record.condition_operator in {"and", "or", "xor", "not", "conditional", "effectivity_assignment"}
+        if record.condition_operator in dependency_operators
         for reference in record.references
     }
     changed = True
@@ -2216,6 +2236,20 @@ def _condition_record_matches_requested(
             matched=len(matched_children) == 1,
             positive=any(child.positive for child in matched_children),
         )
+    if operator == "equals":
+        matched = (
+            len(children) >= 2
+            and any(child.matched for child in children)
+            and all(child.matched == children[0].matched for child in children)
+        )
+        return _StepConditionMatch(matched=matched, positive=matched and any(child.positive for child in children))
+    if operator == "not_equals":
+        matched = (
+            len(children) >= 2
+            and any(child.matched for child in children)
+            and any(child.matched != children[0].matched for child in children[1:])
+        )
+        return _StepConditionMatch(matched=matched, positive=matched and any(child.positive for child in children))
 
     matched_children = [child for child in children if child.matched]
     return _StepConditionMatch(
