@@ -350,6 +350,65 @@ def test_step_pmi_semantic_graph_includes_tolerance_zone_records(tmp_path: Path)
     assert {"source": "#43", "target": "#21", "relationship": "step_reference"} in payload["edges"]
 
 
+def test_step_pmi_semantic_graph_includes_annotation_presentation_records(tmp_path: Path) -> None:
+    source = tmp_path / "pmi-presentation.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#20=PRODUCT_DEFINITION_SHAPE('bracket','',#19);\n"
+        "#21=SHAPE_ASPECT('hole axis','',#20,.T.);\n"
+        "#30=GEOMETRIC_TOLERANCE('position tolerance',0.2,#21);\n"
+        "#40=DRAUGHTING_CALLOUT('position callout',(#41,#30));\n"
+        "#41=ANNOTATION_CURVE_OCCURRENCE('position callout',(#42),#43);\n"
+        "#42=GEOMETRIC_CURVE_SET('position polyline',(#44));\n"
+        "#43=PRESENTATION_STYLE_ASSIGNMENT((#45));\n"
+        "#45=CURVE_STYLE('solid',#46,#47);\n"
+        "#46=DRAUGHTING_PRE_DEFINED_CURVE_FONT('continuous');\n"
+        "#47=COLOUR_RGB('red',1.0,0.0,0.0);\n"
+        "#50=DRAUGHTING_MODEL('pmi presentation',(#40,#41),#60);\n"
+        "#51=DRAUGHTING_MODEL_ITEM_ASSOCIATION('semantic link','',#50,#41,#30);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    graph = _extract_step_pmi_semantic_graph(source, StepReadOptions(pmi=True))
+    payload = graph.to_dict()
+
+    assert graph.summary == {
+        "nodes": 12,
+        "pmi_nodes": 2,
+        "referenced_nodes": 10,
+        "edges": 14,
+        "missing_references": 0,
+    }
+    assert [node["id"] for node in payload["nodes"]] == [
+        "#20",
+        "#21",
+        "#30",
+        "#40",
+        "#41",
+        "#42",
+        "#43",
+        "#45",
+        "#46",
+        "#47",
+        "#50",
+        "#51",
+    ]
+    node_kinds = {node["id"]: node["kind"] for node in payload["nodes"]}
+    assert node_kinds["#41"] == "pmi_presentation"
+    assert node_kinds["#42"] == "pmi_presentation_geometry"
+    assert node_kinds["#45"] == "pmi_presentation_style"
+    assert node_kinds["#50"] == "pmi_presentation"
+    assert node_kinds["#51"] == "pmi_presentation_association"
+    assert {"source": "#41", "target": "#42", "relationship": "step_reference"} in payload["edges"]
+    assert {"source": "#43", "target": "#45", "relationship": "step_reference"} in payload["edges"]
+    assert {"source": "#45", "target": "#46", "relationship": "step_reference"} in payload["edges"]
+    assert {"source": "#50", "target": "#40", "relationship": "step_reference"} in payload["edges"]
+    assert {"source": "#51", "target": "#30", "relationship": "step_reference"} in payload["edges"]
+
+
 def test_step_text_pmi_extraction_respects_disabled_pmi(tmp_path: Path) -> None:
     source = tmp_path / "pmi.step"
     source.write_text("#1=GEOMETRIC_TOLERANCE('flatness',0.05,#2);\n", encoding="utf-8")
