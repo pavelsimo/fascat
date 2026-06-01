@@ -506,6 +506,13 @@ def cmd_inspect(
     ] = None,
     heal_brep: Annotated[bool, typer.Option("--heal-brep", help="Run BREP healing before inspection output.")] = False,
     heal_tolerance: Annotated[float, typer.Option("--heal-tolerance", help="BREP healing tolerance.")] = 0.05,
+    group_open_shells: Annotated[
+        bool,
+        typer.Option(
+            "--group-open-shells/--no-group-open-shells",
+            help="Group disconnected open BREP shells before healing.",
+        ),
+    ] = True,
     cleanup_overlapping_faces: Annotated[
         bool,
         typer.Option(
@@ -561,6 +568,7 @@ def cmd_inspect(
         "target_handedness": None if target_handedness is None else target_handedness.value,
         "heal_brep": heal_brep,
         "heal_tolerance": heal_tolerance,
+        "group_open_shells": group_open_shells,
         "cleanup_overlapping_faces": cleanup_overlapping_faces,
         "overlap_area_ratio": overlap_area_ratio,
         "remove_sliver_faces": remove_sliver_faces,
@@ -613,6 +621,7 @@ def cmd_inspect(
         asset = asset.heal_brep(
             _brep_heal_options(
                 heal_tolerance=heal_tolerance,
+                group_open_shells=group_open_shells,
                 cleanup_overlapping_faces=cleanup_overlapping_faces,
                 overlap_area_ratio=overlap_area_ratio,
                 remove_sliver_faces=remove_sliver_faces,
@@ -751,6 +760,13 @@ def cmd_convert(
     ] = True,
     heal_brep: Annotated[bool, typer.Option("--heal-brep", help="Run BREP healing before tessellation.")] = False,
     heal_tolerance: Annotated[float, typer.Option("--heal-tolerance", help="BREP healing tolerance.")] = 0.05,
+    group_open_shells: Annotated[
+        bool,
+        typer.Option(
+            "--group-open-shells/--no-group-open-shells",
+            help="Group disconnected open BREP shells before healing.",
+        ),
+    ] = True,
     cleanup_overlapping_faces: Annotated[
         bool,
         typer.Option(
@@ -1440,6 +1456,7 @@ def cmd_convert(
         "reuse_existing_meshes": reuse_existing_meshes,
         "heal_brep": heal_brep,
         "heal_tolerance": heal_tolerance,
+        "group_open_shells": group_open_shells,
         "cleanup_overlapping_faces": cleanup_overlapping_faces,
         "overlap_area_ratio": overlap_area_ratio,
         "remove_sliver_faces": remove_sliver_faces,
@@ -1920,6 +1937,7 @@ def cmd_convert(
         heal_options = (
             _brep_heal_options(
                 heal_tolerance=heal_tolerance,
+                group_open_shells=group_open_shells,
                 cleanup_overlapping_faces=cleanup_overlapping_faces,
                 overlap_area_ratio=overlap_area_ratio,
                 remove_sliver_faces=remove_sliver_faces,
@@ -3116,6 +3134,7 @@ def _read_pipeline_for_cli(path: Path, ctx: typer.Context, payload: dict[str, An
 def _brep_heal_options(
     *,
     heal_tolerance: float,
+    group_open_shells: bool,
     cleanup_overlapping_faces: bool,
     overlap_area_ratio: float,
     remove_sliver_faces: bool,
@@ -3124,6 +3143,7 @@ def _brep_heal_options(
 ) -> BrepHealOptions:
     return BrepHealOptions(
         tolerance=heal_tolerance,
+        group_open_shells=group_open_shells,
         remove_overlapping_faces=cleanup_overlapping_faces,
         overlap_area_ratio=overlap_area_ratio,
         remove_sliver_faces=remove_sliver_faces,

@@ -833,6 +833,7 @@ class Asset:
             length_key="heal_tolerance",
             area_key="max_sliver_area",
             operations={
+                "open_shell_grouping": "enabled" if opts.group_open_shells else "disabled",
                 "sew_faces": "enabled" if opts.sew_faces else "disabled",
                 "fix_edges": "enabled" if opts.fix_edges else "disabled",
                 "same_domain_cleanup": "enabled" if opts.unify_same_domain else "disabled",

@@ -380,6 +380,7 @@ class BrepReadOptions(StepReadOptions):
 @dataclass(frozen=True)
 class BrepHealOptions:
     tolerance: float = 0.05
+    group_open_shells: bool = True
     sew_faces: bool = True
     fix_edges: bool = True
     unify_same_domain: bool = True

@@ -417,6 +417,7 @@ Run BREP healing before tessellation when STEP topology needs sewing, edge fixin
 asset = fc.read_step("motor.step").heal_brep(
     fc.BrepHealOptions(
         tolerance=0.05,
+        group_open_shells=True,
         sew_faces=True,
         fix_edges=True,
         unify_same_domain=True,
@@ -431,13 +432,14 @@ asset = fc.read_step("motor.step").heal_brep(
 )
 ```
 
-The operation stores per-part `brep_*` metadata and records a `heal_brep` report step. Metadata includes BREP kind, solid/shell/wire/edge/face counts, open shells, free or unstitched edges, small edges at or below the healing tolerance, sliver-face counts, overlap/z-fighting face-pair counts, resolved overlap counts, and same-domain face/edge reductions. The report step also includes `tolerance_policy`, which records the effective source/local units used by the BREP backend, declared target units, meters-per-unit conversions, tolerance values in meters, sliver area in square meters, and whether sewing, edge fixing, same-domain cleanup, overlap/z-fighting cleanup, tolerance unification, sliver removal, T-junction sewing, and non-manifold cracking are enabled, disabled, requested, or not implemented. `fc.convert(..., heal_brep=fc.BrepHealOptions())` runs healing before tessellation. Same-domain cleanup uses OCCT to merge neighboring faces and edges on coincident surfaces/curves. Overlap cleanup triangulates BREP faces, measures coplanar overlap against the configured smaller-face area ratio, and removes redundant z-fighting faces with OCCT `BRepTools_ReShape`. Sliver-face removal is requested through the BREP backend, but the current backend reports a warning when that removal path is unavailable instead of silently claiming that the source shape changed. Remaining open shells, free edges, small edges, or unresolved overlapping face pairs are also surfaced as report warnings.
+The operation stores per-part `brep_*` metadata and records a `heal_brep` report step. Metadata includes BREP kind, solid/shell/wire/edge/face counts, open shells, free or unstitched edges, small edges at or below the healing tolerance, sliver-face counts, overlap/z-fighting face-pair counts, resolved overlap counts, open-shell grouping counts, and same-domain face/edge reductions. The report step also includes `tolerance_policy`, which records the effective source/local units used by the BREP backend, declared target units, meters-per-unit conversions, tolerance values in meters, sliver area in square meters, and whether open-shell grouping, sewing, edge fixing, same-domain cleanup, overlap/z-fighting cleanup, tolerance unification, sliver removal, T-junction sewing, and non-manifold cracking are enabled, disabled, requested, or not implemented. `fc.convert(..., heal_brep=fc.BrepHealOptions())` runs healing before tessellation. Open-shell grouping processes disconnected shell groups independently before the cleanup stack so unrelated surface patches are not forced through one global sewing operation. Same-domain cleanup uses OCCT to merge neighboring faces and edges on coincident surfaces/curves. Overlap cleanup triangulates BREP faces, measures coplanar overlap against the configured smaller-face area ratio, and removes redundant z-fighting faces with OCCT `BRepTools_ReShape`. Sliver-face removal is requested through the BREP backend, but the current backend reports a warning when that removal path is unavailable instead of silently claiming that the source shape changed. Remaining open shells, free edges, small edges, or unresolved overlapping face pairs are also surfaced as report warnings.
 
 Brep healing parameters:
 
 | Parameter | Meaning |
 |-----------|---------|
 | `tolerance` | Working tolerance used for sewing, edge fixes, and tolerance unification. Must be greater than zero. |
+| `group_open_shells` | Group disconnected open shell patches before running the BREP cleanup stack. |
 | `sew_faces` | Attempt to sew adjacent faces into shells before tessellation. |
 | `fix_edges` | Attempt to repair bad trims and edge curves where supported by the backend. |
 | `unify_same_domain` | Merge neighboring faces/edges that lie on the same OCCT surface or curve domain. |

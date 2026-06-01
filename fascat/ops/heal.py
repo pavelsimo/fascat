@@ -76,6 +76,16 @@ class BrepHealDiagnostics:
     same_domain_faces_removed: int = 0
     same_domain_edges_removed: int = 0
     overlapping_faces_removed: int = 0
+    open_shell_groups: int = 0
+    open_shell_grouped_shells: int = 0
+    open_shell_grouped_faces: int = 0
+
+
+@dataclass(frozen=True)
+class _OpenShellGroupPlan:
+    groups: tuple[object, ...] = ()
+    shells: int = 0
+    faces: int = 0
 
 
 def heal_brep_asset(
@@ -127,6 +137,10 @@ def heal_brep_asset(
             "brep_edges_removed": str(diagnostics.edges_removed),
             "brep_same_domain_faces_removed": str(diagnostics.same_domain_faces_removed),
             "brep_same_domain_edges_removed": str(diagnostics.same_domain_edges_removed),
+            "brep_open_shell_grouping": _open_shell_grouping_status(options, diagnostics),
+            "brep_open_shell_groups": str(diagnostics.open_shell_groups),
+            "brep_open_shell_grouped_shells": str(diagnostics.open_shell_grouped_shells),
+            "brep_open_shell_grouped_faces": str(diagnostics.open_shell_grouped_faces),
             "brep_heal_operations": _operation_summary(options),
             "brep_before": str(before.to_dict()),
             "brep_after": str(after.to_dict()),
@@ -147,6 +161,47 @@ def heal_shape(
         overlap_tolerance=options.tolerance,
         overlap_area_ratio=options.overlap_area_ratio,
     )
+    healed = shape
+    grouped_diagnostics = BrepHealDiagnostics()
+    warnings: list[str] = []
+    if options.group_open_shells:
+        group_plan = _open_shell_group_plan(healed)
+        if group_plan.groups:
+            healed, grouped_warnings, grouped_diagnostics = _heal_open_shell_groups(group_plan, options)
+            warnings.extend(grouped_warnings)
+        else:
+            healed, operation_warnings, grouped_diagnostics = _run_heal_operations(healed, options, before=before)
+            warnings.extend(operation_warnings)
+    else:
+        healed, operation_warnings, grouped_diagnostics = _run_heal_operations(healed, options, before=before)
+        warnings.extend(operation_warnings)
+    after = brep_status(
+        healed,
+        max_sliver_area=options.max_sliver_area,
+        small_edge_length=options.tolerance,
+        detect_overlaps=options.remove_overlapping_faces,
+        overlap_tolerance=options.tolerance,
+        overlap_area_ratio=options.overlap_area_ratio,
+    )
+    diagnostics = BrepHealDiagnostics(
+        faces_removed=max(0, before.faces - after.faces),
+        edges_removed=max(0, before.edges - after.edges),
+        same_domain_faces_removed=grouped_diagnostics.same_domain_faces_removed,
+        same_domain_edges_removed=grouped_diagnostics.same_domain_edges_removed,
+        overlapping_faces_removed=grouped_diagnostics.overlapping_faces_removed,
+        open_shell_groups=grouped_diagnostics.open_shell_groups,
+        open_shell_grouped_shells=grouped_diagnostics.open_shell_grouped_shells,
+        open_shell_grouped_faces=grouped_diagnostics.open_shell_grouped_faces,
+    )
+    return healed, before, after, warnings, diagnostics
+
+
+def _run_heal_operations(
+    shape: object,
+    options: BrepHealOptions,
+    *,
+    before: BrepStatus,
+) -> tuple[object, list[str], BrepHealDiagnostics]:
     healed = shape
     warnings: list[str] = []
     same_domain_faces_removed = 0
@@ -182,22 +237,121 @@ def heal_shape(
         same_domain_faces_removed = 0
         same_domain_edges_removed = 0
         overlapping_faces_removed = 0
-    after = brep_status(
+    return (
         healed,
-        max_sliver_area=options.max_sliver_area,
-        small_edge_length=options.tolerance,
-        detect_overlaps=options.remove_overlapping_faces,
-        overlap_tolerance=options.tolerance,
-        overlap_area_ratio=options.overlap_area_ratio,
+        warnings,
+        BrepHealDiagnostics(
+            same_domain_faces_removed=same_domain_faces_removed,
+            same_domain_edges_removed=same_domain_edges_removed,
+            overlapping_faces_removed=overlapping_faces_removed,
+        ),
     )
-    diagnostics = BrepHealDiagnostics(
-        faces_removed=max(0, before.faces - after.faces),
-        edges_removed=max(0, before.edges - after.edges),
-        same_domain_faces_removed=same_domain_faces_removed,
-        same_domain_edges_removed=same_domain_edges_removed,
-        overlapping_faces_removed=overlapping_faces_removed,
+
+
+def _open_shell_group_plan(shape: object) -> _OpenShellGroupPlan:
+    try:
+        from OCP.BRepCheck import BRepCheck_Analyzer
+        from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_SHELL, TopAbs_SOLID
+        from OCP.TopExp import TopExp, TopExp_Explorer
+        from OCP.TopoDS import TopoDS
+    except ImportError:
+        return _OpenShellGroupPlan()
+
+    try:
+        if _count_subshapes(shape, TopAbs_SOLID, TopExp_Explorer) > 0:
+            return _OpenShellGroupPlan()
+        shell_explorer = TopExp_Explorer(shape, TopAbs_SHELL)
+    except Exception:
+        return _OpenShellGroupPlan()
+
+    shells: list[object] = []
+    open_shells = 0
+    face_count = 0
+    edge_count = 0
+    while shell_explorer.More():
+        shell = TopoDS.Shell_s(shell_explorer.Current())
+        shells.append(shell)
+        if _shell_is_open(shell, BRepCheck_Analyzer, TopAbs_EDGE, TopAbs_FACE, TopExp):
+            open_shells += 1
+        face_count += _count_subshapes(shell, TopAbs_FACE, TopExp_Explorer)
+        edge_count += _count_subshapes(shell, TopAbs_EDGE, TopExp_Explorer)
+        shell_explorer.Next()
+
+    if len(shells) <= 1 or open_shells == 0:
+        return _OpenShellGroupPlan()
+    if face_count != _count_subshapes(shape, TopAbs_FACE, TopExp_Explorer):
+        return _OpenShellGroupPlan()
+    if edge_count != _count_subshapes(shape, TopAbs_EDGE, TopExp_Explorer):
+        return _OpenShellGroupPlan()
+    return _OpenShellGroupPlan(groups=tuple(shells), shells=len(shells), faces=face_count)
+
+
+def _heal_open_shell_groups(
+    group_plan: _OpenShellGroupPlan,
+    options: BrepHealOptions,
+) -> tuple[object, list[str], BrepHealDiagnostics]:
+    from OCP.BRep import BRep_Builder
+    from OCP.TopoDS import TopoDS_Compound
+
+    builder = BRep_Builder()
+    compound = TopoDS_Compound()
+    builder.MakeCompound(compound)
+    warnings: list[str] = []
+    same_domain_faces_removed = 0
+    same_domain_edges_removed = 0
+    overlapping_faces_removed = 0
+    for index, group in enumerate(group_plan.groups, start=1):
+        before = brep_status(
+            group,
+            max_sliver_area=options.max_sliver_area,
+            small_edge_length=options.tolerance,
+            detect_overlaps=options.remove_overlapping_faces,
+            overlap_tolerance=options.tolerance,
+            overlap_area_ratio=options.overlap_area_ratio,
+        )
+        healed_group, group_warnings, diagnostics = _run_heal_operations(group, options, before=before)
+        warnings.extend(f"open-shell group {index}: {warning}" for warning in group_warnings)
+        same_domain_faces_removed += diagnostics.same_domain_faces_removed
+        same_domain_edges_removed += diagnostics.same_domain_edges_removed
+        overlapping_faces_removed += diagnostics.overlapping_faces_removed
+        builder.Add(compound, _ensure_shell_container(healed_group))
+    return (
+        compound,
+        warnings,
+        BrepHealDiagnostics(
+            same_domain_faces_removed=same_domain_faces_removed,
+            same_domain_edges_removed=same_domain_edges_removed,
+            overlapping_faces_removed=overlapping_faces_removed,
+            open_shell_groups=len(group_plan.groups),
+            open_shell_grouped_shells=group_plan.shells,
+            open_shell_grouped_faces=group_plan.faces,
+        ),
     )
-    return healed, before, after, warnings, diagnostics
+
+
+def _ensure_shell_container(shape: object) -> object:
+    try:
+        from OCP.BRep import BRep_Builder
+        from OCP.TopAbs import TopAbs_FACE, TopAbs_SHELL, TopAbs_SOLID
+        from OCP.TopExp import TopExp_Explorer
+        from OCP.TopoDS import TopoDS_Shell
+    except ImportError:
+        return shape
+
+    if _count_subshapes(shape, TopAbs_SOLID, TopExp_Explorer) > 0:
+        return shape
+    if _count_subshapes(shape, TopAbs_SHELL, TopExp_Explorer) > 0:
+        return shape
+    face_explorer = TopExp_Explorer(shape, TopAbs_FACE)
+    if not face_explorer.More():
+        return shape
+    shell = TopoDS_Shell()
+    builder = BRep_Builder()
+    builder.MakeShell(shell)
+    while face_explorer.More():
+        builder.Add(shell, face_explorer.Current())
+        face_explorer.Next()
+    return shell
 
 
 def brep_status(
@@ -236,7 +390,7 @@ def brep_status(
     shell_explorer = TopExp_Explorer(shape, TopAbs_SHELL)
     while shell_explorer.More():
         shell = shell_explorer.Current()
-        if not BRepCheck_Analyzer(shell).IsValid():
+        if _shell_is_open(shell, BRepCheck_Analyzer, TopAbs_EDGE, TopAbs_FACE, TopExp):
             open_shells += 1
         shell_explorer.Next()
     sliver_faces = 0
@@ -283,6 +437,10 @@ def brep_status(
         overlapping_face_pairs=overlap_report.pair_count,
         z_fighting_faces=overlap_report.face_count,
     )
+
+
+def _shell_is_open(shell: object, analyzer_type: Any, edge_type: Any, face_type: Any, top_exp: Any) -> bool:
+    return bool(not analyzer_type(shell).IsValid() or _count_free_edges(shell, edge_type, face_type, top_exp) > 0)
 
 
 def _fix_shape(shape: object, options: BrepHealOptions) -> object:
@@ -597,6 +755,8 @@ def _add_topology_warnings(asset: Asset, part_name: str, status: BrepStatus, opt
 
 def _operation_summary(options: BrepHealOptions) -> str:
     operations: list[str] = []
+    if options.group_open_shells:
+        operations.append("group_open_shells")
     if options.fix_edges:
         operations.append("fix_edges")
     if options.unify_tolerances:
@@ -610,6 +770,12 @@ def _operation_summary(options: BrepHealOptions) -> str:
     if options.remove_sliver_faces:
         operations.append("remove_sliver_faces")
     return ",".join(operations)
+
+
+def _open_shell_grouping_status(options: BrepHealOptions, diagnostics: BrepHealDiagnostics) -> str:
+    if not options.group_open_shells:
+        return "disabled"
+    return "grouped" if diagnostics.open_shell_groups else "not_applicable"
 
 
 def _tolerance_policy_metadata(prefix: str, policy: Mapping[str, object] | None) -> dict[str, object]:

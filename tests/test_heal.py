@@ -60,7 +60,7 @@ def test_heal_brep_scopes_to_selected_parts_and_records_status(monkeypatch) -> N
     assert healed.parts["selected"].metadata["brep_small_edges"] == "0"
     assert (
         healed.parts["selected"].metadata["brep_heal_operations"]
-        == "fix_edges,unify_tolerances,sew_faces,unify_same_domain,remove_overlapping_faces"
+        == "group_open_shells,fix_edges,unify_tolerances,sew_faces,unify_same_domain,remove_overlapping_faces"
     )
     assert healed.report.warnings == ["Selected: fixed trims"]
     assert healed.report.steps[-1].name == "heal_brep"
@@ -97,6 +97,7 @@ def test_heal_brep_report_includes_unit_aware_tolerance_policy(monkeypatch) -> N
     assert policy["target_units"] == "metre"
     assert policy["heal_tolerance_meters"] == pytest.approx(0.002)
     assert policy["max_sliver_area_square_meters"] == pytest.approx(0.000003)
+    assert policy["operations"]["open_shell_grouping"] == "enabled"
     assert policy["operations"]["t_junction_sewing"] == "not_implemented"
     assert healed.parts["selected"].metadata["brep_heal_effective_units"] == "millimetre"
     assert healed.parts["selected"].metadata["brep_heal_target_units"] == "metre"
@@ -178,6 +179,71 @@ def test_brep_status_reports_closed_box_topology() -> None:
     assert status.edges >= 12
     assert status.free_edges == 0
     assert status.small_edges == 0
+
+
+def _two_open_shell_compound() -> object:
+    pytest.importorskip("OCP.BRep")
+    from OCP.BRep import BRep_Builder
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+    from OCP.gp import gp_Dir, gp_Pln, gp_Pnt
+    from OCP.TopoDS import TopoDS_Compound, TopoDS_Shell
+
+    builder = BRep_Builder()
+    compound = TopoDS_Compound()
+    builder.MakeCompound(compound)
+    for offset in (0.0, 3.0):
+        plane = gp_Pln(gp_Pnt(offset, 0.0, 0.0), gp_Dir(0.0, 0.0, 1.0))
+        face = BRepBuilderAPI_MakeFace(plane, 0.0, 1.0, 0.0, 1.0).Face()
+        shell = TopoDS_Shell()
+        builder.MakeShell(shell)
+        builder.Add(shell, face)
+        builder.Add(compound, shell)
+    return compound
+
+
+def test_brep_status_counts_open_shells_from_free_edges() -> None:
+    status = brep_status(_two_open_shell_compound())
+
+    assert status.kind == "open_surface"
+    assert status.shells == 2
+    assert status.open_shells == 2
+    assert status.free_edges == 8
+
+
+def test_heal_shape_groups_open_shells_before_cleanup() -> None:
+    shape = _two_open_shell_compound()
+
+    healed_shape, before, after, warnings, diagnostics = heal_shape(shape, BrepHealOptions(tolerance=0.05))
+
+    assert healed_shape is not shape
+    assert warnings == []
+    assert before.shells == 2
+    assert before.open_shells == 2
+    assert after.shells == 2
+    assert after.open_shells == 2
+    assert diagnostics.open_shell_groups == 2
+    assert diagnostics.open_shell_grouped_shells == 2
+    assert diagnostics.open_shell_grouped_faces == 2
+
+
+def test_heal_brep_records_open_shell_grouping_metadata() -> None:
+    shape = _two_open_shell_compound()
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="skins", name="Skins", part_id="skins")]),
+        parts={"skins": Part(id="skins", name="Skins", source_shape=shape)},
+    )
+
+    healed = asset.heal_brep(BrepHealOptions(tolerance=0.05))
+
+    skins = healed.parts["skins"]
+    policy = healed.report.steps[-1].options["tolerance_policy"]
+    assert skins.metadata["brep_open_shell_grouping"] == "grouped"
+    assert skins.metadata["brep_open_shell_groups"] == "2"
+    assert skins.metadata["brep_open_shell_grouped_shells"] == "2"
+    assert skins.metadata["brep_open_shell_grouped_faces"] == "2"
+    assert skins.metadata["brep_heal_open_shell_grouping"] == "enabled"
+    assert isinstance(policy, dict)
+    assert policy["operations"]["open_shell_grouping"] == "enabled"
 
 
 def _duplicate_coplanar_face_compound() -> object:
@@ -407,6 +473,7 @@ def test_cli_convert_accepts_heal_brep_during_dry_run() -> None:
     assert result.exit_code == 0, result.output
     assert '"heal_brep": true' in result.output
     assert '"heal_tolerance": 0.1' in result.output
+    assert '"group_open_shells": true' in result.output
     assert '"cleanup_overlapping_faces": true' in result.output
     assert '"overlap_area_ratio": 0.9' in result.output
 

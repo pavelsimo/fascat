@@ -175,6 +175,7 @@ _DELETE_DEGENERATE_POLYGONS_KEYS = frozenset({"area_epsilon", "delete_duplicates
 _BREP_HEAL_KEYS = frozenset(
     {
         "tolerance",
+        "group_open_shells",
         "sew_faces",
         "fix_edges",
         "unify_same_domain",
@@ -919,6 +920,7 @@ def _delete_degenerate_polygons_options(values: dict[str, object]) -> DeleteDege
 def _brep_heal_options(values: dict[str, object]) -> BrepHealOptions:
     return BrepHealOptions(
         tolerance=_as_float(values.get("tolerance", 0.05)),
+        group_open_shells=bool(values.get("group_open_shells", True)),
         sew_faces=bool(values.get("sew_faces", True)),
         fix_edges=bool(values.get("fix_edges", True)),
         unify_same_domain=bool(values.get("unify_same_domain", True)),
