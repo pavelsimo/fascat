@@ -21,7 +21,7 @@ def test_runtime_parity_suite_writes_assets_baselines_and_manifest(tmp_path: Pat
 
     assert isinstance(report, fc.RuntimeParitySuiteReport)
     assert report.targets == ("browser", "unity", "unreal")
-    assert len(report.fixtures) == 4
+    assert len(report.fixtures) == 6
     assert Path(report.manifest_path).is_file()
     assert Path(report.directory) == suite_dir
     assert report.to_dict()["recommended_diff"]["pixel_tolerance"] == 8
@@ -35,6 +35,8 @@ def test_runtime_parity_suite_writes_assets_baselines_and_manifest(tmp_path: Pat
         "texture-map-grid",
         "ktx2-basis-fallback",
         "normal-lighting-wedges",
+        "lod-profile-unity",
+        "lod-profile-unreal",
     ]
 
     for fixture in report.fixtures:
@@ -58,6 +60,34 @@ def test_runtime_parity_suite_writes_assets_baselines_and_manifest(tmp_path: Pat
     assert "--runtime-engine unity" in texture_manifest["commands"]["unity"]
     assert "--runtime-engine-baseline baselines/texture-map-grid.png" in texture_manifest["commands"]["unity"]
     assert "--runtime-engine unreal" in texture_manifest["commands"]["unreal"]
+
+
+def test_runtime_parity_lod_profile_fixtures_exercise_engine_exports(tmp_path: Path) -> None:
+    report = write_runtime_parity_suite(tmp_path / "runtime-parity")
+    unity_fixture = next(fixture for fixture in report.fixtures if fixture.name == "lod-profile-unity")
+    unreal_fixture = next(fixture for fixture in report.fixtures if fixture.name == "lod-profile-unreal")
+
+    unity = _read_glb_document(Path(unity_fixture.asset_path))
+    unity_root = unity["nodes"][unity["scenes"][0]["nodes"][0]]
+    unity_occurrence = unity["nodes"][unity_root["children"][0]]
+    unity_lod_index = unity_occurrence["extensions"]["MSFT_lod"]["ids"][0]
+    unity_lod = unity["nodes"][unity_lod_index]
+    assert "MSFT_lod" in unity["extensionsUsed"]
+    assert unity_occurrence["extras"]["fascat"]["lodEngineProfile"] == "unity"
+    assert unity_occurrence["extras"]["fascat"]["lodExportMode"] == "variants"
+    assert unity_lod["name"].endswith("_lod1")
+    assert "unity_msft_lod_export" in unity_fixture.checks
+
+    unreal = _read_glb_document(Path(unreal_fixture.asset_path))
+    unreal_root = unreal["nodes"][unreal["scenes"][0]["nodes"][0]]
+    unreal_occurrence = unreal["nodes"][unreal_root["children"][0]]
+    unreal_lod = unreal["nodes"][unreal_root["children"][1]]
+    assert "MSFT_lod" not in unreal.get("extensionsUsed", [])
+    assert unreal_occurrence["extras"]["fascat"]["lodEngineProfile"] == "unreal"
+    assert unreal_occurrence["extras"]["fascat"]["lodExportMode"] == "separate"
+    assert unreal_lod["name"].endswith("_LOD1")
+    assert unreal_lod["extras"]["fascat"]["lodEngineProfile"] == "unreal"
+    assert "unreal_separate_lod_nodes" in unreal_fixture.checks
 
 
 def test_runtime_parity_texture_fixture_exercises_material_texture_slots(tmp_path: Path) -> None:
@@ -170,7 +200,7 @@ def test_runtime_parity_capture_records_previews_diffs_and_goldens(
 
     assert isinstance(report, fc.RuntimeParityCaptureReport)
     assert report.passed is True
-    assert len(report.captures) == 8
+    assert len(report.captures) == 12
     assert Path(report.results_path).is_file()
     assert all(capture.passed is True for capture in report.captures)
     assert all(capture.diff is not None for capture in report.captures)
@@ -242,7 +272,7 @@ def test_runtime_parity_capture_can_require_target_goldens(
 
     assert report.passed is False
     assert report.required_goldens is True
-    assert len(report.captures) == 4
+    assert len(report.captures) == 6
     assert all(capture.status == "missing_golden" for capture in report.captures)
     assert all(capture.render_status == "not_rendered" for capture in report.captures)
     assert all(capture.passed is False for capture in report.captures)

@@ -264,10 +264,12 @@ def test_runtime_fixtures_command_writes_suite(tmp_path: Path) -> None:
     payload = json.loads(result.output)
     assert payload["command"] == "runtime-fixtures"
     assert payload["suite"]["targets"] == ["browser", "unity", "unreal"]
-    assert len(payload["suite"]["fixtures"]) == 4
+    assert len(payload["suite"]["fixtures"]) == 6
     assert (suite_dir / "runtime-parity-suite.json").is_file()
     assert (suite_dir / "assets" / "pbr-material-grid.glb").is_file()
     assert (suite_dir / "assets" / "ktx2-basis-fallback.glb").is_file()
+    assert (suite_dir / "assets" / "lod-profile-unity.glb").is_file()
+    assert (suite_dir / "assets" / "lod-profile-unreal.glb").is_file()
     assert (suite_dir / "baselines" / "pbr-material-grid.png").is_file()
 
 

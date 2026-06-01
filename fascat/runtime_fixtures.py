@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import numpy as np
 from PIL import Image
@@ -17,7 +17,7 @@ from fascat.image import ImageResource
 from fascat.io.gltf import validate_gltf
 from fascat.material import Material
 from fascat.mesh import Mesh
-from fascat.options import GltfExportOptions
+from fascat.options import GltfExportOptions, LODOptions
 from fascat.runtime import (
     RuntimeBrowserRenderOptions,
     RuntimeEngineOptions,
@@ -452,6 +452,18 @@ def _runtime_parity_specs() -> tuple[_FixtureSpec, ...]:
             checks=("normal_orientation", "directional_lighting", "backface_consistency"),
             build=_normal_lighting_wedges_asset,
         ),
+        _FixtureSpec(
+            name="lod-profile-unity",
+            purpose="exercise Unity/glTFast LOD export profile through MSFT_lod runtime preview captures",
+            checks=("lod_meshes", "unity_msft_lod_export", "screen_coverage", "target_golden_capture"),
+            build=lambda: _lod_profile_asset("unity"),
+        ),
+        _FixtureSpec(
+            name="lod-profile-unreal",
+            purpose="exercise Unreal-oriented LOD export profile through separate _LOD# node runtime preview captures",
+            checks=("lod_meshes", "unreal_separate_lod_nodes", "screen_coverage", "target_golden_capture"),
+            build=lambda: _lod_profile_asset("unreal"),
+        ),
     )
 
 
@@ -658,6 +670,42 @@ def _normal_lighting_wedges_asset() -> Asset:
         },
         up_axis="Y",
         metadata={"runtime_parity_suite": _SUITE_SCHEMA, "runtime_parity_fixture": "normal-lighting-wedges"},
+    )
+
+
+def _lod_profile_asset(engine_profile: str) -> Asset:
+    material_ids = ["lod-red", "lod-green", "lod-blue", "lod-yellow"]
+    mesh = _panel_grid_mesh(material_count=len(material_ids), spacing=1.25).compute_normals()
+    base = Asset(
+        root=Node(
+            id="root",
+            name=f"Runtime Parity {engine_profile.title()} LOD Profile",
+            children=[Node(id="lod-grid", name=f"{engine_profile.title()} LOD Grid", part_id="lod-grid")],
+        ),
+        parts={
+            "lod-grid": Part(
+                id="lod-grid",
+                name=f"{engine_profile.title()} LOD Grid",
+                mesh=mesh,
+                material_ids=material_ids,
+                metadata={"runtime_parity_fixture": f"lod-profile-{engine_profile}"},
+            )
+        },
+        materials={
+            "lod-red": Material("lod-red", "LOD Red", (0.82, 0.10, 0.08, 1.0), roughness=0.72),
+            "lod-green": Material("lod-green", "LOD Green", (0.12, 0.62, 0.24, 1.0), roughness=0.72),
+            "lod-blue": Material("lod-blue", "LOD Blue", (0.10, 0.32, 0.84, 1.0), roughness=0.72),
+            "lod-yellow": Material("lod-yellow", "LOD Yellow", (0.90, 0.68, 0.12, 1.0), roughness=0.72),
+        },
+        up_axis="Y",
+        metadata={"runtime_parity_suite": _SUITE_SCHEMA, "runtime_parity_fixture": f"lod-profile-{engine_profile}"},
+    )
+    return base.lods(
+        LODOptions(
+            ratios=(0.5,),
+            screen_coverage=(0.35,),
+            engine_profile=cast(Literal["generic", "unity", "unreal"], engine_profile),
+        )
     )
 
 

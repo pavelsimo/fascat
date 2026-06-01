@@ -1312,9 +1312,10 @@ be rasterized by that limited commandlet path, it falls back to a count-based
 placeholder PNG with `render_status="rendered_partial"` and a limitation
 message. That Unreal packaged preview is still not a full Unreal scene,
 texture, lighting, or material renderer. `fascat runtime-fixtures DIR` writes
-bundled PBR material, texture-map, optional KTX2/Basis fallback, and
-normal/lighting GLB fixtures with software baseline PNGs and a manifest
-containing browser, Unity, and Unreal preview commands. Add
+bundled PBR material, texture-map, optional KTX2/Basis fallback,
+normal/lighting, Unity `MSFT_lod`, and Unreal separate-node LOD-profile GLB
+fixtures with software baseline PNGs and a manifest containing browser, Unity,
+and Unreal preview commands. Add
 `--capture browser`, `--capture unity`, or `--capture unreal` to run local
 preview captures for the suite and write `runtime-parity-captures.json`;
 `--promote-goldens` copies rendered captures into `goldens/<target>/`. Existing
