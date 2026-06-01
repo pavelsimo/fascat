@@ -90,8 +90,10 @@ metadata. Simple AP242 boolean condition records such as `AND_EXPRESSION`,
 and boolean literals include parsed true/false values. Supported conditions gate
 their operand labels before those labels can drive geometry pruning; boolean
 variables act as named operands selected by label or STEP record id, and
-conditional/effectivity-assignment wrappers also gate their configured target
-labels. Report steps also include `loaded_representations`, a per-part
+conditional/effectivity-assignment wrappers, including
+`CONDITIONAL_CONCEPT_FEATURE`, `CONDITIONAL_EFFECTIVITY`, and
+`CONFIGURED_EFFECTIVITY_ASSIGNMENT`, also gate their configured target labels.
+Report steps also include `loaded_representations`, a per-part
 BREP/construction-shape summary plus deleted construction-only nodes and source
 topology counts. Free construction edges split from mixed face+curve STEP shapes
 appear as separate construction-line parts or construction cleanup counts,

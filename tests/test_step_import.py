@@ -861,6 +861,160 @@ def test_step_design_variant_selection_evaluates_boolean_variables(tmp_path: Pat
     assert "condition expression was not satisfied" in target_selection.warnings[0]
 
 
+def test_step_design_variant_selection_gates_conditional_concept_feature_label(tmp_path: Path) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=PRODUCT_CONCEPT_FEATURE('left hand','left condition',#1);\n"
+        "#11=PRODUCT_CONCEPT_FEATURE('premium trim','premium condition',#1);\n"
+        "#20=AND_EXPRESSION((#10,#11));\n"
+        "#30=CONDITIONAL_CONCEPT_FEATURE('left premium package','select premium housing',#20);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="premium-node", name="Premium Housing", part_id="premium"),
+            fc.Node(id="standard-node", name="Standard Housing", part_id="standard"),
+        ],
+    )
+    parts = {
+        "premium": fc.Part(
+            id="premium",
+            name="Premium Housing",
+            material_ids=["premium-mat"],
+            metadata={"source_name": "premium housing"},
+        ),
+        "standard": fc.Part(
+            id="standard",
+            name="Standard Housing",
+            material_ids=["standard-mat"],
+            metadata={"source_name": "standard housing"},
+        ),
+    }
+    materials = {
+        "premium-mat": fc.Material(id="premium-mat", name="Premium Paint", base_color=(1.0, 0.0, 0.0, 1.0)),
+        "standard-mat": fc.Material(id="standard-mat", name="Standard Paint", base_color=(0.0, 0.0, 1.0, 1.0)),
+    }
+
+    target_options = StepReadOptions(design_variant_selection=("left premium package",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+    full_options = StepReadOptions(design_variant_selection=("left hand", "premium trim"))
+    full_extraction = _extract_step_design_variants(source, full_options)
+    full_root = root.copy()
+    full_parts = {key: part.copy() for key, part in parts.items()}
+    full_materials = dict(materials)
+
+    full_selection = _apply_step_design_variant_selection(
+        full_root,
+        full_parts,
+        full_materials,
+        full_extraction,
+        full_options,
+    )
+
+    assert full_extraction.records[3].kind == "conditional_concept_feature"
+    assert full_extraction.records[3].condition_operator == "conditional"
+    assert full_extraction.summary["product_concept_features"] == 3
+    assert full_extraction.summary["conditional_records"] == 2
+    assert full_selection.status == "applied"
+    assert full_selection.matched_records == ("step_variant_20", "step_variant_30")
+    assert [child.name for child in full_root.children] == ["Premium Housing"]
+    assert set(full_parts) == {"premium"}
+
+
+def test_step_design_variant_selection_supports_conditional_effectivity_assignment(tmp_path: Path) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=CONDITIONAL_EFFECTIVITY('service window','enabled by release condition','apply','qualify');\n"
+        "#11=PRODUCT_CONCEPT_FEATURE('service package','select service panel',#1);\n"
+        "#20=CONFIGURED_EFFECTIVITY_ASSIGNMENT(#10,#11);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="service-node", name="Service Panel", part_id="service"),
+            fc.Node(id="blank-node", name="Blank Panel", part_id="blank"),
+        ],
+    )
+    parts = {
+        "service": fc.Part(
+            id="service",
+            name="Service Panel",
+            material_ids=["service-mat"],
+            metadata={"source_name": "service panel"},
+        ),
+        "blank": fc.Part(
+            id="blank",
+            name="Blank Panel",
+            material_ids=["blank-mat"],
+            metadata={"source_name": "blank panel"},
+        ),
+    }
+    materials = {
+        "service-mat": fc.Material(id="service-mat", name="Service Paint", base_color=(1.0, 0.0, 0.0, 1.0)),
+        "blank-mat": fc.Material(id="blank-mat", name="Blank Paint", base_color=(0.0, 0.0, 1.0, 1.0)),
+    }
+
+    effectivity_options = StepReadOptions(design_variant_selection=("service window",))
+    effectivity_extraction = _extract_step_design_variants(source, effectivity_options)
+    effectivity_root = root.copy()
+    effectivity_parts = {key: part.copy() for key, part in parts.items()}
+    effectivity_materials = dict(materials)
+
+    effectivity_selection = _apply_step_design_variant_selection(
+        effectivity_root,
+        effectivity_parts,
+        effectivity_materials,
+        effectivity_extraction,
+        effectivity_options,
+    )
+
+    assert effectivity_extraction.records[0].kind == "conditional_effectivity"
+    assert effectivity_extraction.records[0].effectivity_kind == "generic"
+    assert effectivity_extraction.records[2].condition_operator == "effectivity_assignment"
+    assert effectivity_extraction.summary["effectivity_records"] == 2
+    assert effectivity_extraction.summary["conditional_records"] == 1
+    assert effectivity_selection.status == "applied"
+    assert effectivity_selection.matched_records == ("step_variant_20",)
+    assert [child.name for child in effectivity_root.children] == ["Service Panel"]
+    assert set(effectivity_parts) == {"service"}
+
+    target_options = StepReadOptions(design_variant_selection=("service package",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+
 def test_step_import_cleanup_actions_cover_construction_only_shapes() -> None:
     point_counts = _ShapeTopologyCounts(vertices=3)
     line_counts = _ShapeTopologyCounts(vertices=4, edges=2)

@@ -101,8 +101,11 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "CONFIGURATION_DESIGN": "configuration_design",
     "CONFIGURATION_EFFECTIVITY": "configuration_effectivity",
     "CONFIGURATION_ITEM": "configuration_item",
+    "CONDITIONAL_CONCEPT_FEATURE": "conditional_concept_feature",
+    "CONDITIONALCONCEPTFEATURE": "conditional_concept_feature",
     "CONDITIONAL_CONFIGURATION": "conditional_configuration",
     "CONDITIONALCONFIGURATION": "conditional_configuration",
+    "CONDITIONAL_EFFECTIVITY": "conditional_effectivity",
     "CONFIGURED_EFFECTIVITY_ASSIGNMENT": "configured_effectivity_assignment",
     "DATED_EFFECTIVITY": "dated_effectivity",
     "EFFECTIVITY": "effectivity",
@@ -118,19 +121,24 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "PRODUCT_DEFINITION_EFFECTIVITY": "product_definition_effectivity",
     "SERIAL_NUMBERED_EFFECTIVITY": "serial_numbered_effectivity",
     "TIME_INTERVAL_BASED_EFFECTIVITY": "time_interval_based_effectivity",
+    "AND_CONDITION": "and_condition",
     "AND_EXPRESSION": "and_expression",
     "ANDEXPRESSION": "and_expression",
     "ANDCONDITION": "and_condition",
     "BOOLEAN_LITERAL": "boolean_literal",
     "BOOLEAN_VARIABLE": "boolean_variable",
+    "NOT_CONDITION": "not_condition",
     "NOT_EXPRESSION": "not_expression",
     "NOTEXPRESSION": "not_expression",
     "NOTCONDITION": "not_condition",
+    "OR_CONDITION": "or_condition",
     "OR_EXPRESSION": "or_expression",
     "OREXPRESSION": "or_expression",
     "ORCONDITION": "or_condition",
+    "XOR_CONDITION": "xor_condition",
     "XOR_EXPRESSION": "xor_expression",
     "XOREXPRESSION": "xor_expression",
+    "XORCONDITION": "xor_condition",
 }
 _STEP_UNIT_RE = re.compile(r"\b(mm|millimet(?:er|re)|cm|centimet(?:er|re)|m|met(?:er|re)|in|inch|deg|degree)\b", re.I)
 _GENERIC_MATERIAL_TOKENS = {"cad", "color", "material", "mat", "texture", "map", "source"}
@@ -1853,13 +1861,13 @@ def _step_condition_operator(entity: str) -> str | None:
         return "and"
     if normalized in {"OREXPRESSION", "ORCONDITION"}:
         return "or"
-    if normalized == "XOREXPRESSION":
+    if normalized in {"XOREXPRESSION", "XORCONDITION"}:
         return "xor"
     if normalized in {"NOTEXPRESSION", "NOTCONDITION"}:
         return "not"
     if normalized == "BOOLEANLITERAL":
         return "literal"
-    if normalized == "CONDITIONALCONFIGURATION":
+    if normalized in {"CONDITIONALCONFIGURATION", "CONDITIONALCONCEPTFEATURE"}:
         return "conditional"
     if normalized in {"CONFIGUREDEFFECTIVITYASSIGNMENT", "EFFECTIVITYASSIGNMENT"}:
         return "effectivity_assignment"
@@ -2047,7 +2055,10 @@ def _design_variant_selector_terms(
             record.condition_operator is not None and condition_match.matched and condition_match.positive
         )
         if record.condition_operator is not None:
-            direct_match = _design_variant_record_self_matches_requested(record, normalized_requested)
+            direct_match = record.condition_operator not in {
+                "conditional",
+                "effectivity_assignment",
+            } and _design_variant_record_self_matches_requested(record, normalized_requested)
             condition_blocked = condition_blocked or (
                 not direct_id_match
                 and not direct_match
@@ -2400,7 +2411,9 @@ def _design_variant_summary(records: Iterable[_StepDesignVariantRecord]) -> dict
     return {
         "records": len(items),
         "configuration_items": sum(1 for item in items if item.entity == "CONFIGURATION_ITEM"),
-        "product_concept_features": sum(1 for item in items if item.entity == "PRODUCT_CONCEPT_FEATURE"),
+        "product_concept_features": sum(
+            1 for item in items if item.entity in {"PRODUCT_CONCEPT_FEATURE", "CONDITIONAL_CONCEPT_FEATURE"}
+        ),
         "effectivity_records": sum(
             1
             for item in items

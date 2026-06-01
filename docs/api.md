@@ -316,7 +316,9 @@ such as `CONFIGURATION_ITEM`, `PRODUCT_CONCEPT_FEATURE`,
 simple AP242 boolean condition records such as `AND_EXPRESSION`,
 `OR_EXPRESSION`, `XOR_EXPRESSION`, `NOT_EXPRESSION`, and
 `BOOLEAN_LITERAL` / `BOOLEAN_VARIABLE`, plus wrappers such as
-`CONDITIONAL_CONFIGURATION` when `design_variants=True`. Detected records are
+`CONDITIONAL_CONFIGURATION`, `CONDITIONAL_CONCEPT_FEATURE`,
+`CONDITIONAL_EFFECTIVITY`, and `CONFIGURED_EFFECTIVITY_ASSIGNMENT` when
+`design_variants=True`. Detected records are
 reported in asset metadata and import reports with counts, STEP references,
 referenced record labels, transitively resolved reference labels, common
 effectivity values, condition operators, and literal true/false condition
@@ -329,12 +331,13 @@ are evaluated before their operand labels can drive geometry pruning, so an
 `AND_EXPRESSION` only selects geometry when all operands match and an
 `EFFECTIVITY_ASSIGNMENT` only selects assigned geometry when the assigned
 effectivity matches. Conditional wrapper records also gate their configured
-target labels, so the target label alone does not bypass an unsatisfied
-condition. Boolean literal records are evaluated from STEP `.T.` / `.F.`
-arguments, and boolean variables act as named operands selected by their label
-or STEP record id. This is useful for STEP files whose configuration labels line
-up with loaded product names; full AP242 conditional/effectivity geometry
-evaluation remains planned backend work.
+target labels, and `CONDITIONAL_CONCEPT_FEATURE` gates its own feature label, so
+the target label alone does not bypass an unsatisfied condition. Boolean literal
+records are evaluated from STEP `.T.` / `.F.` arguments, and boolean variables
+act as named operands selected by their label or STEP record id. This is useful
+for STEP files whose configuration labels line up with loaded product names;
+full AP242 conditional/effectivity geometry evaluation remains planned backend
+work.
 
 STEP and IGES import can scan source-file string references for sidecar PNG, JPEG, and KTX2 textures, load them as first-class `ImageResource` objects, and bind semantic names such as `baseColor`, `normal`, `ao`, or `emissive` to material texture metadata. XDE visual material PBR/common values are preserved where exposed, and common CAD material names such as steel, aluminum, brass, copper, glass, plastic, rubber, and paint are mapped to deterministic PBR defaults with diagnostics in material metadata. Supported vendor material libraries can also be supplied explicitly, or referenced from the CAD source, as JSON/MTL files, ZIP packages containing JSON/MTL records plus textures, or folders containing those files; imported records update matching CAD materials with PBR factors and texture slots while reporting resolved, missing, unreadable, matched, and unmatched counts.
 
