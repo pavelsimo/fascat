@@ -63,6 +63,7 @@ _STEP_EXTERNAL_REF_RE = re.compile(r"'([^']+\.(?:step|stp)(?:[#?][^']*)?)'", re.
 _STEP_RECORD_START_RE = re.compile(r"#(\d+)\s*=\s*([A-Z0-9_]+)\s*\(", re.IGNORECASE)
 _STEP_REFERENCE_RE = re.compile(r"#(\d+)")
 _STEP_NUMBER_RE = re.compile(r"(?<![#A-Za-z0-9_])[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[Ee][-+]?\d+)?")
+_STEP_BOOLEAN_TOKEN_RE = re.compile(r"\.(TRUE|FALSE|T|F)\.", re.IGNORECASE)
 _STEP_PMI_ENTITY_KINDS = {
     "DIMENSIONAL_SIZE": "dimension",
     "DIMENSIONAL_LOCATION": "dimension",
@@ -134,6 +135,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "ANDEXPRESSION": "and_expression",
     "ANDCONDITION": "and_condition",
     "BOOLEAN_LITERAL": "boolean_literal",
+    "BOOLEAN_REPRESENTATION_ITEM": "boolean_representation_item",
+    "BOOLEANREPRESENTATIONITEM": "boolean_representation_item",
     "BOOLEAN_VARIABLE": "boolean_variable",
     "NOT_CONDITION": "not_condition",
     "NOT_EXPRESSION": "not_expression",
@@ -1877,7 +1880,7 @@ def _step_condition_operator(entity: str) -> str | None:
         return "equals"
     if normalized == "COMPARISONNOTEQUAL":
         return "not_equals"
-    if normalized == "BOOLEANLITERAL":
+    if normalized in {"BOOLEANLITERAL", "BOOLEANREPRESENTATIONITEM"}:
         return "literal"
     if normalized in {"CONDITIONALCONFIGURATION", "CONDITIONALCONCEPTFEATURE"}:
         return "conditional"
@@ -1892,6 +1895,8 @@ def _step_condition_value(entity: str, args: str) -> bool | None:
     if _step_condition_operator(entity) != "literal":
         return None
     normalized = args.strip().upper()
+    if match := _STEP_BOOLEAN_TOKEN_RE.search(normalized):
+        return match.group(1) in {"T", "TRUE"}
     if normalized.startswith(".T.") or normalized.startswith(".TRUE.") or normalized in {"T", "TRUE"}:
         return True
     if normalized.startswith(".F.") or normalized.startswith(".FALSE.") or normalized in {"F", "FALSE"}:

@@ -86,12 +86,13 @@ or values inside supported serial/date/time-interval effectivity ranges when
 those records resolve to labels that match imported node, part, or source-name
 metadata. Simple AP242 boolean condition records such as `AND_EXPRESSION`,
 `OR_EXPRESSION`, `XOR_EXPRESSION`, `NOT_EXPRESSION`, `EQUALS_EXPRESSION`,
-`COMPARISON_EQUAL`, `COMPARISON_NOT_EQUAL`, and `BOOLEAN_LITERAL` /
-`BOOLEAN_VARIABLE` / `MATHS_BOOLEAN_VARIABLE` are reported with condition
-operators, and boolean literals include parsed true/false values. Supported
-conditions gate their operand labels before those labels can drive geometry
-pruning; equality/not-equality records compare selected boolean operand states,
-boolean variables act as named operands selected by label or STEP record id, and
+`COMPARISON_EQUAL`, `COMPARISON_NOT_EQUAL`, `BOOLEAN_LITERAL`,
+`BOOLEAN_REPRESENTATION_ITEM`, `BOOLEAN_VARIABLE`, and
+`MATHS_BOOLEAN_VARIABLE` are reported with condition operators, and boolean
+literals include parsed true/false values. Supported conditions gate their
+operand labels before those labels can drive geometry pruning;
+equality/not-equality records compare selected boolean operand states, boolean
+variables act as named operands selected by label or STEP record id, and
 conditional/effectivity-assignment wrappers, including `CONDITIONAL_CONCEPT_FEATURE`,
 `CONDITIONAL_EFFECTIVITY`, and `CONFIGURED_EFFECTIVITY_ASSIGNMENT`, also gate
 their configured target labels.

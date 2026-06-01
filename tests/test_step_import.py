@@ -708,15 +708,31 @@ def test_step_design_variant_selection_supports_not_condition(tmp_path: Path) ->
     assert premium_selection.matched_records == ()
 
 
-def test_step_design_variant_selection_evaluates_boolean_literals(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("true_literal", "false_literal", "expected_kind"),
+    (
+        ("#20=BOOLEAN_LITERAL(.T.);\n", "#21=BOOLEAN_LITERAL(.F.);\n", "boolean_literal"),
+        (
+            "#20=BOOLEAN_REPRESENTATION_ITEM('service literal',.T.);\n",
+            "#21=BOOLEAN_REPRESENTATION_ITEM('blocked literal',.F.);\n",
+            "boolean_representation_item",
+        ),
+    ),
+)
+def test_step_design_variant_selection_evaluates_boolean_literals(
+    tmp_path: Path,
+    true_literal: str,
+    false_literal: str,
+    expected_kind: str,
+) -> None:
     source = tmp_path / "variants.step"
     source.write_text(
         "ISO-10303-21;\n"
         "DATA;\n"
         "#10=PRODUCT_CONCEPT_FEATURE('service package','select service panel',#1);\n"
         "#11=PRODUCT_CONCEPT_FEATURE('blocked package','select blocked panel',#1);\n"
-        "#20=BOOLEAN_LITERAL(.T.);\n"
-        "#21=BOOLEAN_LITERAL(.F.);\n"
+        f"{true_literal}"
+        f"{false_literal}"
         "#30=CONDITIONAL_CONFIGURATION('service condition',#20,#10);\n"
         "#31=CONDITIONAL_CONFIGURATION('blocked condition',#21,#11);\n"
         "ENDSEC;\n"
@@ -765,8 +781,10 @@ def test_step_design_variant_selection_evaluates_boolean_literals(tmp_path: Path
     )
 
     assert service_extraction.summary["conditional_records"] == 4
+    assert service_extraction.records[2].kind == expected_kind
     assert service_extraction.records[2].condition_operator == "literal"
     assert service_extraction.records[2].condition_value is True
+    assert service_extraction.records[3].kind == expected_kind
     assert service_extraction.records[3].condition_value is False
     assert service_selection.status == "applied"
     assert service_selection.matched_records == ("step_variant_30",)
