@@ -408,14 +408,15 @@ def test_tessellation_keep_brep_controls_source_shape_retention(monkeypatch) -> 
     assert kept_sources["brep_patches"] == "retained"
 
 
-def test_tessellation_attribute_sources_record_reused_meshes() -> None:
+def test_tessellation_attribute_sources_record_reused_meshes_and_drops_brep_by_default() -> None:
     mesh = triangle_mesh().compute_normals()
     mesh.uvs[0] = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]], dtype=float)
     mesh.face_groups = {"imported_face": np.array([0], dtype=int)}
+    source_shape = object()
     root = Node(id="root", name="root", children=[Node(id="node", name="Part", part_id="part")])
     asset = Asset(
         root=root,
-        parts={"part": Part(id="part", name="Part", mesh=mesh, source_shape=object())},
+        parts={"part": Part(id="part", name="Part", mesh=mesh, source_shape=source_shape)},
     )
 
     tessellated = asset.tessellate(TessellationOptions(free_edge_report=True))
@@ -423,7 +424,7 @@ def test_tessellation_attribute_sources_record_reused_meshes() -> None:
     sources = json.loads(str(part.metadata["tessellation_attribute_sources"]))
 
     assert sources == {
-        "brep_patches": "unchanged_existing_mesh_reuse",
+        "brep_patches": "deleted",
         "face_groups": "imported_mesh",
         "free_edges": "diagnostic_only",
         "normals": "imported_mesh",
@@ -432,8 +433,31 @@ def test_tessellation_attribute_sources_record_reused_meshes() -> None:
         "triangles": "imported_mesh",
         "uvs": {"0": "imported_mesh"},
     }
+    assert part.source_shape is None
+    assert part.metadata["brep_patch_cleanup"] == "deleted"
+    assert part.metadata["source_shape_retained"] == "false"
     assert part.mesh is not None
     assert json.loads(str(part.mesh.metadata["tessellation_attribute_sources"])) == sources
+
+
+def test_tessellation_reused_mesh_can_keep_brep() -> None:
+    source_shape = object()
+    mesh = triangle_mesh().compute_normals()
+    root = Node(id="root", name="root", children=[Node(id="node", name="Part", part_id="part")])
+    asset = Asset(
+        root=root,
+        parts={"part": Part(id="part", name="Part", mesh=mesh, source_shape=source_shape)},
+    )
+
+    tessellated = asset.tessellate(TessellationOptions(keep_brep=True))
+    part = tessellated.parts["part"]
+    sources = json.loads(str(part.metadata["tessellation_attribute_sources"]))
+
+    assert part.source_shape is source_shape
+    assert part.metadata["brep_patch_cleanup"] == "retained"
+    assert part.metadata["source_shape_retained"] == "true"
+    assert sources["positions"] == "imported_mesh"
+    assert sources["brep_patches"] == "retained"
 
 
 def test_tessellation_warns_about_retained_patch_and_submesh_risk(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -520,7 +544,8 @@ def test_tessellate_reuses_existing_meshes_by_default(monkeypatch) -> None:  # t
     assert calls == []
     assert tessellated.parts["part"].mesh is not None
     assert tessellated.parts["part"].mesh.triangle_count == 1
-    assert tessellated.parts["part"].source_shape is source_shape
+    assert tessellated.parts["part"].source_shape is None
+    assert tessellated.parts["part"].metadata["brep_patch_cleanup"] == "deleted"
 
 
 def test_tessellate_replaces_existing_meshes_when_requested(monkeypatch) -> None:  # type: ignore[no-untyped-def]

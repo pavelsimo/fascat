@@ -484,7 +484,7 @@ Tessellation parameters:
 | `quality_report` | Record per-part tessellation quality metrics and advisories for later reporting. Coarse absolute sag relative to part size is flagged when `relative=False` and no `sag_ratio` is set; shiny or high-detail parts also advise per-part `sag_ratio` or `curvature_adaptive` tuning. |
 | `free_edge_report` | Record free/boundary edge and non-manifold edge counts on tessellated parts and warn when free edges are present. |
 | `create_normals` | Generate normals during tessellation when the backend can provide them. Attribute provenance records `tessellation`, `disabled`, or `missing` for normals. |
-| `keep_brep` | Keep source BREP handles on parts after tessellation for later BREP-aware operations. Tessellated parts record `brep_patch_cleanup=retained` or `deleted` and warn when many retained patches could increase runtime/export risk. |
+| `keep_brep` | Keep source BREP handles on parts after tessellation for later BREP-aware operations. When `False`, source BREP handles are dropped even when an imported mesh is reused instead of retessellated. Tessellated parts record `brep_patch_cleanup=retained` or `deleted` and warn when many retained patches could increase runtime/export risk. |
 | `reuse_existing_meshes` | Reuse meshes already present on imported parts. Set to `False` to retessellate from source BREP where available. |
 | `part_settings` | Per-part overrides keyed by part id or part name. Supports the same tessellation option names. |
 

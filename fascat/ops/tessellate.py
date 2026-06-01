@@ -70,6 +70,9 @@ def tessellate_asset(asset: Asset, options: TessellationOptions, *, selected_par
             _record_detail_adaptive_selection(result, part, options, part_options)
             _record_tessellation_attribute_sources(result, part, part_options, geometry_source="imported_mesh")
             _record_tessellation_diagnostics(result, part, part_options)
+            _record_brep_patch_cleanup(result, part, part_options)
+            if not part_options.keep_brep:
+                part.source_shape = None
             continue
         if part.source_shape is None:
             if part.mesh is None:
@@ -896,8 +899,6 @@ def _face_group_attribute_source(mesh: Mesh, geometry_source: str) -> str:
 def _brep_patch_attribute_source(part: Part, options: TessellationOptions, geometry_source: str) -> str:
     if part.source_shape is None:
         return "not_available"
-    if geometry_source == "imported_mesh":
-        return "unchanged_existing_mesh_reuse"
     return "retained" if options.keep_brep else "deleted"
 
 
