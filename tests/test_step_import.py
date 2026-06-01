@@ -787,12 +787,23 @@ def test_step_design_variant_selection_evaluates_boolean_literals(tmp_path: Path
     assert "condition expression was not satisfied" in blocked_selection.warnings[0]
 
 
-def test_step_design_variant_selection_evaluates_boolean_variables(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("variable_record", "expected_kind"),
+    (
+        ("#10=BOOLEAN_VARIABLE('service enabled');\n", "boolean_variable"),
+        ("#10=MATHS_BOOLEAN_VARIABLE(#1,'service enabled');\n", "maths_boolean_variable"),
+    ),
+)
+def test_step_design_variant_selection_evaluates_boolean_variables(
+    tmp_path: Path,
+    variable_record: str,
+    expected_kind: str,
+) -> None:
     source = tmp_path / "variants.step"
     source.write_text(
         "ISO-10303-21;\n"
         "DATA;\n"
-        "#10=BOOLEAN_VARIABLE('service enabled');\n"
+        f"{variable_record}"
         "#11=PRODUCT_CONCEPT_FEATURE('service package','select service panel',#1);\n"
         "#20=CONDITIONAL_CONFIGURATION('service variable condition',#10,#11);\n"
         "ENDSEC;\n"
@@ -841,6 +852,7 @@ def test_step_design_variant_selection_evaluates_boolean_variables(tmp_path: Pat
     )
 
     assert variable_extraction.summary["conditional_records"] == 2
+    assert variable_extraction.records[0].kind == expected_kind
     assert variable_extraction.records[0].condition_operator == "variable"
     assert variable_selection.status == "applied"
     assert variable_selection.matched_records == ("step_variant_10", "step_variant_20")

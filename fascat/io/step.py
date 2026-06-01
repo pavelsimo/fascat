@@ -118,6 +118,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "EQUALS_EXPRESSION": "equals_expression",
     "EQUALSEXPRESSION": "equals_expression",
     "LOT_EFFECTIVITY": "lot_effectivity",
+    "MATHS_BOOLEAN_VARIABLE": "maths_boolean_variable",
+    "MATHSBOOLEANVARIABLE": "maths_boolean_variable",
     "PRODUCT_CONCEPT": "product_concept",
     "PRODUCT_CONCEPT_CONTEXT": "product_concept_context",
     "PRODUCT_CONCEPT_FEATURE": "product_concept_feature",
@@ -1881,7 +1883,7 @@ def _step_condition_operator(entity: str) -> str | None:
         return "conditional"
     if normalized in {"CONFIGUREDEFFECTIVITYASSIGNMENT", "EFFECTIVITYASSIGNMENT"}:
         return "effectivity_assignment"
-    if normalized == "BOOLEANVARIABLE":
+    if normalized in {"BOOLEANVARIABLE", "MATHSBOOLEANVARIABLE"}:
         return "variable"
     return None
 
