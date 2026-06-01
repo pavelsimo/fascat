@@ -1231,9 +1231,9 @@ browser renderer artifact for simple assets, including node transforms,
 material base-color factors, quantized vertex attributes, meshopt exports that
 keep fallback buffer data, Draco geometry decoded through glTF Transform,
 meshopt bufferViews without fallback buffer data decoded through local
-`meshoptimizer`, KTX2/Basis textures decoded through glTF Transform plus
-KTX-Software when available, and base-color texture sampling for supported
-image URI/data URI textures. The report lists decoded compressed payloads in
+`meshoptimizer`, KTX2/Basis textures decoded through optional `alktx2` or glTF
+Transform plus KTX-Software when available, and base-color texture sampling for
+supported image URI/data URI textures. The report lists decoded compressed payloads in
 `decoded_extensions`; if Draco or meshopt decode tooling is unavailable, the
 preview is reported as unsupported without writing a misleading screenshot. If
 KTX2/Basis texture decode tooling is unavailable, geometry can still render as

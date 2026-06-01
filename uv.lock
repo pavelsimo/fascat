@@ -8,6 +8,21 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "alktx2"
+version = "0.1.6"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9a/00/8cee0f018f70f7cf6a3948c4818c2afff1920005707f924cc6133ef296b5/alktx2-0.1.6-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5257b8a70203894223f304491d492ffc704fbc1cd5700727f416b49d081cca31", size = 3103722, upload-time = "2026-04-28T16:20:50.436Z" },
+    { url = "https://files.pythonhosted.org/packages/5b/aa/e39048a76231d7efe140a3383658aeb47de17e3f7aea676c6b90d5d8e549/alktx2-0.1.6-cp311-cp311-win_amd64.whl", hash = "sha256:8e077abf9e2b216d83afd73046e5eee8b5606a917db62d0ca162ae1ecc0db9d0", size = 1914292, upload-time = "2026-04-28T16:20:52.787Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/91/e3c9a50a576233332df361a6ea67730c9dd9409af3911c635d7038bbd869/alktx2-0.1.6-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:c94243301a2aa9b8a3766228681fda4487a3e91ab1605966b825d0ef6ddd104c", size = 3099695, upload-time = "2026-04-28T16:20:55.67Z" },
+    { url = "https://files.pythonhosted.org/packages/17/82/339e2380a8a9514000641d63763ed18850b9cb53b6a4537bb7d00a55aaa3/alktx2-0.1.6-cp312-cp312-win_amd64.whl", hash = "sha256:6d1069d9b2b6c7d749caba0541a264801fed6e26e4637e0d62df92cc69cfa667", size = 1916423, upload-time = "2026-04-28T16:20:58.089Z" },
+    { url = "https://files.pythonhosted.org/packages/23/6a/12772ff9275fb4cd0c2eebba2feec22f41021f49fde6007b1880b198f6a4/alktx2-0.1.6-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:8ac5b340e8319012f533264e16c63a90d3bf616b28d6271595b263f03c467cef", size = 3099891, upload-time = "2026-04-28T16:20:59.946Z" },
+    { url = "https://files.pythonhosted.org/packages/f4/9e/c2bc9c2126cd1f11769f316e9025d08a3f592b8ed1e58cf91ff201875e1e/alktx2-0.1.6-cp313-cp313-win_amd64.whl", hash = "sha256:67b104a089ae98e52825fa386632ecca59e6b8ae4aa4e574c4d218041e3739b9", size = 1916176, upload-time = "2026-04-28T16:21:02.676Z" },
+    { url = "https://files.pythonhosted.org/packages/89/6f/0e2a4305543f08a930d1785e4e9ad020726a75022cd4dd12c72c214bece9/alktx2-0.1.6-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7d4c846ee1776e4e8892c5244622de5d9ee71d2755be3baf5f97a5ceb7fba9ea", size = 3099752, upload-time = "2026-04-28T16:21:04.808Z" },
+    { url = "https://files.pythonhosted.org/packages/52/de/9b4b53a2db06165ad3d0b5c6d5cdee931a68e32de1591c2bdca402d1b2c7/alktx2-0.1.6-cp314-cp314-win_amd64.whl", hash = "sha256:193e8a9fe78975307e94948075a3df52ba1dae27f1d88ae518d2f2c7b53e11c9", size = 1973860, upload-time = "2026-04-28T16:21:07.124Z" },
+]
+
+[[package]]
 name = "annotated-doc"
 version = "0.0.4"
 source = { registry = "https://pypi.org/simple" }
@@ -430,6 +445,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+ktx2 = [
+    { name = "alktx2", marker = "python_full_version >= '3.11'" },
+]
 uv = [
     { name = "xatlas" },
 ]
@@ -444,6 +462,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "alktx2", marker = "python_full_version >= '3.11' and extra == 'ktx2'", specifier = ">=0.1.6" },
     { name = "cadquery-ocp", specifier = ">=7.7" },
     { name = "fast-simplification", specifier = ">=0.1" },
     { name = "meshoptimizer", specifier = ">=0.2.30a0,<0.3" },
@@ -457,7 +476,7 @@ requires-dist = [
     { name = "usd-core", specifier = ">=24.8" },
     { name = "xatlas", marker = "extra == 'uv'", specifier = ">=0.0.9" },
 ]
-provides-extras = ["uv"]
+provides-extras = ["ktx2", "uv"]
 
 [package.metadata.requires-dev]
 dev = [

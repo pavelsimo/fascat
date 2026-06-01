@@ -12,7 +12,7 @@ import tempfile
 from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import asdict, dataclass
-from importlib import resources
+from importlib import import_module, resources
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 from urllib.parse import unquote, unquote_to_bytes, urlparse
@@ -1062,10 +1062,65 @@ def _run_gltf_transform_copy(input_path: Path, output_path: Path) -> None:
 
 
 def _write_ktx2_decoded_preview_asset(asset_path: Path, output_path: Path) -> Path:
-    _run_gltf_transform_ktxdecompress(asset_path, output_path)
+    python_error: Exception | None = None
+    try:
+        return _write_python_ktx2_decoded_preview_asset(asset_path, output_path.with_suffix(".gltf"))
+    except Exception as exc:
+        python_error = exc
+
+    try:
+        _run_gltf_transform_ktxdecompress(asset_path, output_path)
+    except Exception as exc:
+        if python_error is not None:
+            raise RuntimeError(f"{python_error}; {exc}") from exc
+        raise
     decoded = _read_gltf_json_document(output_path)
     if _document_uses_basis_textures(decoded):
         raise RuntimeError("glTF Transform ktxdecompress preserved KHR_texture_basisu")
+    return output_path
+
+
+def _write_python_ktx2_decoded_preview_asset(asset_path: Path, output_path: Path) -> Path:
+    try:
+        alktx2 = cast(Any, import_module("alktx2"))
+    except ImportError as exc:
+        raise RuntimeError("optional alktx2 KTX2 decoder is not installed") from exc
+
+    source_document, buffers = _read_gltf_json_and_buffers_for_preview(asset_path)
+    document = deepcopy(source_document)
+    images = document.get("images")
+    if not isinstance(images, list):
+        raise RuntimeError("glTF KTX2 decode requires an images array")
+    basis_sources = _basis_texture_image_indices(document)
+    decoded_images = 0
+    for image_index, image in enumerate(images):
+        if not isinstance(image, dict):
+            raise RuntimeError("glTF image must be an object")
+        if image_index not in basis_sources and not _image_is_ktx2(image):
+            continue
+        ktx2_bytes = _load_gltf_image_bytes(image, document, buffers, asset_path.parent)
+        decoded = alktx2.decode_ktx2_to_bytes(ktx2_bytes, format="png")
+        if not isinstance(decoded, tuple) or len(decoded) != 2:
+            raise RuntimeError("alktx2 decode_ktx2_to_bytes returned an invalid result")
+        png_bytes, mime_type = decoded
+        if not isinstance(png_bytes, bytes) or mime_type != "image/png":
+            raise RuntimeError("alktx2 KTX2 decoder did not return PNG bytes")
+        image["uri"] = "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii")
+        image["mimeType"] = "image/png"
+        image.pop("bufferView", None)
+        decoded_images += 1
+
+    if decoded_images == 0:
+        raise RuntimeError("no KTX2/Basis images were decoded")
+
+    _promote_basis_texture_sources(document)
+    _remove_gltf_extension(document, "KHR_texture_basisu")
+    _embed_preview_buffers(document, buffers)
+    _rewrite_external_image_uris(document, asset_path.parent)
+    output_path.write_text(json.dumps(document), encoding="utf-8")
+    decoded_document = _read_gltf_json_document(output_path)
+    if _document_uses_basis_textures(decoded_document):
+        raise RuntimeError("optional alktx2 KTX2 decode preserved KHR_texture_basisu")
     return output_path
 
 
@@ -1198,6 +1253,27 @@ def _load_gltf_uri_bytes(uri: str, base_dir: Path) -> bytes:
     return path.read_bytes()
 
 
+def _load_gltf_image_bytes(
+    image: dict[str, Any],
+    document: dict[str, Any],
+    buffers: list[bytes],
+    base_dir: Path,
+) -> bytes:
+    uri = image.get("uri")
+    if isinstance(uri, str):
+        return _load_gltf_uri_bytes(uri, base_dir)
+    view_index = image.get("bufferView")
+    if not isinstance(view_index, int):
+        raise RuntimeError("glTF KTX2 image must use uri or bufferView")
+    buffer_views = document.get("bufferViews")
+    if not isinstance(buffer_views, list) or view_index < 0 or view_index >= len(buffer_views):
+        raise RuntimeError("glTF KTX2 image references an invalid bufferView")
+    view = buffer_views[view_index]
+    if not isinstance(view, dict):
+        raise RuntimeError("glTF KTX2 image bufferView must be an object")
+    return _copy_buffer_view_bytes(view, buffers)
+
+
 def _decode_meshopt_buffer_view(
     extension: dict[str, Any],
     buffers: list[bytes],
@@ -1274,6 +1350,16 @@ def _append_preview_buffer(payload: bytearray, data: bytes) -> int:
     offset = len(payload)
     payload.extend(data)
     return offset
+
+
+def _embed_preview_buffers(document: dict[str, Any], buffers: list[bytes]) -> None:
+    document["buffers"] = [
+        {
+            "byteLength": len(data),
+            "uri": "data:application/octet-stream;base64," + base64.b64encode(data).decode("ascii"),
+        }
+        for data in buffers
+    ]
 
 
 def _remove_gltf_extension(document: dict[str, Any], extension_name: str) -> None:
@@ -1431,6 +1517,44 @@ def _document_uses_basis_textures(document: dict[str, Any]) -> bool:
             if mime_type == "image/ktx2" or (isinstance(uri, str) and uri.lower().endswith(".ktx2")):
                 return True
     return False
+
+
+def _basis_texture_image_indices(document: dict[str, Any]) -> set[int]:
+    indices: set[int] = set()
+    textures = document.get("textures")
+    if not isinstance(textures, list):
+        return indices
+    for texture in textures:
+        if not isinstance(texture, dict):
+            continue
+        extensions = texture.get("extensions")
+        basis = extensions.get("KHR_texture_basisu") if isinstance(extensions, dict) else None
+        if isinstance(basis, dict) and isinstance(basis.get("source"), int):
+            indices.add(cast(int, basis["source"]))
+    return indices
+
+
+def _promote_basis_texture_sources(document: dict[str, Any]) -> None:
+    textures = document.get("textures")
+    if not isinstance(textures, list):
+        return
+    for texture in textures:
+        if not isinstance(texture, dict):
+            continue
+        extensions = texture.get("extensions")
+        basis = extensions.get("KHR_texture_basisu") if isinstance(extensions, dict) else None
+        if isinstance(basis, dict) and isinstance(basis.get("source"), int):
+            texture["source"] = basis["source"]
+        if isinstance(extensions, dict):
+            extensions.pop("KHR_texture_basisu", None)
+            if not extensions:
+                texture.pop("extensions", None)
+
+
+def _image_is_ktx2(image: dict[str, Any]) -> bool:
+    mime_type = image.get("mimeType")
+    uri = image.get("uri")
+    return mime_type == "image/ktx2" or (isinstance(uri, str) and uri.lower().endswith(".ktx2"))
 
 
 def _referenced_primitive_buffer_views(document: dict[str, Any], accessors: list[object]) -> set[int]:

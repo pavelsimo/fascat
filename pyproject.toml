@@ -38,6 +38,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+ktx2 = [
+    "alktx2>=0.1.6; python_version >= '3.11'",
+]
 uv = [
     "xatlas>=0.0.9",
 ]
