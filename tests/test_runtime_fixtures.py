@@ -21,7 +21,7 @@ def test_runtime_parity_suite_writes_assets_baselines_and_manifest(tmp_path: Pat
 
     assert isinstance(report, fc.RuntimeParitySuiteReport)
     assert report.targets == ("browser", "unity", "unreal")
-    assert len(report.fixtures) == 3
+    assert len(report.fixtures) == 4
     assert Path(report.manifest_path).is_file()
     assert Path(report.directory) == suite_dir
     assert report.to_dict()["recommended_diff"]["pixel_tolerance"] == 8
@@ -32,6 +32,7 @@ def test_runtime_parity_suite_writes_assets_baselines_and_manifest(tmp_path: Pat
     assert [fixture["name"] for fixture in manifest["fixtures"]] == [
         "pbr-material-grid",
         "texture-map-grid",
+        "ktx2-basis-fallback",
         "normal-lighting-wedges",
     ]
 
@@ -68,6 +69,24 @@ def test_runtime_parity_texture_fixture_exercises_material_texture_slots(tmp_pat
     assert material["occlusionTexture"]["index"] == 3
     assert material["emissiveTexture"]["index"] == 4
     assert document["extras"]["fascat"]["metadata"]["runtime_parity_fixture"] == "texture-map-grid"
+
+
+def test_runtime_parity_ktx2_fixture_exercises_basisu_fallback(tmp_path: Path) -> None:
+    report = write_runtime_parity_suite(tmp_path / "runtime-parity")
+    ktx2_fixture = next(fixture for fixture in report.fixtures if fixture.name == "ktx2-basis-fallback")
+
+    document = _read_glb_document(Path(ktx2_fixture.asset_path))
+    texture = document["textures"][0]
+    ktx2_image = document["images"][texture["extensions"]["KHR_texture_basisu"]["source"]]
+
+    assert "KHR_texture_basisu" in document["extensionsUsed"]
+    assert "KHR_texture_basisu" not in document.get("extensionsRequired", [])
+    assert texture["source"] == 0
+    assert document["images"][0]["uri"].startswith("data:image/png;base64,")
+    assert ktx2_image["mimeType"] == "image/ktx2"
+    assert ktx2_image["uri"].startswith("data:image/ktx2;base64,q0tUWCAyMLsNChoK")
+    assert document["extras"]["fascat"]["metadata"]["runtime_parity_fixture"] == "ktx2-basis-fallback"
+    assert document["extras"]["fascat"]["metadata"]["runtime_parity_ktx2_fallback"] == "png_source"
 
 
 def test_runtime_parity_pbr_fixture_marks_alpha_material(tmp_path: Path) -> None:
@@ -145,11 +164,12 @@ def test_runtime_parity_capture_records_previews_diffs_and_goldens(
 
     assert isinstance(report, fc.RuntimeParityCaptureReport)
     assert report.passed is True
-    assert len(report.captures) == 6
+    assert len(report.captures) == 8
     assert Path(report.results_path).is_file()
     assert all(capture.passed is True for capture in report.captures)
     assert all(capture.diff is not None for capture in report.captures)
     assert (suite_dir / "previews" / "texture-map-grid-unity.png").is_file()
+    assert (suite_dir / "previews" / "ktx2-basis-fallback-browser.png").is_file()
     assert (suite_dir / "goldens" / "browser" / "texture-map-grid.png").is_file()
     assert (suite_dir / "goldens" / "unity" / "texture-map-grid.png").is_file()
 

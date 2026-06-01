@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import struct
 from collections.abc import Callable
 from dataclasses import dataclass
 from io import BytesIO
@@ -30,6 +31,16 @@ RuntimeParityTarget = Literal["browser", "unity", "unreal"]
 _SUITE_SCHEMA = "fascat.runtime-parity-suite.v1"
 _CAPTURE_SCHEMA = "fascat.runtime-parity-captures.v1"
 _DEFAULT_TARGETS: tuple[RuntimeParityTarget, ...] = ("browser", "unity", "unreal")
+_KHR_TEXTURE_BASISU = "KHR_texture_basisu"
+_GLB_JSON_CHUNK = 0x4E4F534A
+_GLB_BIN_CHUNK = 0x004E4942
+_KTX2_BASISU_BASE_COLOR = (
+    "q0tUWCAyMLsNChoKAAAAAAEAAAAEAAAABAAAAAAAAAAAAAAAAQAAAAMAAAACAAAAmAAAACwAAADEAAAAJAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAaAQAAAAAAABkAAAAAAAAAEAAAAAAAAAABAQAAAAAAABkAAAAAAAAAEAAAAAAAAADoAAAAAAAAABkAAAAAAAAA"
+    "EAAAAAAAAAAsAAAAAAAAAAIAKACmAQIAAwMAAAAAAAAAAAAAAAB/AAAAAAAAAAAA/////x8AAABLVFh3cml0ZXIAQmFzaXMg"
+    "VW5pdmVyc2FsIDEuNTAAACi1L/0gEIEAAHdXM/I/ulMCAAAAAAAAAAAotS/9IBCBAADTOOCE5rSrUUnv2/5+fn4AKLUv/SAQ"
+    "gQAAk1jUrpsDQHGWBRX39Xh4AA=="
+)
 
 
 @dataclass(frozen=True)
@@ -137,6 +148,7 @@ class _FixtureSpec:
     purpose: str
     checks: tuple[str, ...]
     build: Callable[[], Asset]
+    postprocess: Callable[[Path], None] | None = None
 
 
 def write_runtime_parity_suite(
@@ -168,6 +180,8 @@ def write_runtime_parity_suite(
         asset_path = assets_dir / f"{spec.name}.glb"
         baseline_path = baselines_dir / f"{spec.name}.png"
         asset.write_gltf(asset_path, options=GltfExportOptions())
+        if spec.postprocess is not None:
+            spec.postprocess(asset_path)
         stats = validate_gltf(asset_path)
         preview = write_preview(asset, baseline_path, preview_opts)
         fixture = RuntimeParityFixture(
@@ -394,12 +408,99 @@ def _runtime_parity_specs() -> tuple[_FixtureSpec, ...]:
             build=_texture_map_grid_asset,
         ),
         _FixtureSpec(
+            name="ktx2-basis-fallback",
+            purpose=(
+                "exercise optional KHR_texture_basisu base-color texture decode with a PNG fallback for default previews"
+            ),
+            checks=("base_color_texture", "ktx2_basisu_texture", "png_texture_fallback", "decode_status_reporting"),
+            build=_texture_map_grid_asset,
+            postprocess=_add_ktx2_basisu_fallback,
+        ),
+        _FixtureSpec(
             name="normal-lighting-wedges",
             purpose="exercise surface normal orientation and fixed preview-light response on angled panels",
             checks=("normal_orientation", "directional_lighting", "backface_consistency"),
             build=_normal_lighting_wedges_asset,
         ),
     )
+
+
+def _add_ktx2_basisu_fallback(asset_path: Path) -> None:
+    document, binary = _read_runtime_glb(asset_path)
+    textures = document.get("textures")
+    images = document.get("images")
+    if not isinstance(textures, list) or not textures:
+        raise RuntimeError("KTX2 runtime parity fixture requires at least one texture")
+    if not isinstance(images, list) or not images:
+        raise RuntimeError("KTX2 runtime parity fixture requires at least one fallback image")
+    base_texture = textures[0]
+    if not isinstance(base_texture, dict) or not isinstance(base_texture.get("source"), int):
+        raise RuntimeError("KTX2 runtime parity fixture requires a base texture with a PNG fallback source")
+
+    images.append(
+        {
+            "name": "ktx2_basisu_base_color",
+            "mimeType": "image/ktx2",
+            "uri": "data:image/ktx2;base64," + _KTX2_BASISU_BASE_COLOR,
+        }
+    )
+    extensions = base_texture.setdefault("extensions", {})
+    if not isinstance(extensions, dict):
+        raise RuntimeError("KTX2 runtime parity fixture texture extensions must be an object")
+    extensions[_KHR_TEXTURE_BASISU] = {"source": len(images) - 1}
+    used = document.setdefault("extensionsUsed", [])
+    if isinstance(used, list) and _KHR_TEXTURE_BASISU not in used:
+        used.append(_KHR_TEXTURE_BASISU)
+    metadata = document.setdefault("extras", {}).setdefault("fascat", {}).setdefault("metadata", {})
+    if isinstance(metadata, dict):
+        metadata["runtime_parity_fixture"] = "ktx2-basis-fallback"
+        metadata["runtime_parity_ktx2_fallback"] = "png_source"
+    asset_path.write_bytes(_pack_runtime_glb(document, binary))
+
+
+def _read_runtime_glb(asset_path: Path) -> tuple[dict[str, Any], bytes]:
+    data = asset_path.read_bytes()
+    if len(data) < 20:
+        raise RuntimeError("runtime parity GLB is too short")
+    magic, version, length = struct.unpack_from("<4sII", data, 0)
+    if magic != b"glTF" or version != 2 or length != len(data):
+        raise RuntimeError("runtime parity GLB header is invalid")
+    json_length, json_type = struct.unpack_from("<II", data, 12)
+    if json_type != _GLB_JSON_CHUNK:
+        raise RuntimeError("runtime parity GLB first chunk is not JSON")
+    json_start = 20
+    json_end = json_start + json_length
+    loaded = json.loads(data[json_start:json_end].decode("utf-8").rstrip(" \x00"))
+    if not isinstance(loaded, dict):
+        raise RuntimeError("runtime parity GLB JSON must be an object")
+
+    binary = b""
+    binary_header = json_end
+    if binary_header + 8 <= len(data):
+        binary_length, binary_type = struct.unpack_from("<II", data, binary_header)
+        if binary_type == _GLB_BIN_CHUNK:
+            binary_start = binary_header + 8
+            binary = data[binary_start : binary_start + binary_length]
+    return loaded, binary
+
+
+def _pack_runtime_glb(document: dict[str, Any], binary: bytes) -> bytes:
+    json_payload = json.dumps(document, separators=(",", ":"), sort_keys=False).encode("utf-8")
+    json_padding = (-len(json_payload)) % 4
+    json_chunk = json_payload + b" " * json_padding
+    binary_padding = (-len(binary)) % 4
+    binary_chunk = binary + b"\x00" * binary_padding
+    length = 12 + 8 + len(json_chunk)
+    if binary_chunk:
+        length += 8 + len(binary_chunk)
+    chunks = [
+        struct.pack("<4sII", b"glTF", 2, length),
+        struct.pack("<II", len(json_chunk), _GLB_JSON_CHUNK),
+        json_chunk,
+    ]
+    if binary_chunk:
+        chunks.extend((struct.pack("<II", len(binary_chunk), _GLB_BIN_CHUNK), binary_chunk))
+    return b"".join(chunks)
 
 
 def _pbr_material_grid_asset() -> Asset:

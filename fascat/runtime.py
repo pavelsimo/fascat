@@ -1005,7 +1005,7 @@ def _preflight_texture_decoded(preflight: _BrowserRenderPreflight) -> _BrowserRe
 def _preflight_texture_decode_failed(preflight: _BrowserRenderPreflight, exc: Exception) -> _BrowserRenderPreflight:
     limitations = _without_preview_limitations(preflight, "KTX2", "Basis", "KHR_texture_basisu") + (
         f"browser preview could not decode KHR_texture_basisu: {exc}",
-        "browser preview renders geometry without KTX2/Basis texture sampling",
+        "browser preview renders fallback texture sources when present; otherwise geometry without KTX2/Basis texture sampling",
     )
     return _BrowserRenderPreflight(
         required_extensions=preflight.required_extensions,

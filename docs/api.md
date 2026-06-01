@@ -1164,10 +1164,11 @@ counts, changed pixel ratio, and whether configured thresholds passed. The same
 thresholds can gate engine preview baselines through `fascat validate`, but the
 helper itself remains a general image-diff primitive. Use
 `write_runtime_parity_suite()` to write bundled GLB fixtures, software baseline
-PNGs, and a manifest for browser, Unity, and Unreal material/lighting preview
-comparisons. `capture_runtime_parity_suite()` runs selected browser or engine
-preview targets for that suite, writes `runtime-parity-captures.json`, and can
-promote rendered previews into `goldens/<target>/` for review.
+PNGs, and a manifest for browser, Unity, and Unreal material/lighting and
+compressed-texture preview comparisons. `capture_runtime_parity_suite()` runs
+selected browser or engine preview targets for that suite, writes
+`runtime-parity-captures.json`, and can promote rendered previews into
+`goldens/<target>/` for review.
 
 ## Validation
 
@@ -1251,14 +1252,16 @@ material base-color factors, quantized vertex attributes, meshopt exports that
 keep fallback buffer data, Draco geometry decoded through glTF Transform,
 meshopt bufferViews without fallback buffer data decoded through local
 `meshoptimizer`, KTX2/Basis textures decoded through optional `alktx2` or glTF
-Transform plus KTX-Software when available, and base-color texture sampling for
-supported image URI/data URI textures. The report lists decoded compressed payloads in
+Transform plus KTX-Software when available, optional KHR_texture_basisu textures
+with PNG fallbacks, and base-color texture sampling for supported image URI/data
+URI textures. The report lists decoded compressed payloads in
 `decoded_extensions`; if Draco or meshopt decode tooling is unavailable, the
 preview is reported as unsupported without writing a misleading screenshot. If
-KTX2/Basis texture decode tooling is unavailable, geometry can still render as
-`status="rendered_partial"` with `unsupported_extensions` and
-`preview_limitations` in the JSON report. Sparse accessors and full engine
-material/lighting parity remain outside the packaged browser preview.
+KTX2/Basis texture decode tooling is unavailable, fallback texture sources can
+still render as `status="rendered_partial"` with `unsupported_extensions` and
+`preview_limitations` in the JSON report; assets without fallbacks render
+geometry only. Sparse accessors and full engine material/lighting parity remain
+outside the packaged browser preview.
 
 `--runtime-browser` is available for glTF/GLB outputs. It launches a local
 Chromium-compatible browser when one is installed, loads the asset bytes in a
@@ -1298,9 +1301,10 @@ triangle geometry with material `baseColorFactor`, and reports
 be rasterized by that limited commandlet path, it falls back to a count-based
 placeholder PNG with `render_status="rendered_partial"` and a limitation
 message. That Unreal packaged preview is still not a full Unreal scene,
-texture, lighting, or material renderer. `fascat runtime-fixtures DIR` writes bundled PBR material,
-texture-map, and normal/lighting GLB fixtures with software baseline PNGs and a
-manifest containing browser, Unity, and Unreal preview commands. Add
+texture, lighting, or material renderer. `fascat runtime-fixtures DIR` writes
+bundled PBR material, texture-map, optional KTX2/Basis fallback, and
+normal/lighting GLB fixtures with software baseline PNGs and a manifest
+containing browser, Unity, and Unreal preview commands. Add
 `--capture browser`, `--capture unity`, or `--capture unreal` to run local
 preview captures for the suite and write `runtime-parity-captures.json`;
 `--promote-goldens` copies rendered captures into `goldens/<target>/`.
