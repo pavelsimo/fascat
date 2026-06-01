@@ -199,6 +199,46 @@ def test_step_text_pmi_extraction_reads_common_ap242_records(tmp_path: Path) -> 
     assert annotations[6].text == "datum A primary"
 
 
+def test_step_text_pmi_extraction_reads_named_geometric_tolerance_subtypes(tmp_path: Path) -> None:
+    source = tmp_path / "pmi.step"
+    tolerance_entities = (
+        "ANGULARITY_TOLERANCE",
+        "CIRCULAR_RUNOUT_TOLERANCE",
+        "COAXIALITY_TOLERANCE",
+        "CONCENTRICITY_TOLERANCE",
+        "CYLINDRICITY_TOLERANCE",
+        "FLATNESS_TOLERANCE",
+        "LINE_PROFILE_TOLERANCE",
+        "PARALLELISM_TOLERANCE",
+        "PERPENDICULARITY_TOLERANCE",
+        "POSITION_TOLERANCE",
+        "ROUNDNESS_TOLERANCE",
+        "STRAIGHTNESS_TOLERANCE",
+        "SURFACE_PROFILE_TOLERANCE",
+        "SYMMETRY_TOLERANCE",
+        "TOTAL_RUNOUT_TOLERANCE",
+    )
+    records = "".join(
+        f"#{30 + index}={entity}('{entity.lower().replace('_', ' ')}',0.{index + 1},#20);\n"
+        for index, entity in enumerate(tolerance_entities)
+    )
+    source.write_text(
+        f"ISO-10303-21;\nDATA;\n#20=PRODUCT_DEFINITION_SHAPE('bracket','',#19);\n{records}ENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    annotations = _extract_step_pmi_annotations(source, StepReadOptions(pmi=True))
+    graph = _extract_step_pmi_semantic_graph(source, StepReadOptions(pmi=True))
+
+    assert len(annotations) == len(tolerance_entities)
+    assert {annotation.kind for annotation in annotations} == {"tolerance"}
+    assert [annotation.source["step_entity"] for annotation in annotations] == list(tolerance_entities)
+    assert annotations[5].text == "flatness tolerance"
+    assert annotations[5].tolerance is not None
+    assert annotations[5].tolerance.upper == 0.6
+    assert graph.summary["pmi_nodes"] == len(tolerance_entities)
+
+
 def test_step_pmi_semantic_graph_records_referenced_entities(tmp_path: Path) -> None:
     source = tmp_path / "pmi-graph.step"
     source.write_text(
