@@ -1705,6 +1705,183 @@ def test_step_design_variant_selection_evaluates_numeric_interval_expression(tmp
 
 
 @pytest.mark.parametrize(
+    (
+        "expression_record",
+        "literal_record",
+        "threshold_record",
+        "matching_selection",
+        "blocked_selection",
+        "expected_kind",
+        "expected_operator",
+    ),
+    (
+        (
+            "#20=PLUS_EXPRESSION((#10,#11));\n",
+            "#11=REAL_LITERAL(5.0);\n",
+            "#12=REAL_LITERAL(20.0);\n",
+            "load rating=15",
+            "load rating=10",
+            "plus_expression",
+            "numeric_add",
+        ),
+        (
+            "#20=MINUS_EXPRESSION(#10,#11);\n",
+            "#11=REAL_LITERAL(5.0);\n",
+            "#12=REAL_LITERAL(10.0);\n",
+            "load rating=15",
+            "load rating=12",
+            "minus_expression",
+            "numeric_subtract",
+        ),
+        (
+            "#20=MULT_EXPRESSION((#10,#11));\n",
+            "#11=REAL_LITERAL(2.0);\n",
+            "#12=REAL_LITERAL(30.0);\n",
+            "load rating=15",
+            "load rating=10",
+            "mult_expression",
+            "numeric_multiply",
+        ),
+        (
+            "#20=DIV_EXPRESSION(#10,#11);\n",
+            "#11=REAL_LITERAL(3.0);\n",
+            "#12=REAL_LITERAL(5.0);\n",
+            "load rating=15",
+            "load rating=12",
+            "div_expression",
+            "numeric_divide",
+        ),
+        (
+            "#20=SLASH_EXPRESSION(#10,#11);\n",
+            "#11=REAL_LITERAL(3.0);\n",
+            "#12=REAL_LITERAL(5.0);\n",
+            "load rating=15",
+            "load rating=12",
+            "slash_expression",
+            "numeric_divide",
+        ),
+        (
+            "#20=MOD_EXPRESSION(#10,#11);\n",
+            "#11=REAL_LITERAL(4.0);\n",
+            "#12=REAL_LITERAL(3.0);\n",
+            "load rating=15",
+            "load rating=12",
+            "mod_expression",
+            "numeric_mod",
+        ),
+        (
+            "#20=POWER_EXPRESSION(#10,#11);\n",
+            "#11=REAL_LITERAL(2.0);\n",
+            "#12=REAL_LITERAL(16.0);\n",
+            "load rating=4",
+            "load rating=3",
+            "power_expression",
+            "numeric_power",
+        ),
+    ),
+)
+def test_step_design_variant_selection_evaluates_numeric_arithmetic_expression(
+    tmp_path: Path,
+    expression_record: str,
+    literal_record: str,
+    threshold_record: str,
+    matching_selection: str,
+    blocked_selection: str,
+    expected_kind: str,
+    expected_operator: str,
+) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=MATHS_REAL_VARIABLE(#1,'load rating');\n"
+        f"{literal_record}"
+        f"{threshold_record}"
+        "#13=PRODUCT_CONCEPT_FEATURE('calculated package','select calculated panel',#1);\n"
+        f"{expression_record}"
+        "#21=COMPARISON_GREATER_EQUAL(#20,#12);\n"
+        "#22=CONDITIONAL_CONFIGURATION('calculated load condition',#21,#13);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="calculated-node", name="Calculated Panel", part_id="calculated"),
+            fc.Node(id="baseline-node", name="Baseline Panel", part_id="baseline"),
+        ],
+    )
+    parts = {
+        "calculated": fc.Part(
+            id="calculated",
+            name="Calculated Panel",
+            material_ids=["calculated-mat"],
+            metadata={"source_name": "calculated panel"},
+        ),
+        "baseline": fc.Part(
+            id="baseline",
+            name="Baseline Panel",
+            material_ids=["baseline-mat"],
+            metadata={"source_name": "baseline panel"},
+        ),
+    }
+    materials = {
+        "calculated-mat": fc.Material(id="calculated-mat", name="Calculated Paint", base_color=(0.0, 0.0, 0.0, 1.0)),
+        "baseline-mat": fc.Material(id="baseline-mat", name="Baseline Paint", base_color=(0.7, 0.7, 0.7, 1.0)),
+    }
+
+    matching_options = StepReadOptions(design_variant_selection=(matching_selection,))
+    matching_extraction = _extract_step_design_variants(source, matching_options)
+    matching_root = root.copy()
+    matching_parts = {key: part.copy() for key, part in parts.items()}
+    matching_materials = dict(materials)
+
+    matching_result = _apply_step_design_variant_selection(
+        matching_root,
+        matching_parts,
+        matching_materials,
+        matching_extraction,
+        matching_options,
+    )
+
+    assert matching_extraction.records[4].kind == expected_kind
+    assert matching_extraction.records[4].condition_operator == expected_operator
+    assert matching_extraction.records[5].condition_operator == "greater_equal"
+    assert matching_result.status == "applied"
+    assert matching_result.matched_records == ("step_variant_21", "step_variant_22")
+    assert [child.name for child in matching_root.children] == ["Calculated Panel"]
+    assert set(matching_parts) == {"calculated"}
+
+    blocked_options = StepReadOptions(design_variant_selection=(blocked_selection,))
+    blocked_selection_result = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, blocked_options),
+        blocked_options,
+    )
+
+    assert blocked_selection_result.status == "unmatched_geometry"
+    assert blocked_selection_result.matched_records == ()
+    assert "condition expression was not satisfied" in blocked_selection_result.warnings[0]
+
+    target_options = StepReadOptions(design_variant_selection=("calculated package",))
+    target_selection = _apply_step_design_variant_selection(
+        root.copy(),
+        {key: part.copy() for key, part in parts.items()},
+        dict(materials),
+        _extract_step_design_variants(source, target_options),
+        target_options,
+    )
+
+    assert target_selection.status == "unmatched_geometry"
+    assert target_selection.matched_records == ()
+    assert "condition expression was not satisfied" in target_selection.warnings[0]
+
+
+@pytest.mark.parametrize(
     ("variable_record", "expected_kind"),
     (
         ("#10=STRING_VARIABLE('finish');\n", "string_variable"),

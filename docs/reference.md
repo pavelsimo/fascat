@@ -84,20 +84,24 @@ STEP design variant configuration/effectivity metadata when
 geometry by selected variant labels, STEP record ids, exact effectivity values,
 or values inside supported serial/date/time-interval effectivity ranges when
 those records resolve to labels that match imported node, part, or source-name
-metadata. Simple AP242 boolean condition records such as `AND_EXPRESSION`,
+metadata. Simple AP242 condition/expression records such as `AND_EXPRESSION`,
 `OR_EXPRESSION`, `XOR_EXPRESSION`, `NOT_EXPRESSION`, `EQUALS_EXPRESSION`,
 `COMPARISON_EQUAL`, `COMPARISON_NOT_EQUAL`, `COMPARISON_GREATER`,
 `COMPARISON_GREATER_EQUAL`, `COMPARISON_LESS`, `COMPARISON_LESS_EQUAL`,
-`INTERVAL_EXPRESSION`, `LIKE_EXPRESSION`, `BOOLEAN_LITERAL`,
-`BOOLEAN_REPRESENTATION_ITEM`, `BOOLEAN_VARIABLE`, and
-`MATHS_BOOLEAN_VARIABLE` are reported with condition operators, and boolean
-literals include parsed true/false values. Numeric literals include parsed
-numeric values; string literals include parsed text values. Supported
-conditions gate their operand labels before those labels can drive geometry
-pruning; equality/not-equality records compare selected boolean operand states,
-named maths numeric variables evaluate from selected `label=value` assignments
-for numeric comparisons and intervals, string variables evaluate from selected
-`label=value` assignments for simple `LIKE_EXPRESSION` matching, boolean variables act as named operands
+`INTERVAL_EXPRESSION`, `LIKE_EXPRESSION`, simple numeric arithmetic expressions
+such as `PLUS_EXPRESSION`, `MINUS_EXPRESSION`, `MULT_EXPRESSION`,
+`DIV_EXPRESSION`, `SLASH_EXPRESSION`, `MOD_EXPRESSION`, and
+`POWER_EXPRESSION`, `BOOLEAN_LITERAL`, `BOOLEAN_REPRESENTATION_ITEM`,
+`BOOLEAN_VARIABLE`, and `MATHS_BOOLEAN_VARIABLE` are reported with condition
+operators, and boolean literals include parsed true/false values. Numeric
+literals include parsed numeric values; string literals include parsed text
+values. Supported conditions gate their operand labels before those labels can
+drive geometry pruning; equality/not-equality records compare selected boolean
+operand states, named maths numeric variables evaluate from selected
+`label=value` assignments for numeric comparisons and intervals, simple numeric
+arithmetic expressions can feed those comparisons and intervals, string
+variables evaluate from selected `label=value` assignments for simple
+`LIKE_EXPRESSION` matching, boolean variables act as named operands
 selected by label or STEP record id, and conditional/effectivity-assignment
 wrappers, including `CONDITIONAL_CONCEPT_FEATURE`,
 `CONDITIONAL_EFFECTIVITY`, `CONFIGURED_EFFECTIVITY_ASSIGNMENT`, and
@@ -198,7 +202,7 @@ the native source shape retained for tessellation and healing.
 | `--metadata` | `full` | Metadata import/export mode: `none`, `summary`, or `full` |
 | `--pmi` | `metadata` | PMI import/export mode: `none`, `metadata`, or `metadata-and-visuals` |
 | `--design-variants / --no-design-variants` | `false` | Scan STEP design variant records into metadata and import reports |
-| `--design-variant` | unset | Select a STEP design variant label, effectivity value, numeric assignment, record id, or referenced label and filter imported geometry; may be passed more than once |
+| `--design-variant` | unset | Select a STEP design variant label, effectivity value, numeric/string assignment, record id, or referenced label and filter imported geometry; may be passed more than once |
 | `--import-existing-meshes / --no-import-existing-meshes` | `true` | Prefer existing STEP tessellation payloads when the importer exposes them |
 | `--multi-file-import / --single-file-import` | `false` | Resolve quoted external STEP references from a master STEP file |
 | `--material-library` | unset | Vendor material-library JSON/MTL/ZIP file or folder to apply during import; may be passed more than once |
@@ -344,7 +348,7 @@ Units and behavior notes:
 | `--metadata` | `summary` | Metadata output mode: `none`, `summary`, or `full` |
 | `--pmi` | `summary` | PMI output mode: `none`, `summary`, `full`, `metadata`, or `metadata-and-visuals` |
 | `--design-variants / --no-design-variants` | `false` | Scan STEP design variant records into metadata and import reports |
-| `--design-variant` | unset | Select a STEP design variant label, effectivity value, numeric assignment, record id, or referenced label and filter imported geometry; may be passed more than once |
+| `--design-variant` | unset | Select a STEP design variant label, effectivity value, numeric/string assignment, record id, or referenced label and filter imported geometry; may be passed more than once |
 | `--import-existing-meshes / --no-import-existing-meshes` | `true` | Prefer existing STEP tessellation payloads when the importer exposes them |
 | `--multi-file-import / --single-file-import` | `false` | Resolve quoted external STEP references from a master STEP file |
 | `--material-library` | unset | Vendor material-library JSON/MTL/ZIP file or folder to apply during import; may be passed more than once |
@@ -473,7 +477,7 @@ fallbacks.
 
 | Capability | Fascat status | Report or diagnostic | Next step |
 |------------|---------------|----------------------|-----------|
-| CAD import, hierarchy, names, transforms, colors, metadata | Implemented for STEP and IGES; native BREP imports as a single source-shape part; explicit multi-root STEP path lists and master STEP quoted external-reference graphs are imported with deterministic member namespaces and repeated external-file occurrences | `import` report stats, cleanup counts, STEP import decisions, pipeline import options, per-part loaded-representation reports, construction-curve delete/preserve/tube policy including free construction edges split from mixed face+curve shapes, space normalization transforms, source texture resolved/missing counts, CAD material PBR mapping metadata, AP242 PMI warnings plus textual semantic graph records for dimension/location/tolerance/datum/note families, deterministic glTF/USD PMI marker and simple vector text geometry when `metadata_and_visuals` is requested, design-variant metadata counts/records, serial/lot/date effectivity values/ranges, simple boolean/numeric/string condition operators and literal values, effectivity relationship links, product-definition/configuration effectivity usage target labels, applied effectivity/ineffectivity-assignment target labels, gated effectivity context-assignment target labels, resolved-reference labels, and name/reference-based geometry-selection counts, `read_step_many` member records/warnings, and `external_reference_graph` unique-source/resolved-occurrence records for master STEP assemblies | Add full AP242 conditional/effectivity geometry evaluation, full AP242 PMI semantic coverage and graphical presentation reconstruction, richer vendor-specific external-reference placement transforms, and closed vendor material-library containers |
+| CAD import, hierarchy, names, transforms, colors, metadata | Implemented for STEP and IGES; native BREP imports as a single source-shape part; explicit multi-root STEP path lists and master STEP quoted external-reference graphs are imported with deterministic member namespaces and repeated external-file occurrences | `import` report stats, cleanup counts, STEP import decisions, pipeline import options, per-part loaded-representation reports, construction-curve delete/preserve/tube policy including free construction edges split from mixed face+curve shapes, space normalization transforms, source texture resolved/missing counts, CAD material PBR mapping metadata, AP242 PMI warnings plus textual semantic graph records for dimension/location/tolerance/datum/note families, deterministic glTF/USD PMI marker and simple vector text geometry when `metadata_and_visuals` is requested, design-variant metadata counts/records, serial/lot/date effectivity values/ranges, simple boolean/numeric/string condition operators, numeric arithmetic expression operands, and literal values, effectivity relationship links, product-definition/configuration effectivity usage target labels, applied effectivity/ineffectivity-assignment target labels, gated effectivity context-assignment target labels, resolved-reference labels, and name/reference-based geometry-selection counts, `read_step_many` member records/warnings, and `external_reference_graph` unique-source/resolved-occurrence records for master STEP assemblies | Add full AP242 conditional/effectivity geometry evaluation, full AP242 PMI semantic coverage and graphical presentation reconstruction, richer vendor-specific external-reference placement transforms, and closed vendor material-library containers |
 | BREP healing | Partial | `heal_brep`; records open shells, free/unstitched edges, small edges, sliver counts, open-shell grouping counts/status, same-domain face/edge reductions, overlap/z-fighting face-pair counts, resolved overlap counts, OCCT same-domain cleanup status, and OCCT overlap cleanup status; disconnected open shell groups are processed independently before cleanup; sliver removal warns that the backend leaves shapes unchanged | Implement sliver-face removal and deeper face/wire repair |
 | Tessellation | Implemented | `tessellate` report options, unit-aware tolerance policy with source/local/target unit conversions and normalized-tolerance warnings, explicit sag-ratio, existing mesh reuse/retessellation controls, tessellation-time source BREP cleanup even when imported meshes are reused, size-adaptive `part_settings` helpers, material/metadata/curved-BREP-driven `detail_adaptive` per-part criteria, conditional edge-control cleanup pass metadata, max-polygon-length diagnostics, free-edge diagnostics, retained-patch/submesh risk warnings, quality advisories for coarse absolute sag and aggressive polygon-length settings, attribute-provenance metadata, and quality metadata | Add intrinsic/conformal CAD UV solving and deeper curvature-targeted profiles |
 | Mesh repair | Implemented for core cleanup | `repair` report step; mesh metadata always records face-orientation strategy/status and normal-orientation strategy/status, while `RepairOptions.quality_report=True` adds before/after duplicate polygon, degenerate triangle, boundary edge, boundary gap, non-manifold edge, T-junction, flipped closed-component, and non-orientable shared-edge counts; standalone `merge_vertices` and `delete_degenerate_polygons` are available through Python, CLI flags, and TOML pipelines with before/after reports; vertex-merge reports use Euclidean tolerance matching across spatial bucket boundaries and always include removed counts and tolerance-risk warnings, while `MergeVerticesOptions.quality_report=True` adds same-position candidates, exact-duplicate, boundary, non-manifold, hard-edge, T-junction, boundary-gap, and near-duplicate candidate counts plus skipped normal, tangent, UV, and material-boundary protection reasons; degenerate-polygon reports include duplicate-vertex, collapsed-edge, near-flat, and exact duplicate-polygon removal reasons | Add T-junction sewing, boundary-gap stitching, non-manifold cracking, topology-only merge connectivity, tolerance-overlap cleanup, and backend implementation for viewer/open-shell orientation strategies |

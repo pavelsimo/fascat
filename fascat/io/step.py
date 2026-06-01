@@ -133,6 +133,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "CONFIGURATIONEFFECTIVITY": "configuration_effectivity",
     "DATED_EFFECTIVITY": "dated_effectivity",
     "DATEDEFFECTIVITY": "dated_effectivity",
+    "DIV_EXPRESSION": "div_expression",
+    "DIVEXPRESSION": "div_expression",
     "EFFECTIVITY": "effectivity",
     "EFFECTIVITYASSIGNMENT": "effectivity_assignment",
     "EFFECTIVITY_ASSIGNMENT": "effectivity_assignment",
@@ -153,6 +155,12 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "LOT_EFFECTIVITY": "lot_effectivity",
     "LITERAL_NUMBER": "literal_number",
     "LITERALNUMBER": "literal_number",
+    "MINUS_EXPRESSION": "minus_expression",
+    "MINUSEXPRESSION": "minus_expression",
+    "MOD_EXPRESSION": "mod_expression",
+    "MODEXPRESSION": "mod_expression",
+    "MULT_EXPRESSION": "mult_expression",
+    "MULTEXPRESSION": "mult_expression",
     "MATHS_BOOLEAN_VARIABLE": "maths_boolean_variable",
     "MATHSBOOLEANVARIABLE": "maths_boolean_variable",
     "MATHS_INTEGER_VARIABLE": "maths_integer_variable",
@@ -163,6 +171,10 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "MATHSSTRINGVARIABLE": "maths_string_variable",
     "NUMERIC_VARIABLE": "numeric_variable",
     "NUMERICVARIABLE": "numeric_variable",
+    "PLUS_EXPRESSION": "plus_expression",
+    "PLUSEXPRESSION": "plus_expression",
+    "POWER_EXPRESSION": "power_expression",
+    "POWEREXPRESSION": "power_expression",
     "PRODUCT_CONCEPT": "product_concept",
     "PRODUCT_CONCEPT_CONTEXT": "product_concept_context",
     "PRODUCT_CONCEPT_FEATURE": "product_concept_feature",
@@ -178,6 +190,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "REAL_REPRESENTATION_ITEM": "real_representation_item",
     "REALREPRESENTATIONITEM": "real_representation_item",
     "SERIAL_NUMBERED_EFFECTIVITY": "serial_numbered_effectivity",
+    "SLASH_EXPRESSION": "slash_expression",
+    "SLASHEXPRESSION": "slash_expression",
     "STRING_LITERAL": "string_literal",
     "STRINGLITERAL": "string_literal",
     "STRING_VARIABLE": "string_variable",
@@ -203,6 +217,14 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "XOR_EXPRESSION": "xor_expression",
     "XOREXPRESSION": "xor_expression",
     "XORCONDITION": "xor_condition",
+}
+_STEP_NUMERIC_ARITHMETIC_OPERATORS = {
+    "numeric_add",
+    "numeric_divide",
+    "numeric_mod",
+    "numeric_multiply",
+    "numeric_power",
+    "numeric_subtract",
 }
 _STEP_UNIT_RE = re.compile(r"\b(mm|millimet(?:er|re)|cm|centimet(?:er|re)|m|met(?:er|re)|in|inch|deg|degree)\b", re.I)
 _GENERIC_MATERIAL_TOKENS = {"cad", "color", "material", "mat", "texture", "map", "source"}
@@ -1953,6 +1975,18 @@ def _step_condition_operator(entity: str) -> str | None:
         return "interval"
     if normalized == "LIKEEXPRESSION":
         return "like"
+    if normalized == "PLUSEXPRESSION":
+        return "numeric_add"
+    if normalized == "MINUSEXPRESSION":
+        return "numeric_subtract"
+    if normalized == "MULTEXPRESSION":
+        return "numeric_multiply"
+    if normalized in {"DIVEXPRESSION", "SLASHEXPRESSION"}:
+        return "numeric_divide"
+    if normalized == "MODEXPRESSION":
+        return "numeric_mod"
+    if normalized == "POWEREXPRESSION":
+        return "numeric_power"
     if normalized in {"BOOLEANLITERAL", "BOOLEANREPRESENTATIONITEM"}:
         return "literal"
     if normalized in {
@@ -2190,7 +2224,13 @@ def _design_variant_selector_terms(
         condition_applies = (
             record.condition_operator is not None
             and record.condition_operator
-            not in {"numeric_literal", "numeric_variable", "string_literal", "string_variable"}
+            not in {
+                "numeric_literal",
+                "numeric_variable",
+                "string_literal",
+                "string_variable",
+                *_STEP_NUMERIC_ARITHMETIC_OPERATORS,
+            }
             and condition_match.matched
             and condition_match.positive
         )
@@ -2206,6 +2246,7 @@ def _design_variant_selector_terms(
                 "numeric_variable",
                 "string_literal",
                 "string_variable",
+                *_STEP_NUMERIC_ARITHMETIC_OPERATORS,
             } and _design_variant_record_self_matches_requested(record, normalized_requested)
             condition_blocked = condition_blocked or (
                 not direct_id_match
@@ -2276,6 +2317,7 @@ def _conditional_dependency_references(
         "not_equals",
         "interval",
         "like",
+        *_STEP_NUMERIC_ARITHMETIC_OPERATORS,
         "conditional",
         "effectivity_assignment",
         "effectivity_context_assignment",
@@ -2335,6 +2377,16 @@ def _condition_record_matches_requested(
     if operator == "string_variable":
         matched = _design_variant_record_requested_text(record, requested, normalized_requested) is not None
         return _StepConditionMatch(matched=matched, positive=matched)
+    if operator in _STEP_NUMERIC_ARITHMETIC_OPERATORS:
+        value, positive = _condition_record_numeric_value(
+            record,
+            records_by_reference,
+            requested,
+            normalized_requested,
+            visited=set(),
+        )
+        matched = value is not None
+        return _StepConditionMatch(matched=matched, positive=matched and positive)
     if operator == "effectivity_usage":
         matched = _effectivity_condition_record_matches_requested(
             record,
@@ -2542,6 +2594,22 @@ def _condition_record_numeric_value(
     if record.condition_operator == "numeric_variable":
         value = _design_variant_record_requested_number(record, requested, normalized_requested)
         return value, value is not None
+    if record.condition_operator in _STEP_NUMERIC_ARITHMETIC_OPERATORS:
+        numeric_children = [
+            _condition_record_numeric_value(
+                child_record,
+                records_by_reference,
+                requested,
+                normalized_requested,
+                visited=set(visited),
+            )
+            for reference in record.references
+            if (child_record := records_by_reference.get(reference)) is not None
+        ]
+        values = [item[0] for item in numeric_children if item[0] is not None]
+        if len(values) != len(numeric_children) or not values:
+            return None, False
+        return _numeric_arithmetic_value(record.condition_operator, values), any(item[1] for item in numeric_children)
     return None, False
 
 
@@ -2635,6 +2703,43 @@ def _numeric_comparison_matches(operator: str, values: list[float]) -> bool:
 def _numeric_interval_matches(values: list[float]) -> bool:
     low, item, high = values[:3]
     return low <= item <= high
+
+
+def _numeric_arithmetic_value(operator: str, values: list[float]) -> float | None:
+    if operator == "numeric_add":
+        return sum(values)
+    if operator == "numeric_subtract" and len(values) >= 2:
+        result = values[0]
+        for value in values[1:]:
+            result -= value
+        return result
+    if operator == "numeric_multiply":
+        result = 1.0
+        for value in values:
+            result *= value
+        return result
+    if operator == "numeric_divide" and len(values) >= 2:
+        result = values[0]
+        for value in values[1:]:
+            if value == 0:
+                return None
+            result /= value
+        return result
+    if operator == "numeric_mod" and len(values) >= 2:
+        result = values[0]
+        for value in values[1:]:
+            if value == 0:
+                return None
+            result %= value
+        return result
+    if operator == "numeric_power" and len(values) == 2:
+        try:
+            result = values[0] ** values[1]
+        except (OverflowError, TypeError, ValueError):
+            return None
+        if isinstance(result, (int, float)) and np.isfinite(result):
+            return float(result)
+    return None
 
 
 def _string_like_matches(value: str, pattern: str) -> bool:
