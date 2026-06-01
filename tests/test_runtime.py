@@ -10,6 +10,8 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 import numpy as np
+import pytest
+import tomli
 from PIL import Image
 
 from fascat.asset import Asset, Node, Part
@@ -26,6 +28,7 @@ from fascat.runtime import (
     measure_engine_runtime,
     write_browser_render_preview,
 )
+from fascat.runtime_fixtures import write_runtime_parity_suite
 
 
 def test_browser_runtime_reports_unavailable_when_browser_is_missing(
@@ -528,6 +531,75 @@ def test_browser_render_preview_decodes_ktx2_textures_with_optional_python_decod
     assert report.textured_primitives == 1
     assert report.sampled_textures == 1
     assert Image.open(preview).getpixel((0, 0)) == (100, 110, 120, 255)
+
+
+def test_browser_render_preview_decodes_bundled_ktx2_with_default_python_decoder(
+    monkeypatch,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("alktx2")
+    suite = write_runtime_parity_suite(tmp_path / "runtime-parity")
+    fixture = next(item for item in suite.fixtures if item.name == "ktx2-basis-fallback")
+    preview = tmp_path / "browser-preview.png"
+    screenshot = BytesIO()
+    Image.new("RGBA", (2, 2), (115, 125, 135, 255)).save(screenshot, format="PNG")
+    screenshot_data = "data:image/png;base64," + base64.b64encode(screenshot.getvalue()).decode("ascii")
+
+    def fail_ktxdecompress(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("external KTX-Software fallback should not run when the default Python decoder is present")
+
+    def fake_run(command: list[str], *_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert "--dump-dom" in command
+        harness_path = Path(urlparse(command[-1]).path)
+        harness = harness_path.read_text(encoding="utf-8")
+        match = re.search(r"const ASSET_URL = (?P<value>.*?);", harness)
+        assert match is not None
+        decoded_url = json.loads(match.group("value"))
+        decoded_path = Path(unquote(urlparse(decoded_url).path))
+        assert decoded_path.name == "ktx2-decoded.gltf"
+        decoded_document = json.loads(decoded_path.read_text(encoding="utf-8"))
+        assert "KHR_texture_basisu" not in decoded_document.get("extensionsUsed", [])
+        assert "KHR_texture_basisu" not in decoded_document.get("extensionsRequired", [])
+        texture_source = decoded_document["textures"][0]["source"]
+        assert decoded_document["images"][texture_source]["mimeType"] == "image/png"
+        assert decoded_document["images"][texture_source]["uri"].startswith("data:image/png;base64,")
+        assert validate_gltf(decoded_path)["triangles"] == fixture.triangles
+        stdout = (
+            '<html><body><pre id="result">'
+            '{"status":"rendered","meshes":1,"triangles":8,'
+            '"textured_primitives":1,"sampled_textures":1,'
+            f'"screenshot_data":"{screenshot_data}"'
+            "}</pre></body></html>"
+        )
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr("fascat.runtime._run_gltf_transform_ktxdecompress", fail_ktxdecompress)
+    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+
+    report = write_browser_render_preview(
+        fixture.asset_path,
+        preview,
+        RuntimeBrowserRenderOptions(browser="fake-browser", timeout_seconds=3.0),
+    )
+
+    assert report.status == "rendered"
+    assert report.decoded_extensions == ("KHR_texture_basisu",)
+    assert report.unsupported_extensions == ()
+    assert report.preview_limitations == ()
+    assert report.textured_primitives == 1
+    assert report.sampled_textures == 1
+    assert Image.open(preview).getpixel((0, 0)) == (115, 125, 135, 255)
+
+
+def test_supported_platforms_install_ktx2_python_decoder_by_default() -> None:
+    metadata = tomli.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    dependencies = metadata["project"]["dependencies"]
+    default_ktx2 = next(item for item in dependencies if item.startswith("alktx2"))
+
+    assert "python_version >= '3.11'" in default_ktx2
+    assert "sys_platform == 'linux'" in default_ktx2
+    assert "sys_platform == 'win32'" in default_ktx2
+    assert "platform_machine" in default_ktx2
 
 
 def test_browser_render_preview_harness_samples_base_color_textures(tmp_path: Path) -> None:

@@ -430,6 +430,7 @@ wheels = [
 name = "fascat"
 source = { editable = "." }
 dependencies = [
+    { name = "alktx2", marker = "(python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'linux') or (python_full_version >= '3.11' and platform_machine == 'AMD64' and sys_platform == 'win32') or (python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'win32')" },
     { name = "cadquery-ocp" },
     { name = "fast-simplification" },
     { name = "meshoptimizer" },
@@ -446,7 +447,7 @@ dependencies = [
 
 [package.optional-dependencies]
 ktx2 = [
-    { name = "alktx2", marker = "python_full_version >= '3.11'" },
+    { name = "alktx2", marker = "(python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'linux') or (python_full_version >= '3.11' and platform_machine == 'AMD64' and sys_platform == 'win32') or (python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'win32')" },
 ]
 uv = [
     { name = "xatlas" },
@@ -462,7 +463,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "alktx2", marker = "python_full_version >= '3.11' and extra == 'ktx2'", specifier = ">=0.1.6" },
+    { name = "alktx2", marker = "(python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'linux') or (python_full_version >= '3.11' and platform_machine == 'AMD64' and sys_platform == 'win32') or (python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'win32')", specifier = ">=0.1.6" },
+    { name = "alktx2", marker = "(python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'ktx2') or (python_full_version >= '3.11' and platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'ktx2') or (python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'win32' and extra == 'ktx2')", specifier = ">=0.1.6" },
     { name = "cadquery-ocp", specifier = ">=7.7" },
     { name = "fast-simplification", specifier = ">=0.1" },
     { name = "meshoptimizer", specifier = ">=0.2.30a0,<0.3" },

@@ -35,11 +35,11 @@ _KHR_TEXTURE_BASISU = "KHR_texture_basisu"
 _GLB_JSON_CHUNK = 0x4E4F534A
 _GLB_BIN_CHUNK = 0x004E4942
 _KTX2_BASISU_BASE_COLOR = (
-    "q0tUWCAyMLsNChoKAAAAAAEAAAAEAAAABAAAAAAAAAAAAAAAAQAAAAMAAAACAAAAmAAAACwAAADEAAAAJAAAAAAAAAAAAAAA"
-    "AAAAAAAAAAAAaAQAAAAAAABkAAAAAAAAAEAAAAAAAAAABAQAAAAAAABkAAAAAAAAAEAAAAAAAAADoAAAAAAAAABkAAAAAAAAA"
-    "EAAAAAAAAAAsAAAAAAAAAAIAKACmAQIAAwMAAAAAAAAAAAAAAAB/AAAAAAAAAAAA/////x8AAABLVFh3cml0ZXIAQmFzaXMg"
-    "VW5pdmVyc2FsIDEuNTAAACi1L/0gEIEAAHdXM/I/ulMCAAAAAAAAAAAotS/9IBCBAADTOOCE5rSrUUnv2/5+fn4AKLUv/SAQ"
-    "gQAAk1jUrpsDQHGWBRX39Xh4AA=="
+    "q0tUWCAyMLsNChoKAAAAAAEAAAAEAAAABAAAAAAAAAAAAAAAAQAAAAEAAAABAAAAaAAAACwAAACUAAAAJAAAALgAAAAAAAAA"
+    "gQAAAAAAAAA5AQAAAAAAAAEAAAAAAAAAAAAAAAAAAAAsAAAAAAAAAAIAKACjAQIAAwMAAAgAAAAAAAAAAAA/AAAAAAAAAAAA/"
+    "////x8AAABLVFh3cml0ZXIAQmFzaXMgVW5pdmVyc2FsIDIuMTAAAAEAAQApAAAABQAAACsAAAAAAAAAAAAAAAAAAAABAAAAA"
+    "AAAAAAAAAABwAQAAAAAAACiA5gIAAAAAABAhAgAJgAAAAAAABAEwAwAAAAAAAASICwoeH0FAMFEAAAAAAAA8l8tAJgAAAAAA"
+    "ABACAATAAIAAAAAiAHABAAAAAAAAAIIAAA="
 )
 
 
@@ -441,9 +441,7 @@ def _runtime_parity_specs() -> tuple[_FixtureSpec, ...]:
         ),
         _FixtureSpec(
             name="ktx2-basis-fallback",
-            purpose=(
-                "exercise optional KHR_texture_basisu base-color texture decode with a PNG fallback for default previews"
-            ),
+            purpose=("exercise KHR_texture_basisu base-color texture decode with a PNG fallback for default previews"),
             checks=("base_color_texture", "ktx2_basisu_texture", "png_texture_fallback", "decode_status_reporting"),
             build=_texture_map_grid_asset,
             postprocess=_add_ktx2_basisu_fallback,

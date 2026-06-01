@@ -22,16 +22,18 @@ pipx install fascat
 pip install fascat
 ```
 
-## Optional KTX2 Preview Decode
+## KTX2 Preview Decode
 
 ```bash
 pip install 'fascat[ktx2]'
 ```
 
-The `ktx2` extra installs the optional Python KTX2 decoder used by browser
-preview validation when `KHR_texture_basisu` textures are present. It is
-available on Python 3.11 and newer; without it, Fascat falls back to glTF
-Transform plus KTX-Software when those external tools are installed.
+Default installs include the Python KTX2 decoder used by browser preview
+validation when `KHR_texture_basisu` textures are present on supported Python
+3.11+ Linux/Windows x86_64 environments. The `ktx2` extra is retained for
+explicit installs in compatible environments. On unsupported platforms, Fascat
+falls back to glTF Transform plus KTX-Software when those external tools are
+installed.
 
 ## PyPI
 

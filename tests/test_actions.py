@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from importlib.util import find_spec
 
 import numpy as np
 import pytest
@@ -315,7 +316,12 @@ def test_bake_materials_merges_selected_material_slots() -> None:
     assert baked.metadata["baked_image_count"] == "1"
     assert baked.report.steps[-1].before["draw_calls"] == 2
     assert baked.report.steps[-1].after["draw_calls"] == 1
-    assert baked.report.steps[-1].warnings == []
+    if find_spec("xatlas") is None:
+        assert baked.report.steps[-1].warnings == [
+            "part panel could not use xatlas for bake UVs; falling back to AABB projection"
+        ]
+    else:
+        assert baked.report.steps[-1].warnings == []
 
 
 def test_decimate_uses_selection_budget() -> None:

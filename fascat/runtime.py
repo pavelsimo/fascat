@@ -1088,7 +1088,7 @@ def _write_python_ktx2_decoded_preview_asset(asset_path: Path, output_path: Path
     try:
         alktx2 = cast(Any, import_module("alktx2"))
     except ImportError as exc:
-        raise RuntimeError("optional alktx2 KTX2 decoder is not installed") from exc
+        raise RuntimeError("default alktx2 KTX2 decoder is not installed for this environment") from exc
 
     source_document, buffers = _read_gltf_json_and_buffers_for_preview(asset_path)
     document = deepcopy(source_document)
@@ -1124,7 +1124,7 @@ def _write_python_ktx2_decoded_preview_asset(asset_path: Path, output_path: Path
     output_path.write_text(json.dumps(document), encoding="utf-8")
     decoded_document = _read_gltf_json_document(output_path)
     if _document_uses_basis_textures(decoded_document):
-        raise RuntimeError("optional alktx2 KTX2 decode preserved KHR_texture_basisu")
+        raise RuntimeError("alktx2 KTX2 decode preserved KHR_texture_basisu")
     return output_path
 
 
