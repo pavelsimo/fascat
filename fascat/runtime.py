@@ -212,6 +212,7 @@ class _BrowserRenderPreflight:
     unsupported_extensions: tuple[str, ...] = ()
     decoded_extensions: tuple[str, ...] = ()
     preview_limitations: tuple[str, ...] = ()
+    draco_decode_required: bool = False
     meshopt_decode_required: bool = False
     fatal: bool = False
 
@@ -316,9 +317,18 @@ def write_browser_render_preview(
     with tempfile.TemporaryDirectory(prefix="fascat-browser-render-") as directory:
         workdir = Path(directory)
         render_asset_path = asset_path
-        if preflight.meshopt_decode_required:
+        if preflight.draco_decode_required:
             try:
-                render_asset_path = _write_meshopt_decoded_preview_asset(asset_path, workdir / "meshopt-decoded.gltf")
+                render_asset_path = _write_draco_decoded_preview_asset(render_asset_path, workdir / "draco-decoded.glb")
+            except Exception as exc:
+                preflight = _preflight_draco_decode_failed(preflight, exc)
+            else:
+                preflight = _preflight_draco_decoded(preflight)
+        if not preflight.fatal and preflight.meshopt_decode_required:
+            try:
+                render_asset_path = _write_meshopt_decoded_preview_asset(
+                    render_asset_path, workdir / "meshopt-decoded.gltf"
+                )
             except Exception as exc:
                 preflight = _preflight_meshopt_decode_failed(preflight, exc)
             else:
@@ -884,12 +894,10 @@ def _browser_render_preflight(asset_path: Path) -> _BrowserRenderPreflight:
     required = tuple(sorted(_string_list(document.get("extensionsRequired"))))
     unsupported_extensions: set[str] = set()
     limitations: list[str] = []
-    fatal = False
 
-    if _document_uses_draco(document):
-        unsupported_extensions.add("KHR_draco_mesh_compression")
-        limitations.append("browser preview cannot decode KHR_draco_mesh_compression geometry")
-        fatal = True
+    draco_decode_required = _document_uses_draco(document)
+    if draco_decode_required:
+        limitations.append("browser preview requires Draco decode for KHR_draco_mesh_compression geometry")
     meshopt_decode_required = _document_has_meshopt_only_buffer_views(document, asset_path)
     if meshopt_decode_required:
         limitations.append("browser preview requires meshopt decode for bufferViews without fallback buffer data")
@@ -901,20 +909,47 @@ def _browser_render_preflight(asset_path: Path) -> _BrowserRenderPreflight:
         required_extensions=required,
         unsupported_extensions=tuple(sorted(unsupported_extensions)),
         preview_limitations=tuple(limitations),
+        draco_decode_required=draco_decode_required,
         meshopt_decode_required=meshopt_decode_required,
-        fatal=fatal,
+        fatal=False,
+    )
+
+
+def _preflight_draco_decoded(preflight: _BrowserRenderPreflight) -> _BrowserRenderPreflight:
+    return _BrowserRenderPreflight(
+        required_extensions=preflight.required_extensions,
+        unsupported_extensions=preflight.unsupported_extensions,
+        decoded_extensions=tuple(sorted((*preflight.decoded_extensions, "KHR_draco_mesh_compression"))),
+        preview_limitations=_without_preview_limitations(preflight, "Draco", "KHR_draco"),
+        draco_decode_required=False,
+        meshopt_decode_required=preflight.meshopt_decode_required,
+        fatal=preflight.fatal,
+    )
+
+
+def _preflight_draco_decode_failed(preflight: _BrowserRenderPreflight, exc: Exception) -> _BrowserRenderPreflight:
+    unsupported = tuple(sorted((*preflight.unsupported_extensions, "KHR_draco_mesh_compression")))
+    limitations = _without_preview_limitations(preflight, "Draco", "KHR_draco") + (
+        f"browser preview could not decode KHR_draco_mesh_compression: {exc}",
+    )
+    return _BrowserRenderPreflight(
+        required_extensions=preflight.required_extensions,
+        unsupported_extensions=unsupported,
+        decoded_extensions=preflight.decoded_extensions,
+        preview_limitations=limitations,
+        draco_decode_required=False,
+        meshopt_decode_required=preflight.meshopt_decode_required,
+        fatal=True,
     )
 
 
 def _preflight_meshopt_decoded(preflight: _BrowserRenderPreflight) -> _BrowserRenderPreflight:
-    limitations = tuple(
-        item for item in preflight.preview_limitations if "meshopt" not in item and "EXT_meshopt" not in item
-    )
     return _BrowserRenderPreflight(
         required_extensions=preflight.required_extensions,
         unsupported_extensions=preflight.unsupported_extensions,
         decoded_extensions=tuple(sorted((*preflight.decoded_extensions, "EXT_meshopt_compression"))),
-        preview_limitations=limitations,
+        preview_limitations=_without_preview_limitations(preflight, "meshopt", "EXT_meshopt"),
+        draco_decode_required=preflight.draco_decode_required,
         meshopt_decode_required=False,
         fatal=preflight.fatal,
     )
@@ -930,9 +965,14 @@ def _preflight_meshopt_decode_failed(preflight: _BrowserRenderPreflight, exc: Ex
         unsupported_extensions=unsupported,
         decoded_extensions=preflight.decoded_extensions,
         preview_limitations=limitations,
+        draco_decode_required=preflight.draco_decode_required,
         meshopt_decode_required=False,
         fatal=True,
     )
+
+
+def _without_preview_limitations(preflight: _BrowserRenderPreflight, *patterns: str) -> tuple[str, ...]:
+    return tuple(item for item in preflight.preview_limitations if not any(pattern in item for pattern in patterns))
 
 
 def _read_gltf_json_document(asset_path: Path) -> dict[str, Any]:
@@ -953,6 +993,24 @@ def _read_gltf_json_document(asset_path: Path) -> dict[str, Any]:
     if not isinstance(loaded, dict):
         raise RuntimeError("glTF JSON document must be an object")
     return cast(dict[str, Any], loaded)
+
+
+def _write_draco_decoded_preview_asset(asset_path: Path, output_path: Path) -> Path:
+    _run_gltf_transform_copy(asset_path, output_path)
+    decoded = _read_gltf_json_document(output_path)
+    if _document_uses_draco(decoded):
+        raise RuntimeError("glTF Transform copy preserved KHR_draco_mesh_compression")
+    return output_path
+
+
+def _run_gltf_transform_copy(input_path: Path, output_path: Path) -> None:
+    from fascat.io.gltf import _gltf_transform_command
+
+    command = [*_gltf_transform_command(), "copy", str(input_path), str(output_path)]
+    completed = subprocess.run(command, check=False, capture_output=True, text=True)
+    if completed.returncode != 0:
+        details = (completed.stderr or completed.stdout).strip()
+        raise RuntimeError(f"glTF Transform copy failed: {details}")
 
 
 def _write_meshopt_decoded_preview_asset(asset_path: Path, output_path: Path) -> Path:

@@ -1576,8 +1576,10 @@ def test_validate_reports_unsupported_browser_render_preview(
             triangles=1,
             required_extensions=("KHR_draco_mesh_compression",),
             unsupported_extensions=("KHR_draco_mesh_compression",),
-            preview_limitations=("browser preview cannot decode KHR_draco_mesh_compression geometry",),
-            error="browser preview cannot decode KHR_draco_mesh_compression geometry",
+            preview_limitations=(
+                "browser preview could not decode KHR_draco_mesh_compression: glTF Transform copy failed",
+            ),
+            error="browser preview could not decode KHR_draco_mesh_compression: glTF Transform copy failed",
         )
 
     monkeypatch.setattr("fascat.cli.write_browser_render_preview", fake_preview)

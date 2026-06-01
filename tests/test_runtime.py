@@ -192,7 +192,7 @@ def test_browser_render_preview_writes_screenshot_data_from_payload(
     assert Image.open(preview).getpixel((0, 0)) == (230, 20, 30, 255)
 
 
-def test_browser_render_preview_reports_unsupported_draco_without_running_browser(
+def test_browser_render_preview_reports_unsupported_draco_decode_failure_without_running_browser(
     monkeypatch,  # type: ignore[no-untyped-def]
     tmp_path: Path,
 ) -> None:
@@ -205,9 +205,13 @@ def test_browser_render_preview_reports_unsupported_draco_without_running_browse
     document["meshes"][0]["primitives"][0]["extensions"] = {"KHR_draco_mesh_compression": {"bufferView": 0}}
     output.write_text(json.dumps(document), encoding="utf-8")
 
+    def fake_copy(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("glTF Transform copy failed")
+
     def fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         raise AssertionError("browser should not run for unsupported Draco preview")
 
+    monkeypatch.setattr("fascat.runtime._run_gltf_transform_copy", fake_copy)
     monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
 
     report = write_browser_render_preview(
@@ -220,8 +224,63 @@ def test_browser_render_preview_reports_unsupported_draco_without_running_browse
     assert report.browser is None
     assert report.required_extensions == ("KHR_draco_mesh_compression",)
     assert report.unsupported_extensions == ("KHR_draco_mesh_compression",)
-    assert "KHR_draco_mesh_compression" in str(report.error)
+    assert "could not decode KHR_draco_mesh_compression" in str(report.error)
     assert not preview.exists()
+
+
+def test_browser_render_preview_decodes_draco_geometry(
+    monkeypatch,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "asset.gltf"
+    preview = tmp_path / "browser-preview.png"
+    _asset().write_gltf(output)
+    document = json.loads(output.read_text(encoding="utf-8"))
+    document["extensionsUsed"] = ["KHR_draco_mesh_compression"]
+    document["extensionsRequired"] = ["KHR_draco_mesh_compression"]
+    document["meshes"][0]["primitives"][0]["extensions"] = {"KHR_draco_mesh_compression": {"bufferView": 0}}
+    output.write_text(json.dumps(document), encoding="utf-8")
+    image_bytes = BytesIO()
+    Image.new("RGBA", (2, 2), (60, 70, 80, 255)).save(image_bytes, format="PNG")
+    screenshot_data = "data:image/png;base64," + base64.b64encode(image_bytes.getvalue()).decode("ascii")
+
+    def fake_copy(input_path: Path, output_path: Path) -> None:
+        assert input_path == output
+        assert output_path.name == "draco-decoded.glb"
+        _asset().write_gltf(output_path)
+
+    def fake_run(command: list[str], *_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert "--dump-dom" in command
+        harness_path = Path(urlparse(command[-1]).path)
+        harness = harness_path.read_text(encoding="utf-8")
+        match = re.search(r"const ASSET_URL = (?P<value>.*?);", harness)
+        assert match is not None
+        decoded_url = json.loads(match.group("value"))
+        decoded_path = Path(unquote(urlparse(decoded_url).path))
+        assert decoded_path.name == "draco-decoded.glb"
+        assert validate_gltf(decoded_path)["triangles"] == 1
+        stdout = (
+            '<html><body><pre id="result">'
+            '{"status":"rendered","meshes":1,"triangles":1,'
+            f'"screenshot_data":"{screenshot_data}"'
+            "}</pre></body></html>"
+        )
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr("fascat.runtime._run_gltf_transform_copy", fake_copy)
+    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+
+    report = write_browser_render_preview(
+        output,
+        preview,
+        RuntimeBrowserRenderOptions(browser="fake-browser", timeout_seconds=3.0),
+    )
+
+    assert report.status == "rendered"
+    assert report.decoded_extensions == ("KHR_draco_mesh_compression",)
+    assert report.unsupported_extensions == ()
+    assert report.preview_limitations == ()
+    assert Image.open(preview).getpixel((0, 0)) == (60, 70, 80, 255)
 
 
 def test_browser_render_preview_decodes_meshopt_only_buffer_views(
