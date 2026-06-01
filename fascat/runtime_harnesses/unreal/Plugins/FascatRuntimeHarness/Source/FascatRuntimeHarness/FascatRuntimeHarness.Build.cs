@@ -9,6 +9,7 @@ public class FascatRuntimeHarness : ModuleRules
             "Core",
             "CoreUObject",
             "Engine",
+            "ImageWrapper",
             "Json",
             "UnrealEd"
         });

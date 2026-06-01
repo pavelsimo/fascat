@@ -1266,11 +1266,13 @@ The packaged Unity template includes Unity glTFast, loads and instantiates the
 asset, sets up a camera and key light, renders a fixed multi-frame camera loop,
 and writes the requested preview PNG when Unity can run with graphics enabled.
 That packaged path reports `measured_fps`, `frame_count`, and
-`measurement_duration_ms` from the render loop. The packaged Unreal template
-still validates the engine command contract and glTF/GLB file parsing only, and
-reports preview requests as unavailable. Unreal renderer screenshots, Unreal
-multi-frame renderer FPS, and engine-specific material/lighting parity
-thresholds remain open. Set `FASCAT_UNITY`, `UNITY_EDITOR`,
+`measurement_duration_ms` from the render loop. The packaged Unreal commandlet
+validates the engine command contract and glTF/GLB file parsing, and when a
+preview path is requested it writes a deterministic PNG plus fixed-frame
+software benchmark fields. That Unreal packaged preview is not a full scene or
+material renderer; Unreal scene-rendered screenshots/FPS and engine-specific
+material/lighting parity thresholds remain open. Set `FASCAT_UNITY`,
+`UNITY_EDITOR`,
 `FASCAT_UNREAL`, or `UNREAL_EDITOR`, or pass `--runtime-engine-command`, when
 the engine executable is not on `PATH`. If the executable is missing, or an
 explicitly supplied harness project is missing, the engine report is marked

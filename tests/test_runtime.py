@@ -617,7 +617,24 @@ def test_copy_engine_runtime_harness_writes_unreal_template(tmp_path: Path) -> N
         / "Private"
         / "FascatRuntimeHarnessCommandlet.cpp"
     )
-    assert "FascatPreview=" in commandlet.read_text(encoding="utf-8")
+    build_file = (
+        project.parent
+        / "Plugins"
+        / "FascatRuntimeHarness"
+        / "Source"
+        / "FascatRuntimeHarness"
+        / "FascatRuntimeHarness.Build.cs"
+    )
+    commandlet_text = commandlet.read_text(encoding="utf-8")
+    build_text = build_file.read_text(encoding="utf-8")
+
+    assert "FascatPreview=" in commandlet_text
+    assert "PreviewBenchmarkFrames = 30" in commandlet_text
+    assert "RenderPreview" in commandlet_text
+    assert "FImageUtils::CompressImageArray" in commandlet_text
+    assert "measured_fps" in commandlet_text
+    assert "render_status" in commandlet_text
+    assert '"ImageWrapper"' in build_text
 
 
 def test_engine_runtime_uses_packaged_unity_harness_when_project_is_omitted(
@@ -747,6 +764,72 @@ def test_engine_runtime_uses_packaged_unreal_harness_when_project_is_omitted(
     assert report.load_time_ms == 44
     assert report.meshes == 1
     assert report.triangles == 1
+
+
+def test_engine_runtime_uses_packaged_unreal_harness_preview_when_project_is_omitted(
+    monkeypatch,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "asset.glb"
+    preview = tmp_path / "unreal-preview.png"
+    _asset().write_gltf(output)
+
+    def fake_run(command: list[str], *_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        project = Path(command[1])
+        assert project.name == "FascatUnrealHarness.uproject"
+        assert f"-FascatPreview={preview.resolve()}" in command
+        commandlet = (
+            project.parent
+            / "Plugins"
+            / "FascatRuntimeHarness"
+            / "Source"
+            / "FascatRuntimeHarness"
+            / "Private"
+            / "FascatRuntimeHarnessCommandlet.cpp"
+        )
+        assert "RenderPreview" in commandlet.read_text(encoding="utf-8")
+        report_arg = next(item for item in command if item.startswith("-FascatReport="))
+        report_path = Path(report_arg.split("=", 1)[1])
+        Image.new("RGBA", (4, 4), (30, 60, 90, 255)).save(preview)
+        report_path.write_text(
+            json.dumps(
+                {
+                    "status": "measured",
+                    "engine_version": "Unreal 5.4",
+                    "load_time_ms": 44,
+                    "measured_fps": 61.5,
+                    "frame_count": 30,
+                    "measurement_duration_ms": 488,
+                    "meshes": 1,
+                    "triangles": 1,
+                    "render_status": "rendered",
+                    "render_time_ms": 20,
+                    "rendered_frames": 30,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+
+    report = measure_engine_runtime(
+        output,
+        RuntimeEngineOptions(engine="unreal", executable="UnrealEditor-Cmd", preview_path=preview),
+    )
+
+    assert report.status == "measured"
+    assert report.project is not None
+    assert report.project.endswith("/harness/FascatUnrealHarness.uproject")
+    assert report.preview_path == str(preview)
+    assert report.render_status == "rendered"
+    assert report.render_time_ms == 20
+    assert report.rendered_frames == 30
+    assert report.measured_fps == 61.5
+    assert report.frame_count == 30
+    assert report.measurement_duration_ms == 488
+    assert report.render_error is None
+    assert Image.open(preview).getpixel((0, 0)) == (30, 60, 90, 255)
 
 
 def _asset() -> Asset:
