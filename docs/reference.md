@@ -88,13 +88,14 @@ metadata. Simple AP242 boolean condition records such as `AND_EXPRESSION`,
 `OR_EXPRESSION`, `XOR_EXPRESSION`, `NOT_EXPRESSION`, `EQUALS_EXPRESSION`,
 `COMPARISON_EQUAL`, `COMPARISON_NOT_EQUAL`, `COMPARISON_GREATER`,
 `COMPARISON_GREATER_EQUAL`, `COMPARISON_LESS`, `COMPARISON_LESS_EQUAL`,
-`BOOLEAN_LITERAL`, `BOOLEAN_REPRESENTATION_ITEM`, `BOOLEAN_VARIABLE`, and
-`MATHS_BOOLEAN_VARIABLE` are reported with condition operators, and boolean
-literals include parsed true/false values. Numeric literals include parsed
-numeric values. Supported conditions gate their operand labels before those
-labels can drive geometry pruning; equality/not-equality records compare
-selected boolean operand states, named maths numeric variables evaluate from
-selected `label=value` assignments, boolean variables act as named operands
+`INTERVAL_EXPRESSION`, `BOOLEAN_LITERAL`, `BOOLEAN_REPRESENTATION_ITEM`,
+`BOOLEAN_VARIABLE`, and `MATHS_BOOLEAN_VARIABLE` are reported with condition
+operators, and boolean literals include parsed true/false values. Numeric
+literals include parsed numeric values. Supported conditions gate their operand
+labels before those labels can drive geometry pruning; equality/not-equality
+records compare selected boolean operand states, named maths numeric variables
+evaluate from selected `label=value` assignments for numeric comparisons and
+intervals, boolean variables act as named operands
 selected by label or STEP record id, and conditional/effectivity-assignment
 wrappers, including `CONDITIONAL_CONCEPT_FEATURE`,
 `CONDITIONAL_EFFECTIVITY`, `CONFIGURED_EFFECTIVITY_ASSIGNMENT`, and

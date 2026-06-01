@@ -146,6 +146,8 @@ _STEP_DESIGN_VARIANT_ENTITY_KINDS = {
     "INTNUMERICVARIABLE": "int_numeric_variable",
     "INTEGER_REPRESENTATION_ITEM": "integer_representation_item",
     "INTEGERREPRESENTATIONITEM": "integer_representation_item",
+    "INTERVAL_EXPRESSION": "interval_expression",
+    "INTERVALEXPRESSION": "interval_expression",
     "LOT_EFFECTIVITY": "lot_effectivity",
     "LITERAL_NUMBER": "literal_number",
     "LITERALNUMBER": "literal_number",
@@ -1935,6 +1937,8 @@ def _step_condition_operator(entity: str) -> str | None:
         return "less_equal"
     if normalized == "COMPARISONNOTEQUAL":
         return "not_equals"
+    if normalized == "INTERVALEXPRESSION":
+        return "interval"
     if normalized in {"BOOLEANLITERAL", "BOOLEANREPRESENTATIONITEM"}:
         return "literal"
     if normalized in {
@@ -2188,7 +2192,7 @@ def _design_variant_selector_terms(
             )
             condition_blocked = condition_blocked or (suppress_direct_match and requested_record_match)
         condition_blocked = condition_blocked or (
-            record.condition_operator in {"greater", "greater_equal", "less", "less_equal"}
+            record.condition_operator in {"greater", "greater_equal", "less", "less_equal", "interval"}
             and not condition_applies
             and _condition_record_has_requested_numeric_operand(
                 record,
@@ -2231,6 +2235,7 @@ def _conditional_dependency_references(
         "less",
         "less_equal",
         "not_equals",
+        "interval",
         "conditional",
         "effectivity_assignment",
         "effectivity_context_assignment",
@@ -2421,6 +2426,20 @@ def _condition_record_matches_requested(
             )
         )
         return _StepConditionMatch(matched=matched, positive=matched and any(item[1] for item in numeric_children))
+    if operator == "interval":
+        numeric_children = [
+            _condition_record_numeric_value(
+                child_record,
+                records_by_reference,
+                requested,
+                normalized_requested,
+                visited=set(visited),
+            )
+            for child_record in child_records
+        ]
+        values = [item[0] for item in numeric_children if item[0] is not None]
+        matched = len(values) == len(numeric_children) and len(values) >= 3 and _numeric_interval_matches(values)
+        return _StepConditionMatch(matched=matched, positive=matched and any(item[1] for item in numeric_children))
     if operator == "equals":
         matched = (
             len(children) >= 2
@@ -2501,6 +2520,11 @@ def _numeric_comparison_matches(operator: str, values: list[float]) -> bool:
     if operator == "less_equal":
         return all(left <= right for left, right in pairs)
     return False
+
+
+def _numeric_interval_matches(values: list[float]) -> bool:
+    low, item, high = values[:3]
+    return low <= item <= high
 
 
 def _design_variant_record_matches_requested(
