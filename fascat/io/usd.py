@@ -14,7 +14,9 @@ from fascat.image import ImageResource
 from fascat.material import Material
 from fascat.metadata import pmi_ids_by_part
 from fascat.options import MetadataExportOptions, UsdExportOptions
+from fascat.pmi_visuals import build_pmi_visual_markers
 
+_PMI_VISUAL_MODES = {"metadata_and_visuals", "full"}
 _BAKED_TEXTURE_BINDINGS = (
     (
         "baked_texture_base_color_image",
@@ -170,7 +172,7 @@ def _write_usd_stage(
     occurrence_counts = _part_occurrence_counts(asset.root)
     _write_node(stage, asset.root, scene_path, asset.parts, prototype_paths, occurrence_counts, opts.metadata)
     if opts.metadata.pmi != "none":
-        _write_pmi(stage, asset, opts.metadata)
+        _write_pmi(stage, asset, opts.metadata, scene_path=scene_path)
 
     if not stage.GetRootLayer().Save():
         raise RuntimeError(f"failed to save USD stage: {output_path}")
@@ -579,7 +581,7 @@ def _bind_materials(
         UsdShade.MaterialBindingAPI.Apply(subset.GetPrim()).Bind(material)
 
 
-def _write_pmi(stage: Any, asset: Asset, metadata_options: MetadataExportOptions) -> None:
+def _write_pmi(stage: Any, asset: Asset, metadata_options: MetadataExportOptions, *, scene_path: str) -> None:
     if not asset.pmi:
         return
     from pxr import UsdGeom, Vt
@@ -596,6 +598,51 @@ def _write_pmi(stage: Any, asset: Asset, metadata_options: MetadataExportOptions
         prim.SetCustomDataByKey("fascat:appliesTo", Vt.StringArray(annotation.applies_to))
         if metadata_options.pmi != "summary":
             prim.SetCustomDataByKey("fascat:metadata", _usd_custom_data(payload))
+    if _exports_pmi_visuals(metadata_options):
+        _write_pmi_visuals(stage, asset, scene_path)
+
+
+def _exports_pmi_visuals(options: MetadataExportOptions) -> bool:
+    return options.pmi in _PMI_VISUAL_MODES
+
+
+def _write_pmi_visuals(stage: Any, asset: Asset, scene_path: str) -> None:
+    markers = build_pmi_visual_markers(asset, include_root_transform=False)
+    if not markers:
+        return
+    from pxr import UsdGeom, Vt
+
+    group_path = _available_child_path(stage, scene_path, "PMIVisuals")
+    group = UsdGeom.Xform.Define(stage, group_path).GetPrim()
+    group.SetCustomDataByKey("fascat:pmiVisuals", True)
+    group.SetCustomDataByKey("fascat:pmiVisualCount", len(markers))
+    group.SetCustomDataByKey("fascat:representation", "deterministic_marker_geometry")
+
+    used_names: set[str] = set()
+    for marker in markers:
+        marker_path = f"{group_path}/{_unique_name(_usd_name(marker.annotation_id), used_names)}"
+        marker_prim = UsdGeom.Xform.Define(stage, marker_path).GetPrim()
+        marker_prim.SetCustomDataByKey("fascat:pmiVisual", True)
+        marker_prim.SetCustomDataByKey("fascat:pmiId", marker.annotation_id)
+        marker_prim.SetCustomDataByKey("fascat:type", marker.kind)
+        marker_prim.SetCustomDataByKey("fascat:text", marker.text)
+        marker_prim.SetCustomDataByKey("fascat:appliesTo", Vt.StringArray(marker.applies_to))
+        marker_prim.SetCustomDataByKey("fascat:currentPartIds", Vt.StringArray(marker.current_part_ids))
+        marker_prim.SetCustomDataByKey("fascat:representation", "marker_geometry")
+
+        mesh = UsdGeom.Mesh.Define(stage, f"{marker_path}/Marker")
+        mesh.CreateSubdivisionSchemeAttr("none")
+        mesh.CreatePointsAttr(_vt_vec3f_array(marker.points, Vt))
+        mesh.CreateFaceVertexCountsAttr(_vt_int_array(np.full(marker.faces.shape[0], 3, dtype=np.int32), Vt))
+        mesh.CreateFaceVertexIndicesAttr(_vt_int_array(marker.faces.reshape(-1), Vt))
+        mesh.CreateExtentAttr(_vt_vec3f_array(np.vstack((marker.points.min(axis=0), marker.points.max(axis=0))), Vt))
+        mesh.CreateDisplayColorAttr(_vt_vec3f_array(np.asarray([[1.0, 0.82, 0.12]], dtype=np.float64), Vt))
+        mesh.CreateDisplayOpacityAttr([1.0])
+        if hasattr(mesh, "CreateDoubleSidedAttr"):
+            mesh.CreateDoubleSidedAttr(True)
+        mesh.GetPrim().SetCustomDataByKey("fascat:pmiVisual", True)
+        mesh.GetPrim().SetCustomDataByKey("fascat:pmiId", marker.annotation_id)
+        mesh.GetPrim().SetCustomDataByKey("fascat:representation", "marker_geometry")
 
 
 def _pmi_by_part(asset: Asset) -> dict[str, list[str]]:
@@ -633,6 +680,16 @@ def _part_occurrence_counts(root: Node) -> dict[str, int]:
         if item.part_id is not None:
             counts[item.part_id] = counts.get(item.part_id, 0) + 1
     return counts
+
+
+def _available_child_path(stage: Any, parent_path: str, base_name: str) -> str:
+    name = _usd_name(base_name)
+    candidate = name
+    suffix = 2
+    while stage.GetPrimAtPath(f"{parent_path}/{candidate}").IsValid():
+        candidate = f"{name}_{suffix}"
+        suffix += 1
+    return f"{parent_path}/{candidate}"
 
 
 def _usd_name(value: str) -> str:

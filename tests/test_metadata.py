@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 from fascat.asset import Asset, Node, Part
 from fascat.cli import app
 from fascat.filter import Filter
-from fascat.io.gltf import write_gltf
+from fascat.io.gltf import validate_gltf, write_gltf
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.metadata import PmiAnnotation, Tolerance
@@ -94,6 +94,37 @@ def test_gltf_export_resolves_pmi_links_through_source_part_metadata(tmp_path: P
 
     assert mesh_extras["metadata"]["source_part_ids"] == "part"
     assert mesh_extras["pmiIds"] == ["pmi_001"]
+
+
+def test_gltf_export_writes_pmi_visual_marker_geometry(tmp_path: Path) -> None:
+    output = tmp_path / "metadata-visuals.gltf"
+
+    write_gltf(
+        _asset_with_metadata(),
+        output,
+        options=GltfExportOptions(metadata=MetadataExportOptions(mode="full", pmi="metadata_and_visuals")),
+    )
+
+    document = json.loads(output.read_text(encoding="utf-8"))
+    stats = validate_gltf(output)
+    fascat = document["extras"]["fascat"]
+    visual_group = next(node for node in document["nodes"] if node["name"] == "PMIVisuals")
+    visual_node = document["nodes"][visual_group["children"][0]]
+    visual_mesh = document["meshes"][visual_node["mesh"]]
+    visual_primitive = visual_mesh["primitives"][0]
+    visual_material = document["materials"][visual_primitive["material"]]
+
+    assert fascat["pmiVisuals"]["count"] == 1
+    assert visual_group["extras"]["fascat"]["pmiVisualCount"] == 1
+    assert visual_node["extras"]["fascat"]["pmiId"] == "pmi_001"
+    assert visual_node["extras"]["fascat"]["currentPartIds"] == ["part"]
+    assert visual_mesh["extras"]["fascat"]["pmiVisual"] is True
+    assert visual_mesh["extras"]["fascat"]["representation"] == "marker_geometry"
+    assert visual_primitive["mode"] == 4
+    assert visual_material["doubleSided"] is True
+    assert visual_material["extras"]["fascat"]["pmiVisualMaterial"] is True
+    assert stats["meshes"] == 2
+    assert stats["triangles"] > 1
 
 
 def test_gltf_export_can_suppress_metadata_and_pmi(tmp_path: Path) -> None:

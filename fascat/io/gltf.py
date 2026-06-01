@@ -21,6 +21,7 @@ from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.metadata import pmi_ids_by_part
 from fascat.options import GltfExportOptions, MetadataExportOptions, resolve_gltf_export_options
+from fascat.pmi_visuals import PmiVisualMarker, build_pmi_visual_markers
 
 GLTF_SUFFIXES = {".gltf", ".glb"}
 BinaryPayload = bytes | bytearray | memoryview
@@ -44,6 +45,8 @@ _KHR_DRACO_MESH_COMPRESSION = "KHR_draco_mesh_compression"
 _KHR_TEXTURE_BASISU = "KHR_texture_basisu"
 _MSFT_LOD = "MSFT_lod"
 _FASCAT_EXTRAS = "extras.fascat"
+_PMI_VISUAL_MATERIAL_ID = "__fascat_pmi_visual"
+_PMI_VISUAL_MODES = {"metadata_and_visuals", "full"}
 _RUNTIME_MATRIX_EXTENSIONS = (
     _KHR_MESH_QUANTIZATION,
     _EXT_MESHOPT_COMPRESSION,
@@ -670,6 +673,9 @@ def _build_document(
     part_meshes: dict[str, int] = {}
     part_lods: dict[str, list[dict[str, object]]] = {}
     pmi_by_part = _pmi_by_part(asset)
+    pmi_visual_material_index = (
+        _ensure_pmi_visual_material(material_indices) if _exports_pmi_visuals(metadata_options) and asset.pmi else None
+    )
 
     for part in asset.parts.values():
         if part.mesh is None:
@@ -708,8 +714,33 @@ def _build_document(
     root = _append_node(nodes, asset.root, part_meshes, part_lods, export_space, metadata_options, quantization)
     scene_nodes = [root.index, *root.separate_lod_indices]
     _attach_scene_far_proxy_lod(nodes, root.index, scene_nodes, asset, part_meshes)
+    pmi_visual_count = 0
+    if pmi_visual_material_index is not None:
+        pmi_visual_count = _append_pmi_visuals(
+            builder,
+            meshes,
+            nodes,
+            scene_nodes,
+            asset,
+            export_space,
+            pmi_visual_material_index,
+        )
     binary = builder.data
     buffers: list[dict[str, object]] = [{"byteLength": len(binary)}]
+    fascat_extras = {
+        "units": asset.units,
+        "metersPerUnit": asset.meters_per_unit,
+        "sourceUpAxis": asset.up_axis,
+        "exportUnits": "metre",
+        "exportUpAxis": "Y",
+        **_asset_metadata_extras(asset, metadata_options),
+    }
+    if pmi_visual_count:
+        fascat_extras["pmiVisuals"] = {
+            "count": pmi_visual_count,
+            "representation": "deterministic_marker_geometry",
+            "formats": ["gltf", "glb"],
+        }
 
     document: dict[str, Any] = {
         "asset": {"version": "2.0", "generator": "fascat"},
@@ -720,16 +751,7 @@ def _build_document(
         "bufferViews": builder.buffer_views,
         "accessors": builder.accessors,
         "meshes": meshes,
-        "extras": {
-            "fascat": {
-                "units": asset.units,
-                "metersPerUnit": asset.meters_per_unit,
-                "sourceUpAxis": asset.up_axis,
-                "exportUnits": "metre",
-                "exportUpAxis": "Y",
-                **_asset_metadata_extras(asset, metadata_options),
-            }
-        },
+        "extras": {"fascat": fascat_extras},
     }
     if material_indices:
         document["materials"] = [
@@ -745,6 +767,141 @@ def _build_document(
     if _uses_msft_lod(nodes):
         _add_extension_used(document, _MSFT_LOD)
     return document, binary
+
+
+def _exports_pmi_visuals(options: MetadataExportOptions) -> bool:
+    return options.pmi in _PMI_VISUAL_MODES
+
+
+def _ensure_pmi_visual_material(material_indices: dict[str, dict[str, Any]]) -> int:
+    material_id = _PMI_VISUAL_MATERIAL_ID
+    suffix = 2
+    while material_id in material_indices:
+        material_id = f"{_PMI_VISUAL_MATERIAL_ID}_{suffix}"
+        suffix += 1
+    index = len(material_indices)
+    material_indices[material_id] = {
+        "name": "Fascat PMI Visual",
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [1.0, 0.82, 0.12, 1.0],
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.35,
+        },
+        "emissiveFactor": [1.0, 0.7, 0.08],
+        "doubleSided": True,
+        "extras": {
+            "fascat": {
+                "materialId": material_id,
+                "pmiVisualMaterial": True,
+            }
+        },
+        "_fascat_index": index,
+    }
+    return index
+
+
+def _append_pmi_visuals(
+    builder: _BufferBuilder,
+    meshes: list[dict[str, Any]],
+    nodes: list[dict[str, Any]],
+    scene_nodes: list[int],
+    asset: Asset,
+    export_space: _ExportSpace,
+    material_index: int,
+) -> int:
+    markers = build_pmi_visual_markers(asset, space=export_space.matrix)
+    if not markers:
+        return 0
+    group_node: dict[str, Any] = {
+        "name": "PMIVisuals",
+        "extras": {
+            "fascat": {
+                "pmiVisuals": True,
+                "pmiVisualCount": len(markers),
+                "representation": "deterministic_marker_geometry",
+            }
+        },
+    }
+    group_index = len(nodes)
+    nodes.append(group_node)
+    children: list[int] = []
+    for marker in markers:
+        mesh_index = _append_pmi_visual_mesh(builder, meshes, marker, material_index)
+        node: dict[str, Any] = {
+            "name": f"PMI_{marker.annotation_id}",
+            "mesh": mesh_index,
+            "extras": {
+                "fascat": {
+                    "pmiVisual": True,
+                    "pmiId": marker.annotation_id,
+                    "pmiType": marker.kind,
+                    "text": marker.text,
+                    "appliesTo": list(marker.applies_to),
+                    "currentPartIds": list(marker.current_part_ids),
+                    "anchor": list(marker.anchor),
+                    "representation": "marker_geometry",
+                }
+            },
+        }
+        nodes.append(node)
+        children.append(len(nodes) - 1)
+    group_node["children"] = children
+    scene_nodes.append(group_index)
+    return len(markers)
+
+
+def _append_pmi_visual_mesh(
+    builder: _BufferBuilder,
+    meshes: list[dict[str, Any]],
+    marker: PmiVisualMarker,
+    material_index: int,
+) -> int:
+    points = marker.points.astype(np.float32)
+    position_accessor = builder.add_accessor(
+        points,
+        component_type=_FLOAT,
+        accessor_type="VEC3",
+        target=_ARRAY_BUFFER,
+        minimum=points.min(axis=0).astype(float).tolist() if len(points) else [0.0, 0.0, 0.0],
+        maximum=points.max(axis=0).astype(float).tolist() if len(points) else [0.0, 0.0, 0.0],
+    )
+    indices = marker.faces.reshape(-1)
+    if points.shape[0] <= np.iinfo(np.uint16).max:
+        index_values = indices.astype(np.uint16)
+        component_type = _UNSIGNED_SHORT
+    else:
+        index_values = indices.astype(np.uint32)
+        component_type = _UNSIGNED_INT
+    index_accessor = builder.add_accessor(
+        index_values.reshape(-1, 1),
+        component_type=component_type,
+        accessor_type="SCALAR",
+        target=_ELEMENT_ARRAY_BUFFER,
+    )
+    fascat_extras: dict[str, object] = {
+        "pmiVisual": True,
+        "pmiId": marker.annotation_id,
+        "pmiType": marker.kind,
+        "text": marker.text,
+        "appliesTo": list(marker.applies_to),
+        "currentPartIds": list(marker.current_part_ids),
+        "representation": "marker_geometry",
+    }
+    meshes.append(
+        {
+            "name": f"PMI_{marker.annotation_id}_visual",
+            "primitives": [
+                {
+                    "attributes": {"POSITION": position_accessor},
+                    "indices": index_accessor,
+                    "mode": 4,
+                    "material": material_index,
+                }
+            ],
+            "extras": {"fascat": fascat_extras},
+        }
+    )
+    return len(meshes) - 1
 
 
 def _write_materials(

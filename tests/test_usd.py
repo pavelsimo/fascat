@@ -10,7 +10,7 @@ from fascat.asset import Asset, Node, Part
 from fascat.io.usd import _usd_custom_data, validate_usd, write_usd, write_usd_with_validation_stats
 from fascat.material import Material
 from fascat.mesh import Mesh
-from fascat.options import OptimizeOptions, UsdExportOptions
+from fascat.options import MetadataExportOptions, OptimizeOptions, UsdExportOptions
 
 pytestmark = pytest.mark.requires_usd
 pytest.importorskip("pxr")
@@ -201,6 +201,39 @@ def test_usd_export_authors_metadata_and_pmi_custom_data(tmp_path: Path) -> None
     assert prototype.GetCustomDataByKey("fascat:pmiIds") == ["pmi_001"]
     assert pmi.GetCustomDataByKey("fascat:type") == "dimension"
     assert pmi.GetCustomDataByKey("fascat:appliesTo") == ["cube"]
+
+
+def test_usd_export_writes_pmi_visual_marker_geometry(tmp_path: Path) -> None:
+    mesh = cube_mesh()
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Cube", part_id="cube")]),
+        parts={"cube": Part(id="cube", name="Cube", mesh=mesh)},
+        materials={},
+        pmi=[fc.PmiAnnotation(id="pmi_001", kind="dimension", text="10", applies_to=["cube"])],
+    )
+    output = tmp_path / "metadata-visuals.usda"
+
+    write_usd(
+        asset,
+        output,
+        options=UsdExportOptions(metadata=MetadataExportOptions(mode="full", pmi="metadata_and_visuals")),
+    )
+
+    stage = Usd.Stage.Open(str(output))
+    assert stage is not None
+    visual_group = stage.GetPrimAtPath("/Scene/PMIVisuals")
+    marker = stage.GetPrimAtPath("/Scene/PMIVisuals/pmi_001")
+    marker_mesh = stage.GetPrimAtPath("/Scene/PMIVisuals/pmi_001/Marker")
+    face_counts = UsdGeom.Mesh(marker_mesh).GetFaceVertexCountsAttr().Get()
+
+    assert visual_group.GetCustomDataByKey("fascat:pmiVisualCount") == 1
+    assert marker.GetCustomDataByKey("fascat:pmiId") == "pmi_001"
+    assert marker.GetCustomDataByKey("fascat:currentPartIds") == ["cube"]
+    assert marker_mesh.IsA(UsdGeom.Mesh)
+    assert marker_mesh.GetCustomDataByKey("fascat:pmiVisual") is True
+    assert len(face_counts) > 0
+    assert all(count == 3 for count in face_counts)
+    assert validate_usd(output)["meshes"] >= 2
 
 
 def test_usd_export_resolves_pmi_links_through_source_part_metadata(tmp_path: Path) -> None:
