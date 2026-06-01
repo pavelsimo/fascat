@@ -718,6 +718,7 @@ def test_convert_dry_run_accepts_pipeline_file(tmp_path: Path) -> None:
 metadata = "none"
 pmi = false
 design_variants = true
+design_variant_selection = ["left hand"]
 existing_meshes = false
 multi_file = true
 delete_free_vertices = true
@@ -768,6 +769,7 @@ target_triangles = 80000
     assert payload["pipeline_import"]["metadata"] is False
     assert payload["pipeline_import"]["pmi"] is False
     assert payload["pipeline_import"]["design_variants"] is True
+    assert payload["pipeline_import"]["design_variant_selection"] == ["left hand"]
     assert payload["pipeline_import"]["existing_meshes"] is False
     assert payload["pipeline_import"]["multi_file"] is True
     assert payload["pipeline_import"]["delete_free_vertices"] is True

@@ -1214,6 +1214,7 @@ def test_convert_pipeline_file_can_set_import_and_export_metadata(
 metadata = "none"
 pmi = false
 design_variants = true
+design_variant_selection = ["left hand"]
 existing_meshes = false
 multi_file = true
 source_textures = true
@@ -1262,6 +1263,7 @@ op = "repair"
     assert import_options.metadata is False
     assert import_options.pmi is False
     assert import_options.design_variants is True
+    assert import_options.design_variant_selection == ("left hand",)
     assert import_options.existing_meshes is False
     assert import_options.multi_file is True
     assert import_options.source_textures is True

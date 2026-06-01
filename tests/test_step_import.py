@@ -14,6 +14,7 @@ import fascat.io.step as step_io
 from fascat.io.step import (
     _apply_material_libraries_to_materials,
     _apply_material_library_mapping,
+    _apply_step_design_variant_selection,
     _attach_source_textures_to_materials,
     _build_mixed_construction_curve_node,
     _CadMaterialSpec,
@@ -270,10 +271,14 @@ def test_step_design_variant_extraction_reads_configuration_records(tmp_path: Pa
         "configuration_effectivity",
     ]
     assert extraction.records[0].label == "mounting side / left/right handed option"
+    assert extraction.records[2].reference_labels == (
+        "mounting side / left/right handed option",
+        "left hand / select left mounting side",
+    )
     assert extraction.records[2].references == ("#10", "#11")
     assert extraction.warnings == (
         "STEP design variant records were detected and reported as metadata; "
-        "variant-specific geometry selection is not implemented",
+        "pass design_variant_selection to filter geometry by selected variant labels",
     )
 
 
@@ -291,6 +296,60 @@ def test_step_design_variant_extraction_respects_disabled_option(tmp_path: Path)
         "effectivity_records": 0,
     }
     assert extraction.warnings == ()
+
+
+def test_step_design_variant_selection_filters_matching_geometry(tmp_path: Path) -> None:
+    source = tmp_path / "variants.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#10=CONFIGURATION_ITEM('mounting side','left/right handed option',#1);\n"
+        "#11=PRODUCT_CONCEPT_FEATURE('left hand','select left housing',#2);\n"
+        "#12=CONFIGURATION_DESIGN(#10,#11);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    options = StepReadOptions(design_variant_selection=("left hand",))
+    extraction = _extract_step_design_variants(source, options)
+    root = fc.Node(
+        id="root",
+        name="Assembly",
+        children=[
+            fc.Node(id="left-node", name="Left Housing", part_id="left"),
+            fc.Node(id="right-node", name="Right Housing", part_id="right"),
+        ],
+    )
+    parts = {
+        "left": fc.Part(
+            id="left",
+            name="Left Housing",
+            material_ids=["left-mat"],
+            metadata={"source_name": "left housing"},
+        ),
+        "right": fc.Part(
+            id="right",
+            name="Right Housing",
+            material_ids=["right-mat"],
+            metadata={"source_name": "right housing"},
+        ),
+    }
+    materials = {
+        "left-mat": fc.Material(id="left-mat", name="Left Paint", base_color=(1.0, 0.0, 0.0, 1.0)),
+        "right-mat": fc.Material(id="right-mat", name="Right Paint", base_color=(0.0, 0.0, 1.0, 1.0)),
+    }
+
+    selection = _apply_step_design_variant_selection(root, parts, materials, extraction, options)
+
+    assert selection.status == "applied"
+    assert selection.matched_records == ("step_variant_11", "step_variant_12")
+    assert selection.before_nodes == 3
+    assert selection.after_nodes == 2
+    assert selection.removed_parts == 1
+    assert [child.name for child in root.children] == ["Left Housing"]
+    assert set(parts) == {"left"}
+    assert set(materials) == {"left-mat"}
+    assert parts["left"].metadata["design_variant_selected"] == "true"
 
 
 def test_step_import_cleanup_actions_cover_construction_only_shapes() -> None:

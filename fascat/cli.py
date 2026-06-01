@@ -420,6 +420,13 @@ def cmd_inspect(
         bool,
         typer.Option("--design-variants/--no-design-variants", help="Request STEP design variant import."),
     ] = False,
+    design_variant_selection: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--design-variant",
+            help="STEP design variant label, record id, or referenced label to select. Can be repeated.",
+        ),
+    ] = None,
     import_existing_meshes: Annotated[
         bool,
         typer.Option(
@@ -536,6 +543,7 @@ def cmd_inspect(
         "metadata": metadata.value,
         "pmi": pmi.value,
         "design_variants": design_variants,
+        "design_variant_selection": design_variant_selection or [],
         "import_existing_meshes": import_existing_meshes,
         "multi_file_import": multi_file_import,
         "material_libraries": [str(path) for path in material_libraries or []],
@@ -583,6 +591,7 @@ def cmd_inspect(
         metadata,
         pmi,
         design_variants=design_variants,
+        design_variant_selection=tuple(design_variant_selection or ()),
         existing_meshes=import_existing_meshes,
         multi_file=multi_file_import,
         material_library_paths=material_libraries,
@@ -967,6 +976,13 @@ def cmd_convert(
         bool,
         typer.Option("--design-variants/--no-design-variants", help="Request STEP design variant import."),
     ] = False,
+    design_variant_selection: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--design-variant",
+            help="STEP design variant label, record id, or referenced label to select. Can be repeated.",
+        ),
+    ] = None,
     import_existing_meshes: Annotated[
         bool,
         typer.Option(
@@ -1475,6 +1491,7 @@ def cmd_convert(
         "metadata": metadata.value,
         "pmi": pmi.value,
         "design_variants": design_variants,
+        "design_variant_selection": design_variant_selection or [],
         "import_existing_meshes": import_existing_meshes,
         "multi_file_import": multi_file_import,
         "material_libraries": [str(path) for path in material_libraries or []],
@@ -1877,6 +1894,7 @@ def cmd_convert(
                 metadata,
                 pmi,
                 design_variants=design_variants,
+                design_variant_selection=tuple(design_variant_selection or ()),
                 existing_meshes=import_existing_meshes,
                 multi_file=multi_file_import,
                 material_library_paths=material_libraries,
@@ -2996,6 +3014,7 @@ def _step_read_options(
     pmi: PmiMode,
     *,
     design_variants: bool = False,
+    design_variant_selection: tuple[str, ...] = (),
     existing_meshes: bool = True,
     multi_file: bool = False,
     material_library_paths: list[Path] | tuple[str, ...] | None = None,
@@ -3022,6 +3041,7 @@ def _step_read_options(
         validation_properties=metadata_enabled,
         pmi=pmi_enabled,
         design_variants=design_variants,
+        design_variant_selection=design_variant_selection,
         existing_meshes=existing_meshes,
         multi_file=multi_file,
         material_library_paths=tuple(str(path) for path in material_library_paths or ()),

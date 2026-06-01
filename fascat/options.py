@@ -288,6 +288,7 @@ class StepReadOptions:
     validation_properties: bool = True
     pmi: bool = True
     design_variants: bool = False
+    design_variant_selection: tuple[str, ...] = ()
     existing_meshes: bool = True
     multi_file: bool = False
     source_textures: bool = True
@@ -327,6 +328,13 @@ class StepReadOptions:
             raise ValueError("target_handedness must be one of: right, left")
         object.__setattr__(
             self,
+            "design_variant_selection",
+            _normalize_string_tuple(self.design_variant_selection, "design_variant_selection")
+            if self.design_variant_selection
+            else (),
+        )
+        object.__setattr__(
+            self,
             "source_texture_search_paths",
             _normalize_path_tuple(self.source_texture_search_paths, "source_texture_search_paths"),
         )
@@ -343,6 +351,7 @@ class StepReadOptions:
 
     def to_dict(self) -> dict[str, object]:
         data = asdict(self)
+        data["design_variant_selection"] = list(self.design_variant_selection)
         data["source_texture_search_paths"] = list(self.source_texture_search_paths)
         data["material_library_paths"] = list(self.material_library_paths)
         return data

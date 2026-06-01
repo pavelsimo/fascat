@@ -189,6 +189,8 @@ def test_cli_inspect_can_emit_metadata_and_pmi(monkeypatch) -> None:  # type: ig
             "--pmi",
             "full",
             "--design-variants",
+            "--design-variant",
+            "left hand",
             "--no-import-existing-meshes",
             "--multi-file-import",
             "--delete-free-vertices",
@@ -213,6 +215,7 @@ def test_cli_inspect_can_emit_metadata_and_pmi(monkeypatch) -> None:  # type: ig
     assert captured["options"].metadata is True
     assert captured["options"].pmi is True
     assert captured["options"].design_variants is True
+    assert captured["options"].design_variant_selection == ("left hand",)
     assert captured["options"].existing_meshes is False
     assert captured["options"].multi_file is True
     assert captured["options"].delete_free_vertices is True
@@ -224,6 +227,7 @@ def test_cli_inspect_can_emit_metadata_and_pmi(monkeypatch) -> None:  # type: ig
     assert captured["options"].target_up_axis == "Y"
     assert captured["options"].target_handedness == "right"
     assert payload["design_variants"] is True
+    assert payload["design_variant_selection"] == ["left hand"]
     assert payload["import_existing_meshes"] is False
     assert payload["multi_file_import"] is True
     assert payload["delete_free_vertices"] is True
@@ -251,6 +255,8 @@ def test_cli_convert_accepts_metadata_and_pmi_during_dry_run() -> None:
             "--pmi",
             "none",
             "--design-variants",
+            "--design-variant",
+            "left hand",
             "--no-import-existing-meshes",
             "--multi-file-import",
             "--delete-free-vertices",
@@ -269,6 +275,7 @@ def test_cli_convert_accepts_metadata_and_pmi_during_dry_run() -> None:
     assert payload["metadata"] == "none"
     assert payload["pmi"] == "none"
     assert payload["design_variants"] is True
+    assert payload["design_variant_selection"] == ["left hand"]
     assert payload["import_existing_meshes"] is False
     assert payload["multi_file_import"] is True
     assert payload["delete_free_vertices"] is True

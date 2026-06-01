@@ -247,6 +247,7 @@ class _StepDesignVariantRecord:
     entity: str
     label: str
     references: tuple[str, ...]
+    reference_labels: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -255,6 +256,7 @@ class _StepDesignVariantRecord:
             "entity": self.entity,
             "label": self.label,
             "references": list(self.references),
+            "reference_labels": list(self.reference_labels),
         }
 
 
@@ -268,6 +270,36 @@ class _StepDesignVariantExtraction:
         return {
             "summary": self.summary,
             "records": [record.to_dict() for record in self.records],
+            "warnings": list(self.warnings),
+        }
+
+
+@dataclass(frozen=True)
+class _StepDesignVariantSelectionResult:
+    requested: tuple[str, ...]
+    matched_records: tuple[str, ...]
+    selector_terms: tuple[str, ...]
+    status: str
+    before_nodes: int
+    after_nodes: int
+    before_parts: int
+    after_parts: int
+    removed_nodes: int
+    removed_parts: int
+    warnings: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "requested": list(self.requested),
+            "matched_records": list(self.matched_records),
+            "selector_terms": list(self.selector_terms),
+            "status": self.status,
+            "before_nodes": self.before_nodes,
+            "after_nodes": self.after_nodes,
+            "before_parts": self.before_parts,
+            "after_parts": self.after_parts,
+            "removed_nodes": self.removed_nodes,
+            "removed_parts": self.removed_parts,
             "warnings": list(self.warnings),
         }
 
@@ -684,6 +716,10 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
                     cleanup,
                 )
             )
+        design_variants = _extract_step_design_variants(source, options)
+        design_variant_selection = _apply_step_design_variant_selection(
+            root, parts, materials, design_variants, options
+        )
         source_textures = _extract_source_textures(source, source_identity, options)
         texture_binding_summary = _attach_source_textures_to_materials(materials, source_textures.images)
         material_libraries = _extract_material_libraries(source, source_identity, options)
@@ -691,7 +727,6 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         images = {**source_textures.images, **material_libraries.images}
         pmi = _extract_step_pmi_annotations(source, options)
         pmi_semantic_graph = _extract_step_pmi_semantic_graph(source, options)
-        design_variants = _extract_step_design_variants(source, options)
 
     report = Report(source_path=str(source))
     asset = Asset(
@@ -732,6 +767,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         material_library_binding_summary=material_library_binding_summary,
         pmi_semantic_graph_summary=pmi_semantic_graph.summary,
         design_variant_summary=design_variants.summary,
+        design_variant_selection_summary=design_variant_selection.to_dict(),
     )
     loaded_representations = _loaded_representation_report(asset)
     if asset.metadata:
@@ -743,6 +779,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         asset.metadata["material_library_bindings"] = material_library_binding_summary
         asset.metadata["pmi_semantic_graph"] = pmi_semantic_graph.to_dict()
         asset.metadata["design_variant_import"] = design_variants.summary
+        asset.metadata["design_variant_selection"] = design_variant_selection.to_dict()
         if design_variants.records:
             asset.metadata["design_variants"] = [record.to_dict() for record in design_variants.records]
     import_warnings = [
@@ -756,6 +793,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         *material_libraries.warnings,
         *pmi_semantic_graph.warnings,
         *design_variants.warnings,
+        *design_variant_selection.warnings,
     ]
     for warning in import_warnings:
         asset.report.add_warning(warning)
@@ -770,6 +808,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
             "unsupported_pmi_count": unsupported_pmi_count,
             "pmi_semantic_graph": pmi_semantic_graph.to_dict(),
             "design_variants": design_variants.to_dict(),
+            "design_variant_selection": design_variant_selection.to_dict(),
             "pmi_schema": header_info.schema,
             "pmi_present": header_info.pmi_present,
             "cleanup": cleanup.to_dict(),
@@ -1664,32 +1703,35 @@ def _step_pmi_tolerance(entity: str, kind: str, numbers: list[float]) -> Toleran
 
 
 def _extract_step_design_variants(source: Path, options: StepReadOptions) -> _StepDesignVariantExtraction:
-    if not options.design_variants:
+    if not options.design_variants and not options.design_variant_selection:
         return _StepDesignVariantExtraction(records=(), summary=_empty_design_variant_summary(), warnings=())
 
     text = source.read_text(encoding="utf-8", errors="ignore")
+    step_records = {f"#{record.number}": record for record in _iter_step_records(text)}
     records: list[_StepDesignVariantRecord] = []
-    for record in _iter_step_records(text):
+    for record in step_records.values():
         kind = _STEP_DESIGN_VARIANT_ENTITY_KINDS.get(record.entity)
         if kind is None:
             continue
         strings = _step_string_values(record.args)
+        references = tuple(f"#{item}" for item in _STEP_REFERENCE_RE.findall(record.args))
         records.append(
             _StepDesignVariantRecord(
                 id=f"step_variant_{record.number}",
                 kind=kind,
                 entity=record.entity,
                 label=" / ".join(strings) if strings else record.entity.lower().replace("_", " "),
-                references=tuple(f"#{item}" for item in _STEP_REFERENCE_RE.findall(record.args)),
+                references=references,
+                reference_labels=_step_reference_labels(references, step_records),
             )
         )
 
     warnings = (
         (
             "STEP design variant records were detected and reported as metadata; "
-            "variant-specific geometry selection is not implemented",
+            "pass design_variant_selection to filter geometry by selected variant labels",
         )
-        if records
+        if records and not options.design_variant_selection
         else ()
     )
     return _StepDesignVariantExtraction(
@@ -1697,6 +1739,196 @@ def _extract_step_design_variants(source: Path, options: StepReadOptions) -> _St
         summary=_design_variant_summary(records),
         warnings=warnings,
     )
+
+
+def _step_reference_labels(references: tuple[str, ...], records: dict[str, _StepRecord]) -> tuple[str, ...]:
+    labels: list[str] = []
+    for reference in references:
+        record = records.get(reference)
+        if record is None:
+            continue
+        label = _step_record_label(record)
+        if label and label not in labels:
+            labels.append(label)
+    return tuple(labels)
+
+
+def _apply_step_design_variant_selection(
+    root: Node,
+    parts: dict[str, Part],
+    materials: dict[str, Material],
+    extraction: _StepDesignVariantExtraction,
+    options: StepReadOptions,
+) -> _StepDesignVariantSelectionResult:
+    before_nodes = len(root.walk())
+    before_parts = len(parts)
+    requested = options.design_variant_selection
+    if not requested:
+        return _StepDesignVariantSelectionResult(
+            requested=(),
+            matched_records=(),
+            selector_terms=(),
+            status="not_requested",
+            before_nodes=before_nodes,
+            after_nodes=before_nodes,
+            before_parts=before_parts,
+            after_parts=before_parts,
+            removed_nodes=0,
+            removed_parts=0,
+        )
+
+    matched_records, selector_terms = _design_variant_selector_terms(extraction.records, requested)
+    warnings: list[str] = []
+    if not extraction.records:
+        warnings.append("STEP design variant selection was requested, but no supported variant records were detected")
+        return _StepDesignVariantSelectionResult(
+            requested=requested,
+            matched_records=(),
+            selector_terms=selector_terms,
+            status="no_variant_records",
+            before_nodes=before_nodes,
+            after_nodes=before_nodes,
+            before_parts=before_parts,
+            after_parts=before_parts,
+            removed_nodes=0,
+            removed_parts=0,
+            warnings=tuple(warnings),
+        )
+    if not matched_records:
+        warnings.append(
+            "STEP design variant selection did not match any supported variant record; "
+            "using requested terms directly against imported geometry names"
+        )
+
+    original_children = root.children
+    filtered_children = [
+        selected
+        for child in original_children
+        if (selected := _filter_design_variant_node(child, parts, selector_terms)) is not None
+    ]
+    if not filtered_children:
+        warnings.append(
+            "STEP design variant selection matched no imported geometry by node, part, or source-name metadata"
+        )
+        return _StepDesignVariantSelectionResult(
+            requested=requested,
+            matched_records=matched_records,
+            selector_terms=selector_terms,
+            status="unmatched_geometry",
+            before_nodes=before_nodes,
+            after_nodes=before_nodes,
+            before_parts=before_parts,
+            after_parts=before_parts,
+            removed_nodes=0,
+            removed_parts=0,
+            warnings=tuple(warnings),
+        )
+
+    root.children = filtered_children
+    kept_part_ids = {node.part_id for node in root.walk() if node.part_id is not None}
+    removed_part_ids = set(parts) - kept_part_ids
+    for part_id in removed_part_ids:
+        del parts[part_id]
+    used_material_ids = {material_id for part in parts.values() for material_id in part.material_ids}
+    for material_id in set(materials) - used_material_ids:
+        del materials[material_id]
+    for part in parts.values():
+        part.metadata["design_variant_selected"] = "true"
+        part.metadata["design_variant_selection"] = ",".join(requested)
+    root.metadata["design_variant_selection"] = {
+        "requested": list(requested),
+        "matched_records": list(matched_records),
+        "selector_terms": list(selector_terms),
+    }
+
+    after_nodes = len(root.walk())
+    after_parts = len(parts)
+    return _StepDesignVariantSelectionResult(
+        requested=requested,
+        matched_records=matched_records,
+        selector_terms=selector_terms,
+        status="applied",
+        before_nodes=before_nodes,
+        after_nodes=after_nodes,
+        before_parts=before_parts,
+        after_parts=after_parts,
+        removed_nodes=max(0, before_nodes - after_nodes),
+        removed_parts=max(0, before_parts - after_parts),
+        warnings=tuple(warnings),
+    )
+
+
+def _design_variant_selector_terms(
+    records: tuple[_StepDesignVariantRecord, ...],
+    requested: tuple[str, ...],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    normalized_requested = tuple(_normalize_variant_term(item) for item in requested)
+    matched: list[str] = []
+    terms: list[str] = list(requested)
+    for record in records:
+        haystack = _normalize_variant_term(
+            " ".join(
+                (record.id, record.entity, record.kind, record.label, *record.references, *record.reference_labels)
+            )
+        )
+        if not any(
+            query and (query == _normalize_variant_term(record.id) or query in haystack)
+            for query in normalized_requested
+        ):
+            continue
+        matched.append(record.id)
+        terms.extend(_design_variant_label_terms(record.label))
+        for label in record.reference_labels:
+            terms.extend(_design_variant_label_terms(label))
+        terms.extend(record.references)
+    return tuple(dict.fromkeys(matched)), tuple(
+        item for item in dict.fromkeys(term.strip() for term in terms if term.strip()) if _normalize_variant_term(item)
+    )
+
+
+def _design_variant_label_terms(label: str) -> tuple[str, ...]:
+    terms: list[str] = []
+    for item in (part.strip() for part in label.split(" / ")):
+        if not item:
+            continue
+        terms.append(item)
+        words = item.split()
+        if len(words) > 1 and words[0].lower() in {"select", "selected", "choose", "chosen"}:
+            terms.append(" ".join(words[1:]))
+    return tuple(dict.fromkeys(terms))
+
+
+def _filter_design_variant_node(
+    node: Node,
+    parts: dict[str, Part],
+    selector_terms: tuple[str, ...],
+) -> Node | None:
+    filtered_children = [
+        selected
+        for child in node.children
+        if (selected := _filter_design_variant_node(child, parts, selector_terms)) is not None
+    ]
+    if _design_variant_node_matches(node, parts, selector_terms):
+        kept = node.copy()
+        return kept
+    if filtered_children:
+        kept = node.copy()
+        kept.children = filtered_children
+        return kept
+    return None
+
+
+def _design_variant_node_matches(node: Node, parts: dict[str, Part], selector_terms: tuple[str, ...]) -> bool:
+    fields = [node.name, *[str(value) for value in node.metadata.values()]]
+    if node.part_id is not None and node.part_id in parts:
+        part = parts[node.part_id]
+        fields.extend([part.id, part.name, *[str(value) for value in part.metadata.values()]])
+    haystack = _normalize_variant_term(" ".join(fields))
+    return any(term and term in haystack for term in (_normalize_variant_term(item) for item in selector_terms))
+
+
+def _normalize_variant_term(value: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9#]+", value.lower()))
 
 
 def _design_variant_summary(records: Iterable[_StepDesignVariantRecord]) -> dict[str, int]:
@@ -1870,7 +2102,7 @@ def _import_warnings(
         warnings.append(
             "STEP file advertises AP242 PMI, but no supported typed PMI entities were extracted; annotations are omitted"
         )
-    if options.design_variants and design_variant_count == 0:
+    if (options.design_variants or options.design_variant_selection) and design_variant_count == 0:
         warnings.append(
             "STEP design variant import was requested, but no supported design variant records were detected"
         )
@@ -1893,6 +2125,7 @@ def _import_decisions(
     material_library_binding_summary: dict[str, int] | None = None,
     pmi_semantic_graph_summary: dict[str, int] | None = None,
     design_variant_summary: dict[str, int] | None = None,
+    design_variant_selection_summary: dict[str, object] | None = None,
 ) -> dict[str, object]:
     cleanup_counts = cleanup.to_dict()
     texture_summary = source_texture_summary or {
@@ -1937,7 +2170,7 @@ def _import_decisions(
             detail="source topology counts are derived after transfer; typed STEP validation properties are not extracted",
         ),
         "pmi": _pmi_import_decision(options, header_info, pmi_count, unsupported_pmi_count, pmi_graph_summary),
-        "design_variants": _design_variant_import_decision(options, variant_summary),
+        "design_variants": _design_variant_import_decision(options, variant_summary, design_variant_selection_summary),
         "existing_meshes": _import_decision(
             requested=options.existing_meshes,
             effective=options.existing_meshes,
@@ -2091,16 +2324,50 @@ def _pmi_import_decision(
     )
 
 
-def _design_variant_import_decision(options: StepReadOptions, summary: dict[str, int]) -> dict[str, object]:
+def _design_variant_import_decision(
+    options: StepReadOptions,
+    summary: dict[str, int],
+    selection_summary: dict[str, object] | None = None,
+) -> dict[str, object]:
     counts = {**_empty_design_variant_summary(), **summary}
-    if not options.design_variants:
+    if selection_summary:
+        for key in ("before_nodes", "after_nodes", "before_parts", "after_parts", "removed_nodes", "removed_parts"):
+            value = selection_summary.get(key)
+            if isinstance(value, int):
+                counts[f"selection_{key}"] = value
+        matched = selection_summary.get("matched_records")
+        requested = selection_summary.get("requested")
+        if isinstance(matched, list):
+            counts["selection_matched_records"] = len(matched)
+        if isinstance(requested, list):
+            counts["selection_requested"] = len(requested)
+    if not options.design_variants and not options.design_variant_selection:
         return _import_decision(requested=False, effective=False, state="disabled")
     if counts["records"] == 0:
         return _import_decision(
-            requested=True,
+            requested=True if options.design_variants else list(options.design_variant_selection),
             effective=False,
             state="not_present",
             detail="design variant import was requested, but no supported STEP configuration records were detected",
+            counts=counts,
+        )
+    if options.design_variant_selection and selection_summary:
+        status = str(selection_summary.get("status", "not_requested"))
+        if status == "applied":
+            detail = (
+                "supported STEP configuration/design-variant records were scanned and the imported geometry tree "
+                "was filtered using selected variant record labels and referenced STEP labels"
+            )
+        else:
+            detail = (
+                "supported STEP configuration/design-variant records were scanned, but selected variant geometry "
+                "could not be matched by the current name/reference-based selector"
+            )
+        return _import_decision(
+            requested=list(options.design_variant_selection),
+            effective=status == "applied",
+            state="approximated" if status == "applied" else "unmatched",
+            detail=detail,
             counts=counts,
         )
     return _import_decision(
@@ -2109,7 +2376,7 @@ def _design_variant_import_decision(options: StepReadOptions, summary: dict[str,
         state="approximated",
         detail=(
             "supported STEP configuration/design-variant records are reported as metadata; "
-            "variant-specific geometry selection is not implemented"
+            "pass design_variant_selection to apply name/reference-based geometry filtering"
         ),
         counts=counts,
     )
