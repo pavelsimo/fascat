@@ -487,7 +487,7 @@ def _part_construction_curve_tube_radius(part: Part) -> float:
 
 def _options_for_part(options: TessellationOptions, part: Part, asset: Asset) -> TessellationOptions:
     overrides = options.part_settings.get(part.id) or options.part_settings.get(part.name)
-    detail_contexts = _detail_sensitive_contexts(asset, part) if options.detail_adaptive else []
+    detail_contexts = _adaptive_detail_contexts(asset, part) if options.detail_adaptive else []
     if not overrides and not detail_contexts:
         return options
     values = options.to_dict()
@@ -509,7 +509,7 @@ def _record_detail_adaptive_selection(
 ) -> None:
     if not requested.detail_adaptive:
         return
-    contexts = _detail_sensitive_contexts(asset, part)
+    contexts = _adaptive_detail_contexts(asset, part)
     state = "not_applicable"
     if contexts:
         state = "applied" if effective.sag_ratio is not None or effective.curvature_adaptive else "overridden"
@@ -940,7 +940,7 @@ def _tessellation_quality_advisories(asset: Asset, part: Part, options: Tessella
         return []
 
     advisories: list[dict[str, object]] = []
-    detail_contexts = _detail_sensitive_contexts(asset, part)
+    detail_contexts = _adaptive_detail_contexts(asset, part)
     if detail_contexts and options.sag_ratio is None and not options.curvature_adaptive:
         advisories.append(
             {
@@ -951,7 +951,7 @@ def _tessellation_quality_advisories(asset: Asset, part: Part, options: Tessella
                 "detail_contexts": detail_contexts,
                 "recommendation": "set per-part sag_ratio or enable curvature_adaptive for this part",
                 "message": (
-                    "part has shiny or high-detail material/metadata but tessellation uses bulk criteria "
+                    "part has shiny, high-detail, or curved BREP context but tessellation uses bulk criteria "
                     f"without sag_ratio or curvature_adaptive; consider finer per-part tessellation: {part.name}"
                 ),
             }
@@ -1000,6 +1000,12 @@ def _tessellation_quality_advisories(asset: Asset, part: Part, options: Tessella
     return advisories
 
 
+def _adaptive_detail_contexts(asset: Asset, part: Part) -> list[str]:
+    contexts = set(_detail_sensitive_contexts(asset, part))
+    contexts.update(_curvature_sensitive_contexts(part))
+    return sorted(contexts)
+
+
 def _detail_sensitive_contexts(asset: Asset, part: Part) -> list[str]:
     contexts: set[str] = set()
     if _has_high_detail_metadata(part.metadata):
@@ -1020,6 +1026,39 @@ def _detail_sensitive_contexts(asset: Asset, part: Part) -> list[str]:
         if _has_high_detail_metadata(material.metadata):
             contexts.add("high_detail_material_metadata")
     return sorted(contexts)
+
+
+def _curvature_sensitive_contexts(part: Part) -> list[str]:
+    if part.source_shape is None:
+        return []
+    return ["curved_brep_faces"] if _source_shape_has_curved_faces(part.source_shape) else []
+
+
+def _source_shape_has_curved_faces(shape: object) -> bool:
+    try:
+        from OCP.BRepAdaptor import BRepAdaptor_Surface
+        from OCP.GeomAbs import GeomAbs_Plane
+        from OCP.TopAbs import TopAbs_FACE
+        from OCP.TopExp import TopExp_Explorer
+        from OCP.TopoDS import TopoDS
+    except ImportError:
+        return False
+
+    try:
+        explorer = TopExp_Explorer(shape, TopAbs_FACE)
+    except Exception:
+        return False
+    while explorer.More():
+        try:
+            face = TopoDS.Face_s(explorer.Current())
+            surface = BRepAdaptor_Surface(face)
+            if surface.GetType() != GeomAbs_Plane:
+                return True
+        except Exception:
+            pass
+        finally:
+            explorer.Next()
+    return False
 
 
 def _has_high_detail_metadata(metadata: Metadata) -> bool:

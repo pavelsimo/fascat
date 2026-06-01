@@ -11,6 +11,7 @@ from fascat.mesh import Mesh
 from fascat.ops.tessellate import (
     _apply_cad_uvs,
     _apply_mesh_tessellation_controls,
+    _source_shape_has_curved_faces,
     _store_free_edge_geometry,
     _tube_mesh_from_segments,
     tessellate_shape,
@@ -189,6 +190,15 @@ def test_tessellate_shape_extracts_occt_faces_into_numpy_buffers() -> None:
     assert mesh.material_indices.shape == (mesh.triangle_count,)
     assert len(mesh.face_groups) == 6
     assert sum(values.shape[0] for values in mesh.face_groups.values()) == mesh.triangle_count
+
+
+@pytest.mark.requires_ocp
+def test_curved_brep_detection_distinguishes_planes_from_curves() -> None:
+    pytest.importorskip("OCP.BRepPrimAPI")
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder
+
+    assert _source_shape_has_curved_faces(BRepPrimAPI_MakeBox(1.0, 1.0, 1.0).Shape()) is False
+    assert _source_shape_has_curved_faces(BRepPrimAPI_MakeCylinder(1.0, 2.0).Shape()) is True
 
 
 def test_tessellate_reuses_source_shape_mesh_for_matching_parts(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -861,7 +871,7 @@ def test_tessellation_quality_advisor_flags_shiny_high_detail_parts() -> None:
     assert advisories[0]["recommendation"] == "set per-part sag_ratio or enable curvature_adaptive for this part"
     assert payload["advisories"][0]["code"] == "detail_sensitive_tessellation"
     assert tessellated.report.steps[-1].warnings == [
-        "part has shiny or high-detail material/metadata but tessellation uses bulk criteria "
+        "part has shiny, high-detail, or curved BREP context but tessellation uses bulk criteria "
         "without sag_ratio or curvature_adaptive; consider finer per-part tessellation: Inspection"
     ]
 
@@ -956,6 +966,54 @@ def test_detail_adaptive_tessellation_applies_material_metadata_settings(monkeyp
     assert plain.metadata["tessellation_detail_adaptive"] == "not_applicable"
     assert "tessellation_quality_advisories" not in high.metadata
     assert tessellated.report.steps[-1].warnings == []
+
+
+def test_detail_adaptive_tessellation_applies_curved_brep_settings(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import fascat.ops.tessellate as tessellate_module
+
+    curved_shape = object()
+    plain_shape = object()
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="node_curved", name="Curved", part_id="curved"),
+                Node(id="node_plain", name="Plain", part_id="plain"),
+            ],
+        ),
+        parts={
+            "curved": Part(id="curved", name="Curved", source_shape=curved_shape),
+            "plain": Part(id="plain", name="Plain", source_shape=plain_shape),
+        },
+    )
+    calls: dict[int, TessellationOptions] = {}
+
+    def fake_curvature_contexts(part: Part) -> list[str]:
+        return ["curved_brep_faces"] if part.source_shape is curved_shape else []
+
+    def fake_tessellate_shape(shape: object, options: TessellationOptions, **_kwargs: object) -> Mesh:
+        calls[id(shape)] = options
+        offset = 0.0 if shape is curved_shape else 2.0
+        mesh = triangle_mesh()
+        mesh.points = mesh.points + np.array([offset, 0.0, 0.0])
+        return mesh
+
+    monkeypatch.setattr(tessellate_module, "_curvature_sensitive_contexts", fake_curvature_contexts)
+    monkeypatch.setattr(tessellate_module, "tessellate_shape", fake_tessellate_shape)
+
+    tessellated = asset.tessellate(TessellationOptions(detail_adaptive=True, quality_report=True))
+    curved = tessellated.parts["curved"]
+    plain = tessellated.parts["plain"]
+
+    assert calls[id(curved_shape)].sag_ratio == 0.01
+    assert calls[id(curved_shape)].curvature_adaptive is True
+    assert calls[id(plain_shape)].sag_ratio is None
+    assert calls[id(plain_shape)].curvature_adaptive is False
+    assert curved.metadata["tessellation_detail_adaptive"] == "applied"
+    assert curved.metadata["tessellation_detail_contexts"] == "curved_brep_faces"
+    assert curved.metadata["tessellation_detail_adaptive_sag_ratio"] == "0.01"
+    assert plain.metadata["tessellation_detail_adaptive"] == "not_applicable"
 
 
 def test_tessellation_free_edge_report_records_reused_meshes() -> None:
