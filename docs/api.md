@@ -292,7 +292,14 @@ asset.pmi.append(
 
 glTF export writes metadata and PMI into `extras.fascat`. USD export writes Fascat metadata into `customData` on the scene, nodes, prototypes, materials, meshes, and `/PMI/*` annotation prims. When merge, explode, or replace operations create new parts, exporters resolve PMI links through `source_part_id` and `source_part_ids` metadata so annotations that targeted the original part still attach to the derived output.
 
-STEP AP242 files can advertise PMI even when the current OCP-backed importer cannot extract typed annotation entities. In that case the import report records `pmi_present=true`, `unsupported_pmi_count=1`, and a warning instead of silently implying that PMI was imported.
+STEP AP242 import includes a textual PMI scan for common typed records such as
+`DIMENSIONAL_SIZE`, `GEOMETRIC_TOLERANCE`, `DATUM`, `DATUM_TARGET`,
+`FEATURE_CONTROL_FRAME`, and annotation text entities. Those records become
+typed `PmiAnnotation` objects with source STEP entity ids and references. If a
+file advertises AP242 PMI but no supported typed record is extracted, the import
+report records `pmi_present=true`, `unsupported_pmi_count=1`, and a warning
+instead of silently implying that PMI was imported. Visual annotation geometry
+and full AP242 semantic graph reconstruction are still planned backend work.
 
 STEP and IGES import can scan source-file string references for sidecar PNG, JPEG, and KTX2 textures, load them as first-class `ImageResource` objects, and bind semantic names such as `baseColor`, `normal`, `ao`, or `emissive` to material texture metadata. XDE visual material PBR/common values are preserved where exposed, and common CAD material names such as steel, aluminum, brass, copper, glass, plastic, rubber, and paint are mapped to deterministic PBR defaults with diagnostics in material metadata. Supported vendor material libraries can also be supplied explicitly, or referenced from the CAD source, as JSON/MTL files, ZIP packages containing JSON/MTL records plus textures, or folders containing those files; imported records update matching CAD materials with PBR factors and texture slots while reporting resolved, missing, unreadable, matched, and unmatched counts.
 
@@ -311,7 +318,7 @@ Metadata and PMI parameters:
 | `StepReadOptions` | `properties` | Import user and product properties. |
 | `StepReadOptions` | `layers` | Request layer assignments as metadata. Current normalized layer extraction is reported as unsupported in `import_decisions` when requested. |
 | `StepReadOptions` | `validation_properties` | Request STEP validation properties. Current reports approximate this with source topology counts rather than typed validation-property entities. |
-| `StepReadOptions` | `pmi` | Import typed PMI records when the backend exposes them; AP242 PMI markers are reported when typed import is unavailable. |
+| `StepReadOptions` | `pmi` | Import common typed AP242 PMI text records into `PmiAnnotation` objects; AP242 PMI markers are reported when no supported typed record can be extracted. |
 | `StepReadOptions` | `design_variants` | Request STEP design variant import. Current backend support is limited and reports a warning when requested variants cannot be loaded. |
 | `StepReadOptions` | `existing_meshes` | Prefer existing tessellation payloads from the source file when the importer exposes them. Tessellation `reuse_existing_meshes` still controls whether loaded meshes are retessellated later. |
 | `StepReadOptions` | `multi_file` | Request multi-file STEP assembly import. `read_step_many()` honors explicit member lists; single-path STEP imports recursively resolve quoted external `.step` / `.stp` references, preserve repeated references as member occurrences, and report the `external_reference_graph`. |

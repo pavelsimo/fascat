@@ -21,6 +21,7 @@ from fascat.io.step import (
     _color_material_spec,
     _extract_material_libraries,
     _extract_source_textures,
+    _extract_step_pmi_annotations,
     _import_decisions,
     _import_warnings,
     _ImportCleanupStats,
@@ -128,10 +129,49 @@ def test_step_import_warnings_report_unsupported_import_intent() -> None:
     )
 
     assert warnings == [
-        "STEP file advertises AP242 PMI, but PMI entity import is not implemented; annotations are omitted",
+        "STEP file advertises AP242 PMI, but no supported typed PMI entities were extracted; annotations are omitted",
         "STEP design variant import is not implemented; variants are omitted",
         "multi-file STEP assembly import is not implemented; external references are not loaded",
     ]
+
+
+def test_step_text_pmi_extraction_reads_common_ap242_records(tmp_path: Path) -> None:
+    source = tmp_path / "pmi.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "HEADER;\n"
+        "FILE_SCHEMA(('AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF "
+        "{ 1 0 10303 442 1 1 4 }'));\n"
+        "ENDSEC;\n"
+        "DATA;\n"
+        "#20=PRODUCT_DEFINITION_SHAPE('bracket','',#19);\n"
+        "#30=DIMENSIONAL_SIZE(#20,'hole diameter 12.5 mm',12.5);\n"
+        "#31=GEOMETRIC_TOLERANCE('position tolerance',0.2,#20);\n"
+        "#32=DATUM('A',#20);\n"
+        "#33=ANNOTATION_TEXT_OCCURRENCE('inspect after plating',#20);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    annotations = _extract_step_pmi_annotations(source, StepReadOptions(pmi=True))
+
+    assert [annotation.kind for annotation in annotations] == ["dimension", "tolerance", "datum", "note"]
+    assert [annotation.id for annotation in annotations] == ["step_pmi_30", "step_pmi_31", "step_pmi_32", "step_pmi_33"]
+    assert annotations[0].text == "hole diameter 12.5 mm"
+    assert annotations[0].value == 12.5
+    assert annotations[0].unit == "millimetre"
+    assert annotations[1].tolerance is not None
+    assert annotations[1].tolerance.upper == 0.2
+    assert annotations[1].source["step_references"] == ["#20"]
+    assert annotations[3].text == "inspect after plating"
+
+
+def test_step_text_pmi_extraction_respects_disabled_pmi(tmp_path: Path) -> None:
+    source = tmp_path / "pmi.step"
+    source.write_text("#1=GEOMETRIC_TOLERANCE('flatness',0.05,#2);\n", encoding="utf-8")
+
+    assert _extract_step_pmi_annotations(source, StepReadOptions(pmi=False)) == []
 
 
 def test_step_import_cleanup_actions_cover_construction_only_shapes() -> None:
@@ -183,6 +223,23 @@ def test_step_import_decisions_report_requested_effective_states() -> None:
         "deleted_vertices": 4,
     }
     assert decisions["space_normalization"]["state"] == "honored"
+
+
+def test_step_import_decisions_report_extracted_typed_pmi() -> None:
+    space = _space_normalization("millimetre", 0.001, StepReadOptions())
+
+    decisions = _import_decisions(
+        StepReadOptions(pmi=True),
+        _StepHeaderInfo(schema="AP242", pmi_present=True),
+        pmi_count=2,
+        unsupported_pmi_count=0,
+        cleanup=_ImportCleanupStats(),
+        space=space,
+    )
+
+    assert decisions["pmi"]["state"] == "honored"
+    assert decisions["pmi"]["effective"] is True
+    assert decisions["pmi"]["counts"] == {"imported": 2, "unsupported": 0}
 
 
 def test_step_source_texture_extraction_loads_sidecar_images_and_binds_single_material(tmp_path: Path) -> None:

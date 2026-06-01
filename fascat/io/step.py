@@ -18,7 +18,7 @@ from fascat._ocp import shape_fingerprint as _shape_fingerprint
 from fascat.asset import Asset, Node, Part
 from fascat.image import ImageMimeType, ImageResource
 from fascat.material import Material
-from fascat.metadata import Metadata, PmiAnnotation
+from fascat.metadata import Metadata, PmiAnnotation, PmiKind, Tolerance
 from fascat.options import StepReadOptions
 from fascat.report import Report, timed_step
 
@@ -59,6 +59,33 @@ _MATERIAL_LIBRARY_SUFFIXES = _MATERIAL_RECORD_SUFFIXES | _MATERIAL_LIBRARY_CONTA
 _MATERIAL_LIBRARY_REF_RE = re.compile(r"'([^']+\.(?:json|mtl|zip)(?:[#?][^']*)?)'", re.IGNORECASE)
 _STEP_SUFFIXES = {".step", ".stp"}
 _STEP_EXTERNAL_REF_RE = re.compile(r"'([^']+\.(?:step|stp)(?:[#?][^']*)?)'", re.IGNORECASE)
+_STEP_RECORD_START_RE = re.compile(r"#(\d+)\s*=\s*([A-Z0-9_]+)\s*\(", re.IGNORECASE)
+_STEP_REFERENCE_RE = re.compile(r"#(\d+)")
+_STEP_NUMBER_RE = re.compile(r"(?<![#A-Za-z0-9_])[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[Ee][-+]?\d+)?")
+_STEP_PMI_ENTITY_KINDS = {
+    "DIMENSIONAL_SIZE": "dimension",
+    "DIMENSIONAL_LOCATION": "dimension",
+    "ANGULAR_SIZE": "dimension",
+    "ANGULAR_LOCATION": "dimension",
+    "LINEAR_DIMENSION": "dimension",
+    "RADIAL_DIMENSION": "dimension",
+    "DIAMETER_DIMENSION": "dimension",
+    "GEOMETRIC_TOLERANCE": "tolerance",
+    "GEOMETRIC_TOLERANCE_WITH_DATUM_REFERENCE": "tolerance",
+    "GEOMETRIC_TOLERANCE_WITH_MODIFIERS": "tolerance",
+    "DATUM": "datum",
+    "DATUM_FEATURE": "datum",
+    "DATUM_TARGET": "datum_target",
+    "FEATURE_CONTROL_FRAME": "feature_control_frame",
+    "ANNOTATION_TEXT": "note",
+    "ANNOTATION_TEXT_OCCURRENCE": "note",
+    "TEXT_LITERAL": "note",
+    "TEXT_LITERAL_WITH_EXTENT": "note",
+    "DRAUGHTING_CALLOUT": "note",
+    "SAVED_VIEW": "saved_view",
+    "ANNOTATION_PLANE": "annotation_plane",
+}
+_STEP_UNIT_RE = re.compile(r"\b(mm|millimet(?:er|re)|cm|centimet(?:er|re)|m|met(?:er|re)|in|inch|deg|degree)\b", re.I)
 _GENERIC_MATERIAL_TOKENS = {"cad", "color", "material", "mat", "texture", "map", "source"}
 _TEXTURE_SLOT_TOKENS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("metallic_roughness", ("metallicroughness", "metalrough", "metallic_roughness", "orm")),
@@ -219,6 +246,13 @@ _MATERIAL_LIBRARY_RULES: tuple[_MaterialLibraryRule, ...] = (
 class _StepHeaderInfo:
     schema: str = ""
     pmi_present: bool = False
+
+
+@dataclass(frozen=True)
+class _StepRecord:
+    number: int
+    entity: str
+    args: str
 
 
 @dataclass(frozen=True)
@@ -551,6 +585,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         material_libraries = _extract_material_libraries(source, source_identity, options)
         material_library_binding_summary = _apply_material_libraries_to_materials(materials, material_libraries)
         images = {**source_textures.images, **material_libraries.images}
+        pmi = _extract_step_pmi_annotations(source, options)
 
     report = Report(source_path=str(source))
     asset = Asset(
@@ -562,8 +597,8 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         meters_per_unit=space.target_meters_per_unit,
         up_axis=cast(Any, space.target_up_axis),
         source_path=source,
-        metadata=_asset_metadata(source, source_identity, options, header_info, cleanup, space),
-        pmi=[],
+        metadata=_asset_metadata(source, source_identity, options, header_info, cleanup, space, pmi_count=len(pmi)),
+        pmi=pmi,
         report=report,
     )
     asset.report.input_stats = asset.stats()
@@ -1293,6 +1328,7 @@ def _asset_metadata(
     header_info: _StepHeaderInfo,
     cleanup: _ImportCleanupStats,
     space: _SpaceNormalization,
+    pmi_count: int = 0,
     source_texture_summary: dict[str, int] | None = None,
     texture_binding_summary: dict[str, int] | None = None,
     material_library_summary: dict[str, int] | None = None,
@@ -1325,9 +1361,10 @@ def _asset_metadata(
         metadata["material_library_bindings"] = material_library_binding_summary
     if header_info.schema:
         metadata["step_schema"] = header_info.schema
-    if header_info.pmi_present:
+    if header_info.pmi_present or pmi_count:
         metadata["pmi_present"] = "true"
-        metadata["pmi_import_status"] = "unsupported" if options.pmi else "disabled"
+        metadata["pmi_import_status"] = "imported" if pmi_count else "unsupported" if options.pmi else "disabled"
+        metadata["pmi_import_count"] = pmi_count
     return metadata
 
 
@@ -1344,6 +1381,172 @@ def _step_header_info(source: Path) -> _StepHeaderInfo:
     return _StepHeaderInfo(schema=schema, pmi_present=pmi_present)
 
 
+def _extract_step_pmi_annotations(source: Path, options: StepReadOptions) -> list[PmiAnnotation]:
+    if not options.pmi:
+        return []
+    text = source.read_text(encoding="utf-8", errors="ignore")
+    annotations: list[PmiAnnotation] = []
+    for record in _iter_step_records(text):
+        kind = _STEP_PMI_ENTITY_KINDS.get(record.entity)
+        if kind is None:
+            continue
+        strings = _step_string_values(record.args)
+        numbers = _step_number_values(record.args)
+        value = numbers[0] if numbers else None
+        text_value = _step_pmi_text(record, strings, value)
+        references = tuple(f"#{item}" for item in _STEP_REFERENCE_RE.findall(record.args))
+        annotations.append(
+            PmiAnnotation(
+                id=f"step_pmi_{record.number}",
+                kind=cast(PmiKind, kind),
+                text=text_value,
+                value=value,
+                unit=_step_pmi_unit(strings),
+                tolerance=(
+                    Tolerance(upper=value, kind=record.entity.lower())
+                    if kind in {"tolerance", "feature_control_frame"} and value is not None
+                    else None
+                ),
+                source={
+                    "step_entity_id": f"#{record.number}",
+                    "step_entity": record.entity,
+                    "step_references": list(references),
+                    "step_pmi_import": "textual_ap242_entity_scan",
+                },
+            )
+        )
+    return annotations
+
+
+def _iter_step_records(text: str) -> list[_StepRecord]:
+    records: list[_StepRecord] = []
+    position = 0
+    while match := _STEP_RECORD_START_RE.search(text, position):
+        args_start = match.end()
+        args_end = _find_step_record_args_end(text, args_start - 1)
+        if args_end is None:
+            position = match.end()
+            continue
+        records.append(
+            _StepRecord(
+                number=int(match.group(1)),
+                entity=match.group(2).upper(),
+                args=text[args_start:args_end],
+            )
+        )
+        position = args_end + 1
+    return records
+
+
+def _find_step_record_args_end(text: str, open_paren_index: int) -> int | None:
+    depth = 0
+    in_string = False
+    index = open_paren_index
+    while index < len(text):
+        char = text[index]
+        if in_string:
+            if char == "'":
+                if index + 1 < len(text) and text[index + 1] == "'":
+                    index += 2
+                    continue
+                in_string = False
+            index += 1
+            continue
+        if char == "'":
+            in_string = True
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+            if depth < 0:
+                return None
+        index += 1
+    return None
+
+
+def _step_string_values(text: str) -> list[str]:
+    values: list[str] = []
+    index = 0
+    while index < len(text):
+        if text[index] != "'":
+            index += 1
+            continue
+        index += 1
+        value: list[str] = []
+        while index < len(text):
+            char = text[index]
+            if char == "'":
+                if index + 1 < len(text) and text[index + 1] == "'":
+                    value.append("'")
+                    index += 2
+                    continue
+                index += 1
+                break
+            value.append(char)
+            index += 1
+        cleaned = " ".join("".join(value).split())
+        if cleaned:
+            values.append(cleaned)
+    return values
+
+
+def _step_number_values(text: str) -> list[float]:
+    unquoted = _strip_step_strings(text)
+    return [float(match.group(0)) for match in _STEP_NUMBER_RE.finditer(unquoted)]
+
+
+def _strip_step_strings(text: str) -> str:
+    chars = list(text)
+    index = 0
+    while index < len(chars):
+        if chars[index] != "'":
+            index += 1
+            continue
+        chars[index] = " "
+        index += 1
+        while index < len(chars):
+            char = chars[index]
+            chars[index] = " "
+            if char == "'":
+                if index + 1 < len(chars) and chars[index + 1] == "'":
+                    chars[index + 1] = " "
+                    index += 2
+                    continue
+                index += 1
+                break
+            index += 1
+    return "".join(chars)
+
+
+def _step_pmi_text(record: _StepRecord, strings: list[str], value: float | None) -> str:
+    label = " / ".join(strings)
+    if label:
+        return label
+    if value is not None:
+        return f"{record.entity.lower().replace('_', ' ')} {value:g}"
+    return record.entity.lower().replace("_", " ")
+
+
+def _step_pmi_unit(strings: list[str]) -> str | None:
+    for value in strings:
+        match = _STEP_UNIT_RE.search(value)
+        if match:
+            token = match.group(1).lower()
+            if token in {"mm", "millimeter", "millimetre"}:
+                return "millimetre"
+            if token in {"cm", "centimeter", "centimetre"}:
+                return "centimetre"
+            if token in {"m", "meter", "metre"}:
+                return "metre"
+            if token in {"in", "inch"}:
+                return "inch"
+            if token in {"deg", "degree"}:
+                return "degree"
+    return None
+
+
 def _unsupported_pmi_count(options: StepReadOptions, header_info: _StepHeaderInfo, *, pmi_count: int) -> int:
     if not options.pmi or not header_info.pmi_present or pmi_count:
         return 0
@@ -1358,7 +1561,7 @@ def _import_warnings(
     warnings: list[str] = []
     if options.pmi and unsupported_pmi_count:
         warnings.append(
-            "STEP file advertises AP242 PMI, but PMI entity import is not implemented; annotations are omitted"
+            "STEP file advertises AP242 PMI, but no supported typed PMI entities were extracted; annotations are omitted"
         )
     if options.design_variants:
         warnings.append("STEP design variant import is not implemented; variants are omitted")
@@ -1539,6 +1742,14 @@ def _pmi_import_decision(
 ) -> dict[str, object]:
     if not options.pmi:
         return _import_decision(requested=False, effective=False, state="disabled")
+    if pmi_count:
+        return _import_decision(
+            requested=True,
+            effective=True,
+            state="honored",
+            detail="common STEP AP242 PMI entities were extracted into typed metadata annotations",
+            counts={"imported": pmi_count, "unsupported": unsupported_pmi_count},
+        )
     if unsupported_pmi_count:
         return _import_decision(
             requested=True,
