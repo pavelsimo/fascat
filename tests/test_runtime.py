@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import subprocess
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 import numpy as np
 from PIL import Image
 
 from fascat.asset import Asset, Node, Part
+from fascat.io.gltf import validate_gltf
 from fascat.mesh import Mesh
+from fascat.options import GltfExportOptions
 from fascat.runtime import (
     RuntimeBrowserOptions,
     RuntimeBrowserRenderOptions,
@@ -218,6 +222,70 @@ def test_browser_render_preview_reports_unsupported_draco_without_running_browse
     assert report.unsupported_extensions == ("KHR_draco_mesh_compression",)
     assert "KHR_draco_mesh_compression" in str(report.error)
     assert not preview.exists()
+
+
+def test_browser_render_preview_decodes_meshopt_only_buffer_views(
+    monkeypatch,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "asset.gltf"
+    preview = tmp_path / "browser-preview.png"
+    _asset().write_gltf(output, options=GltfExportOptions(meshopt=True))
+    document = json.loads(output.read_text(encoding="utf-8"))
+    document.setdefault("extensionsRequired", []).append("EXT_meshopt_compression")
+    document["buffers"].append(
+        {
+            "byteLength": document["buffers"][0]["byteLength"],
+            "extensions": {"EXT_meshopt_compression": {"fallback": True}},
+        }
+    )
+    for view in document["bufferViews"]:
+        extension = view.get("extensions", {}).get("EXT_meshopt_compression")
+        if extension is None:
+            continue
+        view["buffer"] = 1
+        view["byteOffset"] = 0
+        view["byteLength"] = extension["count"] * extension["byteStride"]
+    output.write_text(json.dumps(document), encoding="utf-8")
+    image_bytes = BytesIO()
+    Image.new("RGBA", (2, 2), (70, 80, 90, 255)).save(image_bytes, format="PNG")
+    screenshot_data = "data:image/png;base64," + base64.b64encode(image_bytes.getvalue()).decode("ascii")
+
+    def fake_run(command: list[str], *_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert "--dump-dom" in command
+        harness_path = Path(urlparse(command[-1]).path)
+        harness = harness_path.read_text(encoding="utf-8")
+        match = re.search(r"const ASSET_URL = (?P<value>.*?);", harness)
+        assert match is not None
+        decoded_url = json.loads(match.group("value"))
+        decoded_path = Path(unquote(urlparse(decoded_url).path))
+        decoded_document = json.loads(decoded_path.read_text(encoding="utf-8"))
+        assert "EXT_meshopt_compression" not in decoded_document.get("extensionsRequired", [])
+        assert all(
+            "EXT_meshopt_compression" not in view.get("extensions", {}) for view in decoded_document["bufferViews"]
+        )
+        assert validate_gltf(decoded_path)["triangles"] == 1
+        stdout = (
+            '<html><body><pre id="result">'
+            '{"status":"rendered","meshes":1,"triangles":1,'
+            f'"screenshot_data":"{screenshot_data}"'
+            "}</pre></body></html>"
+        )
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+
+    report = write_browser_render_preview(
+        output,
+        preview,
+        RuntimeBrowserRenderOptions(browser="fake-browser", timeout_seconds=3.0),
+    )
+
+    assert report.status == "rendered"
+    assert report.decoded_extensions == ("EXT_meshopt_compression",)
+    assert report.unsupported_extensions == ()
+    assert report.preview_limitations == ()
+    assert Image.open(preview).getpixel((0, 0)) == (70, 80, 90, 255)
 
 
 def test_browser_render_preview_marks_ktx2_texture_preview_partial(

@@ -10,10 +10,15 @@ import shutil
 import subprocess
 import tempfile
 from collections.abc import Iterable
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from importlib import resources
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
+from urllib.parse import unquote, unquote_to_bytes, urlparse
+
+import numpy as np
+from numpy.typing import NDArray
 
 from fascat.io.gltf import validate_gltf
 
@@ -148,6 +153,7 @@ class RuntimeBrowserRenderReport:
     quantized_primitives: int = 0
     required_extensions: tuple[str, ...] = ()
     unsupported_extensions: tuple[str, ...] = ()
+    decoded_extensions: tuple[str, ...] = ()
     preview_limitations: tuple[str, ...] = ()
     error: str | None = None
 
@@ -166,6 +172,7 @@ class RuntimeBrowserRenderReport:
             "quantized_primitives": self.quantized_primitives,
             "required_extensions": list(self.required_extensions),
             "unsupported_extensions": list(self.unsupported_extensions),
+            "decoded_extensions": list(self.decoded_extensions),
             "preview_limitations": list(self.preview_limitations),
             "error": self.error,
         }
@@ -203,7 +210,9 @@ class RuntimeEngineOptions:
 class _BrowserRenderPreflight:
     required_extensions: tuple[str, ...] = ()
     unsupported_extensions: tuple[str, ...] = ()
+    decoded_extensions: tuple[str, ...] = ()
     preview_limitations: tuple[str, ...] = ()
+    meshopt_decode_required: bool = False
     fatal: bool = False
 
 
@@ -302,38 +311,51 @@ def write_browser_render_preview(
     if not asset_path.exists():
         raise FileNotFoundError(f"missing runtime asset: {asset_path}")
 
-    validation_stats = validate_gltf(asset_path)
     preflight = _browser_render_preflight(asset_path)
     output_path = Path(preview_path)
-    if preflight.fatal:
-        return _browser_render_report(
-            asset_path,
-            output_path,
-            opts,
-            validation_stats,
-            status="unsupported",
-            browser=None,
-            error="; ".join(preflight.preview_limitations),
-            preflight=preflight,
-        )
-
-    browser = _browser_command(opts)
-    if browser is None:
-        return _browser_render_report(
-            asset_path,
-            output_path,
-            opts,
-            validation_stats,
-            status="unavailable",
-            browser=None,
-            error="no chromium-compatible browser executable found",
-            preflight=preflight,
-        )
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="fascat-browser-render-") as directory:
+        workdir = Path(directory)
+        render_asset_path = asset_path
+        if preflight.meshopt_decode_required:
+            try:
+                render_asset_path = _write_meshopt_decoded_preview_asset(asset_path, workdir / "meshopt-decoded.gltf")
+            except Exception as exc:
+                preflight = _preflight_meshopt_decode_failed(preflight, exc)
+            else:
+                preflight = _preflight_meshopt_decoded(preflight)
+        if preflight.fatal:
+            try:
+                validation_stats = validate_gltf(render_asset_path)
+            except Exception:
+                validation_stats = _gltf_document_stats(_read_gltf_json_document(asset_path))
+            return _browser_render_report(
+                asset_path,
+                output_path,
+                opts,
+                validation_stats,
+                status="unsupported",
+                browser=None,
+                error="; ".join(preflight.preview_limitations),
+                preflight=preflight,
+            )
+        validation_stats = validate_gltf(render_asset_path)
+
+        browser = _browser_command(opts)
+        if browser is None:
+            return _browser_render_report(
+                asset_path,
+                output_path,
+                opts,
+                validation_stats,
+                status="unavailable",
+                browser=None,
+                error="no chromium-compatible browser executable found",
+                preflight=preflight,
+            )
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         harness_path = Path(directory) / "browser-render.html"
-        harness_path.write_text(_runtime_browser_render_html(asset_path.resolve(), opts), encoding="utf-8")
+        harness_path.write_text(_runtime_browser_render_html(render_asset_path.resolve(), opts), encoding="utf-8")
         command = _browser_render_report_invocation(browser, harness_path, opts)
         try:
             completed = subprocess.run(
@@ -396,6 +418,7 @@ def write_browser_render_preview(
                 quantized_primitives=_int(payload.get("quantized_primitives"), 0),
                 required_extensions=preflight.required_extensions,
                 unsupported_extensions=preflight.unsupported_extensions,
+                decoded_extensions=preflight.decoded_extensions,
                 preview_limitations=preflight.preview_limitations,
                 error=str(error) if error is not None else None,
             )
@@ -454,6 +477,7 @@ def write_browser_render_preview(
         quantized_primitives=_int(payload.get("quantized_primitives"), 0),
         required_extensions=preflight.required_extensions,
         unsupported_extensions=preflight.unsupported_extensions,
+        decoded_extensions=preflight.decoded_extensions,
         preview_limitations=preflight.preview_limitations,
         error=str(error) if error is not None else None,
     )
@@ -849,6 +873,7 @@ def _browser_render_report(
         quantized_primitives=0,
         required_extensions=checks.required_extensions,
         unsupported_extensions=checks.unsupported_extensions,
+        decoded_extensions=checks.decoded_extensions,
         preview_limitations=checks.preview_limitations,
         error=error,
     )
@@ -865,10 +890,9 @@ def _browser_render_preflight(asset_path: Path) -> _BrowserRenderPreflight:
         unsupported_extensions.add("KHR_draco_mesh_compression")
         limitations.append("browser preview cannot decode KHR_draco_mesh_compression geometry")
         fatal = True
-    if _document_has_meshopt_only_buffer_views(document):
-        unsupported_extensions.add("EXT_meshopt_compression")
-        limitations.append("browser preview cannot decode meshopt bufferViews without fallback buffer data")
-        fatal = True
+    meshopt_decode_required = _document_has_meshopt_only_buffer_views(document, asset_path)
+    if meshopt_decode_required:
+        limitations.append("browser preview requires meshopt decode for bufferViews without fallback buffer data")
     if _document_uses_basis_textures(document):
         unsupported_extensions.add("KHR_texture_basisu")
         limitations.append("browser preview renders geometry without KTX2/Basis texture sampling")
@@ -877,7 +901,37 @@ def _browser_render_preflight(asset_path: Path) -> _BrowserRenderPreflight:
         required_extensions=required,
         unsupported_extensions=tuple(sorted(unsupported_extensions)),
         preview_limitations=tuple(limitations),
+        meshopt_decode_required=meshopt_decode_required,
         fatal=fatal,
+    )
+
+
+def _preflight_meshopt_decoded(preflight: _BrowserRenderPreflight) -> _BrowserRenderPreflight:
+    limitations = tuple(
+        item for item in preflight.preview_limitations if "meshopt" not in item and "EXT_meshopt" not in item
+    )
+    return _BrowserRenderPreflight(
+        required_extensions=preflight.required_extensions,
+        unsupported_extensions=preflight.unsupported_extensions,
+        decoded_extensions=tuple(sorted((*preflight.decoded_extensions, "EXT_meshopt_compression"))),
+        preview_limitations=limitations,
+        meshopt_decode_required=False,
+        fatal=preflight.fatal,
+    )
+
+
+def _preflight_meshopt_decode_failed(preflight: _BrowserRenderPreflight, exc: Exception) -> _BrowserRenderPreflight:
+    unsupported = tuple(sorted((*preflight.unsupported_extensions, "EXT_meshopt_compression")))
+    limitations = tuple(
+        item for item in preflight.preview_limitations if "meshopt" not in item and "EXT_meshopt" not in item
+    ) + (f"browser preview could not decode EXT_meshopt_compression: {exc}",)
+    return _BrowserRenderPreflight(
+        required_extensions=preflight.required_extensions,
+        unsupported_extensions=unsupported,
+        decoded_extensions=preflight.decoded_extensions,
+        preview_limitations=limitations,
+        meshopt_decode_required=False,
+        fatal=True,
     )
 
 
@@ -901,6 +955,282 @@ def _read_gltf_json_document(asset_path: Path) -> dict[str, Any]:
     return cast(dict[str, Any], loaded)
 
 
+def _write_meshopt_decoded_preview_asset(asset_path: Path, output_path: Path) -> Path:
+    try:
+        import meshoptimizer
+    except ImportError as exc:
+        raise RuntimeError("meshoptimizer is not installed") from exc
+
+    source_document, buffers = _read_gltf_json_and_buffers_for_preview(asset_path)
+    document = deepcopy(source_document)
+    buffer_views = document.get("bufferViews")
+    if not isinstance(buffer_views, list):
+        raise RuntimeError("glTF bufferViews must be an array")
+
+    payload = bytearray()
+    decoded_views = 0
+    for view in buffer_views:
+        if not isinstance(view, dict):
+            raise RuntimeError("glTF bufferView must be an object")
+        extensions = view.get("extensions")
+        meshopt_extension = extensions.get("EXT_meshopt_compression") if isinstance(extensions, dict) else None
+        if isinstance(meshopt_extension, dict):
+            data = _decode_meshopt_buffer_view(meshopt_extension, buffers, meshoptimizer)
+            decoded_views += 1
+        else:
+            data = _copy_buffer_view_bytes(view, buffers)
+        offset = _append_preview_buffer(payload, data)
+        view["buffer"] = 0
+        view["byteOffset"] = offset
+        view["byteLength"] = len(data)
+        if isinstance(meshopt_extension, dict) and isinstance(meshopt_extension.get("byteStride"), int):
+            if meshopt_extension.get("mode") == "ATTRIBUTES":
+                view["byteStride"] = meshopt_extension["byteStride"]
+            else:
+                view.pop("byteStride", None)
+        if isinstance(extensions, dict):
+            extensions.pop("EXT_meshopt_compression", None)
+            if not extensions:
+                view.pop("extensions", None)
+
+    if decoded_views == 0:
+        raise RuntimeError("no meshopt-compressed bufferViews were found")
+    document["buffers"] = [
+        {
+            "byteLength": len(payload),
+            "uri": "data:application/octet-stream;base64," + base64.b64encode(bytes(payload)).decode("ascii"),
+        }
+    ]
+    _remove_gltf_extension(document, "EXT_meshopt_compression")
+    _rewrite_external_image_uris(document, asset_path.parent)
+    output_path.write_text(json.dumps(document), encoding="utf-8")
+    return output_path
+
+
+def _read_gltf_json_and_buffers_for_preview(asset_path: Path) -> tuple[dict[str, Any], list[bytes]]:
+    binary_chunk = b""
+    if asset_path.suffix.lower() == ".glb":
+        document, binary_chunk = _read_glb_json_and_binary(asset_path)
+    else:
+        document = _read_gltf_json_document(asset_path)
+
+    buffers: list[bytes] = []
+    for index, buffer_value in enumerate(document.get("buffers", [])):
+        if not isinstance(buffer_value, dict):
+            raise RuntimeError(f"glTF buffer {index} must be an object")
+        uri = buffer_value.get("uri")
+        if isinstance(uri, str):
+            buffers.append(_load_gltf_uri_bytes(uri, asset_path.parent))
+        elif asset_path.suffix.lower() == ".glb" and index == 0:
+            buffers.append(binary_chunk)
+        else:
+            buffers.append(b"")
+    return document, buffers
+
+
+def _read_glb_json_and_binary(asset_path: Path) -> tuple[dict[str, Any], bytes]:
+    data = asset_path.read_bytes()
+    if len(data) < 20 or data[0:4] != b"glTF":
+        raise RuntimeError("GLB header is invalid")
+    json_document: dict[str, Any] | None = None
+    binary_chunk = b""
+    offset = 12
+    while offset < len(data):
+        if offset + 8 > len(data):
+            raise RuntimeError("invalid GLB chunk header")
+        chunk_length = int.from_bytes(data[offset : offset + 4], "little")
+        chunk_type = int.from_bytes(data[offset + 4 : offset + 8], "little")
+        offset += 8
+        chunk = data[offset : offset + chunk_length]
+        if len(chunk) != chunk_length:
+            raise RuntimeError("invalid GLB chunk length")
+        offset += chunk_length
+        if chunk_type == 0x4E4F534A:
+            loaded = json.loads(chunk.decode("utf-8").rstrip(" \x00"))
+            if not isinstance(loaded, dict):
+                raise RuntimeError("glTF JSON document must be an object")
+            json_document = cast(dict[str, Any], loaded)
+        elif chunk_type == 0x004E4942:
+            binary_chunk = chunk
+    if json_document is None:
+        raise RuntimeError("GLB contains no JSON chunk")
+    return json_document, binary_chunk
+
+
+def _load_gltf_uri_bytes(uri: str, base_dir: Path) -> bytes:
+    if uri.startswith("data:"):
+        comma = uri.find(",")
+        if comma < 0:
+            raise RuntimeError("invalid data URI buffer")
+        header = uri[:comma]
+        payload = uri[comma + 1 :]
+        if ";base64" in header:
+            return base64.b64decode(payload)
+        return unquote_to_bytes(payload)
+    parsed = urlparse(uri)
+    if parsed.scheme and parsed.scheme != "file":
+        raise RuntimeError(f"unsupported external glTF URI scheme: {parsed.scheme}")
+    path = Path(unquote(parsed.path)) if parsed.scheme == "file" else base_dir / unquote(parsed.path)
+    return path.read_bytes()
+
+
+def _decode_meshopt_buffer_view(
+    extension: dict[str, Any],
+    buffers: list[bytes],
+    meshoptimizer: Any,
+) -> bytes:
+    buffer_index = _required_int(extension, "buffer")
+    if buffer_index < 0 or buffer_index >= len(buffers):
+        raise RuntimeError("meshopt extension references an invalid buffer")
+    byte_offset = _optional_json_int(extension.get("byteOffset"), 0)
+    byte_length = _required_int(extension, "byteLength")
+    byte_stride = _required_int(extension, "byteStride")
+    count = _required_int(extension, "count")
+    mode = extension.get("mode")
+    filter_name = str(extension.get("filter", "NONE"))
+    if not isinstance(mode, str):
+        raise RuntimeError("meshopt extension mode must be a string")
+    source_buffer = buffers[buffer_index]
+    source = source_buffer[byte_offset : byte_offset + byte_length]
+    if len(source) != byte_length:
+        raise RuntimeError("meshopt compressed bufferView is out of range")
+
+    if mode == "ATTRIBUTES":
+        decoded = meshoptimizer.decode_vertex_buffer(count, byte_stride, source)
+        raw = decoded.view(np.uint8).reshape(-1)[: count * byte_stride].copy()
+        raw = _apply_meshopt_filter(raw, count, byte_stride, filter_name, meshoptimizer)
+        return raw.tobytes()
+    if mode == "TRIANGLES":
+        if filter_name != "NONE":
+            raise RuntimeError("meshopt TRIANGLES mode does not support filters")
+        decoded = meshoptimizer.decode_index_buffer(count, byte_stride, source)
+        return cast(bytes, decoded.view(np.uint8).reshape(-1)[: count * byte_stride].tobytes())
+    if mode == "INDICES":
+        if filter_name != "NONE":
+            raise RuntimeError("meshopt INDICES mode does not support filters")
+        decoded = meshoptimizer.decode_index_sequence(count, byte_stride, source)
+        return cast(bytes, decoded.view(np.uint8).reshape(-1)[: count * byte_stride].tobytes())
+    raise RuntimeError(f"unsupported meshopt mode: {mode}")
+
+
+def _apply_meshopt_filter(
+    raw: NDArray[np.uint8],
+    count: int,
+    byte_stride: int,
+    filter_name: str,
+    meshoptimizer: Any,
+) -> NDArray[np.uint8]:
+    if filter_name == "NONE":
+        return raw
+    if filter_name == "OCTAHEDRAL":
+        return cast(NDArray[np.uint8], meshoptimizer.decode_filter_oct(raw, count, byte_stride))
+    if filter_name == "QUATERNION":
+        return cast(NDArray[np.uint8], meshoptimizer.decode_filter_quat(raw, count, byte_stride))
+    if filter_name == "EXPONENTIAL":
+        return cast(NDArray[np.uint8], meshoptimizer.decode_filter_exp(raw, count, byte_stride))
+    raise RuntimeError(f"unsupported meshopt filter: {filter_name}")
+
+
+def _copy_buffer_view_bytes(view: dict[str, Any], buffers: list[bytes]) -> bytes:
+    buffer_index = _optional_json_int(view.get("buffer"), 0)
+    if buffer_index < 0 or buffer_index >= len(buffers):
+        raise RuntimeError("glTF bufferView references an invalid buffer")
+    byte_offset = _optional_json_int(view.get("byteOffset"), 0)
+    byte_length = _required_int(view, "byteLength")
+    data = buffers[buffer_index][byte_offset : byte_offset + byte_length]
+    if len(data) != byte_length:
+        raise RuntimeError("glTF bufferView is out of range")
+    return data
+
+
+def _append_preview_buffer(payload: bytearray, data: bytes) -> int:
+    padding = (-len(payload)) % 4
+    if padding:
+        payload.extend(b"\x00" * padding)
+    offset = len(payload)
+    payload.extend(data)
+    return offset
+
+
+def _remove_gltf_extension(document: dict[str, Any], extension_name: str) -> None:
+    for field in ("extensionsUsed", "extensionsRequired"):
+        value = document.get(field)
+        if not isinstance(value, list):
+            continue
+        document[field] = [item for item in value if item != extension_name]
+        if not document[field]:
+            document.pop(field, None)
+
+
+def _rewrite_external_image_uris(document: dict[str, Any], base_dir: Path) -> None:
+    images = document.get("images")
+    if not isinstance(images, list):
+        return
+    for image in images:
+        if not isinstance(image, dict):
+            continue
+        uri = image.get("uri")
+        if not isinstance(uri, str) or uri.startswith("data:"):
+            continue
+        parsed = urlparse(uri)
+        if parsed.scheme:
+            continue
+        image["uri"] = (base_dir / unquote(parsed.path)).resolve().as_uri()
+
+
+def _gltf_document_stats(document: dict[str, Any]) -> dict[str, int]:
+    meshes = document.get("meshes")
+    accessors = document.get("accessors")
+    if not isinstance(meshes, list) or not isinstance(accessors, list):
+        return {"meshes": 0, "points": 0, "triangles": 0}
+    points = 0
+    triangles = 0
+    for mesh in meshes:
+        if not isinstance(mesh, dict):
+            continue
+        primitives = mesh.get("primitives")
+        if not isinstance(primitives, list):
+            continue
+        for primitive in primitives:
+            if not isinstance(primitive, dict):
+                continue
+            attributes = primitive.get("attributes")
+            if isinstance(attributes, dict) and isinstance(attributes.get("POSITION"), int):
+                position_count = _accessor_count_from_json(accessors, attributes["POSITION"])
+                points += position_count
+            else:
+                position_count = 0
+            if isinstance(primitive.get("indices"), int):
+                triangles += _accessor_count_from_json(accessors, primitive["indices"]) // 3
+            elif position_count:
+                triangles += position_count // 3
+    return {"meshes": len(meshes), "points": points, "triangles": triangles}
+
+
+def _accessor_count_from_json(accessors: list[object], index: int) -> int:
+    if index < 0 or index >= len(accessors):
+        return 0
+    accessor = accessors[index]
+    if not isinstance(accessor, dict) or not isinstance(accessor.get("count"), int):
+        return 0
+    return int(accessor["count"])
+
+
+def _required_int(source: dict[str, Any], key: str) -> int:
+    value = source.get(key)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise RuntimeError(f"meshopt extension {key} must be an integer")
+    return value
+
+
+def _optional_json_int(value: object, default: int) -> int:
+    if value is None:
+        return default
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise RuntimeError("glTF integer value must be an integer")
+    return value
+
+
 def _string_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -917,7 +1247,7 @@ def _document_uses_draco(document: dict[str, Any]) -> bool:
     return False
 
 
-def _document_has_meshopt_only_buffer_views(document: dict[str, Any]) -> bool:
+def _document_has_meshopt_only_buffer_views(document: dict[str, Any], asset_path: Path) -> bool:
     buffer_views = document.get("bufferViews")
     accessors = document.get("accessors")
     if not isinstance(buffer_views, list) or not isinstance(accessors, list):
@@ -931,9 +1261,29 @@ def _document_has_meshopt_only_buffer_views(document: dict[str, Any]) -> bool:
         extensions = view.get("extensions")
         if not isinstance(extensions, dict) or "EXT_meshopt_compression" not in extensions:
             continue
-        if "buffer" not in view:
+        buffer_index = view.get("buffer")
+        if not isinstance(buffer_index, int):
+            return True
+        if _buffer_is_meshopt_placeholder(document, buffer_index, asset_path):
             return True
     return False
+
+
+def _buffer_is_meshopt_placeholder(document: dict[str, Any], buffer_index: int, asset_path: Path) -> bool:
+    buffers = document.get("buffers")
+    if not isinstance(buffers, list) or buffer_index < 0 or buffer_index >= len(buffers):
+        return True
+    buffer = buffers[buffer_index]
+    if not isinstance(buffer, dict):
+        return True
+    extensions = buffer.get("extensions")
+    meshopt = extensions.get("EXT_meshopt_compression") if isinstance(extensions, dict) else None
+    if isinstance(meshopt, dict) and meshopt.get("fallback") is True:
+        return True
+    uri = buffer.get("uri")
+    if isinstance(uri, str):
+        return False
+    return not (asset_path.suffix.lower() == ".glb" and buffer_index == 0)
 
 
 def _document_uses_basis_textures(document: dict[str, Any]) -> bool:

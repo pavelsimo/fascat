@@ -1232,13 +1232,15 @@ material base-color factors, quantized vertex attributes, meshopt exports that
 keep fallback buffer data, and base-color texture sampling for supported image
 URI/data URI textures. Before launch, the browser preview checks compressed
 runtime extensions that the lightweight renderer cannot decode: Draco geometry
-and meshopt bufferViews without fallback buffer data return
-`status="unsupported"` without writing a misleading screenshot, while KTX2/Basis
-texture-only limitations can still render geometry as `status="rendered_partial"`
-with `unsupported_extensions` and `preview_limitations` in the JSON report.
-Actual Draco decoding, meshopt-only decoding, KTX2/Basis texture sampling,
-sparse accessors, and full engine material/lighting parity remain outside the
-packaged browser preview.
+returns `status="unsupported"` without writing a misleading screenshot. Meshopt
+bufferViews without fallback buffer data are decoded into a temporary preview
+glTF through the local `meshoptimizer` module when available, and the report
+lists `decoded_extensions=["EXT_meshopt_compression"]`; if that decode path is
+unavailable, the preview is reported as unsupported. KTX2/Basis texture-only
+limitations can still render geometry as `status="rendered_partial"` with
+`unsupported_extensions` and `preview_limitations` in the JSON report. Actual
+Draco decoding, KTX2/Basis texture sampling, sparse accessors, and full engine
+material/lighting parity remain outside the packaged browser preview.
 
 `--runtime-browser` is available for glTF/GLB outputs. It launches a local
 Chromium-compatible browser when one is installed, loads the asset bytes in a
