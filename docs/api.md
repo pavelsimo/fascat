@@ -1231,15 +1231,15 @@ browser renderer artifact for simple assets, including node transforms,
 material base-color factors, quantized vertex attributes, meshopt exports that
 keep fallback buffer data, Draco geometry decoded through glTF Transform,
 meshopt bufferViews without fallback buffer data decoded through local
-`meshoptimizer`, and base-color texture sampling for supported image URI/data
-URI textures. The report lists decoded compressed geometry in
+`meshoptimizer`, KTX2/Basis textures decoded through glTF Transform plus
+KTX-Software when available, and base-color texture sampling for supported
+image URI/data URI textures. The report lists decoded compressed payloads in
 `decoded_extensions`; if Draco or meshopt decode tooling is unavailable, the
-preview is reported as unsupported without writing a misleading screenshot.
-KTX2/Basis texture-only limitations can still render geometry as
+preview is reported as unsupported without writing a misleading screenshot. If
+KTX2/Basis texture decode tooling is unavailable, geometry can still render as
 `status="rendered_partial"` with `unsupported_extensions` and
-`preview_limitations` in the JSON report. Actual KTX2/Basis texture sampling,
-sparse accessors, and full engine material/lighting parity remain outside the
-packaged browser preview.
+`preview_limitations` in the JSON report. Sparse accessors and full engine
+material/lighting parity remain outside the packaged browser preview.
 
 `--runtime-browser` is available for glTF/GLB outputs. It launches a local
 Chromium-compatible browser when one is installed, loads the asset bytes in a

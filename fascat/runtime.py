@@ -214,6 +214,7 @@ class _BrowserRenderPreflight:
     preview_limitations: tuple[str, ...] = ()
     draco_decode_required: bool = False
     meshopt_decode_required: bool = False
+    texture_decode_required: bool = False
     fatal: bool = False
 
 
@@ -333,6 +334,13 @@ def write_browser_render_preview(
                 preflight = _preflight_meshopt_decode_failed(preflight, exc)
             else:
                 preflight = _preflight_meshopt_decoded(preflight)
+        if not preflight.fatal and preflight.texture_decode_required:
+            try:
+                render_asset_path = _write_ktx2_decoded_preview_asset(render_asset_path, workdir / "ktx2-decoded.glb")
+            except Exception as exc:
+                preflight = _preflight_texture_decode_failed(preflight, exc)
+            else:
+                preflight = _preflight_texture_decoded(preflight)
         if preflight.fatal:
             try:
                 validation_stats = validate_gltf(render_asset_path)
@@ -901,9 +909,10 @@ def _browser_render_preflight(asset_path: Path) -> _BrowserRenderPreflight:
     meshopt_decode_required = _document_has_meshopt_only_buffer_views(document, asset_path)
     if meshopt_decode_required:
         limitations.append("browser preview requires meshopt decode for bufferViews without fallback buffer data")
-    if _document_uses_basis_textures(document):
+    texture_decode_required = _document_uses_basis_textures(document)
+    if texture_decode_required:
         unsupported_extensions.add("KHR_texture_basisu")
-        limitations.append("browser preview renders geometry without KTX2/Basis texture sampling")
+        limitations.append("browser preview requires KTX2/Basis decode for texture sampling")
 
     return _BrowserRenderPreflight(
         required_extensions=required,
@@ -911,6 +920,7 @@ def _browser_render_preflight(asset_path: Path) -> _BrowserRenderPreflight:
         preview_limitations=tuple(limitations),
         draco_decode_required=draco_decode_required,
         meshopt_decode_required=meshopt_decode_required,
+        texture_decode_required=texture_decode_required,
         fatal=False,
     )
 
@@ -923,6 +933,7 @@ def _preflight_draco_decoded(preflight: _BrowserRenderPreflight) -> _BrowserRend
         preview_limitations=_without_preview_limitations(preflight, "Draco", "KHR_draco"),
         draco_decode_required=False,
         meshopt_decode_required=preflight.meshopt_decode_required,
+        texture_decode_required=preflight.texture_decode_required,
         fatal=preflight.fatal,
     )
 
@@ -939,6 +950,7 @@ def _preflight_draco_decode_failed(preflight: _BrowserRenderPreflight, exc: Exce
         preview_limitations=limitations,
         draco_decode_required=False,
         meshopt_decode_required=preflight.meshopt_decode_required,
+        texture_decode_required=preflight.texture_decode_required,
         fatal=True,
     )
 
@@ -951,6 +963,7 @@ def _preflight_meshopt_decoded(preflight: _BrowserRenderPreflight) -> _BrowserRe
         preview_limitations=_without_preview_limitations(preflight, "meshopt", "EXT_meshopt"),
         draco_decode_required=preflight.draco_decode_required,
         meshopt_decode_required=False,
+        texture_decode_required=preflight.texture_decode_required,
         fatal=preflight.fatal,
     )
 
@@ -967,12 +980,47 @@ def _preflight_meshopt_decode_failed(preflight: _BrowserRenderPreflight, exc: Ex
         preview_limitations=limitations,
         draco_decode_required=preflight.draco_decode_required,
         meshopt_decode_required=False,
+        texture_decode_required=preflight.texture_decode_required,
         fatal=True,
+    )
+
+
+def _preflight_texture_decoded(preflight: _BrowserRenderPreflight) -> _BrowserRenderPreflight:
+    return _BrowserRenderPreflight(
+        required_extensions=preflight.required_extensions,
+        unsupported_extensions=_without_extensions(preflight.unsupported_extensions, "KHR_texture_basisu"),
+        decoded_extensions=tuple(sorted((*preflight.decoded_extensions, "KHR_texture_basisu"))),
+        preview_limitations=_without_preview_limitations(preflight, "KTX2", "Basis", "KHR_texture_basisu"),
+        draco_decode_required=preflight.draco_decode_required,
+        meshopt_decode_required=preflight.meshopt_decode_required,
+        texture_decode_required=False,
+        fatal=preflight.fatal,
+    )
+
+
+def _preflight_texture_decode_failed(preflight: _BrowserRenderPreflight, exc: Exception) -> _BrowserRenderPreflight:
+    limitations = _without_preview_limitations(preflight, "KTX2", "Basis", "KHR_texture_basisu") + (
+        f"browser preview could not decode KHR_texture_basisu: {exc}",
+        "browser preview renders geometry without KTX2/Basis texture sampling",
+    )
+    return _BrowserRenderPreflight(
+        required_extensions=preflight.required_extensions,
+        unsupported_extensions=tuple(sorted({*preflight.unsupported_extensions, "KHR_texture_basisu"})),
+        decoded_extensions=preflight.decoded_extensions,
+        preview_limitations=limitations,
+        draco_decode_required=preflight.draco_decode_required,
+        meshopt_decode_required=preflight.meshopt_decode_required,
+        texture_decode_required=False,
+        fatal=preflight.fatal,
     )
 
 
 def _without_preview_limitations(preflight: _BrowserRenderPreflight, *patterns: str) -> tuple[str, ...]:
     return tuple(item for item in preflight.preview_limitations if not any(pattern in item for pattern in patterns))
+
+
+def _without_extensions(extensions: tuple[str, ...], *names: str) -> tuple[str, ...]:
+    return tuple(item for item in extensions if item not in names)
 
 
 def _read_gltf_json_document(asset_path: Path) -> dict[str, Any]:
@@ -1011,6 +1059,24 @@ def _run_gltf_transform_copy(input_path: Path, output_path: Path) -> None:
     if completed.returncode != 0:
         details = (completed.stderr or completed.stdout).strip()
         raise RuntimeError(f"glTF Transform copy failed: {details}")
+
+
+def _write_ktx2_decoded_preview_asset(asset_path: Path, output_path: Path) -> Path:
+    _run_gltf_transform_ktxdecompress(asset_path, output_path)
+    decoded = _read_gltf_json_document(output_path)
+    if _document_uses_basis_textures(decoded):
+        raise RuntimeError("glTF Transform ktxdecompress preserved KHR_texture_basisu")
+    return output_path
+
+
+def _run_gltf_transform_ktxdecompress(input_path: Path, output_path: Path) -> None:
+    from fascat.io.gltf import _gltf_transform_command
+
+    command = [*_gltf_transform_command(), "ktxdecompress", str(input_path), str(output_path)]
+    completed = subprocess.run(command, check=False, capture_output=True, text=True)
+    if completed.returncode != 0:
+        details = (completed.stderr or completed.stdout).strip()
+        raise RuntimeError(f"glTF Transform ktxdecompress failed: {details}")
 
 
 def _write_meshopt_decoded_preview_asset(asset_path: Path, output_path: Path) -> Path:

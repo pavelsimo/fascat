@@ -363,6 +363,9 @@ def test_browser_render_preview_marks_ktx2_texture_preview_partial(
     Image.new("RGBA", (2, 2), (40, 50, 60, 255)).save(image_bytes, format="PNG")
     screenshot_data = "data:image/png;base64," + base64.b64encode(image_bytes.getvalue()).decode("ascii")
 
+    def fake_ktxdecompress(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("KTX-Software ktx command not found")
+
     def fake_run(command: list[str], *_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         assert "--dump-dom" in command
         stdout = (
@@ -374,6 +377,7 @@ def test_browser_render_preview_marks_ktx2_texture_preview_partial(
         )
         return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
+    monkeypatch.setattr("fascat.runtime._run_gltf_transform_ktxdecompress", fake_ktxdecompress)
     monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
 
     report = write_browser_render_preview(
@@ -384,9 +388,69 @@ def test_browser_render_preview_marks_ktx2_texture_preview_partial(
 
     assert report.status == "rendered_partial"
     assert report.unsupported_extensions == ("KHR_texture_basisu",)
-    assert "KTX2/Basis" in str(report.error)
+    assert "could not decode KHR_texture_basisu" in str(report.error)
+    assert "KTX2/Basis texture sampling" in str(report.error)
     assert report.to_dict()["unsupported_extensions"] == ["KHR_texture_basisu"]
     assert Image.open(preview).getpixel((0, 0)) == (40, 50, 60, 255)
+
+
+def test_browser_render_preview_decodes_ktx2_textures(
+    monkeypatch,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "asset.gltf"
+    preview = tmp_path / "browser-preview.png"
+    _asset().write_gltf(output)
+    document = json.loads(output.read_text(encoding="utf-8"))
+    document["extensionsUsed"] = ["KHR_texture_basisu"]
+    document["extensionsRequired"] = ["KHR_texture_basisu"]
+    document["textures"] = [{"extensions": {"KHR_texture_basisu": {"source": 0}}}]
+    document["images"] = [{"mimeType": "image/ktx2", "uri": "data:image/ktx2;base64,"}]
+    output.write_text(json.dumps(document), encoding="utf-8")
+    image_bytes = BytesIO()
+    Image.new("RGBA", (2, 2), (90, 100, 110, 255)).save(image_bytes, format="PNG")
+    screenshot_data = "data:image/png;base64," + base64.b64encode(image_bytes.getvalue()).decode("ascii")
+
+    def fake_ktxdecompress(input_path: Path, output_path: Path) -> None:
+        assert input_path == output
+        assert output_path.name == "ktx2-decoded.glb"
+        _asset().write_gltf(output_path)
+
+    def fake_run(command: list[str], *_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert "--dump-dom" in command
+        harness_path = Path(urlparse(command[-1]).path)
+        harness = harness_path.read_text(encoding="utf-8")
+        match = re.search(r"const ASSET_URL = (?P<value>.*?);", harness)
+        assert match is not None
+        decoded_url = json.loads(match.group("value"))
+        decoded_path = Path(unquote(urlparse(decoded_url).path))
+        assert decoded_path.name == "ktx2-decoded.glb"
+        assert validate_gltf(decoded_path)["triangles"] == 1
+        stdout = (
+            '<html><body><pre id="result">'
+            '{"status":"rendered","meshes":1,"triangles":1,'
+            '"textured_primitives":1,"sampled_textures":1,'
+            f'"screenshot_data":"{screenshot_data}"'
+            "}</pre></body></html>"
+        )
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr("fascat.runtime._run_gltf_transform_ktxdecompress", fake_ktxdecompress)
+    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+
+    report = write_browser_render_preview(
+        output,
+        preview,
+        RuntimeBrowserRenderOptions(browser="fake-browser", timeout_seconds=3.0),
+    )
+
+    assert report.status == "rendered"
+    assert report.decoded_extensions == ("KHR_texture_basisu",)
+    assert report.unsupported_extensions == ()
+    assert report.preview_limitations == ()
+    assert report.textured_primitives == 1
+    assert report.sampled_textures == 1
+    assert Image.open(preview).getpixel((0, 0)) == (90, 100, 110, 255)
 
 
 def test_browser_render_preview_harness_samples_base_color_textures(tmp_path: Path) -> None:
