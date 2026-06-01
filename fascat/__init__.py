@@ -94,6 +94,11 @@ from fascat.runtime import (
     measure_engine_runtime,
     write_browser_render_preview,
 )
+from fascat.runtime_fixtures import (
+    RuntimeParityFixture,
+    RuntimeParitySuiteReport,
+    write_runtime_parity_suite,
+)
 from fascat.size_ladder import GltfSizeLadderReport, GltfSizeLadderVariant, measure_gltf_size_ladder
 from fascat.visual import (
     LodSwitchPreviewReport,
@@ -159,6 +164,8 @@ __all__ = [
     "RuntimeBrowserReport",
     "RuntimeEngineOptions",
     "RuntimeEngineReport",
+    "RuntimeParityFixture",
+    "RuntimeParitySuiteReport",
     "SceneOptimizeOptions",
     "ReplaceOptions",
     "SelectionMatch",
@@ -216,6 +223,7 @@ __all__ = [
     "validate_output",
     "validate_usd",
     "write_gltf",
+    "write_runtime_parity_suite",
     "write_obj",
     "write_stl",
     "write_fbx",

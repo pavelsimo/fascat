@@ -1147,6 +1147,7 @@ preview = fc.write_preview(asset, "preview.png")
 comparison = fc.write_before_after_previews(before_asset, after_asset, "visual-review/")
 lod_contact_sheet = fc.write_lod_switch_previews(asset_with_lods, "lod-previews/")
 diff = fc.compare_images("baseline.png", "preview.png", fc.VisualDiffOptions(pixel_tolerance=2))
+suite = fc.write_runtime_parity_suite("runtime-parity/")
 ```
 
 The preview renderer is a local orthographic software renderer. It writes PNGs,
@@ -1155,8 +1156,10 @@ substitute each part's LOD mesh to build an LOD switching contact sheet.
 `compare_images()` reports mean absolute error, max channel error, changed pixel
 counts, changed pixel ratio, and whether configured thresholds passed. The same
 thresholds can gate engine preview baselines through `fascat validate`, but the
-helper itself remains a general image-diff primitive rather than a curated
-Unity/Unreal material and lighting parity suite.
+helper itself remains a general image-diff primitive. Use
+`write_runtime_parity_suite()` to write bundled GLB fixtures, software baseline
+PNGs, and a manifest for browser, Unity, and Unreal material/lighting preview
+comparisons.
 
 ## Validation
 
@@ -1213,6 +1216,8 @@ fascat validate motor.glb \
   --runtime-browser-preview motor-browser.png \
   --visual-preview motor-preview.png \
   --lod-preview-dir lod-previews/
+
+fascat runtime-fixtures runtime-parity/
 ```
 
 Validation-time geometry reports use the same filter selectors as conversion
@@ -1273,8 +1278,10 @@ That packaged path reports `measured_fps`, `frame_count`, and
 validates the engine command contract and glTF/GLB file parsing, and when a
 preview path is requested it writes a deterministic PNG plus fixed-frame
 software benchmark fields. That Unreal packaged preview is not a full scene or
-material renderer; Unreal scene-rendered screenshots/FPS and bundled
-engine-specific material/lighting parity fixture suites remain open. Set
+material renderer. `fascat runtime-fixtures DIR` writes bundled PBR material,
+texture-map, and normal/lighting GLB fixtures with software baseline PNGs and a
+manifest containing browser, Unity, and Unreal preview commands. Engine-specific
+golden captures and full Unreal scene-rendered screenshots/FPS remain open. Set
 `FASCAT_UNITY`, `UNITY_EDITOR`,
 `FASCAT_UNREAL`, or `UNREAL_EDITOR`, or pass `--runtime-engine-command`, when
 the engine executable is not on `PATH`. If the executable is missing, or an

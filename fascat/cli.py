@@ -72,6 +72,7 @@ from fascat.runtime import (
     measure_engine_runtime,
     write_browser_render_preview,
 )
+from fascat.runtime_fixtures import write_runtime_parity_suite
 from fascat.visual import VisualDiffOptions, compare_images, write_output_lod_switch_previews, write_output_preview
 
 DOCS_URL = "https://pavelsimo.github.io/fascat"
@@ -81,7 +82,7 @@ STEP_SUFFIXES = {".step", ".stp"}
 CAD_SUFFIXES = STEP_SUFFIXES | IGES_SUFFIXES | BREP_SUFFIXES
 USD_SUFFIXES = {".usd", ".usda", ".usdc", ".usdz"}
 EXPORT_SUFFIXES = USD_SUFFIXES | GLTF_SUFFIXES | OBJ_SUFFIXES | STL_SUFFIXES | FBX_SUFFIXES
-COMMAND_NAMES = ("inspect", "convert", "validate", "version", "help")
+COMMAND_NAMES = ("inspect", "convert", "validate", "runtime-fixtures", "version", "help")
 GLOBAL_FLAG_ALIASES = {
     "--json",
     "--dry-run",
@@ -102,6 +103,7 @@ TOP_LEVEL_EPILOG = f"""Examples:
   fascat convert source.brep source.glb --profile realtime-web
   fascat convert motor.step motor.glb --profile virtual-reality
   fascat --json validate motor.usdc
+  fascat runtime-fixtures runtime-parity/
 
 Docs: {DOCS_URL}
 Issues: {ISSUES_URL}"""
@@ -2443,6 +2445,43 @@ def cmd_validate(
         ctx,
         json_payload,
         message,
+    )
+
+
+@app.command(
+    "runtime-fixtures",
+    epilog=f"""Examples:
+  fascat runtime-fixtures runtime-parity/
+  fascat --json runtime-fixtures runtime-parity/
+
+Docs: {DOCS_URL}/reference.html""",
+)
+def cmd_runtime_fixtures(
+    ctx: typer.Context,
+    output_dir: Annotated[Path, typer.Argument(help="Directory to write runtime parity GLBs and baselines.")],
+) -> None:
+    """Write bundled runtime parity fixtures for browser, Unity, and Unreal preview checks."""
+    state = _state(ctx)
+    payload: dict[str, Any] = {
+        "command": "runtime-fixtures",
+        "output": str(output_dir),
+        "dry_run": state.dry_run,
+    }
+    if state.dry_run:
+        _emit(ctx, payload, f"Would write runtime parity fixtures to {output_dir}.")
+        return
+
+    try:
+        suite = write_runtime_parity_suite(output_dir)
+    except Exception as exc:
+        _fail(ctx, payload, str(exc))
+        raise AssertionError("unreachable") from exc
+
+    json_payload = {**payload, "suite": suite.to_dict()}
+    _emit(
+        ctx,
+        json_payload,
+        f"Wrote runtime parity fixtures to {suite.directory} ({len(suite.fixtures)} fixtures).",
     )
 
 

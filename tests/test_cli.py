@@ -255,6 +255,33 @@ def test_validate_help() -> None:
     assert "--report" in plain(result.output)
 
 
+def test_runtime_fixtures_command_writes_suite(tmp_path: Path) -> None:
+    suite_dir = tmp_path / "runtime-parity"
+
+    result = runner.invoke(app, ["--json", "runtime-fixtures", str(suite_dir)])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["command"] == "runtime-fixtures"
+    assert payload["suite"]["targets"] == ["browser", "unity", "unreal"]
+    assert len(payload["suite"]["fixtures"]) == 3
+    assert (suite_dir / "runtime-parity-suite.json").is_file()
+    assert (suite_dir / "assets" / "pbr-material-grid.glb").is_file()
+    assert (suite_dir / "baselines" / "pbr-material-grid.png").is_file()
+
+
+def test_runtime_fixtures_dry_run_does_not_write(tmp_path: Path) -> None:
+    suite_dir = tmp_path / "runtime-parity"
+
+    result = runner.invoke(app, ["--json", "--dry-run", "runtime-fixtures", str(suite_dir)])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["command"] == "runtime-fixtures"
+    assert payload["dry_run"] is True
+    assert not suite_dir.exists()
+
+
 def test_convert_dry_run_json() -> None:
     result = runner.invoke(
         app,
