@@ -3,109 +3,52 @@ title: Python API
 description: Use fascat from Python
 ---
 
-The Python API exposes the same pipeline as the CLI, but keeps each conversion step explicit and composable.
+The Python API runs the same pipeline as the CLI, but keeps each conversion step
+explicit and composable.
 
-## End-to-end pipeline
+## Start here
+
+The simplest path is one call. It runs the full default pipeline for a profile and
+validates the output:
 
 ```python
 import fascat as fc
 
-asset = fc.read_step("motor.step")
-# Or import other CAD inputs:
-# asset = fc.read_iges("legacy.igs")
-# asset = fc.read_brep("native.brep")
-
-asset = asset.tessellate(
-    fc.TessellationOptions(
-        sag=0.1,
-        sag_ratio=None,
-        angle=15.0,
-        relative=True,
-        min_edge_length=None,
-        max_edge_length=None,
-        max_polygon_length=None,
-        free_edge_report=False,
-        reuse_existing_meshes=True,
-        preserve_boundaries=True,
-        curvature_adaptive=False,
-        detail_adaptive=False,
-        avoid_skinny_triangles=False,
-        quality_report=False,
-    )
-)
-
-asset = asset.repair(
-    fc.RepairOptions(
-        tolerance=0.05,
-        merge_vertices=True,
-        delete_degenerate=True,
-        fix_winding=True,
-        quality_report=False,
-        face_orientation="exterior",
-        normal_orientation="from_faces",
-        fill_small_holes=False,
-    )
-)
-
-asset = asset.stage(
-    fc.StageOptions(
-        materials="cad",
-        material_mode="cad",
-        merge_equivalent_materials=False,
-        normals=True,
-        normal_mode="smooth",
-        normal_weighting="angle",
-        hard_edge_angle=30.0,
-        preserve_face_boundaries=False,
-        override_normals=True,
-        tangents=False,
-        tangent_uv_channel=0,
-        override_tangents=False,
-        validate_normals=False,
-        unwrap=fc.UnwrapOptions(),
-        atlas=fc.AtlasOptions(),
-        uv0="box",
-        uv1=None,
-    )
-)
-
-asset = asset.optimize(
-    fc.OptimizeOptions(
-        target_triangles=500_000,
-        preserve_instances=True,
-        simplify=True,
-        optimize_buffers=True,
-        preserve_hard_edges=False,
-        preserve_holes=False,
-        preserve_material_boundaries=False,
-        preserve_uv_seams=False,
-        preserve_small_parts=False,
-        preserve_silhouette=False,
-    )
-)
-
-asset = asset.lods(
-    fc.LODOptions(
-        ratios=[0.5, 0.25, 0.1],
-        mode="variants",
-        screen_coverage=[0.5, 0.2, 0.05],
-        per_part_budget=True,
-        drop_tiny_parts=True,
-        tiny_part_screen_size=2.0,
-        validate=True,
-    )
-)
-
-asset.write_usd("motor.usdc")
-asset.write_gltf("motor.glb")
+asset = fc.convert("motor.step", "motor.glb", profile="realtime-web")
+print(asset.report.summary())
 ```
 
-Pipeline operations return new `Asset` instances instead of mutating the previous asset. Write calls attach a final write step to the asset report.
+When you need control over individual steps, build the pipeline yourself. Each
+method returns a **new** `Asset`, and every `*Options` object has sensible defaults —
+set only what you want to change:
 
-Mesh-heavy per-part operations accept `jobs` to fan out independent parts while applying results
-back in deterministic part order. `jobs=1` is the default; set a higher value on
-`RepairOptions`, `MergeVerticesOptions`, `StageOptions`, `OptimizeOptions`, `DecimateOptions`,
-`LODOptions`, or `LODGeneratorOptions` for larger multi-part assets.
+```python
+import fascat as fc
+
+asset = (
+    fc.read_step("motor.step")          # or read_iges(...) / read_brep(...)
+    .tessellate(fc.TessellationOptions(sag=0.1, angle=15.0))
+    .repair(fc.RepairOptions(tolerance=0.05))
+    .stage(fc.StageOptions(materials="cad", uv0="box"))
+    .optimize(fc.OptimizeOptions(target_triangles=500_000))
+    .lods(fc.LODOptions(ratios=[0.5, 0.25, 0.1]))
+)
+
+asset.write_gltf("motor.glb")
+asset.write_usd("motor.usdc")
+```
+
+The rest of this page documents each step and every option. Two things apply
+throughout:
+
+- **Reports.** Write calls append a write step to the asset report, and every step
+  records its options, before/after counts, and warnings. See [Reports and
+  stats](#reports-and-stats).
+- **Parallelism.** Mesh-heavy per-part operations accept `jobs` to fan out
+  independent parts and reassemble them in deterministic order. `jobs=1` is the
+  default; raise it on `RepairOptions`, `MergeVerticesOptions`, `StageOptions`,
+  `OptimizeOptions`, `DecimateOptions`, `LODOptions`, or `LODGeneratorOptions` for
+  large multi-part assets.
 
 Core pipeline calls:
 
@@ -202,7 +145,16 @@ asset = asset.merge(
 )
 ```
 
-Merge modes include `all`, `by_material`, `by_node_name`, `by_part_name`, `hierarchy_level`, `parent_children`, `final_level`, and `regions`. Merging bakes node transforms into merged vertex positions, keeps material slots when requested, removes replaced empty nodes, and records before/after draw-call breakdown fields in the merge report step: `draw_calls`, `draw_call_meshes`, `draw_call_materials`, `draw_call_submesh_slots`, `draw_call_material_slots`, `draw_call_mesh_instances`, `draw_call_reused_instances`, `draw_call_instanced_meshes`, and `draw_call_merged_batches`. When merging reduces reusable instances, report steps include an `export_advisor` entry and warning so GLB file-size, memory, and culling tradeoffs are explicit.
+Merge modes are `all`, `by_material`, `by_node_name`, `by_part_name`,
+`hierarchy_level`, `parent_children`, `final_level`, and `regions`. Merging bakes node
+transforms into merged vertex positions, keeps material slots when requested, and
+removes replaced empty nodes. The merge report step records a before/after draw-call
+breakdown (`draw_calls`, `draw_call_meshes`, `draw_call_materials`,
+`draw_call_submesh_slots`, `draw_call_material_slots`, `draw_call_mesh_instances`,
+`draw_call_reused_instances`, `draw_call_instanced_meshes`,
+`draw_call_merged_batches`). When merging reduces reusable instances, the step adds an
+`export_advisor` entry and warning so the GLB file-size, memory, and culling tradeoff
+is explicit.
 
 Use `explode()` when runtime tools need separate meshes by material or connected component, and `replace()` when a selected part should become a proxy.
 
@@ -293,147 +245,107 @@ asset.pmi.append(
 
 glTF export writes metadata and PMI into `extras.fascat`. USD export writes Fascat metadata into `customData` on the scene, nodes, prototypes, materials, meshes, and `/PMI/*` annotation prims. When merge, explode, or replace operations create new parts, exporters resolve PMI links through `source_part_id` and `source_part_ids` metadata so annotations that targeted the original part still attach to the derived output.
 
-STEP AP242 import includes a textual PMI scan for common typed records such as
-`DIMENSIONAL_SIZE`, `DIMENSIONAL_LOCATION`, `PLUS_MINUS_TOLERANCE`,
-`GEOMETRIC_TOLERANCE`, common named geometric-tolerance subtypes such as
-`FLATNESS_TOLERANCE`, `POSITION_TOLERANCE`, and `SURFACE_PROFILE_TOLERANCE`,
-`DATUM`, `DATUM_REFERENCE`, `DATUM_TARGET`,
-`FEATURE_CONTROL_FRAME`, and annotation text entities. Those records become
-typed `PmiAnnotation` objects with source STEP entity ids, references, and
-numeric tolerance bounds where the textual record exposes them. If a
-file advertises AP242 PMI but no supported typed record is extracted, the import
-report records `pmi_present=true`, `unsupported_pmi_count=1`, and a warning
-instead of silently implying that PMI was imported. Import reports and asset
-metadata also include `pmi_semantic_graph`, a textual STEP reference graph with
-PMI entity nodes, referenced STEP entity nodes, common shape-aspect/product
-target support nodes, inbound callout/annotation associativity records,
-tolerance-zone support records, annotation-presentation support records,
-reference edges, and missing reference counts. `metadata_and_visuals` export
-adds deterministic glTF/USD PMI marker meshes with simple vector text glyphs
-linked to those records; full AP242 graphical presentation reconstruction and
-semantic coverage beyond the supported textual records are still planned
-backend work.
+### PMI import
 
-STEP design variant import can scan common configuration and effectivity records
-such as `CONFIGURATION_ITEM`, `PRODUCT_CONCEPT_FEATURE`,
-`CONFIGURATION_DESIGN`, `CONFIGURATION_EFFECTIVITY`,
-`PRODUCT_DEFINITION_EFFECTIVITY`, `SERIAL_NUMBERED_EFFECTIVITY`,
-`LOT_EFFECTIVITY`, `DATED_EFFECTIVITY`, `EFFECTIVITY_RELATIONSHIP`, and
-simple AP242 condition/expression records such as `AND_EXPRESSION`,
-`OR_EXPRESSION`, `XOR_EXPRESSION`, `NOT_EXPRESSION`, `EQUALS_EXPRESSION`,
-`COMPARISON_EQUAL`, `COMPARISON_NOT_EQUAL`, `COMPARISON_GREATER`,
-`COMPARISON_GREATER_EQUAL`, `COMPARISON_LESS`, `COMPARISON_LESS_EQUAL`,
-`INTERVAL_EXPRESSION`, `LIKE_EXPRESSION`, numeric arithmetic expressions such
-as `PLUS_EXPRESSION`, `MINUS_EXPRESSION`, `MULT_EXPRESSION`,
-`DIV_EXPRESSION`, `SLASH_EXPRESSION`, `MOD_EXPRESSION`, and
-`POWER_EXPRESSION`, `RATIONAL_REPRESENTATION_ITEM`,
-`EXPRESSION_EXTENSION_NUMERIC`, numeric functions such as
-`ABS_FUNCTION`,
-`MINUS_FUNCTION`, `SQUARE_ROOT_FUNCTION`, `MAXIMUM_FUNCTION`,
-`MINIMUM_FUNCTION`, `SIN_FUNCTION`, `COS_FUNCTION`, `TAN_FUNCTION`,
-`ASIN_FUNCTION`, `ACOS_FUNCTION`, unary or binary `ATAN_FUNCTION`, `EXP_FUNCTION`,
-`LOG_FUNCTION`, `LOG2_FUNCTION`, and `LOG10_FUNCTION`, simple string
-expressions such as `CONCAT_EXPRESSION`, `SUBSTRING_EXPRESSION`,
-`INDEX_EXPRESSION`, `FORMAT_FUNCTION`, and `EXPRESSION_EXTENSION_STRING`,
-and string-derived numeric
-functions such as
-`LENGTH_FUNCTION`, `VALUE_FUNCTION`, and `INT_VALUE_FUNCTION`,
-`ODD_FUNCTION`, `BOOLEAN_LITERAL`, `BOOLEAN_REPRESENTATION_ITEM`,
-`LOGICAL_LITERAL`, `LOGICAL_REPRESENTATION_ITEM`, `BOOLEAN_VARIABLE`,
-`MATHS_BOOLEAN_VARIABLE`, numeric literals, string literals, and named maths
-numeric/string variables, plus wrappers such as
-`CONDITIONAL_CONFIGURATION`, `CONDITIONAL_CONCEPT_FEATURE`,
-`CONDITIONAL_EFFECTIVITY`, `CONFIGURED_EFFECTIVITY_ASSIGNMENT`, and
-`APPLIED_EFFECTIVITY_ASSIGNMENT` / `APPLIED_INEFFECTIVITY_ASSIGNMENT`, plus
-`APPLIED_EFFECTIVITY_CONTEXT_ASSIGNMENT`,
-`CONFIGURED_EFFECTIVITY_CONTEXT_ASSIGNMENT`, and
-`CLASS_USAGE_EFFECTIVITY_CONTEXT_ASSIGNMENT` when
-`design_variants=True`. Detected records are
-reported in asset metadata and import reports with counts, STEP references,
-referenced record labels, transitively resolved reference labels, common
-effectivity values, condition operators, and literal true/false condition
-values, numeric condition values, or string condition values where present.
-`design_variant_selection=("left hand",)` or
-`design_variant_selection=("SN-A-050",)` can select matching variant or
-effectivity records, including values inside supported serial/date/time-interval
-ranges and referenced `TIME_INTERVAL_WITH_BOUNDS` date bounds using
-`CALENDAR_DATE`, `ORDINAL_DATE`, or `WEEK_OF_YEAR_AND_DAY_DATE` records.
-Supported condition records and effectivity-assignment wrappers
-are evaluated before their operand labels can drive geometry pruning, so an
-`AND_EXPRESSION` only selects geometry when all operands match and an
-`EQUALS_EXPRESSION` / `COMPARISON_EQUAL` only select geometry when numeric or
-string operands resolve to equal values, or when non-value operands participate
-and resolve to the same boolean selection state. `COMPARISON_NOT_EQUAL` selects
-when resolved numeric/string operand values differ, or when participating
-non-value operand states differ. Numeric comparison and interval records select
-when named numeric variables are
-supplied as selection values such as `load rating=15`, including when those
-variables flow through simple numeric arithmetic or numeric function expression
-operands, including rational representation items, expression-extension numeric
-values, and elementary trig/log/exp functions, with two-operand
-`ATAN_FUNCTION` evaluated as `atan2`. `ODD_FUNCTION` selects when a named
-integer numeric variable is
-supplied as an odd integer assignment.
-`LIKE_EXPRESSION` records select when named string variables are supplied as
-selection values such as `finish=black anodized`, including when those values
-flow through simple `CONCAT_EXPRESSION`, `SUBSTRING_EXPRESSION`, or
-`INDEX_EXPRESSION` operands, `EXPRESSION_EXTENSION_STRING` values, or when
-numeric variables flow through conservative `FORMAT_FUNCTION` operands.
-`LENGTH_FUNCTION`, `VALUE_FUNCTION`, and `INT_VALUE_FUNCTION` can feed numeric
-comparisons from selected string variables; value functions parse strict numeric
-text, and integer value functions require strict integer text.
-`EFFECTIVITY_ASSIGNMENT` /
-`APPLIED_EFFECTIVITY_ASSIGNMENT` records only select assigned geometry when the
-assigned effectivity matches. `APPLIED_INEFFECTIVITY_ASSIGNMENT` records are
-reported and suppress assigned target labels when the selected effectivity
-matches. Applied assignment targets can resolve through referenced
-product-definition labels. Effectivity context-assignment records add their
-context target labels only when the referenced effectivity assignment is
-satisfied. Product-definition and configuration effectivity records add their
-usage relationship labels only when the selected effectivity matches.
-Effectivity relationship records can bridge selected effectivity labels to
-related gated usage records.
-Conditional wrapper records also gate their
-configured target labels, and `CONDITIONAL_CONCEPT_FEATURE` gates its own
-feature label, so the target label alone does not bypass an unsatisfied
-condition. Boolean literal records, including named
-`BOOLEAN_REPRESENTATION_ITEM`, `LOGICAL_LITERAL`, and
-`LOGICAL_REPRESENTATION_ITEM` records, are evaluated
-from STEP `.T.` / `.F.` arguments, and boolean variables including
-`MATHS_BOOLEAN_VARIABLE` act as named operands selected by their label or STEP
-record id, with explicit `label=true` / `label=false` assignments supported for
-positive and `NOT`-gated conditions. Numeric arithmetic/function records can
-participate in numeric comparisons, intervals, and equality/not-equality
-conditions through selected `label=value` assignments.
-`STRING_LITERAL`, `EXPRESSION_EXTENSION_STRING`,
-`MATHS_STRING_VARIABLE` / `STRING_VARIABLE`, `CONCAT_EXPRESSION`, and
-`SUBSTRING_EXPRESSION` records can participate in simple string equality,
-not-equality, and
-`LIKE_EXPRESSION` conditions with `*`/`%` and `?`/`_` wildcard matching; string
-variables require explicit `label=value` assignments, and operand-only
-expression labels are not promoted to geometry selector terms. This is useful
-for STEP files whose configuration labels line up with loaded product names;
-full AP242 conditional/effectivity geometry evaluation remains planned backend
-work.
+When `pmi=True`, STEP AP242 import runs a textual scan and turns supported records
+into typed `PmiAnnotation` objects with source STEP entity ids, references, and
+numeric tolerance bounds where available. Supported record families:
 
-STEP and IGES import can scan source-file string references for sidecar PNG, JPEG, and KTX2 textures, load them as first-class `ImageResource` objects, and bind semantic names such as `baseColor`, `normal`, `ao`, or `emissive` to material texture metadata. XDE visual material PBR/common values are preserved where exposed, and common CAD material names such as steel, aluminum, brass, copper, glass, plastic, rubber, and paint are mapped to deterministic PBR defaults with diagnostics in material metadata. Supported vendor material libraries can also be supplied explicitly, or referenced from the CAD source, as JSON/MTL files, ZIP packages containing JSON/MTL records plus textures, or folders containing those files; imported records update matching CAD materials with PBR factors and texture slots while reporting resolved, missing, unreadable, matched, and unmatched counts.
+- **Dimensions** — `DIMENSIONAL_SIZE`, `DIMENSIONAL_LOCATION`
+- **Tolerances** — `PLUS_MINUS_TOLERANCE`, `GEOMETRIC_TOLERANCE`, and named subtypes such as `FLATNESS_TOLERANCE`, `POSITION_TOLERANCE`, `SURFACE_PROFILE_TOLERANCE`
+- **Datums** — `DATUM`, `DATUM_REFERENCE`, `DATUM_TARGET`
+- **Callouts** — `FEATURE_CONTROL_FRAME` and annotation text entities
 
-Construction-only STEP/IGES line shapes use an explicit construction-curve
-policy. The default `preserve_metadata` keeps the source shape and reports that
-it has no triangle mesh. `delete` drops construction-only line nodes during
-import. `tessellate_tubes` preserves the source curve metadata and, during
-tessellation, converts curve segments into deterministic low-sided triangle
-tubes using `construction_curve_tube_radius` in source units. Legacy
-`delete_lines=True` remains a delete-policy alias. STEP import also splits free
-construction edges out of mixed face+curve shapes so the same policy applies to
-those curve segments; when `keep_brep=True` later retains source BREP handles,
-the original mixed source topology may still be available on the BREP part.
+Import reports and asset metadata also include `pmi_semantic_graph`: a textual STEP
+reference graph of PMI entity nodes, referenced entities, shape-aspect/product
+targets, inbound callout/associativity records, tolerance-zone and
+annotation-presentation support records, reference edges, and missing-reference
+counts.
 
-STEP import reports also include `import_decisions`, which records each import toggle as requested, effective, and `honored`, `approximated`, `unsupported`, `disabled`, `not_present`, or `backend_default`. The same report step includes `loaded_representations`, a per-part list of BREP, construction-point, construction-line, split mixed construction-line, or empty-shape inputs plus deleted construction-only nodes and source topology counts.
+If a file advertises AP242 PMI but no supported record is extracted, the import
+report records `pmi_present=true`, `unsupported_pmi_count=1`, and a warning rather
+than implying PMI was imported. `metadata_and_visuals` export adds deterministic
+glTF/USD marker meshes with simple vector text glyphs linked to these records.
 
-Use `fc.read_step_many([...])`, `fc.convert([...], "out.glb")`, or `fascat convert root-a.step out.glb --input root-b.step` when an assembly is delivered as several root STEP files rather than one file. Fascat imports each member through the normal STEP path, namespaces nodes, parts, materials, images, and PMI IDs with a deterministic member prefix, keeps each member root under a shared multi-file root node, and prefixes warnings with the member index and path. `continue_on_error=True` keeps successfully imported members and records failed members in the import report.
+> Full AP242 graphical presentation reconstruction and semantic coverage beyond
+> these textual records is planned backend work.
 
-For a single master STEP, pass `StepReadOptions(multi_file=True)` or use `--multi-file-import`. Fascat scans quoted `.step` and `.stp` path records, resolves them relative to the referencing file, follows nested references once per resolved source, and imports the master plus each resolved reference occurrence through the same deterministic namespace merge. Repeated references to the same external STEP file become separate member occurrences while the resolver still scans that source only once to avoid cycles. The import report includes `external_reference_graph` with resolved, missing, unsupported, unique-source, and resolved-occurrence counts; missing references produce warnings instead of being silently dropped. This is graph-level loading, not deep reconstruction of every vendor-specific placement transform encoded around the external reference.
+### Design variants
+
+When `design_variants=True`, import scans STEP configuration, effectivity, and
+condition records into asset metadata and the import report, with counts, STEP
+references, resolved reference labels, effectivity values, condition operators, and
+parsed literal values. Pass `design_variant_selection=(...)` to **prune geometry**
+by selected variant.
+
+A selection value can be a variant label, an effectivity value or range, a STEP
+record id, a referenced label, or a `label=value` assignment — for example
+`("left hand",)`, `("SN-A-050",)`, `("load rating=15",)`,
+`("finish=black anodized",)`, or `("service enabled=false",)`. Conditions are
+**evaluated before** their operand labels can drive pruning: an `AND_EXPRESSION`
+selects only when all operands match, `EQUALS_EXPRESSION` / `COMPARISON_EQUAL`
+only when operands resolve equal, `APPLIED_INEFFECTIVITY_ASSIGNMENT` suppresses its
+targets, and wrappers gate their configured targets. Operand-only expression
+labels are never promoted to geometry selectors.
+
+Supported record families:
+
+- **Configuration & effectivity** — `CONFIGURATION_ITEM`, `PRODUCT_CONCEPT_FEATURE`, `CONFIGURATION_DESIGN`, `CONFIGURATION_EFFECTIVITY`, `PRODUCT_DEFINITION_EFFECTIVITY`, `SERIAL_NUMBERED_EFFECTIVITY`, `LOT_EFFECTIVITY`, `DATED_EFFECTIVITY`, `EFFECTIVITY_RELATIONSHIP`
+- **Boolean / comparison conditions** — `AND_EXPRESSION`, `OR_EXPRESSION`, `XOR_EXPRESSION`, `NOT_EXPRESSION`, `EQUALS_EXPRESSION`, `COMPARISON_EQUAL`, `COMPARISON_NOT_EQUAL`, `COMPARISON_GREATER`, `COMPARISON_GREATER_EQUAL`, `COMPARISON_LESS`, `COMPARISON_LESS_EQUAL`, `INTERVAL_EXPRESSION`, `LIKE_EXPRESSION`
+- **Numeric arithmetic** — `PLUS_EXPRESSION`, `MINUS_EXPRESSION`, `MULT_EXPRESSION`, `DIV_EXPRESSION`, `SLASH_EXPRESSION`, `MOD_EXPRESSION`, `POWER_EXPRESSION`, `RATIONAL_REPRESENTATION_ITEM`, `EXPRESSION_EXTENSION_NUMERIC`
+- **Numeric functions** — `ABS_FUNCTION`, `MINUS_FUNCTION`, `SQUARE_ROOT_FUNCTION`, `MAXIMUM_FUNCTION`, `MINIMUM_FUNCTION`, `SIN_FUNCTION`, `COS_FUNCTION`, `TAN_FUNCTION`, `ASIN_FUNCTION`, `ACOS_FUNCTION`, `ATAN_FUNCTION` (unary, or binary as `atan2`), `EXP_FUNCTION`, `LOG_FUNCTION`, `LOG2_FUNCTION`, `LOG10_FUNCTION`, `ODD_FUNCTION`
+- **String expressions** — `CONCAT_EXPRESSION`, `SUBSTRING_EXPRESSION`, `INDEX_EXPRESSION`, `FORMAT_FUNCTION`, `EXPRESSION_EXTENSION_STRING`, and the string-to-numeric `LENGTH_FUNCTION`, `VALUE_FUNCTION`, `INT_VALUE_FUNCTION`
+- **Literals & variables** — `BOOLEAN_LITERAL`, `BOOLEAN_REPRESENTATION_ITEM`, `LOGICAL_LITERAL`, `LOGICAL_REPRESENTATION_ITEM`, `BOOLEAN_VARIABLE`, `MATHS_BOOLEAN_VARIABLE`, `STRING_LITERAL`, `MATHS_STRING_VARIABLE` / `STRING_VARIABLE`, numeric/string literals, and named maths variables
+- **Wrappers** — `CONDITIONAL_CONFIGURATION`, `CONDITIONAL_CONCEPT_FEATURE`, `CONDITIONAL_EFFECTIVITY`, `CONFIGURED_EFFECTIVITY_ASSIGNMENT`, `APPLIED_EFFECTIVITY_ASSIGNMENT` / `APPLIED_INEFFECTIVITY_ASSIGNMENT`, `APPLIED_EFFECTIVITY_CONTEXT_ASSIGNMENT`, `CONFIGURED_EFFECTIVITY_CONTEXT_ASSIGNMENT`, `CLASS_USAGE_EFFECTIVITY_CONTEXT_ASSIGNMENT`
+- **Date bounds** (for serial/date/interval ranges) — `TIME_INTERVAL_WITH_BOUNDS`, `CALENDAR_DATE`, `ORDINAL_DATE`, `WEEK_OF_YEAR_AND_DAY_DATE`
+
+How values resolve:
+
+- **Numeric** comparisons and intervals match named numeric variables supplied as `label=value`, including values flowing through the arithmetic, function, and rational/extension records above (`ATAN_FUNCTION` evaluated as `atan2`; `ODD_FUNCTION` tests odd integers).
+- **String** equality, not-equality, and `LIKE_EXPRESSION` match named string variables, with `*`/`%` and `?`/`_` wildcards, flowing through concat/substring/index/extension operands; `FORMAT_FUNCTION` can feed string matching from numeric variables, and `LENGTH`/`VALUE`/`INT_VALUE` functions feed numeric comparisons from strings (strict text parsing).
+- **Boolean** literals parse STEP `.T.` / `.F.`; boolean variables act as named operands selected by label, record id, or explicit `label=true` / `label=false`.
+
+> This matches configuration labels against loaded product names. Full AP242
+> conditional/effectivity geometry evaluation remains planned backend work.
+
+### Textures and materials
+
+With `source_textures=True`, STEP/IGES import scans source-file string references
+for sidecar PNG, JPEG, and KTX2 textures, loads them as first-class
+`ImageResource` objects, and binds semantic names (`baseColor`, `normal`, `ao`,
+`emissive`) to material metadata. XDE visual PBR values are preserved where exposed,
+and common CAD material names (steel, aluminum, brass, copper, glass, plastic,
+rubber, paint) map to deterministic PBR defaults.
+
+Vendor material libraries can be supplied via `material_library_paths` or referenced
+from the CAD source — as JSON/MTL files, ZIP packages, or folders. Imported records
+update matching CAD materials with PBR factors and texture slots, and the import
+report records resolved, missing, unreadable, matched, and unmatched counts.
+
+### Construction curves
+
+Construction-only line shapes follow the `construction_curve_policy`:
+
+- `preserve_metadata` (default) — keep the source shape; report it has no triangle mesh
+- `delete` — drop construction-only line nodes during import (legacy `delete_lines=True` is an alias)
+- `tessellate_tubes` — convert curve segments into low-sided triangle tubes during tessellation, using `construction_curve_tube_radius` (source units)
+
+STEP import also splits free construction edges out of mixed face+curve shapes so the
+same policy applies. With `keep_brep=True`, the original mixed topology stays
+available on the BREP part. Import reports record `import_decisions` (each toggle as
+requested/effective plus a status) and `loaded_representations` (per-part input kind
+and source topology counts).
+
+### Multi-file assemblies
+
+Two cases, both imported through the normal STEP path with deterministic member
+namespacing:
+
+- **Several root files** — `fc.read_step_many([...])`, `fc.convert([...], "out.glb")`, or `fascat convert root-a.step out.glb --input root-b.step`. Members are namespaced and kept under a shared root; warnings are prefixed with member index and path. `continue_on_error=True` keeps successful members and records failures.
+- **One master file with external references** — `StepReadOptions(multi_file=True)` (or `--multi-file-import`). Quoted `.step`/`.stp` references are resolved relative to the referencing file and followed once per source; repeated references become separate member occurrences. The report includes `external_reference_graph` (resolved/missing/unsupported/unique-source/occurrence counts), and missing references warn rather than disappear.
+
+> Multi-file import is graph-level loading, not deep reconstruction of every
+> vendor-specific external-reference placement transform.
 
 Metadata and PMI parameters:
 
@@ -444,9 +356,9 @@ Metadata and PMI parameters:
 | `StepReadOptions` | `properties` | Import user and product properties. |
 | `StepReadOptions` | `layers` | Request layer assignments as metadata. Current normalized layer extraction is reported as unsupported in `import_decisions` when requested. |
 | `StepReadOptions` | `validation_properties` | Request STEP validation properties. Current reports approximate this with source topology counts rather than typed validation-property entities. |
-| `StepReadOptions` | `pmi` | Import common typed AP242 PMI text records, including dimension, location, geometric tolerance and common named geometric-tolerance subtypes, plus/minus tolerance, datum, datum-reference, feature-control-frame, and note entities, into `PmiAnnotation` objects and report a textual semantic reference graph with common target, callout, annotation-associativity, tolerance-zone, and annotation-presentation support records; AP242 PMI markers are reported when no supported typed record can be extracted. |
-| `StepReadOptions` | `design_variants` | Scan common STEP configuration/design-variant/effectivity and simple boolean/numeric/string condition records into metadata and import reports. |
-| `StepReadOptions` | `design_variant_selection` | Select one or more variant labels, effectivity values/ranges, STEP record ids, referenced labels, or numeric/string/boolean assignments such as `load rating=15`, `finish=black anodized`, or `service enabled=false`, and prune imported geometry by matching node/part/source-name metadata. Effectivity selections follow resolved STEP references back to configuration/design feature labels, effectivity relationship links, product-definition/configuration effectivity usage targets, applied product-definition assignment targets, and gated effectivity context-assignment target labels when present; supported serial/date/time-interval ranges match values inside their bounds, including referenced `TIME_INTERVAL_WITH_BOUNDS` date bounds using `CALENDAR_DATE`, `ORDINAL_DATE`, or `WEEK_OF_YEAR_AND_DAY_DATE` records, simple `AND`/`OR`/`XOR`/`NOT`/equality/not-equality/numeric-comparison/numeric-interval/string-like/odd-function condition records gate operand labels before pruning, boolean/logical literals including `BOOLEAN_REPRESENTATION_ITEM`, `LOGICAL_LITERAL`, and `LOGICAL_REPRESENTATION_ITEM` evaluate `.T.` / `.F.` values, boolean variables including `MATHS_BOOLEAN_VARIABLE` evaluate as named operands selected by label, STEP record id, or explicit `label=true` / `label=false` assignments, named maths numeric variables evaluate from selected `label=value` assignments and can flow through simple numeric arithmetic and function expressions, rational representation items, and expression-extension numeric values before comparison/interval/equality evaluation, named string variables evaluate from selected `label=value` assignments for `LIKE_EXPRESSION`, equality/not-equality, `CONCAT_EXPRESSION`, `SUBSTRING_EXPRESSION`, `EXPRESSION_EXTENSION_STRING`, `LENGTH_FUNCTION`, `VALUE_FUNCTION`, and `INT_VALUE_FUNCTION`, applied ineffectivity assignments suppress assigned target labels, and conditional/effectivity-assignment wrappers gate their configured target labels while expression-only operand labels are kept out of geometry selectors. Full AP242 conditional/effectivity geometry evaluation remains planned. |
+| `StepReadOptions` | `pmi` | Import typed AP242 PMI records into `PmiAnnotation` objects and report the `pmi_semantic_graph`. See [PMI import](#pmi-import). |
+| `StepReadOptions` | `design_variants` | Scan STEP configuration, effectivity, and condition records into metadata and import reports. See [Design variants](#design-variants). |
+| `StepReadOptions` | `design_variant_selection` | One or more selection values (variant labels, effectivity values/ranges, record ids, or `label=value` assignments) used to prune imported geometry. See [Design variants](#design-variants) for the full resolution rules. |
 | `StepReadOptions` | `existing_meshes` | Prefer existing tessellation payloads from the source file when the importer exposes them. Tessellation `reuse_existing_meshes` still controls whether loaded meshes are retessellated later. |
 | `StepReadOptions` | `multi_file` | Request multi-file STEP assembly import. `read_step_many()` honors explicit member lists; single-path STEP imports recursively resolve quoted external `.step` / `.stp` references, preserve repeated references as member occurrences, and report the `external_reference_graph`. |
 | `StepReadOptions` | `source_textures` | Scan STEP/IGES source text for referenced sidecar PNG/JPEG/KTX2 texture files, load resolved files into `asset.images`, and report resolved/missing/unreadable counts. |
@@ -509,7 +421,21 @@ asset = fc.read_step("motor.step").heal_brep(
 )
 ```
 
-The operation stores per-part `brep_*` metadata and records a `heal_brep` report step. Metadata includes BREP kind, solid/shell/wire/edge/face counts, open shells, free or unstitched edges, small edges at or below the healing tolerance, sliver-face counts, overlap/z-fighting face-pair counts, resolved overlap counts, open-shell grouping counts, and same-domain face/edge reductions. The report step also includes `tolerance_policy`, which records the effective source/local units used by the BREP backend, declared target units, meters-per-unit conversions, tolerance values in meters, sliver area in square meters, and whether open-shell grouping, sewing, edge fixing, same-domain cleanup, overlap/z-fighting cleanup, tolerance unification, sliver removal, T-junction sewing, and non-manifold cracking are enabled, disabled, requested, or not implemented. `fc.convert(..., heal_brep=fc.BrepHealOptions())` runs healing before tessellation. Open-shell grouping processes disconnected shell groups independently before the cleanup stack so unrelated surface patches are not forced through one global sewing operation. Same-domain cleanup uses OCCT to merge neighboring faces and edges on coincident surfaces/curves. Overlap cleanup triangulates BREP faces, measures coplanar overlap against the configured smaller-face area ratio, and removes redundant z-fighting faces with OCCT `BRepTools_ReShape`. Sliver-face removal is requested through the BREP backend, but the current backend reports a warning when that removal path is unavailable instead of silently claiming that the source shape changed. Remaining open shells, free edges, small edges, or unresolved overlapping face pairs are also surfaced as report warnings.
+Healing stores per-part `brep_*` metadata and records a `heal_brep` report step.
+You can also run it inside a one-shot conversion: `fc.convert(..., heal_brep=fc.BrepHealOptions())`.
+
+What it does:
+
+- **Open-shell grouping** processes disconnected shell groups independently, so unrelated surface patches aren't forced through one global sewing pass.
+- **Same-domain cleanup** uses OCCT to merge neighboring faces/edges on coincident surfaces and curves.
+- **Overlap cleanup** triangulates faces, measures coplanar overlap against `overlap_area_ratio`, and removes redundant z-fighting faces with OCCT `BRepTools_ReShape`.
+- **Sliver removal** is requested through the backend; when unavailable it warns rather than claim the shape changed.
+
+What it records:
+
+- **Metadata** — BREP kind; solid/shell/wire/edge/face counts; open shells; free/unstitched edges; small edges at or below tolerance; sliver counts; overlap and resolved-overlap counts; open-shell grouping counts; same-domain reductions.
+- **`tolerance_policy`** — effective source/local and target units, meters-per-unit conversions, tolerance and sliver area in metric units, and whether each cleanup stage is enabled, disabled, requested, or not implemented.
+- **Warnings** for remaining open shells, free edges, small edges, or unresolved overlapping face pairs.
 
 Brep healing parameters:
 
@@ -558,7 +484,13 @@ asset = fc.read_step("motor.step").tessellate(
 quality = asset.tessellation_quality_report()
 ```
 
-`part_settings` keys match a part id or part name. Quality reports include per-part edge length, triangle area, aspect ratio, skinny triangle, duplicate polygon, boundary edge, and non-manifold edge counts. Tessellation advisories warn when bulk criteria are risky for coarse absolute sag, aggressive polygon-length limits, or shiny/high-detail/curved BREP parts that lack `sag_ratio` or `curvature_adaptive` tuning. Set `detail_adaptive=True` to turn shiny/high-detail material metadata and curved BREP face detection into per-part settings: affected parts get `sag_ratio=0.01` when unset and `curvature_adaptive=True`, while explicit `part_settings` remain authoritative. The `tessellate` report step includes a `tolerance_policy` with the active deflection kind, source/local units, target units, meters-per-unit conversions, and converted absolute sag or min/max polygon-length values when those settings are unit-bearing. Tessellated parts store that policy on part and mesh metadata and warn when source-to-target unit normalization makes absolute sag or max length suspiciously coarse or fine. Parts also record `tessellation_face_groups`, `tessellation_estimated_draw_calls`, and retained-patch counts when available; the tessellation step warns when retained BREP patches, CAD face groups, or material splits are likely to increase submesh, draw-call, or export-size pressure. Part and mesh metadata include `tessellation_attribute_sources`, which records whether positions, triangles, normals, tangents, UVs, face groups, free-edge diagnostics, and BREP patches came from tessellation, an imported mesh, or were not generated during tessellation. Mesh metadata also records `tessellation_edge_control_passes`, which is `2` only when the first edge-control pass changed the mesh and a cleanup pass was rerun.
+`part_settings` keys match a part id or part name. A few behaviors worth knowing:
+
+- **Quality reports** (`quality_report=True`) record per-part edge length, triangle area, aspect ratio, skinny-triangle, duplicate-polygon, boundary-edge, and non-manifold-edge counts, plus advisories for coarse absolute sag, aggressive polygon-length limits, and shiny/high-detail/curved parts lacking `sag_ratio` or `curvature_adaptive`.
+- **`detail_adaptive=True`** turns shiny/high-detail material metadata and curved-BREP detection into per-part settings — affected parts get `sag_ratio=0.01` (when unset) and `curvature_adaptive=True`. Explicit `part_settings` always win.
+- **`tolerance_policy`** on the report step (and on part/mesh metadata) records the active deflection kind, source/target units, meters-per-unit conversions, and converted unit-bearing values; it warns when unit normalization makes sag or max length suspiciously coarse or fine.
+- **Risk metadata** — parts record `tessellation_face_groups`, `tessellation_estimated_draw_calls`, and retained-patch counts; the step warns when retained patches, face groups, or material splits could raise submesh/draw-call/export pressure.
+- **Provenance** — `tessellation_attribute_sources` records whether positions, triangles, normals, tangents, UVs, face groups, free-edge diagnostics, and BREP patches came from tessellation, an imported mesh, or weren't generated. `tessellation_edge_control_passes` is `2` only when a cleanup pass was rerun after the first edge-control pass changed the mesh.
 
 Size-adaptive tessellation helpers can generate `part_settings` from part
 bounding-box diagonals, using existing mesh bounds or source BREP bounds when
@@ -618,10 +550,30 @@ Repair parameters:
 | `area_epsilon` | Area threshold used to classify degenerate triangles. |
 | `jobs` | Worker count for independent mesh-bearing parts. `1` keeps serial behavior. |
 
-Repair always records orientation policy metadata: `repair_face_orientation_strategy`, `repair_face_orientation_status`, `repair_normal_orientation_strategy`, `repair_normal_orientation_status`, and optional `repair_orientation_viewer_position`, so viewer-standpoint or source-trusted choices are visible even when the backend preserves source orientation. When `quality_report=True`, repair also records before/after counts for `repair_duplicate_polygons`, `repair_degenerate_triangles`, `repair_boundary_edges`, `repair_non_manifold_edges`, `repair_t_junctions`, and `repair_boundary_gaps`. Duplicate polygons are triangles that reference the same three vertices, regardless of winding. T-junction counts identify vertices that lie on another triangle edge without splitting that edge; non-zero counts after repair emit a warning because T-junction sewing is still not implemented. Boundary-gap counts identify nearby, unconnected boundary vertices within the repair tolerance; non-zero counts after repair warn because boundary stitching is also not implemented. With `quality_report=True`, repair also records orientability counts before and after winding normalization. The `repair` report step records `tolerance_policy`, including effective source/local units, declared target units, meter conversions, vertex merge tolerance in meters, degenerate area epsilon in square meters, and the status of vertex merge, degenerate-polygon cleanup, face orientation, normal orientation, quality diagnostics, T-junction sewing, boundary-gap stitching, and non-manifold edge cracking.
+Repair always records orientation policy metadata
+(`repair_face_orientation_strategy`/`_status`, `repair_normal_orientation_strategy`/`_status`,
+and optional `repair_orientation_viewer_position`), so viewer-standpoint or
+source-trusted choices stay visible even when the backend preserves source
+orientation. The report step also records a unit-aware `tolerance_policy` covering
+merge tolerance, degenerate area epsilon, and the status of each cleanup stage.
 
-Use `MergeVerticesOptions` when you want Unity-style vertex merge as a standalone pipeline step instead of the broad repair pass. `tolerance=0.0` merges exact duplicate positions; larger values merge Euclidean tolerance-close positions, including pairs that fall across spatial bucket boundaries. By default the operation keeps normals, tangents, UVs, and material-boundary signatures in the merge key so hard edges and UV seams are not collapsed accidentally. Set `preserve_normals=False`, `preserve_tangents=False`, or `preserve_uvs=False` to ignore and drop those attributes during merging. Default reports include `merge_vertices_removed`, `merge_vertices_degenerate_triangles_removed`, tolerance scale ratios against the part bounding-box diagonal and shortest mesh edge, warnings for high-risk tolerances, and a unit-aware `tolerance_policy`. Set `quality_report=True` (or `--merge-vertex-quality-report`) to add heavier same-position candidate counts, exact-duplicate, boundary, non-manifold, hard-edge, T-junction, and boundary-gap candidate counts, skipped merge reasons for normal, tangent, UV, and material-boundary protection, plus near-duplicate advisories for too-small tolerances.
-Use `jobs` on `MergeVerticesOptions` to process independent mesh-bearing parts concurrently.
+With `quality_report=True`, repair adds before/after counts for duplicate polygons,
+degenerate triangles, boundary edges, non-manifold edges, T-junctions, boundary
+gaps, and orientability. Note:
+
+- **Duplicate polygons** are triangles referencing the same three vertices, regardless of winding.
+- **T-junctions** and **boundary gaps** are reported but **not** fixed — non-zero counts after repair emit a warning, because T-junction sewing and boundary stitching are not yet implemented.
+
+`MergeVerticesOptions` gives you vertex merging as a standalone step (rather than the
+broad repair pass). `tolerance=0.0` merges exact duplicate positions; larger values
+merge Euclidean-close positions, including across spatial bucket boundaries. By
+default normals, tangents, UVs, and material-boundary signatures are part of the
+merge key so hard edges and UV seams aren't collapsed — set `preserve_normals=False`,
+`preserve_tangents=False`, or `preserve_uvs=False` to drop that protection. Reports
+include removed counts, tolerance scale ratios (against bounding-box diagonal and
+shortest edge), high-risk-tolerance warnings, and `tolerance_policy`;
+`quality_report=True` (or `--merge-vertex-quality-report`) adds candidate counts and
+skipped-merge reasons. Use `jobs` to process independent parts concurrently.
 
 Use `DeleteDegeneratePolygonsOptions` when you want Unity-style degenerate
 polygon cleanup as a standalone, reproducible step. `area_epsilon` controls the
@@ -706,7 +658,14 @@ asset = asset.stage(
 )
 ```
 
-Tangents require the selected UV channel when they are generated, which defaults to UV0. If tangents are requested without that channel, staging records missing-UV metadata and emits a stage warning instead of silently writing no tangent data. Existing tangents are preserved by default when staging has not invalidated them and the selected UV channel is still present; set `override_tangents=True` to force regeneration from `tangent_uv_channel`. When UV generation edits a mesh that already had tangents, staging invalidates the old tangent basis; if `tangents=True`, it regenerates tangents from the selected UV channel, otherwise it records the dropped tangent state. glTF export writes a `TANGENT` vertex attribute when staged meshes contain tangent data.
+Tangent generation needs the selected UV channel (`tangent_uv_channel`, default UV0).
+If tangents are requested without it, staging records missing-UV metadata and warns
+rather than silently writing none. Existing tangents are preserved unless staging
+invalidated them and the channel is still present; set `override_tangents=True` to
+force regeneration. When UV generation edits a mesh that already had tangents, the old
+basis is invalidated — staging regenerates from the selected channel if `tangents=True`,
+otherwise records the dropped state. glTF export writes a `TANGENT` attribute whenever
+staged meshes carry tangent data.
 
 Normal and tangent parameters:
 
@@ -756,7 +715,21 @@ asset = asset.stage(
 
 Atlas options on staging record texture-bake intent and layout limits. Dedicated material baking is the step that writes raster atlas images: baked maps are stored as first-class `ImageResource` objects, mirrored into material metadata for compatibility, and bound by the glTF/USD exporters as material textures.
 
-Staged meshes also record UV layout quality metadata for each channel: `uvN_domain`, `uvN_bounds`, `uvN_unit_domain_status`, `uvN_validation_status`, `uvN_out_of_unit_vertices`, `uvN_degenerate_faces`, `uvN_overlap_check`, and `uvN_overlap_pairs`. Expensive overlap checks run only for bake-domain UVs or when `forbid_overlapping=True`; skipped tileable channels record `uvN_overlap_pairs="not_evaluated"`. Every staged UV channel records seam graph diagnostics for duplicated-position UV discontinuities: `uvN_seam_graph_status`, `uvN_seam_edges`, `uvN_seam_components`, `uvN_seam_position_vertices`, `uvN_seam_mesh_vertices`, `uvN_seam_length`, and `uvN_seam_longest_component_length`; asset metadata also summarizes channels and edge counts with `stage_uv_seam_graph_channels` and `stage_uv_seam_graph_edges`. Bake-domain UVs, or any channel staged with `max_stretch`, also record diagnostic unwrap quality fields: `uvN_distortion_check`, `uvN_island_count`, `uvN_pack_efficiency`, `uvN_normalized_pack_efficiency`, `uvN_max_angle_distortion_degrees`, `uvN_mean_angle_distortion_degrees`, `uvN_max_edge_length_distortion`, and `uvN_mean_edge_length_distortion`; other channels record `uvN_distortion_check="skipped"`. UV0 defaults to the `tileable` domain, where overlaps and coordinates outside 0..1 are allowed. UV1 and `lightmap` channels use the `bake` domain, where overlaps, degenerate UV faces, or coordinates outside 0..1 set `uvN_validation_status` and add stage warnings. Bake-domain channels generated with `unwrap` or `lightmap` are packed by xatlas with the configured padding/resolution and record `uvN_pack_status="packed"`, `uvN_padding_status`, `uvN_pack_width`, `uvN_pack_height`, and `uvN_pack_utilization`. When `uv0` or `uv1` uses `box`, staging runs an AABB projection and records `uvN_projection_*` fields for local versus shared bounds, selected axes, destination channel, override policy, units, meters-per-unit, and `uv3d_size`. Unity-style UV policy controls are recorded per channel as `uvN_sharp_to_seam_requested`, `uvN_sharp_to_seam_enforced`, `uvN_forbid_overlapping_requested`, `uvN_forbid_overlapping_effective`, and `uvN_forbid_overlapping_status`; the current xatlas path records sharp-edge seam and forbid-overlap controls as intent and validates resulting UVs after generation. Use `uv1="copy_uv0"` when the secondary channel should reuse the generated or existing UV0 layout; staging records `uv1_source_channel="0"` and warns if UV0 is missing. Use `normalize_uvs=(1,)` to rescale selected channels into the 0..1 domain; staging records the original bounds and warns when a requested channel is absent.
+Staging records detailed per-channel UV metadata (fields are prefixed `uvN_`, where
+`N` is the channel index):
+
+- **Domains** — UV0 defaults to the `tileable` domain (overlaps and coordinates outside 0..1 are fine). UV1 and `lightmap` channels use the `bake` domain, where overlaps, degenerate faces, or out-of-unit coordinates set `uvN_validation_status` and add warnings.
+- **Layout quality** — every channel records `uvN_domain`, `uvN_bounds`, `uvN_validation_status`, `uvN_out_of_unit_vertices`, `uvN_degenerate_faces`, and `uvN_overlap_check`. Expensive overlap checks run only for bake-domain UVs or when `forbid_overlapping=True`; skipped channels record `uvN_overlap_pairs="not_evaluated"`.
+- **Seam graph** — duplicated-position UV discontinuities are reported per channel (`uvN_seam_edges`, `uvN_seam_components`, `uvN_seam_length`, …) and summarized on the asset as `stage_uv_seam_graph_channels` / `stage_uv_seam_graph_edges`.
+- **Distortion** — bake-domain channels, or any channel staged with `max_stretch`, record `uvN_island_count`, `uvN_pack_efficiency`, and angle/edge distortion fields; other channels record `uvN_distortion_check="skipped"`.
+- **Packing** — `unwrap`/`lightmap` bake channels are packed by xatlas with the configured padding/resolution and record `uvN_pack_status`, dimensions, and utilization.
+- **Box projection** — `box` channels run an AABB projection and record `uvN_projection_*` fields for local/shared bounds, axes, destination, override policy, units, and `uv3d_size`.
+
+Two convenience modes: `uv1="copy_uv0"` reuses the UV0 layout for the secondary
+channel (warns if UV0 is missing), and `normalize_uvs=(1,)` rescales selected
+channels into 0..1 (warns if a requested channel is absent). Sharp-to-seam and
+forbid-overlap controls are recorded as intent and validated after generation,
+since the current xatlas path doesn't expose them directly.
 
 ```python
 asset = asset.stage(
@@ -803,7 +776,16 @@ Staging, UV, and material parameters:
 
 ## Scene Optimization
 
-Use scene optimization to reduce draw calls after staging and optional hierarchy merging. It batches compatible meshes, can batch by material, reconstructs exact repeated mesh instances when vertex attributes, materials, and metadata match, can reconstruct near-identical instances within a configured position tolerance, reports duplicate vertex/triangle counts and estimated mesh-payload byte savings, splits large merged meshes, simplifies empty hierarchy, annotates the intended index-buffer width, and records how mesh count, material count, submesh/material slots, instances, and merged batches contributed to the draw-call estimate. When batching removes reusable instances, the report includes the same export advisor used by explicit merge operations.
+Use scene optimization to reduce draw calls after staging and optional hierarchy
+merging. It:
+
+- batches compatible meshes (optionally by material) and splits oversized merged meshes;
+- reconstructs repeated mesh instances — exact matches, or near-identical ones within a position tolerance — when vertex attributes, materials, and metadata match;
+- simplifies empty hierarchy and annotates the intended index-buffer width;
+- reports duplicate vertex/triangle counts, estimated payload-byte savings, and how mesh/material counts, submesh/material slots, instances, and merged batches contributed to the draw-call estimate.
+
+When batching removes reusable instances, the report includes the same export
+advisor used by explicit merge operations.
 
 ```python
 asset = asset.optimize_scene(
@@ -881,9 +863,34 @@ asset = asset.run_lod_generators(
 )
 ```
 
-Material baking creates a shared flat material plus raster atlas images from selected material maps and per-face material assignments. The images are stored as first-class `ImageResource` objects, and glTF/USD exports bind them through material texture slots or `UsdUVTexture` shader networks connected to `UsdPreviewSurface` inputs. Hole removal uses deterministic mesh boundary classification and filling when BREP feature editing is unavailable. Occlusion removal uses deterministic visibility sampling, so the report records that thin occluders can require higher precision and asset metadata records the measured sample coverage, direction coverage, and confidence score. Decimation report options include `target_strategy`, which identifies whether the run used an explicit target triangle count, an explicit target ratio, or quality/error-bounded simplification. The same strategy is stored as `decimate_target_strategy`, source/workflow metadata, effective keep ratio when one exists, and quality-bound status on the asset and affected parts. Decimation records `decimate_requested_keep_ratio` metadata when a requested ratio can be derived, and warns when the request keeps less than 20% of source triangles because those settings are usually appropriate for distant LODs rather than close-view LOD0 assets. Decimation also records a memory estimate using the Unity rule of thumb of 5 GB RAM per million source triangles; `iterative_threshold` controls when intermediate simplification passes run, and reports include `decimate_simplification_passes`, `decimate_iterative_passes`, and `decimate_iterative_recommended`. Selection-wide decimation records per-part target allocation metadata, including assigned target triangles, reduced-versus-preserved part counts, and min/max assigned targets, so users can see which dense parts absorbed the global reduction. Decimation reports topology/material/UV protection counts for hard edges, hole boundaries, material boundaries, UV seams, silhouette faces, and total protected feature faces. `preserve_painted_areas=True` protects face groups or metadata-marked face indices named as painted, protected, weighted, or important, and `preserve_ambient_occlusion=True` protects low-AO faces from the sampled AO estimator. Reports include painted-area, AO, and combined importance-face counts. `uv_importance="ignore"` strips UV/tangent attributes before simplification; `"preserve_seams"` uses UVs for seam preservation and then strips them; `"preserve_islands"` keeps UVs through the output. `cleanup_attributes=("unused_uvs", "tangents")` removes degenerate or unused UV channels and tangents before simplification, while reports still warn when preserved UV seams or islands can reduce simplification efficiency.
+**Material baking** creates a shared flat material plus raster atlas images from
+selected maps and per-face assignments. Images are stored as `ImageResource` objects
+and bound by glTF/USD exports through texture slots or `UsdUVTexture` networks.
 
-LOD generation skips parts that do not have tessellated meshes, records `lod_status="skipped_no_mesh"` on those parts, and adds report warnings so partial LOD chains are visible. Asset metadata records `lod_generated_parts` and `lod_skipped_no_mesh_parts`. LOD reports also record source, added-LOD, and full-chain vertex/triangle counts plus estimated mesh payload bytes, so the memory and export-size cost of adding extra LOD levels is visible. Ratio-based LOD generation simplifies progressively: LOD1 is simplified from the source mesh, and later levels are simplified from the previous generated LOD while preserving the requested ratios against the source triangle count. LOD chain advisories warn when a chain has more than four generated levels, when LOD1 or LOD2 are aggressively reduced for close or mid views, and when the farthest LOD is still geometry-only and should eventually use one-mesh/one-material baking. Per-level LOD metadata records `lod_simplification_source`, whether source instances were reused, whether material merging or texture baking ran, whether culling granularity stayed per-part or changed because a tiny-part level was omitted, which policy advisory applies to that level, and the resolved export representation. `engine_profile="unity"` exports glTF LODs as `MSFT_lod` variant nodes, while `engine_profile="unreal"` exports separate `_LOD#` scene nodes for importer pipelines that ignore `MSFT_lod`.
+**Hole removal** uses mesh boundary classification and filling when BREP feature
+editing is unavailable. **Occlusion removal** uses deterministic visibility sampling;
+asset metadata records sample coverage, direction coverage, and a confidence score,
+and the report notes that thin occluders may need higher precision.
+
+**Decimation** records what it did and how aggressively:
+
+- **Strategy** — `target_strategy` (and `decimate_target_strategy` metadata) marks the run as explicit target count, target ratio, or quality/error-bounded; `decimate_requested_keep_ratio` is recorded when derivable. Keeping under 20% of source triangles warns, since that suits distant LODs more than LOD0.
+- **Memory & passes** — a RAM estimate (Unity's ~5 GB per million source triangles), `iterative_threshold` control, and `decimate_simplification_passes` / `decimate_iterative_passes` / `decimate_iterative_recommended`.
+- **Selection budgets** — selection-wide runs record per-part target allocation (assigned targets, reduced-vs-preserved counts, min/max), showing which dense parts absorbed the reduction.
+- **Protected features** — counts for hard edges, hole boundaries, material boundaries, UV seams, and silhouette faces. `preserve_painted_areas` protects painted/protected/weighted/important face groups; `preserve_ambient_occlusion` protects low-AO faces.
+- **UV handling** — `uv_importance` is `ignore` (strip UV/tangents first), `preserve_seams` (use then strip), or `preserve_islands` (keep through output); `cleanup_attributes` removes unused UV channels/tangents before simplification.
+
+**LOD generation** simplifies progressively — LOD1 from the source mesh, later levels
+from the previous LOD, each preserving its requested ratio against the source count.
+Parts without tessellated meshes are skipped (`lod_status="skipped_no_mesh"`, plus
+`lod_generated_parts` / `lod_skipped_no_mesh_parts` on the asset). Reports record
+source/added/full-chain vertex/triangle counts and payload bytes, per-level
+provenance (instance reuse, material merge, texture bake, culling-granularity
+changes, resolved export representation), and chain advisories (more than four
+levels; over-aggressive LOD1/LOD2; geometry-only far LODs that should bake to
+one mesh/material). `engine_profile="unity"` exports LODs as `MSFT_lod` variant
+nodes; `"unreal"` exports separate `_LOD#` scene nodes for pipelines that ignore
+`MSFT_lod`.
 
 Optimization action parameters:
 
@@ -1103,7 +1110,33 @@ asset.write_stl("motor.stl", options=fc.StlExportOptions(binary=True, merge=True
 asset.write_fbx("motor.fbx", options=fc.FbxExportOptions(materials=True, normals=True, uvs=True))
 ```
 
-`preset="web"`, `"mobile"`, `"desktop"`, `"vr"`, or `"ar"` resolves to concrete glTF compression defaults and, during `fc.convert()`, runs texture resize/dedupe cleanup with the preset's texture cap before writing. `quantize=True` writes `KHR_mesh_quantization` accessors and composes the dequantization transform into referencing nodes. `meshopt=True` writes `EXT_meshopt_compression` bufferView payloads while keeping fallback buffer data for validators and loaders that ignore the extension. `draco=True` runs the glTF Transform Draco encoder and writes required `KHR_draco_mesh_compression` payloads. `texture_compression="ktx2"` or `"basisu"` runs the KTX2/Basis encoder for referenced texture images and writes required `KHR_texture_basisu` payloads. USDZ output is built by writing a temporary USD stage and packaging it as `.usdz`. Scalar material transparency uses the effective opacity from base-color alpha and material opacity without double-counting duplicated CAD alpha values; glTF also marks scalar-transparent or baked-opacity materials as alpha-blended. When KTX2/Basis compression is not requested, `texture_fallback_format` records the PNG/JPEG fallback policy: `auto` chooses PNG for alpha-bearing texture sets and JPEG for color-only sets, while explicit `png` or `jpeg` records a forced fallback. `png_compression` and `jpeg_quality` are reported as fallback policy settings. glTF write report steps include `runtime_dependencies`, listing emitted extensions, required extensions, `extras.fascat` metadata, not-written runtime extensions, expected runtime support, a `runtime_compatibility` matrix for Unity glTFast, web, mobile, and XR targets, and a `runtime_decision_matrix` that explains when quantization, meshopt, Draco, KTX2/Basis, and PNG/JPEG fallbacks are appropriate. When `size_ladder=True`, direct writes and `fc.convert()` add a `gltf_size_ladder` report step that writes temporary GLB variants for baseline, quantized, meshopt, Draco, texture-compressed, and requested settings where available, then records measured bytes, baseline/requested/smallest sizes, and unavailable encoder warnings. Write report steps also include output file size, estimated geometry/texture/metadata payload bytes, referenced/unused/written material counts, source/referenced/unused/duplicate-reference/written image counts, and file-size budget warnings when a budget is provided. glTF, USD, and OBJ exports write only referenced materials, leaving the in-memory asset unchanged. glTF also omits images referenced only by unused materials and reuses repeated embedded texture URIs as one image/texture resource.
+**Presets** — `preset="web"` (also `mobile`, `desktop`, `vr`, `ar`) resolves to
+concrete compression defaults and, during `fc.convert()`, runs texture
+resize/dedupe cleanup with the preset's texture cap before writing.
+
+**Geometry compression** — these can be combined:
+
+- `quantize=True` writes `KHR_mesh_quantization` accessors and composes the dequantization transform into referencing nodes.
+- `meshopt=True` writes `EXT_meshopt_compression` payloads, keeping fallback buffer data for loaders that ignore the extension.
+- `draco=True` runs the glTF Transform Draco encoder and writes `KHR_draco_mesh_compression`.
+
+**Textures** — `texture_compression="ktx2"`/`"basisu"` runs the KTX2/Basis encoder
+and writes `KHR_texture_basisu`. Otherwise `texture_fallback_format` sets PNG/JPEG
+policy: `auto` keeps alpha-bearing sets PNG and color-only sets JPEG; explicit `png`
+or `jpeg` forces a format (`png_compression`/`jpeg_quality` tune it). Scalar
+transparency uses effective opacity without double-counting duplicated CAD alpha.
+
+**Report fields** — glTF write steps include `runtime_dependencies` (emitted/required
+extensions, `extras.fascat`, a `runtime_compatibility` matrix for glTFast/web/mobile/XR,
+and a `runtime_decision_matrix`). With `size_ladder=True`, a `gltf_size_ladder` step
+writes temporary baseline/quantized/meshopt/Draco/texture-compressed/requested GLB
+variants and records measured bytes plus unavailable-encoder warnings. All write
+steps record output size, estimated geometry/texture/metadata bytes, material/image
+counts, and budget warnings.
+
+USDZ is built by writing a temporary USD stage and packaging it. glTF, USD, and OBJ
+exports write only referenced materials (the in-memory asset is unchanged); glTF also
+drops images used only by unused materials and reuses repeated embedded texture URIs.
 
 OBJ export writes vertex positions, normals, `f v//vn` face references, material assignments, and smoothing directives. Staged smooth normals export with smoothing enabled; flat, hard-edge, or generated face normals export with smoothing disabled.
 
@@ -1167,11 +1200,15 @@ Available profiles:
 | `augmented-reality` | stricter phone and tablet AR runtime budget | 60 | 100,000 | 65,535 | 1,024px | 64 MB | 1,500 ms | 150 | 50K-250K triangles, under 500 draw calls |
 | `mixed-reality` | stricter headset budget for mixed-reality runtimes | 60 | 75,000 | 65,535 | 1,024px | 64 MB | 1,200 ms | 100 | 50K-200K triangles, under 500 draw calls |
 
-You can pass either a profile name or a `ConversionProfile` returned by `fc.profiles`. Built-in profiles also carry a `WorkflowRecipe` that names the Unity-inspired target, such as `web-glb`, `mobile-glb`, `vr-glb`, or `high-fidelity-desktop`. Conversion reports include a `workflow_recipe` step for those profiles, with each import, repair, tessellation, staging, optimization, LOD, texture, and export choice marked as `honored`, `disabled`, `metadata_only`, or `unsupported`.
+Pass either a profile name or a `ConversionProfile` from `fc.profiles`. Built-in
+profiles carry a `WorkflowRecipe` naming the target (`web-glb`, `mobile-glb`,
+`vr-glb`, `high-fidelity-desktop`), surfaced as a `workflow_recipe` report step that
+marks each stage `honored`, `disabled`, `metadata_only`, or `unsupported`.
 
-Conversion reports include a `profile_budget` step when the selected profile has a budget. That step records target FPS, triangle, vertex, per-mesh vertex, texture-resolution, texture-memory, estimated load-time, draw-call budgets, draw-call breakdown fields, supported compression/runtime-extension caps, and Unity reference triangle/draw-call ranges when the profile has them. Fascat's defaults are intentionally stricter than Unity's broad reference ranges for repeatable export checks. Load time is a deterministic estimate based on output file size, geometry bytes, baked texture bytes, and draw-call overhead; it is not a measured engine runtime.
+When the profile has a budget, conversion reports add:
 
-When referenced baked textures are present, conversion reports also include a pre-write `texture_export_policy` step. It records source, referenced, and unused texture-set counts, map counts, largest source and referenced resolution, estimated referenced texture bytes, selected profile texture-resolution and texture-memory caps, resize candidate counts, estimated resized bytes, estimated savings, whether KTX2/Basis was requested, and PNG/JPEG fallback policy when compression is not requested, including fallback format, PNG compression, JPEG quality, alpha-bearing set counts, and transparency-loss warnings for explicit JPEG fallback.
+- **`profile_budget`** — target FPS plus triangle, vertex, per-mesh vertex, texture-resolution, texture-memory, load-time, and draw-call budgets, draw-call breakdown, compression/extension caps, and Unity reference ranges. Fascat's defaults are intentionally stricter than Unity's broad ranges. Load time is a deterministic estimate (file size, geometry/texture bytes, draw-call overhead), not a measured runtime.
+- **`texture_export_policy`** (when baked textures are referenced, before write) — source/referenced/unused texture-set and map counts, largest resolutions, estimated bytes, the profile's texture caps, resize candidates and estimated savings, KTX2/Basis request state, and PNG/JPEG fallback policy with transparency-loss warnings.
 
 Custom target-device profiles can overlay a budget on any built-in base profile:
 
@@ -1194,7 +1231,13 @@ profile = fc.profiles.from_file("factory-tablet.toml", base="realtime-mobile")
 asset = fc.convert("motor.step", "motor.glb", profile=profile)
 ```
 
-The CLI equivalent is `fascat convert motor.step motor.glb --profile realtime-mobile --target-device-profile factory-tablet.toml`. Profile files may be TOML or JSON and currently act as target-device budget overlays; tessellation, repair, staging, and LOD defaults still come from the selected base profile. When a file overrides `max_triangles`, Fascat uses that value as the profile optimization target, uses it as the explicit decimation target when `--decimate` is enabled without `--target-triangles` or `--ratio`, and derives `max_vertices` as three times the triangle budget unless `max_vertices` is set explicitly. `supported_compression` and `supported_runtime_extensions` are optional caps for glTF-oriented target devices; when the write report emits compression methods or runtime extensions outside those lists, the profile budget report records a violation.
+The CLI equivalent is `fascat convert motor.step motor.glb --profile realtime-mobile
+--target-device-profile factory-tablet.toml`. These TOML/JSON files are **budget
+overlays only** — tessellation, repair, staging, and LOD defaults still come from the
+base profile. Notes:
+
+- An overridden `max_triangles` becomes the optimization target (and the explicit decimation target when `--decimate` is used without `--target-triangles`/`--ratio`); `max_vertices` defaults to 3× the triangle budget unless set.
+- `supported_compression` and `supported_runtime_extensions` are optional caps; the profile budget report records a violation when the write emits anything outside them.
 
 ## Functional wrappers
 
@@ -1232,7 +1275,15 @@ for step in asset.report.steps:
 asset.report.write_json("report.json")
 ```
 
-The report records options, before/after counts, warnings, errors, and timings for each pipeline step. Approximate operations put the limitation on the step that produced it, so callers can distinguish exact geometry changes from fallbacks or metadata-only intent. Conversion reports include a `preflight` step before expensive operations start, with checklist warnings for missing patch cleanup, orientation preparation, UV/tangent ordering, AO bake UV1 prerequisites, and LOD0 optimization, plus glTF compression applicability notes. They also include a `workflow_recipe` step for built-in profiles, a `conversion_manifest` step with the resolved profile, import options, direct or pipeline operation settings, and export options, followed by a `workflow_summary` step that maps Unity-inspired preparation stages such as import cleanup, UV preparation, material baking, LOD generation, export compression, and export to run or skipped status.
+The report records options, before/after counts, warnings, errors, and timings for
+each pipeline step. Approximate operations attach the limitation to the step that
+produced it, so you can tell exact geometry changes from fallbacks or metadata-only
+intent. Conversion reports add four framing steps:
+
+- **`preflight`** (before expensive work) — checklist warnings for missing patch cleanup, orientation prep, UV/tangent ordering, AO-bake UV1 prerequisites, and LOD0 optimization, plus glTF compression notes.
+- **`workflow_recipe`** — for built-in profiles, the target recipe and honored/disabled/metadata-only/unsupported choice counts.
+- **`conversion_manifest`** — the resolved profile, import options, operation settings, and export options.
+- **`workflow_summary`** — preparation stages (import cleanup, UV prep, baking, LOD, export compression, export) mapped to run/skipped status.
 
 Use `Asset.analyze()` when you need geometry quality risks beyond raw part and triangle totals.
 
@@ -1298,22 +1349,20 @@ captures = fc.capture_runtime_parity_suite(
 )
 ```
 
-The preview renderer is a local orthographic software renderer. It writes PNGs,
-uses material base colors when available, respects node transforms, and can
-substitute each part's LOD mesh to build an LOD switching contact sheet.
-`compare_images()` reports mean absolute error, max channel error, changed pixel
-counts, changed pixel ratio, and whether configured thresholds passed. The same
-thresholds can gate engine preview baselines through `fascat validate`, but the
-helper itself remains a general image-diff primitive. Use
-`write_runtime_parity_suite()` to write bundled GLB fixtures, software baseline
-PNGs, and a manifest for browser, Unity, and Unreal material/lighting and
-compressed-texture preview comparisons. `capture_runtime_parity_suite()` runs
-selected browser or engine preview targets for that suite, writes
-`runtime-parity-captures.json`, and can promote rendered previews into
-`goldens/<target>/` for review. When `goldens/<target>/<fixture>.png` already
-exists, captures compare against that target-specific golden instead of the
-software baseline. Set `require_goldens=True` when a CI job should fail if the
-checked-in target golden corpus is incomplete.
+The preview renderer is a local orthographic software renderer: it writes PNGs, uses
+material base colors, respects node transforms, and can substitute each part's LOD
+mesh into an LOD-switching contact sheet. `compare_images()` is a general image-diff
+primitive that reports mean absolute error, max channel error, changed-pixel counts
+and ratio, and whether configured thresholds passed (the same thresholds gate engine
+preview baselines through `fascat validate`).
+
+For cross-renderer comparison, `write_runtime_parity_suite()` writes bundled GLB
+fixtures, software baseline PNGs, and a manifest.
+`capture_runtime_parity_suite()` runs selected browser/engine targets, writes
+`runtime-parity-captures.json`, and can promote renders into `goldens/<target>/`.
+When a `goldens/<target>/<fixture>.png` exists, later captures compare against that
+golden instead of the software baseline; `require_goldens=True` fails CI if the
+golden corpus is incomplete.
 
 ## Validation
 
@@ -1389,94 +1438,49 @@ fascat runtime-fixtures runtime-parity/ \
   --require-goldens
 ```
 
-Validation-time geometry reports use the same filter selectors as conversion
-when an exported format can be reconstructed for analysis.
+Validation-time geometry reports use the same filter selectors as conversion when an
+exported format can be reconstructed for analysis.
 
-`--visual-preview` writes a deterministic PNG from the validated output mesh.
-`--visual-baseline` compares that PNG against a baseline image and exits non-zero
-when the configured diff thresholds fail.
-`--lod-preview-dir` writes `lod0.png`, each available LOD level, and a
-`lod-switching.png` contact sheet. Fascat GLB exports preserve enough LOD
-metadata for this validation path to reconstruct LOD previews.
-`--runtime-browser-preview` launches the same Chromium-compatible browser
-discovery path as `--runtime-browser`, renders supported glTF/GLB mesh
-primitives with WebGL, and writes a PNG screenshot. This path gives a real
-browser renderer artifact for simple assets, including node transforms,
-material base-color factors, quantized vertex attributes, meshopt exports that
-keep fallback buffer data, Draco geometry decoded through glTF Transform,
-meshopt bufferViews without fallback buffer data decoded through local
-`meshoptimizer`, KTX2/Basis textures decoded through the default Python
-`alktx2` backend on supported Python 3.11+ Linux/Windows x86_64 installs or glTF
-Transform plus KTX-Software when available, optional KHR_texture_basisu textures
-with PNG fallbacks, and base-color texture sampling for supported image URI/data
-URI textures. The report lists decoded compressed payloads in
-`decoded_extensions`; if Draco or meshopt decode tooling is unavailable, the
-preview is reported as unsupported without writing a misleading screenshot. If
-KTX2/Basis texture decode tooling is unavailable, fallback texture sources can
-still render as `status="rendered_partial"` with `unsupported_extensions` and
-`preview_limitations` in the JSON report; assets without fallbacks render
-geometry only. Sparse accessors and full engine material/lighting parity remain
-outside the packaged browser preview.
+**Software preview (always available).** `--visual-preview` writes a deterministic
+PNG from the validated output mesh; `--visual-baseline` diffs it against a baseline
+and exits non-zero when thresholds fail. `--lod-preview-dir` writes `lod0.png`, each
+LOD level, and a `lod-switching.png` contact sheet (Fascat GLB exports preserve
+enough LOD metadata to reconstruct these).
 
-`--runtime-browser` is available for glTF/GLB outputs. It launches a local
-Chromium-compatible browser when one is installed, loads the asset bytes in a
-headless page, creates a WebGL workload from the asset triangle count, and
-reports measured load time, FPS, frame count, memory bytes, and workload scale.
-Set `FASCAT_BROWSER` or pass `--runtime-browser-command` when the browser is not
-on the default PATH. If no browser is available, the report returns
-`status="unavailable"` instead of substituting an estimate.
+**Browser (glTF/GLB).** `--runtime-browser` launches a local Chromium-compatible
+browser, runs a bounded WebGL workload, and reports load time, FPS, frame count,
+memory, and workload scale. `--runtime-browser-preview` renders a real WebGL
+screenshot — node transforms, base-color factors, quantized attributes, Draco
+(via glTF Transform), meshopt (fallback or local `meshoptimizer`), KTX2/Basis
+(default Python `alktx2` on supported platforms, else glTF Transform + KTX-Software),
+and base-color textures. Decoded payloads are listed in `decoded_extensions`; if
+Draco/meshopt tooling is missing the preview is `unsupported` (no misleading image),
+and missing KTX2/Basis tooling falls back to `status="rendered_partial"`. Set
+`FASCAT_BROWSER` or `--runtime-browser-command` if the browser isn't on PATH; with no
+browser, the report is `status="unavailable"` rather than an estimate.
 
-`--runtime-engine unity` and `--runtime-engine unreal` are also available for
-glTF/GLB outputs. When `--runtime-engine-project` is omitted, Fascat copies a
-packaged Unity or Unreal harness template into a temporary directory and runs
-that project. Use `fc.copy_engine_runtime_harness("unity", path)` or
-`fc.copy_engine_runtime_harness("unreal", path)` when you want an editable,
-persistent harness project; the Unreal helper returns the copied `.uproject`
-path. The CLI launches Unity with `FascatRuntimeHarness.Run` or Unreal with
-`-run=FascatRuntimeHarness`, passes the asset path and a JSON report path, and
-records engine-process load/parse time, frame count, memory bytes, engine
-version, mesh count, and triangle count. `--runtime-engine-preview` also passes
-a requested PNG path to the harness (`-fascatPreview` for Unity or
-`-FascatPreview=` for Unreal) and records `render_status`, `render_time_ms`,
-`rendered_frames`, `render_backend`, `render_limitations`, `render_error`, and
-`preview_path` from the returned report.
-`--runtime-engine-baseline` compares that rendered engine preview against a PNG
-baseline with the `--visual-diff-*` thresholds and exits non-zero when the
-engine preview drifts beyond the configured tolerance.
-The packaged Unity template includes Unity glTFast, loads and instantiates the
-asset, sets up a camera and key light, renders a fixed multi-frame camera loop,
-and writes the requested preview PNG when Unity can run with graphics enabled.
-That packaged path reports `measured_fps`, `frame_count`, and
-`measurement_duration_ms` from the render loop. The packaged Unreal commandlet
-validates the engine command contract and glTF/GLB file parsing. When a preview
-path is requested for GLB assets with supported FLOAT VEC3 positions and
-unsigned indices, it writes an asset-driven deterministic PNG by rasterizing
-triangle geometry with material `baseColorFactor`, and reports
-`render_backend="unreal_commandlet_geometry_rasterizer"`. If the asset cannot
-be rasterized by that limited commandlet path, it falls back to a count-based
-placeholder PNG with `render_status="rendered_partial"` and a limitation
-message. That Unreal packaged preview is still not a full Unreal scene,
-texture, lighting, or material renderer. `fascat runtime-fixtures DIR` writes
-bundled PBR material, texture-map, optional KTX2/Basis fallback,
-normal/lighting, Unity `MSFT_lod`, and Unreal separate-node LOD-profile GLB
-fixtures with software baseline PNGs and a manifest containing browser, Unity,
-and Unreal preview commands. Add
-`--capture browser`, `--capture unity`, or `--capture unreal` to run local
-preview captures for the suite and write `runtime-parity-captures.json`;
-`--promote-goldens` copies rendered captures into `goldens/<target>/`. Existing
-`goldens/<target>/<fixture>.png` files become target-specific comparison
-baselines on later captures, and `--require-goldens` fails the suite when any
-requested target golden is missing. Add `--check-goldens` to write
-`runtime-parity-golden-coverage.json` without rendering; with
-`--require-goldens`, the command fails when any expected target PNG is missing,
-invalid, or has dimensions that differ from the software baseline.
-Engine-specific checked-in golden corpora and full Unreal scene-rendered
-screenshots/FPS remain open. Set
-`FASCAT_UNITY`, `UNITY_EDITOR`,
-`FASCAT_UNREAL`, or `UNREAL_EDITOR`, or pass `--runtime-engine-command`, when
-the engine executable is not on `PATH`. If the executable is missing, or an
-explicitly supplied harness project is missing, the engine report is marked
-unavailable.
+**Engine (glTF/GLB).** `--runtime-engine unity|unreal` runs a packaged harness (copied
+to a temp dir) or a custom one via `--runtime-engine-project`; use
+`fc.copy_engine_runtime_harness(engine, path)` for a persistent project. It records
+load/parse time, frame count, memory, engine version, and mesh/triangle counts.
+`--runtime-engine-preview` requests a PNG and records `render_status`,
+`render_backend`, `render_time_ms`, and limitations; `--runtime-engine-baseline`
+diffs that render against a baseline with the `--visual-diff-*` thresholds. The Unity
+template (glTFast) renders a fixed camera loop with `measured_fps`; the Unreal
+commandlet rasterizes supported GLB geometry with `baseColorFactor` (falling back to
+a count-based placeholder). Set `FASCAT_UNITY`/`UNITY_EDITOR`/`FASCAT_UNREAL`/`UNREAL_EDITOR`
+or `--runtime-engine-command` if the executable isn't on PATH; missing executables or
+projects are reported unavailable.
+
+**Parity fixtures.** `fascat runtime-fixtures DIR` writes bundled material, texture,
+KTX2/Basis-fallback, lighting, and Unity/Unreal LOD-profile GLBs with software
+baselines and a manifest. `--capture browser|unity|unreal` renders captures into
+`runtime-parity-captures.json`; `--promote-goldens` copies them into
+`goldens/<target>/` (which then become comparison baselines); `--require-goldens`
+fails on missing goldens; `--check-goldens` audits coverage without rendering.
+
+> Full Unreal scene rendering, sparse accessors, and checked-in engine-specific
+> golden corpora remain open.
 
 ## Inspecting assets
 

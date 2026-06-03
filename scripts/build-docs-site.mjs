@@ -727,16 +727,17 @@ if(tocLinks.length){
 // ── Navigation ────────────────────────────────────────────────────────────────
 
 const sections = [
-  ["Get Started", ["index.md", "install.md", "quickstart.md", "api.md"]],
-  ["Guides",      ["format-guidelines.md"]],
-  ["Reference",   ["reference.md"]],
+  ["Get Started",   ["index.md", "install.md", "quickstart.md"]],
+  ["Python API",    ["api.md"]],
+  ["CLI Reference", ["reference.md"]],
 ];
-const optionalDocs = new Set(["format-guidelines.md"]);
+const optionalDocs = new Set();
 
 const LABELS = {
   "index":      "Home",
   "quickstart": "Quick Start",
   "api":        "Python API",
+  "reference":  "CLI Reference",
 };
 
 function fileToLabel(filename) {
