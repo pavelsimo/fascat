@@ -7,18 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-06
+
 ### Added
 - add IGES and native BREP import support for CAD conversion workflows
 - add benchmark tooling for measuring CAD import and conversion performance
 - add configurable per-part worker jobs for repair, staging, optimization, decimation, and LOD generation
+- add FBX export support for realtime asset workflows
+- add texture baking, compression, and source-texture import support
+- add vendor material-library sidecar and zipped material-container imports
+- add browser, Unity, and Unreal runtime validation previews with packaged engine harnesses
+- add visual baseline diff checks and runtime parity fixtures for exported assets
+- add multi-root STEP import for assemblies spread across multiple input files
+- add STEP external reference graph resolution and preservation of external occurrences
+- add glTF export presets and asset-size ladder guidance
+- add detail-adaptive tessellation for curved BREP geometry
+- add AP242 PMI extraction, visualization, semantic graph reporting, tolerance zones, and annotation presentation support
+- add STEP design variant, effectivity, and conditional feature evaluation
+- add construction-curve import controls and mixed construction-curve splitting
+- add BREP same-domain cleanup, overlap cleanup, open-shell grouping, and curved-BREP tessellation handling
+- add engine LOD profile export and LOD runtime parity fixtures
 
 ### Changed
 - improve conversion performance across mesh repair, staging, occlusion, decimation, tessellation, LOD generation, and USD/glTF/OBJ/STL export paths
 - reduce repeated mesh topology, validation, fingerprint, and export-buffer work across pipeline stages
 - accelerate occlusion removal with triangle and occurrence BVH culling
+- preserve decimation importance faces during optimization
+- normalize exported material opacity for more consistent runtime previews
 
 ### Fixed
 - bound memory usage during nearest-centroid material assignment on large meshes
+- delete stale BREP patches when reusing existing meshes
 
 ## [0.2.0] - 2026-05-28
 
@@ -55,6 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - improve CLI behavior for help, color handling, quiet mode, backend failures, and validation errors
 - keep asset, mesh, material, report, and node models isolated from caller-owned mutable inputs
 
-[Unreleased]: https://github.com/pavelsimo/fascat/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/pavelsimo/fascat/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/pavelsimo/fascat/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/pavelsimo/fascat/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/pavelsimo/fascat/releases/tag/v0.1.0
