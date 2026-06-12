@@ -7,7 +7,6 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-ffd60a?style=flat-square&logoColor=white" alt="license MIT"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.10+-3776ab?style=flat-square&logoColor=white" alt="Python"></a>
   <a href="https://pypi.org/project/fascat"><img src="https://img.shields.io/pypi/v/fascat?style=flat-square&label=PyPI&color=3775a9&cacheSeconds=300&logoColor=white" alt="PyPI"></a>
-  <a href="https://github.com/pavelsimo/homebrew-tap"><img src="https://img.shields.io/badge/Homebrew-b28f62?style=flat-square&logoColor=white" alt="Homebrew"></a>
   <a href="https://deepwiki.com/pavelsimo/fascat"><img src="https://img.shields.io/badge/DeepWiki-0088cc?style=flat-square&logoColor=white" alt="DeepWiki"></a>
 </p>
 
@@ -24,13 +23,6 @@ flowchart TD
 ```
 
 ## Installation
-
-### Homebrew (macOS / Linux)
-
-```bash
-brew tap pavelsimo/homebrew-tap
-brew install fascat
-```
 
 ### pip / pipx
 

@@ -14,10 +14,10 @@ import pytest
 
 from fascat.asset import Asset, Node, Part
 from fascat.image import ImageResource
-from fascat.io.gltf import _apply_meshopt_compression, validate_gltf, write_gltf
+from fascat.io.gltf import _apply_meshopt_compression, validate_gltf, write_gltf, write_gltf_with_validation
 from fascat.material import Material
 from fascat.mesh import Mesh
-from fascat.options import BakeMaterialOptions, LODOptions
+from fascat.options import BakeMaterialOptions, GltfExportOptions, LODOptions
 
 
 def _asset_with_materials_and_lods() -> Asset:
@@ -372,6 +372,36 @@ def test_gltf_export_embeds_buffer_data_uri_and_validates(tmp_path: Path) -> Non
     assert validate_gltf(output)["triangles"] == 2
     assert uri.startswith("data:application/octet-stream;base64,")
     assert len(base64.b64decode(uri.split(",", 1)[1])) == document["buffers"][0]["byteLength"]
+
+
+def test_gltf_validation_reads_external_sidecar_buffer(tmp_path: Path) -> None:
+    output = tmp_path / "panel.gltf"
+    sidecar = tmp_path / "panel.bin"
+    write_gltf(_asset_with_materials_and_lods(), output)
+    document = json.loads(output.read_text(encoding="utf-8"))
+    uri = document["buffers"][0].pop("uri")
+    sidecar.write_bytes(base64.b64decode(uri.split(",", 1)[1]))
+    document["buffers"][0]["uri"] = sidecar.name
+    output.write_text(json.dumps(document), encoding="utf-8")
+
+    assert validate_gltf(output)["triangles"] == 2
+
+
+def test_gltf_write_validation_reopens_final_compressed_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import fascat.io.gltf as gltf
+
+    def fake_draco_transform(arguments: tuple[str, ...]) -> None:
+        output_path = Path(arguments[2])
+        output_path.write_bytes(b"not a glb")
+
+    monkeypatch.setattr(gltf, "_run_gltf_transform", fake_draco_transform)
+
+    with pytest.raises(RuntimeError, match="invalid GLB header"):
+        write_gltf_with_validation(
+            _asset_with_materials_and_lods(),
+            tmp_path / "compressed.glb",
+            options=GltfExportOptions(draco=True),
+        )
 
 
 def test_gltf_export_rejects_unknown_extension(tmp_path: Path) -> None:

@@ -14,7 +14,6 @@ fascat/
 ├── tests/                    # pytest test suite
 ├── docs/                     # Markdown documentation source
 ├── scripts/                  # Build tooling (docs site builder, etc.)
-├── Formula/                  # Homebrew formula (updated by release workflow)
 ├── .github/workflows/        # CI, release, and pages workflows
 ├── pyproject.toml            # project metadata, deps, tool config
 ├── Makefile                  # All developer tasks

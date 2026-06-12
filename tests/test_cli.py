@@ -1,4 +1,5 @@
 import builtins
+import io
 import json
 import re
 import shutil
@@ -1342,6 +1343,61 @@ def test_convert_reads_step_from_stdin_and_writes_usd_to_stdout() -> None:
     validate_result = runner.invoke(app, ["validate", "-"], input=result.output)
     assert validate_result.exit_code == 0
     assert "valid USD" in compact(validate_result.output)
+
+
+def test_convert_output_uses_requested_stdout_format(monkeypatch: pytest.MonkeyPatch) -> None:
+    import click
+
+    import fascat.cli as cli
+
+    stdout = io.BytesIO()
+    temp_paths: list[Path] = []
+
+    def fake_convert(_input_path: object, output_path: str | Path, **_kwargs: object) -> Asset:
+        output = Path(output_path)
+        temp_paths.append(output)
+        assert output.suffix == ".glb"
+        output.write_bytes(b"glTF")
+        return Asset(root=Node(id="root", name="Root"))
+
+    monkeypatch.setattr(cli, "convert", fake_convert)
+    monkeypatch.setattr(click, "get_binary_stream", lambda _name: stdout)
+
+    cli._convert_output(
+        input_path=Path("input.step"),
+        output_path=Path("-"),
+        profile="realtime-web",
+        pipeline=None,
+        tessellation=None,  # type: ignore[arg-type]
+        stage=None,  # type: ignore[arg-type]
+        import_options=None,  # type: ignore[arg-type]
+        heal_brep=None,
+        merge_vertices=None,
+        delete_degenerate_polygons=None,
+        merge=None,
+        explode=None,
+        replace=None,
+        scene=None,
+        bake_materials=None,
+        remove_holes=None,
+        remove_occluded=None,
+        decimate=None,
+        lod_generator=None,
+        optimize=None,
+        lods=None,
+        where=None,
+        progress=None,
+        debug=False,
+        gltf_options=None,
+        usd_options=None,
+        obj_options=None,
+        stl_options=None,
+        fbx_options=None,
+        stdout_format=cli.StdoutFormat.GLB,
+    )
+
+    assert stdout.getvalue() == b"glTF"
+    assert temp_paths and not temp_paths[0].exists()
 
 
 @pytest.mark.requires_ocp

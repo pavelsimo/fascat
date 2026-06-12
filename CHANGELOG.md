@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- add stdout format selection for streaming USD, glTF, GLB, OBJ, STL, and FBX conversions
+
+### Changed
+- require preinstalled glTF compression tooling instead of installing Node packages during export
+- document glTF compression tooling requirements and prefer pipx for installation guidance
+
+### Removed
+- remove unsupported Homebrew formula, install instructions, and release automation
+
+### Fixed
+- validate final written USD, glTF, OBJ, and STL artifacts after export
+- validate glTF files that use external binary buffers or Draco-compressed accessors
+- avoid locked temporary files during stdin import and stdout conversion workflows
+
 ## [0.3.0] - 2026-06-06
 
 ### Added

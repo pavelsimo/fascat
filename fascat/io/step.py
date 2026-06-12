@@ -5,6 +5,7 @@ import re
 import tempfile
 import zipfile
 from collections.abc import Iterable
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from io import BytesIO
@@ -1137,10 +1138,18 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
 
 
 def read_step_bytes(data: bytes, *, name: str = "stdin.step", options: StepReadOptions | None = None) -> Asset:
-    with tempfile.NamedTemporaryFile(suffix=Path(name).suffix or ".step") as handle:
-        handle.write(data)
-        handle.flush()
-        asset = _read_step_path(Path(handle.name), source_identity=name, options=options or StepReadOptions())
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=Path(name).suffix or ".step", delete=False) as handle:
+            temp_path = Path(handle.name)
+            handle.write(data)
+            handle.flush()
+        assert temp_path is not None
+        asset = _read_step_path(temp_path, source_identity=name, options=options or StepReadOptions())
+    finally:
+        if temp_path is not None:
+            with suppress(FileNotFoundError):
+                temp_path.unlink()
     asset.source_path = None
     asset.report.source_path = None
     asset.root.metadata["source"] = name

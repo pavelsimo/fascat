@@ -29,7 +29,7 @@ fascat convert motor.step motor.glb --profile realtime-web
 
 ## Quick links
 
-- [Install](install.html) — Homebrew, pip, pipx, or PyPI
+- [Install](install.html) — pipx, pip, PyPI, and optional compression tooling
 - [Quick Start](quickstart.html) — the common commands in 60 seconds
 - [Python API](api.html) — fluent assets, profiles, reports, validation, and export
 - [CLI Reference](reference.html) — global flags, env vars, exit codes, completions

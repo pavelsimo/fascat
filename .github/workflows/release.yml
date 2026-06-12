@@ -28,6 +28,28 @@ jobs:
       - name: Install uv
         run: python -m pip install --upgrade uv
 
+      - name: Install dependencies
+        run: uv sync --dev --all-extras
+
+      - name: Verify release metadata
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PACKAGE_VERSION="$(uv run python -c 'import fascat; print(fascat.__version__)')"
+          test "$PACKAGE_VERSION" = "$VERSION"
+          grep -F "## [$VERSION]" CHANGELOG.md
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Type check
+        run: uv run mypy fascat/
+
+      - name: Test
+        run: uv run pytest
+
       - name: Build distribution packages
         run: uv build
 
@@ -41,42 +63,3 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           attestations: true
-
-      - name: Update Homebrew tap
-        if: ${{ env.HOMEBREW_TAP_TOKEN != '' }}
-        env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        run: |
-          VERSION=${GITHUB_REF_NAME#v}
-
-          # Wait for PyPI to propagate the new release
-          sleep 30
-
-          # Fetch package metadata from PyPI
-          INFO=$(curl -sf "https://pypi.org/pypi/fascat/$VERSION/json")
-          SHA256=$(echo "$INFO" | python3 -c "
-          import sys, json
-          data = json.load(sys.stdin)
-          for f in data['urls']:
-              if f['packagetype'] == 'sdist':
-                  print(f['digests']['sha256'])
-                  break
-          ")
-          URL=$(echo "$INFO" | python3 -c "
-          import sys, json
-          data = json.load(sys.stdin)
-          for f in data['urls']:
-              if f['packagetype'] == 'sdist':
-                  print(f['url'])
-                  break
-          ")
-
-          # Clone tap repo and update formula
-          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/pavelsimo/homebrew-tap.git" tap
-          cd tap
-          sed -i "s|url \".*\"|url \"$URL\"|" Formula/fascat.rb
-          sed -i "s|sha256 \".*\"|sha256 \"$SHA256\"|" Formula/fascat.rb
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git commit -am "🔖 release v$VERSION"
-          git push

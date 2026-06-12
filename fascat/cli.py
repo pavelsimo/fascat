@@ -5,6 +5,7 @@ import os
 import sys
 import time
 from collections.abc import Callable, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from dataclasses import replace as dataclass_replace
 from difflib import get_close_matches
@@ -142,6 +143,17 @@ class ExportPreset(str, Enum):
     MOBILE = "mobile"
     VR = "vr"
     AR = "ar"
+
+
+class StdoutFormat(str, Enum):
+    USDA = "usda"
+    USDC = "usdc"
+    USDZ = "usdz"
+    GLTF = "gltf"
+    GLB = "glb"
+    OBJ = "obj"
+    STL = "stl"
+    FBX = "fbx"
 
 
 class RuntimeEngineMode(str, Enum):
@@ -668,7 +680,7 @@ def cmd_inspect(
   fascat convert motor.step
   fascat convert motor.step motor.usda --debug --report report.json
   fascat --dry-run --json convert motor.step motor.usdc
-  cat motor.step | fascat convert - - --profile realtime-web
+  cat motor.step | fascat convert - - --stdout-format glb --profile realtime-web
 
 Docs: {DOCS_URL}/reference.html""",
 )
@@ -678,10 +690,14 @@ def cmd_convert(
     output_path: Annotated[
         Path | None,
         typer.Argument(
-            help="Output USD or glTF file, or '-' for stdout. Defaults to input .usdc.",
+            help="Output USD, glTF, OBJ, STL, or FBX file, or '-' for stdout. Defaults to input .usdc.",
             allow_dash=True,
         ),
     ] = None,
+    stdout_format: Annotated[
+        StdoutFormat,
+        typer.Option("--stdout-format", help="Format to use when output is '-'."),
+    ] = StdoutFormat.USDA,
     extra_inputs: Annotated[
         list[Path] | None,
         typer.Option("--input", help="Additional STEP root input for explicit multi-root conversion."),
@@ -1435,6 +1451,7 @@ def cmd_convert(
         "input": str(input_path) if len(input_paths) == 1 else [str(path) for path in input_paths],
         "extra_inputs": [str(path) for path in input_paths[1:]],
         "output": str(output_path) if output_path is not None else None,
+        "stdout_format": stdout_format.value,
         "profile": profile.value,
         "base_profile": None,
         "target_device_profile": str(target_device_profile) if target_device_profile else None,
@@ -1649,6 +1666,10 @@ def cmd_convert(
     output_path = _resolve_convert_output(input_path, output_path, ctx, payload)
     payload["output"] = str(output_path)
     _validate_export_output(output_path, ctx, payload)
+    effective_output_suffix = f".{stdout_format.value}" if _is_stdio(output_path) else output_path.suffix.lower()
+    payload["effective_output_suffix"] = effective_output_suffix
+    if not _is_stdio(output_path) and stdout_format != StdoutFormat.USDA:
+        _fail(ctx, payload, "--stdout-format can only be used when output is '-'.", code=2)
     if ratio is not None and (ratio <= 0.0 or ratio >= 1.0):
         _fail(ctx, payload, "--ratio must be greater than 0 and less than 1.", code=2)
     if sag is not None and sag <= 0.0:
@@ -1770,9 +1791,9 @@ def cmd_convert(
         _fail(ctx, payload, "--jpeg-quality must be between 0 and 100.", code=2)
     if file_size_budget_mb is not None and file_size_budget_mb <= 0.0:
         _fail(ctx, payload, "--file-size-budget-mb must be greater than 0.", code=2)
-    if package == UsdPackage.USDZ and not _is_stdio(output_path) and output_path.suffix.lower() != ".usdz":
+    if package == UsdPackage.USDZ and effective_output_suffix != ".usdz":
         _fail(ctx, payload, "--package usdz requires a .usdz output path.", code=2)
-    if debug and not _is_stdio(output_path) and output_path.suffix.lower() not in {".usd", ".usda"}:
+    if debug and effective_output_suffix not in {".usd", ".usda"}:
         _fail(ctx, payload, "--debug requires .usd or .usda output.", code=2)
     if quality_report is not None and report is not None and quality_report.resolve() == report.resolve():
         _fail(ctx, payload, "--quality-report must use a different path than --report.", code=2)
@@ -2072,7 +2093,7 @@ def cmd_convert(
             validate_lods,
             jobs,
         )
-        usd_package = "usdz" if (package == UsdPackage.USDZ or output_path.suffix.lower() == ".usdz") else "default"
+        usd_package = "usdz" if (package == UsdPackage.USDZ or effective_output_suffix == ".usdz") else "default"
         gltf_options = GltfExportOptions(
             preset=None if export_preset is None else cast(Any, export_preset.value),
             quantize=quantize,
@@ -2138,6 +2159,7 @@ def cmd_convert(
                 obj_options=obj_options,
                 stl_options=stl_options,
                 fbx_options=fbx_options,
+                stdout_format=stdout_format,
             )
     except typer.Exit:
         raise
@@ -2753,7 +2775,7 @@ def _emit(ctx: typer.Context, payload: dict[str, Any], human_message: str) -> No
     if state.json_output:
         out.print_json(json.dumps(payload))
     elif not state.quiet:
-        out.print(human_message)
+        out.print(human_message, markup=False, soft_wrap=True)
 
 
 def _require_existing_file(path: Path, label: str, ctx: typer.Context, payload: dict[str, Any]) -> None:
@@ -3300,6 +3322,7 @@ def _convert_for_cli(
     obj_options: ObjExportOptions | None,
     stl_options: StlExportOptions | None,
     fbx_options: FbxExportOptions | None,
+    stdout_format: StdoutFormat,
 ) -> Any:
     if isinstance(input_path, Path) and _is_stdio(input_path):
         data = sys.stdin.buffer.read()
@@ -3336,6 +3359,7 @@ def _convert_for_cli(
                 obj_options,
                 stl_options,
                 fbx_options,
+                stdout_format=stdout_format,
             )
     return _convert_output(
         input_path,
@@ -3367,6 +3391,7 @@ def _convert_for_cli(
         obj_options,
         stl_options,
         fbx_options,
+        stdout_format=stdout_format,
     )
 
 
@@ -3400,16 +3425,22 @@ def _convert_output(
     obj_options: ObjExportOptions | None,
     stl_options: StlExportOptions | None,
     fbx_options: FbxExportOptions | None,
+    *,
+    stdout_format: StdoutFormat,
 ) -> Any:
     if _is_stdio(output_path):
         import tempfile
 
         import click
 
-        with tempfile.NamedTemporaryFile(suffix=".usda") as handle:
+        temp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=f".{stdout_format.value}", delete=False) as handle:
+                temp_path = Path(handle.name)
+            assert temp_path is not None
             asset = convert(
                 input_path,
-                handle.name,
+                temp_path,
                 profile=profile,
                 pipeline=pipeline,
                 import_options=import_options,
@@ -3439,9 +3470,13 @@ def _convert_output(
                 fbx_options=fbx_options,
             )
             stdout = click.get_binary_stream("stdout")
-            stdout.write(Path(handle.name).read_bytes())
+            stdout.write(temp_path.read_bytes())
             stdout.flush()
             return asset
+        finally:
+            if temp_path is not None:
+                with suppress(FileNotFoundError):
+                    temp_path.unlink()
     return convert(
         input_path,
         output_path,
@@ -3628,15 +3663,17 @@ class _temporary_step_file:
     def __enter__(self) -> Path:
         import tempfile
 
-        self._handle = tempfile.NamedTemporaryFile(suffix=".step")
+        self._handle = tempfile.NamedTemporaryFile(suffix=".step", delete=False)
         self._handle.write(self.data)
         self._handle.flush()
         self.path = Path(self._handle.name)
+        self._handle.close()
         return self.path
 
     def __exit__(self, *_exc_info: object) -> None:
-        if self._handle is not None:
-            self._handle.close()
+        if self.path is not None:
+            with suppress(FileNotFoundError):
+                self.path.unlink()
 
 
 def _validate_and_analyze_output_for_cli(
@@ -3651,16 +3688,24 @@ def _validate_and_analyze_output_for_cli(
         data = sys.stdin.buffer.read()
         if not data:
             raise RuntimeError("Missing USD data on stdin.")
-        with tempfile.NamedTemporaryFile(suffix=".usda") as handle:
-            handle.write(data)
-            handle.flush()
-            stats = validate_export(handle.name)
+        temp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".usda", delete=False) as handle:
+                temp_path = Path(handle.name)
+                handle.write(data)
+                handle.flush()
+            assert temp_path is not None
+            stats = validate_export(temp_path)
             analysis = (
-                analyze_output(handle.name, options, where=where, validation_stats=stats, source_path="-")
+                analyze_output(temp_path, options, where=where, validation_stats=stats, source_path="-")
                 if options is not None
                 else None
             )
             return stats, analysis
+        finally:
+            if temp_path is not None:
+                with suppress(FileNotFoundError):
+                    temp_path.unlink()
     stats = validate_export(path)
     analysis = analyze_output(path, options, where=where, validation_stats=stats) if options is not None else None
     return stats, analysis

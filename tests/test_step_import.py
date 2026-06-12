@@ -46,6 +46,23 @@ from fascat.options import StepReadOptions
 from fascat.report import Report
 
 
+def test_read_step_bytes_closes_and_removes_temporary_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen_paths: list[Path] = []
+
+    def fake_read_step_path(path: Path, *, source_identity: str, options: fc.StepReadOptions) -> fc.Asset:
+        assert source_identity == "stdin.step"
+        assert path.exists()
+        seen_paths.append(path)
+        return fc.Asset(root=fc.Node(id="root", name="Root"))
+
+    monkeypatch.setattr(step_io, "_read_step_path", fake_read_step_path)
+
+    asset = step_io.read_step_bytes(b"ISO-10303-21;")
+
+    assert asset.root.metadata["source"] == "stdin.step"
+    assert seen_paths and not seen_paths[0].exists()
+
+
 def test_canonical_part_id_reuses_matching_shape_and_material() -> None:
     part_index: dict[tuple[str, str, str, str], str] = {}
 

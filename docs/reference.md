@@ -107,6 +107,7 @@ keeping the native source shape for tessellation and healing.
 | `--target-device-profile` | unset | TOML or JSON target-device budget overlay for the selected profile |
 | `--pipeline` | unset | TOML pipeline file with named filters and ordered conversion steps |
 | `--input` | unset | Additional STEP root input for explicit multi-root conversion; may be passed more than once |
+| `--stdout-format` | `usda` | Output format used only when the output path is `-`: `usda`, `usdc`, `usdz`, `gltf`, `glb`, `obj`, `stl`, or `fbx` |
 | `--sag` | profile value | CAD tessellation sag tolerance |
 | `--sag-ratio` | unset | Relative CAD tessellation sag ratio; enables explicit relative deflection when set |
 | `--angle` | profile value | CAD tessellation angle tolerance in degrees |
@@ -544,13 +545,13 @@ Use `-` for standard streams:
 
 ```bash
 cat input.step | fascat inspect -
-cat input.step | fascat convert - - --profile realtime-web
+cat input.step | fascat convert - - --stdout-format glb --profile realtime-web
 cat output.usdc | fascat validate -
 ```
 
 When the convert output argument is omitted for a file input, Fascat writes beside the input with a `.usdc` suffix. Stdin input requires an explicit output path or `-`.
 
-When output is `-`, USD bytes are reserved for stdout and progress/errors stay on stderr.
+When output is `-`, `--stdout-format` selects the emitted format and defaults to `usda`. Progress/errors stay on stderr.
 
 Supported input suffixes are `.step`, `.stp`, `.igs`, `.iges`, and `.brep`.
 Supported output suffixes are `.usd`, `.usda`, `.usdc`, `.usdz`, `.gltf`, `.glb`, `.obj`, `.stl`, and `.fbx`.

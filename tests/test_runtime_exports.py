@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import struct
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -376,6 +377,28 @@ def test_gltf_write_invokes_draco_and_ktx2_export_backends(monkeypatch, tmp_path
     assert output.read_bytes().startswith(b"glTF")
     assert runtime_dependencies["extensions_used"] == ["KHR_draco_mesh_compression", "KHR_texture_basisu"]
     assert runtime_dependencies["extensions_required"] == ["KHR_draco_mesh_compression", "KHR_texture_basisu"]
+
+
+def test_ktx2_transform_uses_preinstalled_node_packages_without_npm(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.io.gltf as gltf
+
+    commands: list[list[str]] = []
+
+    def fake_which(name: str) -> str | None:
+        return "/usr/bin/node" if name == "node" else None
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(gltf.shutil, "which", fake_which)
+    monkeypatch.setattr(gltf.subprocess, "run", fake_run)
+
+    gltf._run_ktx2_transform(tmp_path / "input.glb", tmp_path / "output.glb", mode="ktx2")
+
+    assert commands
+    assert commands[0][0] == "/usr/bin/node"
+    assert all("npm" not in part for part in commands[0])
 
 
 def test_gltf_write_reports_lod_and_metadata_runtime_dependencies(tmp_path) -> None:  # type: ignore[no-untyped-def]

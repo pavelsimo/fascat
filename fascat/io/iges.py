@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
 
@@ -25,10 +26,18 @@ def read_iges_bytes(
     options: IgesReadOptions | StepReadOptions | None = None,
 ) -> Asset:
     suffix = Path(name).suffix.lower()
-    with tempfile.NamedTemporaryFile(suffix=suffix if suffix in IGES_SUFFIXES else ".igs") as handle:
-        handle.write(data)
-        handle.flush()
-        asset = _read_iges_path(Path(handle.name), source_identity=name, options=_coerce_options(options))
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix if suffix in IGES_SUFFIXES else ".igs", delete=False) as handle:
+            temp_path = Path(handle.name)
+            handle.write(data)
+            handle.flush()
+        assert temp_path is not None
+        asset = _read_iges_path(temp_path, source_identity=name, options=_coerce_options(options))
+    finally:
+        if temp_path is not None:
+            with suppress(FileNotFoundError):
+                temp_path.unlink()
     asset.source_path = None
     asset.report.source_path = None
     asset.root.metadata["source"] = name

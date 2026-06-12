@@ -19,7 +19,6 @@ import { join, basename } from "path";
 
 const TOOL         = "fascat";
 const REPO_URL     = "https://github.com/pavelsimo/fascat";
-const BREW_TAP     = "pavelsimo/homebrew-tap";
 const DESC         = "convert CAD STEP data into realtime-ready OpenUSD and glTF assets";
 const COLOR_SCHEME = "teal"; // teal | ocean | purple | amber
 const SITE_BASE    = existsSync("docs/CNAME")
@@ -358,8 +357,8 @@ function heroHtml() {
   </div>
   <div class="install-cmd">
     <span class="install-label">Install</span>
-    <code>brew install ${TOOL}</code>
-    <button class="copy-btn" data-copy="brew install ${TOOL}">Copy</button>
+    <code>pipx install ${TOOL}</code>
+    <button class="copy-btn" data-copy="pipx install ${TOOL}">Copy</button>
   </div>
 </section>`;
 }
@@ -794,8 +793,7 @@ writeFileSync(join(OUT,"llms.txt"),
 ## Install
 
 \`\`\`bash
-brew tap ${BREW_TAP}
-brew install ${TOOL}
+pipx install ${TOOL}
 \`\`\`
 
 ## Source

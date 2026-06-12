@@ -24,7 +24,8 @@ def write_obj_with_validation_stats(
     *,
     options: ObjExportOptions | None = None,
 ) -> dict[str, int] | None:
-    return _write_obj(asset, path, options=options, collect_stats=True)
+    _write_obj(asset, path, options=options, collect_stats=False)
+    return validate_obj(path)
 
 
 def _write_obj(

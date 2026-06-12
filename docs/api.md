@@ -1126,6 +1126,11 @@ policy: `auto` keeps alpha-bearing sets PNG and color-only sets JPEG; explicit `
 or `jpeg` forces a format (`png_compression`/`jpeg_quality` tune it). Scalar
 transparency uses effective opacity without double-counting duplicated CAD alpha.
 
+Draco export requires the `gltf-transform` CLI on `PATH` or `FASCAT_GLTF_TRANSFORM`.
+KTX2/Basis texture export requires Node.js plus `@gltf-transform/core`,
+`@gltf-transform/extensions`, `ktx2-encoder`, and `sharp` installed in the working
+directory or `FASCAT_NODE_MODULE_ROOT`.
+
 **Report fields** — glTF write steps include `runtime_dependencies` (emitted/required
 extensions, `extras.fascat`, a `runtime_compatibility` matrix for glTFast/web/mobile/XR,
 and a `runtime_decision_matrix`). With `size_ladder=True`, a `gltf_size_ladder` step
@@ -1451,8 +1456,8 @@ enough LOD metadata to reconstruct these).
 browser, runs a bounded WebGL workload, and reports load time, FPS, frame count,
 memory, and workload scale. `--runtime-browser-preview` renders a real WebGL
 screenshot — node transforms, base-color factors, quantized attributes, Draco
-(via glTF Transform), meshopt (fallback or local `meshoptimizer`), KTX2/Basis
-(default Python `alktx2` on supported platforms, else glTF Transform + KTX-Software),
+(via an installed glTF Transform CLI), meshopt (fallback or local `meshoptimizer`), KTX2/Basis
+(default Python `alktx2` on supported platforms, else installed glTF Transform + KTX-Software),
 and base-color textures. Decoded payloads are listed in `decoded_extensions`; if
 Draco/meshopt tooling is missing the preview is `unsupported` (no misleading image),
 and missing KTX2/Basis tooling falls back to `status="rendered_partial"`. Set

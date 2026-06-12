@@ -3,13 +3,6 @@ title: Install
 description: Install fascat on macOS, Linux, or Windows
 ---
 
-## Homebrew (macOS / Linux)
-
-```bash
-brew tap pavelsimo/homebrew-tap
-brew install fascat
-```
-
 ## pipx (recommended for isolated install)
 
 ```bash
@@ -34,6 +27,18 @@ validation when `KHR_texture_basisu` textures are present on supported Python
 explicit installs in compatible environments. On unsupported platforms, Fascat
 falls back to glTF Transform plus KTX-Software when those external tools are
 installed.
+
+## glTF Compression Tooling
+
+Draco export requires the glTF Transform CLI on `PATH`, or a
+`FASCAT_GLTF_TRANSFORM` environment variable pointing at the executable.
+
+KTX2/Basis texture export requires Node.js plus these packages installed in the
+working directory, or in `FASCAT_NODE_MODULE_ROOT`:
+
+```bash
+npm install --save-dev @gltf-transform/core @gltf-transform/extensions ktx2-encoder sharp
+```
 
 ## PyPI
 

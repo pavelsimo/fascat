@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import shutil
 import struct
 import subprocess
@@ -10,6 +11,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, cast
+from urllib.parse import unquote, urlparse
 
 import numpy as np
 from numpy.typing import NDArray
@@ -183,17 +185,16 @@ def _write_gltf(
     _apply_export_options(document, opts)
     if opts.meshopt:
         binary = _apply_meshopt_compression(document, binary)
-    validation_stats = validate_gltf_document(document, binary) if validate else None
     if opts.draco or opts.texture_compression is not None:
         _write_gltf_with_external_compression(document, binary, output_path, opts)
-        return validation_stats
+        return validate_gltf(output_path) if validate else None
     if suffix == ".gltf":
         _embed_binary_uri(document, binary)
     if suffix == ".glb":
         output_path.write_bytes(_pack_glb(document, binary))
-        return validation_stats
-    output_path.write_text(json.dumps(document, indent=2, sort_keys=False) + "\n", encoding="utf-8")
-    return validation_stats
+    else:
+        output_path.write_text(json.dumps(document, indent=2, sort_keys=False) + "\n", encoding="utf-8")
+    return validate_gltf(output_path) if validate else None
 
 
 def runtime_dependency_report(asset: Asset, options: GltfExportOptions | None = None) -> dict[str, object]:
@@ -1350,49 +1351,40 @@ def _run_gltf_transform(arguments: Sequence[str]) -> None:
 
 
 def _run_ktx2_transform(input_path: Path, output_path: Path, *, mode: str) -> None:
-    npm = shutil.which("npm")
     node = shutil.which("node")
-    if npm is None or node is None:
-        raise RuntimeError("KTX2/Basis export requires npm and node to run the ktx2 encoder")
+    if node is None:
+        raise RuntimeError("KTX2/Basis export requires node and installed KTX2 encoder packages")
     with tempfile.TemporaryDirectory(prefix="fascat-ktx2-") as directory:
         workdir = Path(directory)
         script = workdir / "encode-ktx2.mjs"
         script.write_text(_KTX2_TRANSFORM_SCRIPT, encoding="utf-8")
-        install = subprocess.run(
-            [
-                npm,
-                "install",
-                "--silent",
-                "@gltf-transform/core@^4.3.0",
-                "@gltf-transform/extensions@^4.3.0",
-                "ktx2-encoder@^0.5.3",
-                "sharp@^0.34.0",
-            ],
-            cwd=workdir,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if install.returncode != 0:
-            details = (install.stderr or install.stdout).strip()
-            raise RuntimeError(f"KTX2 encoder dependencies failed to install: {details}")
         completed = subprocess.run(
             [node, str(script), str(input_path), str(output_path), mode],
-            cwd=workdir,
+            cwd=Path.cwd(),
             check=False,
             capture_output=True,
             text=True,
         )
         if completed.returncode != 0:
             details = (completed.stderr or completed.stdout).strip()
-            raise RuntimeError(f"KTX2/Basis texture compression failed: {details}")
+            raise RuntimeError(
+                "KTX2/Basis texture compression failed: "
+                f"{details}. Install @gltf-transform/core, @gltf-transform/extensions, "
+                "ktx2-encoder, and sharp in the working directory, or set FASCAT_NODE_MODULE_ROOT."
+            )
 
 
 _KTX2_TRANSFORM_SCRIPT = """
-import { NodeIO } from '@gltf-transform/core';
-import { KHRTextureBasisu } from '@gltf-transform/extensions';
-import { ktx2 } from 'ktx2-encoder/gltf-transform';
-import sharp from 'sharp';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const moduleRoot = path.resolve(process.env.FASCAT_NODE_MODULE_ROOT || process.cwd());
+const require = createRequire(path.join(moduleRoot, 'package.json'));
+const { NodeIO } = await import(pathToFileURL(require.resolve('@gltf-transform/core')).href);
+const { KHRTextureBasisu } = await import(pathToFileURL(require.resolve('@gltf-transform/extensions')).href);
+const { ktx2 } = await import(pathToFileURL(require.resolve('ktx2-encoder/gltf-transform')).href);
+const sharp = (await import(pathToFileURL(require.resolve('sharp')).href)).default;
 
 const [input, output, mode] = process.argv.slice(2);
 const imageDecoder = async (buffer) => {
@@ -1414,13 +1406,13 @@ await io.write(output, document);
 
 
 def _gltf_transform_command() -> list[str]:
+    configured = os.environ.get("FASCAT_GLTF_TRANSFORM")
+    if configured:
+        return [configured]
     local = shutil.which("gltf-transform")
     if local is not None:
         return [local]
-    npx = shutil.which("npx")
-    if npx is not None:
-        return [npx, "--yes", "@gltf-transform/cli"]
-    raise RuntimeError("Draco/KTX2 export requires glTF Transform CLI or npx")
+    raise RuntimeError("Draco export requires the glTF Transform CLI on PATH or FASCAT_GLTF_TRANSFORM")
 
 
 def _apply_meshopt_compression(document: dict[str, Any], binary: BinaryPayload) -> bytearray:
@@ -1927,14 +1919,28 @@ def _read_gltf(path: Path) -> tuple[dict[str, Any], list[bytes]]:
     for index, buffer in enumerate(_array(document.get("buffers"), "buffers")):
         buffer_object = _object(buffer, f"buffer {index}")
         uri = buffer_object.get("uri")
-        if not isinstance(uri, str) or not uri.startswith("data:"):
-            raise RuntimeError("glTF validation only supports embedded data URI buffers")
+        if not isinstance(uri, str):
+            raise RuntimeError("glTF validation requires buffer URIs for .gltf assets")
+        buffers.append(_read_gltf_buffer_uri(path.parent, uri))
+    return document, buffers
+
+
+def _read_gltf_buffer_uri(base_dir: Path, uri: str) -> bytes:
+    if uri.startswith("data:"):
         try:
             _, encoded = uri.split(",", 1)
-            buffers.append(base64.b64decode(encoded))
+            return base64.b64decode(encoded)
         except ValueError as exc:
             raise RuntimeError("invalid glTF data URI buffer") from exc
-    return document, buffers
+
+    parsed = urlparse(uri)
+    if parsed.scheme and parsed.scheme != "file":
+        raise RuntimeError(f"unsupported external glTF buffer URI scheme: {parsed.scheme}")
+    if parsed.scheme == "file":
+        path = Path(unquote(parsed.path))
+    else:
+        path = base_dir / unquote(uri.split("?", 1)[0].split("#", 1)[0])
+    return path.read_bytes()
 
 
 def _validate_buffers(document: dict[str, Any], buffers: Sequence[BinaryPayload]) -> None:
@@ -1954,12 +1960,29 @@ def _validate_buffers(document: dict[str, Any], buffers: Sequence[BinaryPayload]
         length = _int(view.get("byteLength"), f"bufferView {index} byteLength")
         if offset < 0 or length < 0 or offset + length > len(buffers[buffer_index]):
             raise RuntimeError(f"glTF bufferView {index} is out of range")
+    compressed_accessors = _draco_compressed_accessor_indices(document)
     for index, accessor in enumerate(_array(document.get("accessors"), "accessors")):
-        _validate_accessor_storage(document, index, _object(accessor, f"accessor {index}"))
+        _validate_accessor_storage(
+            document,
+            index,
+            _object(accessor, f"accessor {index}"),
+            compressed=index in compressed_accessors,
+        )
 
 
-def _validate_accessor_storage(document: dict[str, Any], index: int, accessor: dict[str, Any]) -> None:
+def _validate_accessor_storage(
+    document: dict[str, Any],
+    index: int,
+    accessor: dict[str, Any],
+    *,
+    compressed: bool,
+) -> None:
     buffer_views = _array(document.get("bufferViews"), "bufferViews")
+    if "bufferView" not in accessor:
+        if compressed:
+            _validate_compressed_accessor_metadata(index, accessor)
+            return
+        raise RuntimeError(f"glTF accessor {index} is missing bufferView")
     view_index = _int(accessor.get("bufferView"), f"accessor {index} bufferView")
     if view_index < 0 or view_index >= len(buffer_views):
         raise RuntimeError(f"glTF accessor {index} references an invalid bufferView")
@@ -1979,6 +2002,48 @@ def _validate_accessor_storage(document: dict[str, Any], index: int, accessor: d
         needed += (count - 1) * stride + item_size if stride else count * item_size
     if count < 0 or byte_offset < 0 or needed > _int(view.get("byteLength"), f"bufferView {view_index} byteLength"):
         raise RuntimeError(f"glTF accessor {index} is out of range")
+
+
+def _validate_compressed_accessor_metadata(index: int, accessor: dict[str, Any]) -> None:
+    count = _int(accessor.get("count"), f"accessor {index} count")
+    component_type = _int(accessor.get("componentType"), f"accessor {index} componentType")
+    accessor_type = accessor.get("type")
+    if count < 0:
+        raise RuntimeError(f"glTF accessor {index} count must not be negative")
+    if component_type not in _COMPONENT_SIZES:
+        raise RuntimeError(f"glTF accessor {index} uses unsupported componentType")
+    if accessor_type not in _ACCESSOR_WIDTHS:
+        raise RuntimeError(f"glTF accessor {index} uses unsupported type")
+
+
+def _draco_compressed_accessor_indices(document: dict[str, Any]) -> set[int]:
+    compressed: set[int] = set()
+    for mesh_index, mesh_value in enumerate(_array(document.get("meshes"), "meshes")):
+        mesh = _object(mesh_value, f"mesh {mesh_index}")
+        for primitive_index, primitive_value in enumerate(
+            _array(mesh.get("primitives"), f"mesh {mesh_index} primitives")
+        ):
+            primitive = _object(primitive_value, f"mesh {mesh_index} primitive {primitive_index}")
+            extensions = primitive.get("extensions", {})
+            if not isinstance(extensions, dict) or _KHR_DRACO_MESH_COMPRESSION not in extensions:
+                continue
+            draco = _object(
+                extensions.get(_KHR_DRACO_MESH_COMPRESSION),
+                f"mesh {mesh_index} primitive {primitive_index} KHR_draco_mesh_compression",
+            )
+            attributes = _object(
+                draco.get("attributes", {}),
+                f"mesh {mesh_index} primitive {primitive_index} Draco attributes",
+            )
+            for accessor_index in attributes.values():
+                compressed.add(_int(accessor_index, "Draco attribute accessor"))
+            primitive_attributes = primitive.get("attributes", {})
+            if isinstance(primitive_attributes, dict):
+                for accessor_index in primitive_attributes.values():
+                    compressed.add(_int(accessor_index, "primitive attribute accessor"))
+            if "indices" in primitive:
+                compressed.add(_int(primitive["indices"], "primitive indices accessor"))
+    return compressed
 
 
 def _validate_default_scene(context: _GltfValidationContext) -> dict[str, int]:

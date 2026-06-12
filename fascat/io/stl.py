@@ -24,7 +24,8 @@ def write_stl_with_validation_stats(
     *,
     options: StlExportOptions | None = None,
 ) -> dict[str, int] | None:
-    return _write_stl(asset, path, options=options, collect_stats=True)
+    _write_stl(asset, path, options=options, collect_stats=False)
+    return validate_stl(path)
 
 
 def _write_stl(

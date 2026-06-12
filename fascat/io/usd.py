@@ -92,27 +92,9 @@ def write_usd_with_validation_stats(
 
     if opts.package == "usdz":
         _write_usdz_package(asset, output_path, debug, opts, Sdf, Usd, UsdGeom, UsdUtils)
-        return _asset_scene_validation_stats(asset)
+        return validate_usd(output_path)
     _write_usd_stage(asset, output_path, debug, opts, Usd, UsdGeom)
-    return _asset_scene_validation_stats(asset)
-
-
-def _asset_scene_validation_stats(asset: Asset) -> dict[str, int] | None:
-    mesh_count = 0
-    point_count = 0
-    triangle_count = 0
-    for node in asset.root.walk():
-        if node.part_id is None:
-            continue
-        part = asset.parts.get(node.part_id)
-        if part is None or part.mesh is None:
-            continue
-        mesh_count += 1
-        point_count += part.mesh.vertex_count
-        triangle_count += part.mesh.triangle_count
-    if mesh_count == 0:
-        return None
-    return {"meshes": mesh_count, "points": point_count, "triangles": triangle_count}
+    return validate_usd(output_path)
 
 
 def _write_usdz_package(
