@@ -890,6 +890,8 @@ asset = asset.run_lod_generators(
 **Material baking** creates a shared flat material plus raster atlas images from
 selected maps and per-face assignments. Images are stored as `ImageResource` objects
 and bound by glTF/USD exports through texture slots or `UsdUVTexture` networks.
+`ambient_occlusion_strategy` selects conservative, exterior, or advanced direction
+sets when baking AO maps or protecting low-AO faces during decimation.
 
 **Hole removal** uses mesh boundary classification and filling when BREP feature
 editing is unavailable. **Occlusion removal** uses deterministic visibility sampling;
@@ -926,6 +928,7 @@ Optimization action parameters:
 | `BakeMaterialOptions` | `padding` | Texture padding between islands in pixels. |
 | `BakeMaterialOptions` | `bake` | Maps to bake, such as `base_color`, `opacity`, `normal`, `roughness`, `metallic`, `ao`, or `emissive`. |
 | `BakeMaterialOptions` | `merge_output` | Replace selected materials with a shared baked output material. |
+| `BakeMaterialOptions` | `ambient_occlusion_strategy` | Direction set for baked AO maps: `conservative`, `exterior`, or `advanced`. |
 | `DecimateOptions` | `criterion` | `target` prioritizes a triangle budget. `quality` passes the largest configured tolerance as a target error bound to the simplification backend and records bound/result metadata. Report `target_strategy` identifies whether the effective workflow was target count, target ratio, or quality/error-bounded simplification. |
 | `DecimateOptions` | `target_triangles` | Absolute triangle target for selected geometry. In the CLI, `--decimate` uses the selected profile or target-device triangle budget when no explicit target or ratio is supplied. |
 | `DecimateOptions` | `target_ratio` | Fraction of source triangles to keep when no absolute target is set. Ratios below 20% produce an LOD0 distortion warning. |
@@ -936,6 +939,7 @@ Optimization action parameters:
 | `DecimateOptions` | `protect_topology` | Avoid topology changes that would remove important boundaries. Reports include protected hard-edge, hole-boundary, material-boundary, UV-seam, silhouette, and total feature-face counts. |
 | `DecimateOptions` | `preserve_painted_areas` | Preserve face groups or metadata-marked face indices named as painted, protected, weighted, or important. Reports include painted-area and combined importance-face counts. |
 | `DecimateOptions` | `preserve_ambient_occlusion` | Preserve low-AO faces from the sampled AO estimator during decimation. Reports include ambient-occlusion and combined importance-face counts. |
+| `DecimateOptions` | `ambient_occlusion_strategy` | Direction set for the low-AO estimator used by `preserve_ambient_occlusion`: `conservative`, `exterior`, or `advanced`. |
 | `DecimateOptions` | `budget_scope` | `part` budgets each part separately. `selection` uses a global selected-geometry target so sparse/simple parts can stay intact while dense parts absorb more reduction. Global selection decimation reports per-part target allocation, estimated RAM, and iterative-threshold status. |
 | `DecimateOptions` | `uv_importance` | Texture-coordinate handling: `preserve_islands` keeps UVs, `preserve_seams` protects seam topology then drops UVs, and `ignore` strips UVs/tangents before decimation. |
 | `DecimateOptions` | `cleanup_attributes` | Pre-decimation cleanup for attribute streams that are not useful to simplification. `unused_uvs` removes empty, constant, or zero-area UV channels. `tangents` removes tangents before simplification. Reports record removed channels, removed tangent parts, preserved UV channels, and UV seam/island constraint status. |

@@ -666,7 +666,7 @@ def _raster_bake_map(asset: Asset, part_ids: list[str], options: BakeMaterialOpt
         mesh = part.mesh
         if mesh is None or options.uv_channel not in mesh.uvs:
             continue
-        face_values = _face_bake_values(asset, part, mesh, kind)
+        face_values = _face_bake_values(asset, part, mesh, kind, options.ambient_occlusion_strategy)
         uv = np.clip(mesh.uvs[options.uv_channel], 0.0, 1.0)
         for face_index, face in enumerate(mesh.faces.astype(int)):
             _rasterize_triangle(pixels, filled, uv[face], face_values[face_index])
@@ -686,14 +686,20 @@ def _default_bake_pixel(kind: str) -> NDArray[np.uint8]:
     return np.asarray(defaults[kind], dtype=np.uint8)
 
 
-def _face_bake_values(asset: Asset, part: Part, mesh: Mesh, kind: str) -> NDArray[np.uint8]:
+def _face_bake_values(
+    asset: Asset,
+    part: Part,
+    mesh: Mesh,
+    kind: str,
+    ambient_occlusion_strategy: str,
+) -> NDArray[np.uint8]:
     if kind == "normal":
         normals = _bake_face_normals(mesh)
         encoded = np.clip((normals * 0.5 + 0.5) * 255.0, 0, 255).round().astype(np.uint8)
         alpha = np.full((mesh.triangle_count, 1), 255, dtype=np.uint8)
         return cast(NDArray[np.uint8], np.hstack((encoded, alpha)))
     if kind == "ao":
-        ao = _face_ambient_occlusion(mesh)
+        ao = _face_ambient_occlusion(mesh, ambient_occlusion_strategy)
         values = np.clip(ao[:, None] * 255.0, 0, 255).round().astype(np.uint8)
         alpha = np.full((mesh.triangle_count, 1), 255, dtype=np.uint8)
         return cast(NDArray[np.uint8], np.hstack((np.repeat(values, 3, axis=1), alpha)))
@@ -752,23 +758,13 @@ def _bake_face_normals(mesh: Mesh) -> FloatArray:
     return normals
 
 
-def _face_ambient_occlusion(mesh: Mesh) -> FloatArray:
+def _face_ambient_occlusion(mesh: Mesh, strategy: str = "conservative") -> FloatArray:
     if mesh.triangle_count == 0:
         return np.empty(0, dtype=np.float64)
     triangles = mesh.points[mesh.faces]
     centroids = triangles.mean(axis=1)
     normals = _bake_face_normals(mesh)
-    directions = np.asarray(
-        [
-            [0.0, 0.0, 1.0],
-            [0.0, 0.0, -1.0],
-            [1.0, 0.0, 0.0],
-            [-1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, -1.0, 0.0],
-        ],
-        dtype=np.float64,
-    )
+    directions = _ambient_occlusion_directions(strategy)
     mins, maxs = mesh.bounds()
     ray_length = max(float(np.linalg.norm(maxs - mins)), 1.0) * 2.0
     epsilon = ray_length * 1e-6
@@ -785,6 +781,11 @@ def _face_ambient_occlusion(mesh: Mesh) -> FloatArray:
                 hits += 1
         values[face_index] = 1.0 if tested == 0 else 1.0 - (hits / tested)
     return values
+
+
+def _ambient_occlusion_directions(strategy: str) -> tuple[FloatArray, ...]:
+    options = RemoveOccludedOptions(strategy=cast(Any, strategy), hemi_evaluation=False)
+    return tuple(_occlusion_directions(options))
 
 
 def _ray_hits_mesh(
@@ -1055,7 +1056,7 @@ def _decimation_importance_face_groups(mesh: Mesh, options: DecimateOptions) -> 
         if painted.size:
             groups["painted_area_faces"] = painted
     if options.preserve_ambient_occlusion:
-        ao = _ambient_occlusion_importance_faces(mesh)
+        ao = _ambient_occlusion_importance_faces(mesh, options.ambient_occlusion_strategy)
         if ao.size:
             groups["ambient_occlusion_faces"] = ao
     return groups
@@ -1099,8 +1100,8 @@ def _metadata_face_indices(value: object, triangle_count: int) -> IntArray:
     return np.asarray(sorted(set(indices)), dtype=np.int64)
 
 
-def _ambient_occlusion_importance_faces(mesh: Mesh) -> IntArray:
-    values = _face_ambient_occlusion(mesh)
+def _ambient_occlusion_importance_faces(mesh: Mesh, strategy: str) -> IntArray:
+    values = _face_ambient_occlusion(mesh, strategy)
     if values.size == 0:
         return np.empty(0, dtype=np.int64)
     return np.flatnonzero(values <= _AO_IMPORTANCE_THRESHOLD).astype(np.int64)

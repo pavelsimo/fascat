@@ -632,7 +632,13 @@ def test_decimate_preserves_painted_and_ambient_occlusion_faces(monkeypatch: pyt
         return self.copy()
 
     monkeypatch.setattr(Mesh, "simplify", fake_simplify)
-    monkeypatch.setattr(actions, "_face_ambient_occlusion", lambda _mesh: np.asarray([1.0, 0.9, 0.7, 0.2]))
+    strategies: list[str] = []
+
+    def fake_ambient_occlusion(_mesh: Mesh, strategy: str = "conservative") -> np.ndarray:
+        strategies.append(strategy)
+        return np.asarray([1.0, 0.9, 0.7, 0.2])
+
+    monkeypatch.setattr(actions, "_face_ambient_occlusion", fake_ambient_occlusion)
     mesh = _triangle_strip(4)
     mesh.face_groups["painted_area"] = np.asarray([1], dtype=int)
     mesh.metadata["decimate_protected_faces"] = "2, 99, invalid"
@@ -647,12 +653,15 @@ def test_decimate_preserves_painted_and_ambient_occlusion_faces(monkeypatch: pyt
             protect_topology=False,
             preserve_painted_areas=True,
             preserve_ambient_occlusion=True,
+            ambient_occlusion_strategy="advanced",
         )
     )
     part = decimated.parts["body"]
     step = decimated.report.steps[-1]
 
     assert captured == [{1, 2, 3}]
+    assert strategies
+    assert set(strategies) == {"advanced"}
     assert part.metadata["decimate_protect_painted_area_faces"] == "2"
     assert part.metadata["decimate_protect_ambient_occlusion_faces"] == "1"
     assert part.metadata["decimate_protect_importance_faces"] == "3"
@@ -664,6 +673,7 @@ def test_decimate_preserves_painted_and_ambient_occlusion_faces(monkeypatch: pyt
     assert step.after["decimate_protect_importance_faces"] == 3
     assert step.options["preserve_painted_areas"] is True
     assert step.options["preserve_ambient_occlusion"] is True
+    assert step.options["ambient_occlusion_strategy"] == "advanced"
 
 
 def test_remove_holes_fills_small_boundary_loop() -> None:
@@ -982,6 +992,8 @@ def test_cli_convert_accepts_optimization_action_options_during_dry_run() -> Non
             "--force-uv-generation",
             "--bake",
             "base-color,opacity",
+            "--ambient-occlusion-strategy",
+            "advanced",
             "--decimate",
             "--decimate-criterion",
             "target",
@@ -1040,6 +1052,7 @@ def test_cli_convert_accepts_optimization_action_options_during_dry_run() -> Non
     payload = json.loads(result.output)
     assert payload["bake_materials"] is True
     assert payload["bake"] == ["base_color", "opacity"]
+    assert payload["ambient_occlusion_strategy"] == "advanced"
     assert payload["decimate"] is True
     assert payload["uv_importance"] == "ignore"
     assert payload["preserve_painted_areas"] is True

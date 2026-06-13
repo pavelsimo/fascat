@@ -1175,6 +1175,13 @@ def cmd_convert(
         str,
         typer.Option("--bake", help="Comma-separated material maps to bake, for example base-color,opacity."),
     ] = "base-color",
+    ambient_occlusion_strategy: Annotated[
+        OcclusionStrategy,
+        typer.Option(
+            "--ambient-occlusion-strategy",
+            help="AO sampling directions for baked AO maps and decimation AO protection.",
+        ),
+    ] = OcclusionStrategy.CONSERVATIVE,
     decimate: Annotated[
         bool,
         typer.Option("--decimate", help="Run the explicit decimation action before profile optimization."),
@@ -1597,6 +1604,7 @@ def cmd_convert(
         "maps_resolution": maps_resolution,
         "force_uv_generation": force_uv_generation,
         "bake": bake,
+        "ambient_occlusion_strategy": ambient_occlusion_strategy.value,
         "decimate": decimate,
         "decimate_criterion": decimate_criterion.value,
         "surface_tolerance": surface_tolerance,
@@ -2078,6 +2086,7 @@ def cmd_convert(
                 padding=uv_padding,
                 bake=cast(Any, bake_maps),
                 merge_output=True,
+                ambient_occlusion_strategy=ambient_occlusion_strategy.value,
             )
             if bake_materials
             else None
@@ -2095,6 +2104,7 @@ def cmd_convert(
                 protect_topology=protect_topology,
                 preserve_painted_areas=preserve_painted_areas,
                 preserve_ambient_occlusion=preserve_ambient_occlusion,
+                ambient_occlusion_strategy=ambient_occlusion_strategy.value,
                 budget_scope=budget_scope.value,
                 uv_importance=cast(Any, uv_importance.value.replace("-", "_")),
                 cleanup_attributes=cast(Any, cleanup_attributes),

@@ -219,6 +219,7 @@ keeping the native source shape for tessellation and healing.
 | `--maps-resolution` | `2048` | Requested bake texture resolution in pixels, recorded for downstream atlas generation |
 | `--force-uv-generation` | `false` | Generate UVs before material bake metadata and textures are recorded |
 | `--bake` | `base-color` | Maps to bake into raster atlas textures, such as `base-color,opacity` |
+| `--ambient-occlusion-strategy` | `conservative` | AO sampling direction set for baked AO maps and decimation AO protection: `conservative`, `exterior`, or `advanced` |
 | `--decimate` | `false` | Run explicit decimation before profile optimization |
 | `--decimate-criterion` | `target` | Decimation criterion: `target` or `quality` |
 | `--surface-tolerance` | unset | Surface deviation tolerance metadata for decimation |
@@ -309,7 +310,7 @@ keeping the native source shape for tessellation and healing.
 - `--decimate` without `--target-triangles`/`--ratio` seeds its target from the profile or `--target-device-profile` triangle budget.
 - `--decimate-criterion quality` passes tolerance-derived error bounds to the backend and records bound/result metadata.
 - Reports include `target_strategy` (target count / ratio / quality), estimated RAM (Unity's ~5 GB per million source triangles), iterative pass counts, and per-part target allocation; plus protected hard-edge, hole-boundary, material-boundary, UV-seam, and silhouette face counts.
-- `--uv-importance`: `ignore` strips UV/tangents first, `preserve-seams` uses then strips them, `preserve-islands` keeps them. `--preserve-painted-areas` and `--preserve-ambient-occlusion` add painted/protected and low-AO faces as constraints. `--decimate-cleanup-attributes unused-uvs,tangents` removes unused UV channels/tangents first.
+- `--uv-importance`: `ignore` strips UV/tangents first, `preserve-seams` uses then strips them, `preserve-islands` keeps them. `--preserve-painted-areas` and `--preserve-ambient-occlusion` add painted/protected and low-AO faces as constraints; `--ambient-occlusion-strategy` controls the AO direction set. `--decimate-cleanup-attributes unused-uvs,tangents` removes unused UV channels/tangents first.
 
 ### UVs
 
