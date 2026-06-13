@@ -311,6 +311,10 @@ keeping the native source shape for tessellation and healing.
 - Reports include `target_strategy` (target count / ratio / quality), estimated RAM (Unity's ~5 GB per million source triangles), iterative pass counts, and per-part target allocation; plus protected hard-edge, hole-boundary, material-boundary, UV-seam, and silhouette face counts.
 - `--uv-importance`: `ignore` strips UV/tangents first, `preserve-seams` uses then strips them, `preserve-islands` keeps them. `--preserve-painted-areas` and `--preserve-ambient-occlusion` add painted/protected and low-AO faces as constraints. `--decimate-cleanup-attributes unused-uvs,tangents` removes unused UV channels/tangents first.
 
+### Materials
+
+- `--merge-equivalent-materials` compares PBR material factors with fixed six-decimal rounding for base color, metallic, roughness, and opacity, so importer floating-point noise does not prevent deduplication.
+
 ### UVs
 
 - `--uv1 unwrap`/`lightmap` bake channels are packed by xatlas with configured padding/resolution and report pack dimensions, utilization, and padding status.

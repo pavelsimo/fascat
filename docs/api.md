@@ -739,6 +739,8 @@ asset = asset.stage(
 
 Atlas options on staging record texture-bake intent and layout limits. Dedicated material baking is the step that writes raster atlas images: baked maps are stored as first-class `ImageResource` objects, mirrored into material metadata for compatibility, and bound by the glTF/USD exporters as material textures.
 
+When `merge_equivalent_materials=True`, staging groups materials by PBR factors after rounding `base_color`, `metallic`, `roughness`, and `opacity` to six decimal places. This absorbs floating-point noise from importers while keeping visibly distinct values separate; the precision is fixed.
+
 Staging records detailed per-channel UV metadata (fields are prefixed `uvN_`, where
 `N` is the channel index):
 
