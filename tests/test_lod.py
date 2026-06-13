@@ -304,6 +304,31 @@ def test_lods_report_chain_advisories_for_risky_levels() -> None:
     assert "enable far_lod_bake" in step.warnings[2]
 
 
+def test_lods_warn_when_ratio_can_collapse_to_one_triangle() -> None:
+    mesh = _triangle_mesh()
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="tri")]),
+        parts={"tri": Part(id="tri", name="Triangle", mesh=mesh)},
+    )
+
+    with_lods = asset.lods(LODOptions(ratios=(0.01,), screen_coverage=(0.02,)))
+    advisories = json.loads(str(with_lods.metadata["lod_advisories"]))
+    warnings = with_lods.report.steps[-1].warnings
+
+    assert with_lods.parts["tri"].lod_meshes[0].triangle_count == 1
+    assert "destructive_lod_ratio_floor" in with_lods.metadata["lod_advisory_codes"]
+    floor_advisory = next(item for item in advisories if item["code"] == "destructive_lod_ratio_floor")
+    assert floor_advisory["levels"] == [
+        {
+            "level": 1,
+            "ratio": 0.01,
+            "minimum_recommended_ratio": 0.01,
+            "screen_coverage": 0.02,
+        }
+    ]
+    assert any("commonly collapse to a one-triangle LOD" in warning for warning in warnings)
+
+
 def test_lods_can_bake_far_level_material_policy() -> None:
     mesh = _triangle_mesh()
     asset = Asset(
