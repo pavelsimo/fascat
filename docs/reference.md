@@ -484,7 +484,7 @@ above and on the [Python API page](api.html) document each field.
 | Tessellation | Implemented | `tessellate` (tolerance policy, detail-adaptive criteria, quality metrics and advisories) | Conformal CAD UV solving; deeper curvature-targeted profiles |
 | Mesh repair | Implemented for core cleanup | `repair`, plus standalone `merge_vertices` / `delete_degenerate_polygons` reports | T-junction sewing, boundary-gap stitching, non-manifold cracking, viewer/open-shell orientation backends |
 | Staging (normals, tangents, UV metadata) | Partial | `stage` (normal/tangent provenance, per-channel UV domain/seam/distortion/pack metadata) | Backend-enforced unwrap controls, island merge, tileable UV alignment |
-| Material baking | Implemented for factor/face atlas, sidecar textures, JSON/MTL/ZIP libraries | `bake_materials`; import material-library match counts | High-poly normal transfer; closed vendor library containers |
+| Material baking | Implemented for factor/face atlas, sidecar textures, JSON/MTL/ZIP libraries | `bake_materials`; emissive material/fallback provenance; import material-library match counts | High-poly normal transfer; closed vendor library containers |
 | Hole removal | Approximate | `remove_holes` (warns on mesh-fill fallback) | BREP feature-level removal for closed holes |
 | Occlusion removal | Approximate | `remove_occluded` (sample/direction coverage, confidence) | Acceleration structures and raster/GPU backends |
 | Decimation | Partial | `decimate` (target strategy, RAM/pass estimates, protected/importance counts) | Continuous weighted decimation and retopology |

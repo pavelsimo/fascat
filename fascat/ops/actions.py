@@ -634,10 +634,19 @@ def _bake_texture_images(asset: Asset, part_ids: list[str], options: BakeMateria
     if "emissive" in maps:
         requests.append(("emissive", "emissive"))
 
+    emissive_provenance = _emissive_provenance_metadata(asset, part_ids) if "emissive" in maps else {}
     for texture_name, kind in requests:
         pixels = _raster_bake_map(asset, part_ids, options, kind)
         data = _png_bytes(pixels)
         image_id = _unique_image_id(asset.images, f"baked_{texture_name}")
+        metadata: dict[str, object] = {
+            "baked": "true",
+            "baked_map": texture_name,
+            "baked_uv_channel": str(options.uv_channel),
+            "baked_padding": str(options.padding),
+        }
+        if texture_name == "emissive":
+            metadata.update(emissive_provenance)
         asset.images[image_id] = ImageResource(
             id=image_id,
             name=f"Baked {texture_name.replace('_', ' ').title()}",
@@ -645,12 +654,7 @@ def _bake_texture_images(asset: Asset, part_ids: list[str], options: BakeMateria
             data=data,
             width=options.maps_resolution,
             height=options.maps_resolution,
-            metadata={
-                "baked": "true",
-                "baked_map": texture_name,
-                "baked_uv_channel": str(options.uv_channel),
-                "baked_padding": str(options.padding),
-            },
+            metadata=metadata,
         )
         image_ids[texture_name] = image_id
     return image_ids
@@ -710,7 +714,7 @@ def _face_bake_values(asset: Asset, part: Part, mesh: Mesh, kind: str) -> NDArra
             roughness = 0.5 if material is None else material.roughness
             values = (1.0, roughness, metallic, 1.0)
         else:
-            values = _emissive_color(material)
+            values, _source = _emissive_color_with_source(material)
         result[face_index] = np.asarray([_color_byte(value) for value in values], dtype=np.uint8)
     return result
 
@@ -727,17 +731,52 @@ def _face_material(asset: Asset, part: Part, mesh: Mesh, face_index: int) -> Mat
 
 
 def _emissive_color(material: Material | None) -> tuple[float, float, float, float]:
+    color, _source = _emissive_color_with_source(material)
+    return color
+
+
+def _emissive_color_with_source(material: Material | None) -> tuple[tuple[float, float, float, float], str]:
     if material is None:
-        return (0.0, 0.0, 0.0, 1.0)
+        return (0.0, 0.0, 0.0, 1.0), "fallback"
     value = material.metadata.get("emissive_color")
     if isinstance(value, str):
         pieces = [piece.strip() for piece in value.split(",")]
         if len(pieces) >= 3:
             try:
-                return (float(pieces[0]), float(pieces[1]), float(pieces[2]), 1.0)
+                return (float(pieces[0]), float(pieces[1]), float(pieces[2]), 1.0), "material"
             except ValueError:
                 pass
-    return (0.0, 0.0, 0.0, 1.0)
+    return (0.0, 0.0, 0.0, 1.0), "fallback"
+
+
+def _emissive_provenance_metadata(asset: Asset, part_ids: list[str]) -> dict[str, str]:
+    material_faces = 0
+    fallback_faces = 0
+    for part_id in part_ids:
+        part = asset.parts[part_id]
+        mesh = part.mesh
+        if mesh is None:
+            continue
+        for face_index in range(mesh.triangle_count):
+            material = _face_material(asset, part, mesh, face_index)
+            _color, source = _emissive_color_with_source(material)
+            if source == "material":
+                material_faces += 1
+            else:
+                fallback_faces += 1
+    if material_faces and fallback_faces:
+        source = "mixed"
+    elif material_faces:
+        source = "material"
+    elif fallback_faces:
+        source = "fallback"
+    else:
+        source = "none"
+    return {
+        "baked_emissive_source": source,
+        "baked_emissive_material_faces": str(material_faces),
+        "baked_emissive_fallback_faces": str(fallback_faces),
+    }
 
 
 def _bake_face_normals(mesh: Mesh) -> FloatArray:
@@ -936,6 +975,15 @@ def _baked_texture_metadata(asset: Asset, image_ids: dict[str, str]) -> dict[str
         image = asset.images[image_id]
         metadata[f"baked_texture_{texture_name}_image"] = image_id
         metadata[f"baked_texture_{texture_name}_uri"] = image.data_uri()
+        if texture_name == "emissive":
+            for key in (
+                "baked_emissive_source",
+                "baked_emissive_material_faces",
+                "baked_emissive_fallback_faces",
+            ):
+                value = image.metadata.get(key)
+                if value is not None:
+                    metadata[key] = str(value)
     return metadata
 
 

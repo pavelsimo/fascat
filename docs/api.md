@@ -890,6 +890,8 @@ asset = asset.run_lod_generators(
 **Material baking** creates a shared flat material plus raster atlas images from
 selected maps and per-face assignments. Images are stored as `ImageResource` objects
 and bound by glTF/USD exports through texture slots or `UsdUVTexture` networks.
+Emissive bakes record `baked_emissive_source` plus material/fallback face counts
+so explicit material emission can be distinguished from the black fallback.
 
 **Hole removal** uses mesh boundary classification and filling when BREP feature
 editing is unavailable. **Occlusion removal** uses deterministic visibility sampling;
