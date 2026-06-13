@@ -890,6 +890,7 @@ asset = asset.run_lod_generators(
 **Material baking** creates a shared flat material plus raster atlas images from
 selected maps and per-face assignments. Images are stored as `ImageResource` objects
 and bound by glTF/USD exports through texture slots or `UsdUVTexture` networks.
+When multiple source materials are collapsed into the baked output material, Fascat uses a simple arithmetic mean for base color, metallic, roughness, and opacity. The average is not currently weighted by face area, texel coverage, or material usage.
 
 **Hole removal** uses mesh boundary classification and filling when BREP feature
 editing is unavailable. **Occlusion removal** uses deterministic visibility sampling;

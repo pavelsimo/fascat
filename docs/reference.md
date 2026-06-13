@@ -317,6 +317,10 @@ keeping the native source shape for tessellation and healing.
 - `box` UV generation is reported as AABB projection; `--uv-aabb-scope`, `--uv3d-size`, and `--uv-preserve-existing` record local/shared bounds, scale, destination, override policy, and units.
 - `--uv-sharp-to-seam` and `--uv-forbid-overlapping` are recorded as intent (the xatlas backend doesn't expose them directly) and validated after generation.
 
+### Material Baking
+
+- `--bake-materials` collapses source material factors into the baked output with a simple arithmetic mean for base color, metallic, roughness, and opacity; atlas images carry the per-face raster detail.
+
 ### LODs
 
 - LOD reports separate source, added-LOD, and full-chain vertex/triangle counts and payload bytes, so the memory/size cost of extra levels is visible. Ratio LODs simplify progressively from the previous level while preserving each ratio against the source count.
