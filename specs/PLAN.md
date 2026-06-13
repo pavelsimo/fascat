@@ -92,7 +92,7 @@ handling were each independently challenged and held up.
 - [ ] **P2** glTF-Transform invocations lack preflight `shutil.which` checks and contextual errors (`fascat/runtime.py:1058`, `fascat/runtime.py:1131`)
 - [ ] **P2** Default visual-diff thresholds are too permissive for regression gating (pixel tolerance 8/255, 35% changed-pixel ratio) (`fascat/runtime_fixtures.py:245`)
 - [ ] **P3** Pillow-based preview rendering is platform-dependent — soften the "deterministic" claim or pin/render differently (`fascat/visual.py:382`)
-- [ ] **P3** Cap browser screenshot data-URI payload size (`fascat/runtime.py:2226`)
+- [x] **P3** Cap browser screenshot data-URI payload size (`fascat/runtime.py:2226`)
 
 ## 2. Robustness & input hardening
 
