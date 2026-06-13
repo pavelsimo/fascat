@@ -1036,9 +1036,7 @@ def _write_draco_decoded_preview_asset(asset_path: Path, output_path: Path) -> P
 
 
 def _run_gltf_transform_copy(input_path: Path, output_path: Path) -> None:
-    from fascat.io.gltf import _gltf_transform_command
-
-    command = [*_gltf_transform_command(), "copy", str(input_path), str(output_path)]
+    command = [*_gltf_transform_runtime_command("copy"), "copy", str(input_path), str(output_path)]
     try:
         completed = _subprocess.run_guarded(command, timeout=_subprocess.GLTF_TRANSFORM_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired as exc:
@@ -1048,6 +1046,17 @@ def _run_gltf_transform_copy(input_path: Path, output_path: Path) -> None:
     if completed.returncode != 0:
         details = (completed.stderr or completed.stdout).strip()
         raise RuntimeError(f"glTF Transform copy failed: {details}")
+
+
+def _gltf_transform_runtime_command(operation: str) -> list[str]:
+    from fascat.io.gltf import _gltf_transform_command
+
+    try:
+        return _gltf_transform_command()
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"glTF Transform {operation} requires the glTF Transform CLI on PATH or FASCAT_GLTF_TRANSFORM"
+        ) from exc
 
 
 def _write_ktx2_decoded_preview_asset(asset_path: Path, output_path: Path) -> Path:
@@ -1114,9 +1123,7 @@ def _write_python_ktx2_decoded_preview_asset(asset_path: Path, output_path: Path
 
 
 def _run_gltf_transform_ktxdecompress(input_path: Path, output_path: Path) -> None:
-    from fascat.io.gltf import _gltf_transform_command
-
-    command = [*_gltf_transform_command(), "ktxdecompress", str(input_path), str(output_path)]
+    command = [*_gltf_transform_runtime_command("ktxdecompress"), "ktxdecompress", str(input_path), str(output_path)]
     try:
         completed = _subprocess.run_guarded(command, timeout=_subprocess.GLTF_TRANSFORM_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired as exc:
