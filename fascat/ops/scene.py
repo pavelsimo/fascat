@@ -9,6 +9,10 @@ from fascat.asset import Asset, Node, Part, identity_transform
 from fascat.mesh import Mesh
 from fascat.options import MergeOptions, SceneOptimizeOptions
 
+_FLATTEN_SAFE_IDENTITY_RTOL = 1e-5
+_FLATTEN_SAFE_IDENTITY_ATOL = 1e-8
+_IDENTITY_4X4 = np.eye(4, dtype=np.float64)
+
 
 def optimize_scene_asset(
     asset: Asset,
@@ -309,11 +313,22 @@ def _flatten_safe(node: Node) -> None:
     flattened: list[Node] = []
     for child in node.children:
         _flatten_safe(child)
-        if child.part_id is None and not child.metadata and np.allclose(child.transform, np.eye(4)):
+        if child.part_id is None and not child.metadata and _is_flatten_safe_identity(child.transform):
             flattened.extend(grandchild.copy() for grandchild in child.children)
         else:
             flattened.append(child)
     node.children = flattened
+
+
+def _is_flatten_safe_identity(transform: np.ndarray) -> bool:
+    return bool(
+        np.allclose(
+            transform,
+            _IDENTITY_4X4,
+            rtol=_FLATTEN_SAFE_IDENTITY_RTOL,
+            atol=_FLATTEN_SAFE_IDENTITY_ATOL,
+        )
+    )
 
 
 def _flatten_all(asset: Asset) -> None:
