@@ -1373,7 +1373,10 @@ and ratio, and whether configured thresholds passed (the same thresholds gate en
 preview baselines through `fascat validate`).
 
 For cross-renderer comparison, `write_runtime_parity_suite()` writes bundled GLB
-fixtures, software baseline PNGs, and a manifest.
+fixtures, software baseline PNGs, and a manifest. The generated manifest
+recommends regression-gating thresholds of 2 channel values of pixel tolerance,
+4.0 mean absolute error, and a 2% changed-pixel ratio unless callers pass
+explicit `diff_options`.
 `capture_runtime_parity_suite()` runs selected browser/engine targets, writes
 `runtime-parity-captures.json`, and can promote renders into `goldens/<target>/`.
 When a `goldens/<target>/<fixture>.png` exists, later captures compare against that
