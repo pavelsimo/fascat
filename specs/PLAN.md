@@ -80,7 +80,7 @@ handling were each independently challenged and held up.
 
 ### Optimize / LOD
 
-- [ ] **P2** LOD re-simplification retry doesn't update `simplification_source` metadata — misleading provenance (`fascat/ops/lod.py:229-231`)
+- [x] **P2** LOD re-simplification retry doesn't update `simplification_source` metadata — misleading provenance (`fascat/ops/lod.py:229-231`)
 - [ ] **P3** LOD ratio ≤ 0.01 produces a 1-triangle LOD with no warning; validate ratios (`fascat/ops/lod.py:631`, `fascat/ops/lod.py:553`)
 - [ ] **P3** `_flatten_safe` near-identity check relies on default `np.allclose` tolerances; make the tolerance explicit (`fascat/ops/scene.py:312`)
 - [ ] **P3** Merge without a `max_vertices_per_mesh` default can exceed engine index limits; default 65536 + warning (`fascat/ops/hierarchy.py:298`)

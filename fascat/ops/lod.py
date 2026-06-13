@@ -249,9 +249,11 @@ def _build_part_lods(
             level_simplification_sources.append(simplification_source)
             continue
 
+        actual_simplification_source = simplification_source
         lod = previous_mesh.simplify(target_triangles=_target_lod_triangles(part_source_triangles, ratio))
         if lod.triangle_count > previous_count:
             lod = lod.simplify(target_triangles=previous_count)
+            actual_simplification_source = f"{simplification_source}_retry"
         if options.far_lod_bake and far_lod:
             lod = _bake_far_lod_mesh(lod)
         lod.metadata = {
@@ -263,7 +265,7 @@ def _build_part_lods(
             "lod_engine_profile": options.engine_profile,
             "lod_switch_distance": f"{switch_distance:.9g}",
             "lod_per_part_budget": str(options.per_part_budget).lower(),
-            "lod_simplification_source": simplification_source,
+            "lod_simplification_source": actual_simplification_source,
             **policy_metadata,
         }
         lod.validate()
@@ -273,7 +275,7 @@ def _build_part_lods(
         part_lod_vertices += lod.vertex_count
         part_lod_triangles += lod.triangle_count
         part_lod_bytes += _mesh_payload_bytes(lod)
-        level_simplification_sources.append(simplification_source)
+        level_simplification_sources.append(actual_simplification_source)
 
     level_vertices = ",".join(str(mesh.vertex_count) for mesh in lod_meshes)
     level_triangles = ",".join(str(mesh.triangle_count) for mesh in lod_meshes)

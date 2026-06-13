@@ -143,6 +143,50 @@ def test_lods_simplify_progressively_from_previous_level(monkeypatch: pytest.Mon
     ]
 
 
+def test_lods_marks_simplification_source_when_retry_enforces_monotonicity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    points = np.array(
+        [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [2, 0, 0], [2, 1, 0], [3, 0, 0], [3, 1, 0]],
+        dtype=float,
+    )
+    faces = np.array(
+        [[0, 1, 2], [1, 3, 2], [1, 4, 3], [4, 5, 3], [4, 6, 5], [6, 7, 5], [0, 2, 3], [4, 3, 5]],
+        dtype=int,
+    )
+    mesh = Mesh(points=points, faces=faces)
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="strip")]),
+        parts={"strip": Part(id="strip", name="Strip", mesh=mesh)},
+    )
+    calls: list[tuple[int, int | None]] = []
+
+    def fake_simplify(
+        self: Mesh,
+        *,
+        target_triangles: int | None = None,
+        **_kwargs: object,
+    ) -> Mesh:
+        calls.append((self.triangle_count, target_triangles))
+        if self.triangle_count == 4 and target_triangles == 2:
+            return mesh
+        target = self.triangle_count if target_triangles is None else min(target_triangles, self.triangle_count)
+        return self._filter_faces(np.arange(target, dtype=np.int64)).remove_unreferenced_vertices()
+
+    monkeypatch.setattr(Mesh, "simplify", fake_simplify)
+
+    with_lods = asset.lods(LODOptions((0.5, 0.25)))
+    part = with_lods.parts["strip"]
+
+    assert calls == [(8, 4), (4, 2), (8, 4)]
+    assert [lod.triangle_count for lod in part.lod_meshes] == [4, 4]
+    assert part.metadata["lod_level_simplification_source"] == "source,previous_retry"
+    assert [lod.metadata["lod_simplification_source"] for lod in part.lod_meshes] == [
+        "source",
+        "previous_retry",
+    ]
+
+
 def test_lods_report_level_policy_for_reused_instances() -> None:
     mesh = _triangle_mesh()
     asset = Asset(
