@@ -12,6 +12,7 @@ from fascat.io._atomic import atomic_output
 from fascat.options import StlExportOptions
 
 STL_SUFFIXES = {".stl"}
+ASCII_STL_TRIANGLE_WARNING_THRESHOLD = 10_000
 FloatArray = NDArray[np.float64]
 
 
@@ -41,6 +42,12 @@ def _write_stl(
         raise ValueError(f"unsupported STL extension: {output_path.suffix or '<none>'}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     triangles = _triangles(asset)
+    if not opts.binary and triangles.shape[0] > ASCII_STL_TRIANGLE_WARNING_THRESHOLD:
+        asset.report.add_warning(
+            "ASCII STL export selected for "
+            f"{triangles.shape[0]:,} triangles; binary STL is recommended above "
+            f"{ASCII_STL_TRIANGLE_WARNING_THRESHOLD:,} triangles"
+        )
     with atomic_output(output_path) as temp:
         if opts.binary:
             temp.write_bytes(_binary_stl(triangles))

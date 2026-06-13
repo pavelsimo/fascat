@@ -75,7 +75,7 @@ handling were each independently challenged and held up.
 - [ ] **P2** Quantized SNORM8 NORMAL accessors are not covered by the KHR_mesh_quantization validation pass (`fascat/io/gltf.py:1200`, validator `fascat/io/gltf.py:2089`)
 - [ ] **P2** USD `display_color` metadata parse failures fall back silently (`fascat/io/usd.py:512-525`)
 - [ ] **P2** USD UV conversion lacks (N,2) shape validation (`fascat/io/usd.py:504`)
-- [ ] **P3** Warn when ASCII STL is chosen for >10k-triangle meshes (`fascat/io/stl.py:17`)
+- [x] **P3** Warn when ASCII STL is chosen for >10k-triangle meshes (`fascat/io/stl.py:17`)
 - [ ] **P3** USD name sanitization collision policy documented/enforced (`fascat/io/usd.py:681`)
 
 ### Optimize / LOD
