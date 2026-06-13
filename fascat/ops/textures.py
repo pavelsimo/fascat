@@ -56,6 +56,10 @@ def process_textures_asset(asset: Asset, options: TextureProcessOptions) -> Asse
             "texture_process_max_resolution": "none" if options.max_resolution is None else str(options.max_resolution),
         }
     )
+    if resized:
+        result.report.add_warning(
+            f"texture processing downsampled {resized} image(s) to max_resolution={options.max_resolution}"
+        )
     if alpha_flattened:
         result.report.add_warning(
             f"texture processing flattened alpha for {alpha_flattened} image(s) because JPEG fallback was requested"
