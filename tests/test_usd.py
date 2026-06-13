@@ -720,6 +720,60 @@ def test_usd_export_authors_debug_metadata_and_display_color_only_materials(tmp_
     assert usd_mesh.GetDisplayOpacityAttr().Get()[0] == pytest.approx(0.4)
 
 
+@pytest.mark.parametrize(
+    ("display_color", "warning"),
+    [
+        ("0.1,0.2,0.3", "expected 4 components, got 3"),
+        ("red,0,0,1", "expected 4 comma-separated numeric components"),
+    ],
+)
+def test_usd_export_warns_and_uses_material_for_invalid_display_color_metadata(
+    tmp_path: Path,
+    display_color: str,
+    warning: str,
+) -> None:
+    mesh = cube_mesh()
+    material = Material(id="paint", name="Paint", base_color=(0.2, 0.4, 0.6, 0.8))
+    part = Part(
+        id="cube",
+        name="Cube",
+        mesh=mesh,
+        material_ids=[material.id],
+        metadata={"display_color": display_color},
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="n1", name="Cube", part_id="cube")]),
+        parts={"cube": part},
+        materials={material.id: material},
+    )
+    output = tmp_path / f"invalid-display-color-{display_color[0]}.usda"
+
+    write_usd(asset, output)
+
+    assert any(warning in item for item in asset.report.warnings)
+    stage = Usd.Stage.Open(str(output))
+    assert stage is not None
+    mesh_prim = next(prim for prim in Usd.PrimRange(stage.GetDefaultPrim()) if prim.IsA(UsdGeom.Mesh))
+    usd_mesh = UsdGeom.Mesh(mesh_prim)
+    assert usd_mesh.GetDisplayColorAttr().Get()[0] == (0.2, 0.4, 0.6)
+    assert usd_mesh.GetDisplayOpacityAttr().Get()[0] == pytest.approx(0.8)
+
+
+def test_usd_export_rejects_invalid_uv0_shape(tmp_path: Path) -> None:
+    mesh = cube_mesh()
+    mesh.uvs[0] = np.zeros((mesh.vertex_count, 3), dtype=float)
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="n1", name="Cube", part_id="cube")]),
+        parts={"cube": Part(id="cube", name="Cube", mesh=mesh)},
+    )
+    output = tmp_path / "invalid-uv.usda"
+
+    with pytest.raises(ValueError, match=r"uv channel 0 must have shape \(N, 2\)"):
+        write_usd(asset, output)
+
+    assert not output.exists()
+
+
 def test_failed_usd_validation_leaves_no_output_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     import fascat.io.usd as usd
 
