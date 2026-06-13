@@ -15,6 +15,7 @@ from fascat.options import ExplodeOptions, MergeOptions, ReplaceOptions
 
 FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int64]
+DEFAULT_MAX_VERTICES_PER_MERGED_MESH = 65_535
 
 
 @dataclass(frozen=True)
@@ -60,10 +61,11 @@ def merge_asset(asset: Asset, options: MergeOptions, *, selected_node_ids: set[s
         return result
 
     groups = _build_groups(result, occurrences, options)
+    max_vertices_per_mesh = _resolve_max_vertices_per_mesh(result, options.max_vertices_per_mesh)
     merged_parts: dict[str, Part] = {}
     merged_nodes_by_parent: dict[str, list[Node]] = {}
     for group in groups:
-        chunks = _split_group(group, options.max_vertices_per_mesh)
+        chunks = _split_group(group, max_vertices_per_mesh)
         for chunk_index, chunk in enumerate(chunks, start=1):
             part_id = _merged_part_id(result.parts, group.key, chunk_index)
             part_name = group.name if len(chunks) == 1 else f"{group.name} {chunk_index}"
@@ -295,9 +297,17 @@ def _group_name(key: tuple[object, ...], inputs: list[_MergeInput], options: Mer
     return "Merged " + str(key[-1]).replace("/", " ")
 
 
-def _split_group(group: _MergeGroup, max_vertices: int | None) -> list[tuple[_MergeInput, ...]]:
-    if max_vertices is None:
-        return [group.inputs]
+def _resolve_max_vertices_per_mesh(asset: Asset, max_vertices: int | None) -> int:
+    if max_vertices is not None:
+        return max_vertices
+    asset.report.add_warning(
+        "merge max_vertices_per_mesh was unset; "
+        f"using {DEFAULT_MAX_VERTICES_PER_MERGED_MESH} to keep merged meshes within 16-bit-friendly index limits"
+    )
+    return DEFAULT_MAX_VERTICES_PER_MERGED_MESH
+
+
+def _split_group(group: _MergeGroup, max_vertices: int) -> list[tuple[_MergeInput, ...]]:
     chunks: list[tuple[_MergeInput, ...]] = []
     current: list[_MergeInput] = []
     current_vertices = 0
