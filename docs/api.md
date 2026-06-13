@@ -1345,7 +1345,7 @@ Analysis parameters:
 | `tiny_part_diagonal` | Bounding-box diagonal threshold used to classify tiny parts. |
 | `max_self_intersection_pairs` | Maximum non-adjacent triangle pairs to check before reporting a lower-bound result. |
 
-Use the visual preview helpers when you need deterministic review artifacts in CI
+Use the visual preview helpers when you need stable review artifacts in CI
 or before handing an asset to a runtime viewer:
 
 ```python
@@ -1367,7 +1367,10 @@ captures = validation.capture_runtime_parity_suite(
 
 The preview renderer is a local orthographic software renderer: it writes PNGs, uses
 material base colors, respects node transforms, and can substitute each part's LOD
-mesh into an LOD-switching contact sheet. `compare_images()` is a general image-diff
+mesh into an LOD-switching contact sheet. It is repeatable for a fixed Python,
+Pillow, and platform stack, but antialiasing and resampling can vary across
+platform builds, so CI baselines should compare with explicit thresholds.
+`compare_images()` is a general image-diff
 primitive that reports mean absolute error, max channel error, changed-pixel counts
 and ratio, and whether configured thresholds passed (the same thresholds gate engine
 preview baselines through `fascat validate`).
@@ -1461,7 +1464,7 @@ fascat runtime-fixtures runtime-parity/ \
 Validation-time geometry reports use the same filter selectors as conversion when an
 exported format can be reconstructed for analysis.
 
-**Software preview (always available).** `--visual-preview` writes a deterministic
+**Software preview (always available).** `--visual-preview` writes a stable
 PNG from the validated output mesh; `--visual-baseline` diffs it against a baseline
 and exits non-zero when thresholds fail. `--lod-preview-dir` writes `lod0.png`, each
 LOD level, and a `lod-switching.png` contact sheet (Fascat GLB exports preserve
