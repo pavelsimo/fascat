@@ -18,6 +18,7 @@ from fascat.asset import Asset, Node, Part
 from fascat.cli import app, run
 from fascat.material import Material
 from fascat.mesh import Mesh
+from fascat.options import StepReadOptions
 from fascat.report import Report
 from fascat.runtime import RuntimeBrowserRenderReport, RuntimeBrowserReport, RuntimeEngineReport
 from fascat.visual import write_output_preview
@@ -308,7 +309,7 @@ def test_runtime_fixtures_can_capture_targets(
         assert kwargs["require_goldens"] is True
         return FakeCaptureReport()
 
-    monkeypatch.setattr("fascat.cli.capture_runtime_parity_suite", fake_capture)
+    monkeypatch.setattr("fascat.runtime_fixtures.capture_runtime_parity_suite", fake_capture)
 
     result = runner.invoke(
         app,
@@ -358,7 +359,7 @@ def test_runtime_fixtures_can_require_capture_goldens(
         assert kwargs["require_goldens"] is True
         return FakeCaptureReport()
 
-    monkeypatch.setattr("fascat.cli.capture_runtime_parity_suite", fake_capture)
+    monkeypatch.setattr("fascat.runtime_fixtures.capture_runtime_parity_suite", fake_capture)
 
     result = runner.invoke(
         app,
@@ -887,7 +888,7 @@ def test_convert_passes_material_library_paths_to_import_options(
 
     assert result.exit_code == 0, result.output
     import_options = captured["import_options"]
-    assert isinstance(import_options, fc.StepReadOptions)
+    assert isinstance(import_options, StepReadOptions)
     assert import_options.material_library_paths == (str(library),)
 
 
@@ -1094,7 +1095,7 @@ def test_convert_explicit_binary_usdc_and_validates(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert output_file.read_bytes().startswith(b"PXR-USDC")
-    assert "Converted tests/fixtures/spool-clamp-lid.step to" in compact(result.output)
+    assert f"Converted {Path('tests/fixtures/spool-clamp-lid.step')} to" in compact(result.output)
     assert "1 parts" in compact(result.output)
 
     validate_result = runner.invoke(app, ["validate", str(output_file)])
@@ -1125,7 +1126,7 @@ def test_convert_explicit_binary_glb_and_validates(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert output_file.read_bytes().startswith(b"glTF")
-    assert "Converted tests/fixtures/spool-clamp-lid.step to" in compact(result.output)
+    assert f"Converted {Path('tests/fixtures/spool-clamp-lid.step')} to" in compact(result.output)
 
     validate_result = runner.invoke(app, ["validate", str(output_file)])
     assert validate_result.exit_code == 0
@@ -1336,11 +1337,11 @@ def test_convert_reads_step_from_stdin_and_writes_usd_to_stdout() -> None:
     )
 
     assert result.exit_code == 0
-    assert "#usda" in result.output
-    assert 'def Xform "Scene"' in result.output
-    assert "Converted" not in result.output
+    assert "#usda" in result.stdout
+    assert 'def Xform "Scene"' in result.stdout
+    assert "Converted" not in result.stdout
 
-    validate_result = runner.invoke(app, ["validate", "-"], input=result.output)
+    validate_result = runner.invoke(app, ["validate", "-"], input=result.stdout)
     assert validate_result.exit_code == 0
     assert "valid USD" in compact(validate_result.output)
 
@@ -1440,7 +1441,7 @@ def test_cli_stdio_paths_use_real_process_streams() -> None:
     )
     assert convert_result.returncode == 0
     assert "#usda" in convert_result.stdout
-    assert convert_result.stderr == ""
+    assert all(line.startswith("warning:") for line in convert_result.stderr.splitlines())
 
     validate_result = subprocess.run(
         [sys.executable, "-m", "fascat", "validate", "-"],
@@ -1711,7 +1712,7 @@ def test_validate_can_include_browser_runtime_measurement(
             workload_scale=1.0,
         )
 
-    monkeypatch.setattr("fascat.cli.measure_browser_runtime", fake_measure)
+    monkeypatch.setattr("fascat.runtime.measure_browser_runtime", fake_measure)
 
     result = runner.invoke(app, ["--json", "validate", str(output_file), "--runtime-browser"])
 
@@ -1751,7 +1752,7 @@ def test_validate_can_write_browser_render_preview(
             triangles=1,
         )
 
-    monkeypatch.setattr("fascat.cli.write_browser_render_preview", fake_preview)
+    monkeypatch.setattr("fascat.runtime.write_browser_render_preview", fake_preview)
 
     result = runner.invoke(
         app, ["--json", "validate", str(output_file), "--runtime-browser-preview", str(preview_file)]
@@ -1797,7 +1798,7 @@ def test_validate_reports_unsupported_browser_render_preview(
             error="browser preview could not decode KHR_draco_mesh_compression: glTF Transform copy failed",
         )
 
-    monkeypatch.setattr("fascat.cli.write_browser_render_preview", fake_preview)
+    monkeypatch.setattr("fascat.runtime.write_browser_render_preview", fake_preview)
 
     result = runner.invoke(
         app, ["--json", "validate", str(output_file), "--runtime-browser-preview", str(preview_file)]
@@ -1852,7 +1853,7 @@ def test_validate_can_include_engine_runtime_measurement(
             rendered_frames=1,
         )
 
-    monkeypatch.setattr("fascat.cli.measure_engine_runtime", fake_measure)
+    monkeypatch.setattr("fascat.runtime.measure_engine_runtime", fake_measure)
 
     result = runner.invoke(
         app,
@@ -1922,7 +1923,7 @@ def test_validate_can_compare_engine_preview_against_baseline(
             rendered_frames=1,
         )
 
-    monkeypatch.setattr("fascat.cli.measure_engine_runtime", fake_measure)
+    monkeypatch.setattr("fascat.runtime.measure_engine_runtime", fake_measure)
 
     result = runner.invoke(
         app,
@@ -1988,7 +1989,7 @@ def test_validate_fails_when_engine_preview_diff_exceeds_threshold(
             rendered_frames=1,
         )
 
-    monkeypatch.setattr("fascat.cli.measure_engine_runtime", fake_measure)
+    monkeypatch.setattr("fascat.runtime.measure_engine_runtime", fake_measure)
 
     result = runner.invoke(
         app,
@@ -2051,7 +2052,7 @@ def test_validate_fails_engine_baseline_when_preview_is_not_rendered(
             render_error="graphics unavailable",
         )
 
-    monkeypatch.setattr("fascat.cli.measure_engine_runtime", fake_measure)
+    monkeypatch.setattr("fascat.runtime.measure_engine_runtime", fake_measure)
 
     result = runner.invoke(
         app,
@@ -2511,7 +2512,7 @@ def test_convert_reports_stage_progress_to_stderr(tmp_path: Path, capsys) -> Non
 
     assert result.exit_code == 0
     assert "Converted" in result.stdout
-    progress_lines = [line for line in result.stderr.splitlines() if ":" in line]
+    progress_lines = [line for line in result.stderr.splitlines() if ":" in line and not line.startswith("warning:")]
     assert [line.split(":", 1)[0] for line in progress_lines] == [
         "source",
         "tessellate",
@@ -2524,3 +2525,117 @@ def test_convert_reports_stage_progress_to_stderr(tmp_path: Path, capsys) -> Non
     ]
     assert all(re.search(r"\d+ parts", line) for line in progress_lines)
     assert all(re.search(r"\d+ triangles", line) for line in progress_lines)
+
+
+def test_convert_interrupt_exits_130_without_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import fascat.cli as cli
+
+    input_file = tmp_path / "input.step"
+    input_file.write_text("ISO-10303-21;", encoding="utf-8")
+    output_file = tmp_path / "output.glb"
+
+    def interrupt_convert(*_args: object, **_kwargs: object) -> object:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "_convert_for_cli", interrupt_convert)
+
+    result = runner.invoke(app, ["convert", str(input_file), str(output_file)])
+
+    assert result.exit_code == 130
+    assert "Interrupted." in result.output
+    assert "Traceback" not in result.output
+    assert not output_file.exists()
+
+
+def test_convert_interrupt_json_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import fascat.cli as cli
+
+    input_file = tmp_path / "input.step"
+    input_file.write_text("ISO-10303-21;", encoding="utf-8")
+
+    def interrupt_convert(*_args: object, **_kwargs: object) -> object:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "_convert_for_cli", interrupt_convert)
+
+    result = runner.invoke(app, ["--json", "convert", str(input_file), str(tmp_path / "output.glb")])
+
+    assert result.exit_code == 130
+    payload = json.loads(result.stdout)
+    assert payload["error"] == "interrupted"
+
+
+def test_run_converts_keyboard_interrupt_to_exit_130(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,  # type: ignore[no-untyped-def]
+) -> None:
+    import fascat.cli as cli
+
+    def interrupt_app(*_args: object, **_kwargs: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "app", interrupt_app)
+
+    result = invoke_run(["version"], capsys)
+
+    assert result.exit_code == 130
+    assert "Interrupted." in result.stderr
+
+
+def _convert_with_synthetic_warnings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    warning_count: int,
+    arguments: list[str] | None = None,
+) -> object:
+    import fascat as fc
+    import fascat.cli as cli
+
+    input_file = tmp_path / "input.step"
+    input_file.write_text("ISO-10303-21;", encoding="utf-8")
+    output_file = tmp_path / "output.glb"
+
+    def fake_convert(*_args: object, **_kwargs: object) -> fc.Asset:
+        asset = fc.Asset(root=fc.Node(id="root", name="root"))
+        for index in range(warning_count):
+            asset.report.add_warning(f"profile budget exceeded for realtime-web: marker {index}")
+        return asset
+
+    monkeypatch.setattr(cli, "_convert_for_cli", fake_convert)
+    return runner.invoke(app, [*(arguments or []), "convert", str(input_file), str(output_file)])
+
+
+def test_convert_prints_report_warnings_on_stderr(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    result = _convert_with_synthetic_warnings(monkeypatch, tmp_path, 2)
+
+    assert result.exit_code == 0
+    assert "warning: profile budget exceeded for realtime-web: marker 0" in result.stderr
+    assert "warning:" not in result.stdout
+
+
+def test_convert_warning_overflow_capped(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    result = _convert_with_synthetic_warnings(monkeypatch, tmp_path, 15)
+
+    assert result.stderr.count("warning:") == 10
+    assert "and 5 more warning(s)" in result.stderr
+
+
+def test_convert_quiet_suppresses_warning_lines(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    result = _convert_with_synthetic_warnings(monkeypatch, tmp_path, 2, ["--quiet"])
+
+    assert "warning:" not in result.stderr
+
+
+def test_convert_json_keeps_warnings_in_payload_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    result = _convert_with_synthetic_warnings(monkeypatch, tmp_path, 2, ["--json"])
+
+    assert result.exit_code == 0
+    assert "warning:" not in result.stderr
+    payload = json.loads(result.stdout)
+    assert len(payload["report"]["warnings"]) == 2

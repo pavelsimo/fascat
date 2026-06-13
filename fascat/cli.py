@@ -58,6 +58,7 @@ from fascat.options import (
     TessellationOptions,
     UnwrapOptions,
     UsdExportOptions,
+    default_jobs,
 )
 from fascat.pipeline import convert
 from fascat.pipeline import validate_output as validate_export
@@ -65,20 +66,6 @@ from fascat.pipeline_file import PipelineSpec
 from fascat.profiles import by_name
 from fascat.profiles import from_file as profile_from_file
 from fascat.report import Report
-from fascat.runtime import (
-    RuntimeBrowserOptions,
-    RuntimeBrowserRenderOptions,
-    RuntimeEngineOptions,
-    measure_browser_runtime,
-    measure_engine_runtime,
-    write_browser_render_preview,
-)
-from fascat.runtime_fixtures import (
-    audit_runtime_parity_goldens,
-    capture_runtime_parity_suite,
-    write_runtime_parity_suite,
-)
-from fascat.visual import VisualDiffOptions, compare_images, write_output_lod_switch_previews, write_output_preview
 
 DOCS_URL = "https://pavelsimo.github.io/fascat"
 ISSUES_URL = "https://github.com/pavelsimo/fascat/issues"
@@ -938,17 +925,26 @@ def cmd_convert(
         ),
     ] = False,
     merge_vertex_area_epsilon: Annotated[
-        float,
-        typer.Option("--merge-vertex-area-epsilon", help="Area threshold for degenerate polygons after merging."),
-    ] = 1e-12,
+        float | None,
+        typer.Option(
+            "--merge-vertex-area-epsilon",
+            help="Area threshold for degenerate polygons after merging (default: derived from the mesh bounding box).",
+        ),
+    ] = None,
     delete_degenerate_polygons: Annotated[
         bool,
         typer.Option("--delete-degenerate-polygons", help="Run standalone degenerate polygon cleanup."),
     ] = False,
     degenerate_area_epsilon: Annotated[
-        float,
-        typer.Option("--degenerate-area-epsilon", help="Area threshold for standalone degenerate polygon cleanup."),
-    ] = 1e-12,
+        float | None,
+        typer.Option(
+            "--degenerate-area-epsilon",
+            help=(
+                "Area threshold for standalone degenerate polygon cleanup "
+                "(default: derived from the mesh bounding box)."
+            ),
+        ),
+    ] = None,
     delete_duplicate_polygons: Annotated[
         bool,
         typer.Option(
@@ -1306,9 +1302,12 @@ def cmd_convert(
         typer.Option("--validate-lods", help="Validate generated LOD monotonicity."),
     ] = False,
     jobs: Annotated[
-        int,
-        typer.Option("--jobs", help="Worker count for independent per-part mesh operations."),
-    ] = 1,
+        int | None,
+        typer.Option(
+            "--jobs",
+            help="Worker count for independent per-part mesh operations (default: min(4, CPU count)).",
+        ),
+    ] = None,
     filters: Annotated[
         list[str] | None,
         typer.Option("--filter", help="Scope optimization and LOD work with selectors such as path=*/Fasteners/*."),
@@ -1372,9 +1371,44 @@ def cmd_convert(
         bool,
         typer.Option("--draco", help="Compress glTF geometry with KHR_draco_mesh_compression."),
     ] = False,
+    draco_compression_level: Annotated[
+        int,
+        typer.Option("--draco-compression-level", help="Draco compression level, 0 (fastest) to 10 (smallest)."),
+    ] = 5,
+    draco_quantize_position: Annotated[
+        int,
+        typer.Option("--draco-quantize-position", help="Draco position quantization bits (1-30)."),
+    ] = 14,
+    draco_quantize_normal: Annotated[
+        int,
+        typer.Option("--draco-quantize-normal", help="Draco normal quantization bits (1-30)."),
+    ] = 10,
+    draco_quantize_texcoord: Annotated[
+        int,
+        typer.Option("--draco-quantize-texcoord", help="Draco texcoord quantization bits (1-30)."),
+    ] = 12,
+    draco_quantize_color: Annotated[
+        int,
+        typer.Option("--draco-quantize-color", help="Draco color quantization bits (1-30)."),
+    ] = 8,
     texture_compression: Annotated[
         str | None,
         typer.Option("--texture-compression", help="Compress glTF textures with KTX2/Basis: ktx2 or basisu."),
+    ] = None,
+    ktx2_quality: Annotated[
+        int,
+        typer.Option("--ktx2-quality", help="KTX2/Basis encoder quality level (0-255)."),
+    ] = 128,
+    ktx2_effort: Annotated[
+        int,
+        typer.Option("--ktx2-effort", help="KTX2/Basis encoder compression effort (0-6)."),
+    ] = 2,
+    ktx2_uastc: Annotated[
+        bool | None,
+        typer.Option(
+            "--ktx2-uastc/--ktx2-etc1s",
+            help="Force UASTC or ETC1S encoding (default: derived from --texture-compression).",
+        ),
     ] = None,
     texture_fallback_format: Annotated[
         str,
@@ -1722,8 +1756,10 @@ def cmd_convert(
         _fail(ctx, payload, "--uv3d-size must be greater than 0.", code=2)
     if merge_vertex_tolerance < 0.0:
         _fail(ctx, payload, "--merge-vertex-tolerance must be greater than or equal to 0.", code=2)
-    if merge_vertex_area_epsilon < 0.0:
+    if merge_vertex_area_epsilon is not None and merge_vertex_area_epsilon < 0.0:
         _fail(ctx, payload, "--merge-vertex-area-epsilon must be greater than or equal to 0.", code=2)
+    if degenerate_area_epsilon is not None and degenerate_area_epsilon < 0.0:
+        _fail(ctx, payload, "--degenerate-area-epsilon must be greater than or equal to 0.", code=2)
     if unwrap_iterations is not None and unwrap_iterations <= 0:
         _fail(ctx, payload, "--unwrap-iterations must be greater than 0.", code=2)
     if unwrap_tolerance is not None and unwrap_tolerance < 0.0:
@@ -1777,8 +1813,24 @@ def cmd_convert(
             )
     if lod_tiny_part_screen_size < 0.0:
         _fail(ctx, payload, "--lod-tiny-part-screen-size must be greater than or equal to 0.", code=2)
-    if jobs < 1:
+    if jobs is not None and jobs < 1:
         _fail(ctx, payload, "--jobs must be greater than or equal to 1.", code=2)
+    if draco_compression_level < 0 or draco_compression_level > 10:
+        _fail(ctx, payload, "--draco-compression-level must be between 0 and 10.", code=2)
+    if ktx2_quality < 0 or ktx2_quality > 255:
+        _fail(ctx, payload, "--ktx2-quality must be between 0 and 255.", code=2)
+    if ktx2_effort < 0 or ktx2_effort > 6:
+        _fail(ctx, payload, "--ktx2-effort must be between 0 and 6.", code=2)
+    for draco_bits_flag, draco_bits in (
+        ("--draco-quantize-position", draco_quantize_position),
+        ("--draco-quantize-normal", draco_quantize_normal),
+        ("--draco-quantize-texcoord", draco_quantize_texcoord),
+        ("--draco-quantize-color", draco_quantize_color),
+    ):
+        if draco_bits < 1 or draco_bits > 30:
+            _fail(ctx, payload, f"{draco_bits_flag} must be between 1 and 30.", code=2)
+    if jobs is None:
+        jobs = default_jobs()
     if texture_compression not in {None, "ktx2", "basisu"}:
         _fail(ctx, payload, "--texture-compression must be one of: ktx2, basisu.", code=2)
     texture_fallback_format = texture_fallback_format.replace("-", "_")
@@ -2099,6 +2151,14 @@ def cmd_convert(
             quantize=quantize,
             meshopt=meshopt,
             draco=draco,
+            draco_compression_level=draco_compression_level,
+            draco_quantize_position=draco_quantize_position,
+            draco_quantize_normal=draco_quantize_normal,
+            draco_quantize_texcoord=draco_quantize_texcoord,
+            draco_quantize_color=draco_quantize_color,
+            ktx2_quality=ktx2_quality,
+            ktx2_effort=ktx2_effort,
+            ktx2_uastc=ktx2_uastc,
             texture_compression=cast(Any, texture_compression),
             texture_fallback_format=cast(Any, texture_fallback_format),
             png_compression=png_compression,
@@ -2163,6 +2223,9 @@ def cmd_convert(
             )
     except typer.Exit:
         raise
+    except KeyboardInterrupt:
+        _interrupt(ctx, payload)
+        raise AssertionError("unreachable") from None
     except Exception as exc:
         if report is not None:
             failure_report = getattr(exc, "report", None)
@@ -2176,6 +2239,7 @@ def cmd_convert(
     if quality_report is not None:
         _write_tessellation_quality_report(asset, quality_report)
 
+    _print_report_warnings(ctx, asset.report)
     if _is_stdio(output_path):
         return
 
@@ -2336,6 +2400,21 @@ def cmd_validate(
         typer.Option("--report", help="Write validation and geometry quality report as JSON."),
     ] = None,
 ) -> None:
+    from fascat.runtime import (
+        RuntimeBrowserOptions,
+        RuntimeBrowserRenderOptions,
+        RuntimeEngineOptions,
+        measure_browser_runtime,
+        measure_engine_runtime,
+        write_browser_render_preview,
+    )
+    from fascat.visual import (
+        VisualDiffOptions,
+        compare_images,
+        write_output_lod_switch_previews,
+        write_output_preview,
+    )
+
     """Validate a generated USD, glTF, OBJ, or STL file."""
     state = _state(ctx)
     analyze_options = _analyze_options(
@@ -2638,6 +2717,12 @@ def cmd_runtime_fixtures(
         ),
     ] = False,
 ) -> None:
+    from fascat.runtime_fixtures import (
+        audit_runtime_parity_goldens,
+        capture_runtime_parity_suite,
+        write_runtime_parity_suite,
+    )
+
     """Write bundled runtime parity fixtures for browser, Unity, and Unreal preview checks."""
     state = _state(ctx)
     capture_targets = tuple(item.value for item in capture or [])
@@ -2749,8 +2834,12 @@ def run(args: Sequence[str] | None = None) -> None:
         raise SystemExit(2)
 
     color_enabled = not _color_disabled_requested(raw_args)
-    with _temporary_no_color(not color_enabled):
-        app(args=normalized_args, prog_name="fascat", color=color_enabled)
+    try:
+        with _temporary_no_color(not color_enabled):
+            app(args=normalized_args, prog_name="fascat", color=color_enabled)
+    except KeyboardInterrupt:
+        err.print("Interrupted.")
+        raise SystemExit(_INTERRUPT_EXIT_CODE) from None
 
 
 def _is_tty() -> bool:
@@ -3262,6 +3351,35 @@ def _fail(ctx: typer.Context, payload: dict[str, Any], message: str, code: int =
     else:
         err.print(message)
     raise typer.Exit(code)
+
+
+_WARNING_DISPLAY_LIMIT = 10
+
+
+def _print_report_warnings(ctx: typer.Context, report: Report, *, limit: int = _WARNING_DISPLAY_LIMIT) -> None:
+    state = _state(ctx)
+    if state.quiet or state.json_output or not report.warnings:
+        return
+    for warning in report.warnings[:limit]:
+        err.print(f"warning: {warning}", style="yellow", markup=False, soft_wrap=True)
+    hidden = len(report.warnings) - limit
+    if hidden > 0:
+        err.print(
+            f"... and {hidden} more warning(s); pass --report report.json for the full list",
+            style="yellow",
+            markup=False,
+        )
+
+
+_INTERRUPT_EXIT_CODE = 130  # 128 + SIGINT
+
+
+def _interrupt(ctx: typer.Context, payload: dict[str, Any]) -> NoReturn:
+    if _state(ctx).json_output:
+        out.print_json(json.dumps({**payload, "error": "interrupted"}))
+    else:
+        err.print("Interrupted.")
+    raise typer.Exit(_INTERRUPT_EXIT_CODE)
 
 
 def _read_cad_for_cli(

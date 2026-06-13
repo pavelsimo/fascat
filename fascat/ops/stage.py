@@ -4,12 +4,23 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from fascat.asset import Asset
+from fascat.asset import Asset, Node
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.ops.parallel import parallel_map
 from fascat.options import StageOptions
 from fascat.report import Report
+
+
+class UVOverlapError(RuntimeError):
+    """Raised when ``forbid_overlapping=True`` but staged UVs still overlap."""
+
+
+@dataclass(frozen=True)
+class _UvOverlapViolation:
+    part_id: str
+    channel: int
+    overlap_pairs: int
 
 
 @dataclass(frozen=True)
@@ -21,6 +32,7 @@ class _StagePartResult:
     tangent_summary: dict[str, int]
     normal_summary: dict[str, int]
     warnings: tuple[str, ...]
+    overlap_violations: tuple[_UvOverlapViolation, ...] = ()
 
 
 def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[str] | None = None) -> Asset:
@@ -50,16 +62,28 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
         if (selected_part_ids is None or part.id in selected_part_ids) and part.mesh is not None
     ]
 
-    def stage_part(part_id: str) -> _StagePartResult:
+    payloads: list[_StagePayload] = []
+    for part_id in part_ids:
         part = result.parts[part_id]
         if part.mesh is None:
             raise AssertionError("selected stage part must have a mesh")
-        return _stage_part(result, part.id, part.mesh, options, shared_aabb_bounds)
+        payloads.append(
+            _StagePayload(
+                part_id=part.id,
+                mesh=part.mesh,
+                options=options,
+                shared_aabb_bounds=shared_aabb_bounds,
+                units=result.units,
+                meters_per_unit=result.meters_per_unit,
+            )
+        )
 
-    for staged in parallel_map(part_ids, stage_part, jobs=options.jobs):
+    overlap_violations: list[_UvOverlapViolation] = []
+    for staged in parallel_map(payloads, _stage_part_worker, jobs=options.jobs, executor="process"):
         part = result.parts[staged.part_id]
         part.mesh = staged.mesh
         part.fingerprint = staged.fingerprint
+        overlap_violations.extend(staged.overlap_violations)
         _merge_summary(uv_summary, staged.uv_summary)
         _merge_summary(tangent_summary, staged.tangent_summary)
         _merge_summary(normal_summary, staged.normal_summary)
@@ -68,6 +92,16 @@ def stage_asset(asset: Asset, options: StageOptions, *, selected_part_ids: set[s
     _tag_uv_summary(result, uv_summary)
     _tag_normal_summary(result, normal_summary)
     _tag_tangent_summary(result, tangent_summary)
+    if options.unwrap.forbid_overlapping and overlap_violations:
+        details = ", ".join(
+            f"{violation.part_id} uv{violation.channel} ({violation.overlap_pairs} overlapping pairs)"
+            for violation in overlap_violations
+        )
+        raise UVOverlapError(
+            f"forbid_overlapping=True but overlapping UV faces remain after staging: {details}. "
+            "Unwrap with higher padding/resolution, repair the input UVs, or drop "
+            "forbid_overlapping to continue with warnings."
+        )
     return result
 
 
@@ -124,6 +158,27 @@ def _stage_warning_asset(asset: Asset) -> Asset:
         pmi=asset.pmi,
         report=Report(),
     )
+
+
+@dataclass(frozen=True)
+class _StagePayload:
+    part_id: str
+    mesh: Mesh
+    options: StageOptions
+    shared_aabb_bounds: tuple[np.ndarray, np.ndarray] | None
+    units: str
+    meters_per_unit: float
+
+
+def _stage_part_worker(payload: _StagePayload) -> _StagePartResult:
+    # A minimal sink asset: _stage_part and its helpers only consume the
+    # report (warnings travel back in the result) and the unit metadata.
+    sink = Asset(
+        root=Node(id="stage-sink", name="stage-sink"),
+        units=payload.units,
+        meters_per_unit=payload.meters_per_unit,
+    )
+    return _stage_part(sink, payload.part_id, payload.mesh, payload.options, payload.shared_aabb_bounds)
 
 
 def _stage_part(
@@ -200,7 +255,7 @@ def _stage_part(
     )
     if options.validate_normals:
         mesh.validate_normals(require_tangents=options.tangents)
-    _tag_uv_layout_quality(local_asset, part_id, mesh, uv_modes, options, uv_summary)
+    overlap_violations = _tag_uv_layout_quality(local_asset, part_id, mesh, uv_modes, options, uv_summary)
     return _StagePartResult(
         part_id=part_id,
         mesh=mesh,
@@ -209,6 +264,7 @@ def _stage_part(
         tangent_summary=tangent_summary,
         normal_summary=normal_summary,
         warnings=tuple(local_asset.report.warnings),
+        overlap_violations=tuple(overlap_violations),
     )
 
 
@@ -624,7 +680,8 @@ def _tag_uv_layout_quality(
     uv_modes: dict[int, str],
     options: StageOptions,
     uv_summary: dict[str, int],
-) -> None:
+) -> list[_UvOverlapViolation]:
+    violations: list[_UvOverlapViolation] = []
     for channel in sorted(mesh.uvs):
         prefix = f"uv{channel}"
         mode = uv_modes.get(channel, str(mesh.metadata.get(f"{prefix}_mode", mesh.metadata.get(prefix, "existing"))))
@@ -653,12 +710,15 @@ def _tag_uv_layout_quality(
         )
         _tag_uv_distortion_metadata(mesh, prefix, distortion)
         mesh.metadata[f"{prefix}_workflow_steps"] = _uv_workflow_steps(mesh, prefix, mode)
-        if domain != "bake":
-            if options.unwrap.forbid_overlapping and stats["overlapping_face_pairs"]:
-                asset.report.add_warning(
-                    f"part {part_id} {prefix} violates requested forbid-overlapping UV policy: "
-                    f"{stats['overlapping_face_pairs']} overlapping UV face pairs"
+        if options.unwrap.forbid_overlapping and stats["overlapping_face_pairs"]:
+            violations.append(
+                _UvOverlapViolation(
+                    part_id=part_id,
+                    channel=channel,
+                    overlap_pairs=int(stats["overlapping_face_pairs"]),
                 )
+            )
+        if domain != "bake":
             continue
         if mode in {"unwrap", "lightmap"}:
             if mesh.metadata.get(f"{prefix}_pack_status") == "packed":
@@ -674,8 +734,10 @@ def _tag_uv_layout_quality(
         problems = _uv_bake_warning_problems(stats)
         if problems:
             asset.report.add_warning(
-                f"part {part_id} {prefix} violates lightmap/baking constraints: {', '.join(problems)}"
+                f"part {part_id} {prefix} violates lightmap/baking constraints ({', '.join(problems)}); "
+                "overlapping or degenerate bake UVs will corrupt AO, lightmap, and material bakes"
             )
+    return violations
 
 
 def _tag_uv_policy_metadata(
@@ -705,14 +767,15 @@ def _tag_uv_policy_metadata(
     overlap_pairs = stats["overlapping_face_pairs"]
     mesh.metadata[f"{prefix}_forbid_overlapping_requested"] = str(requested_forbid).lower()
     mesh.metadata[f"{prefix}_forbid_overlapping_effective"] = str(effective_forbid).lower()
-    mesh.metadata[f"{prefix}_forbid_overlapping_enforced"] = "false"
+    # An explicit request is enforced: residual overlaps raise UVOverlapError.
+    mesh.metadata[f"{prefix}_forbid_overlapping_enforced"] = str(requested_forbid).lower()
     if not effective_forbid:
         status = "not_requested"
     elif overlap_pairs:
         status = "violation"
         uv_summary["forbid_overlapping_violations"] += 1
     elif requested_forbid:
-        status = "validated_not_enforced"
+        status = "validated"
     else:
         status = "domain_default"
     mesh.metadata[f"{prefix}_forbid_overlapping_status"] = status

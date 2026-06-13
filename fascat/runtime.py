@@ -16,10 +16,12 @@ from importlib import import_module, resources
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 from urllib.parse import unquote, unquote_to_bytes, urlparse
+from urllib.request import url2pathname
 
 import numpy as np
 from numpy.typing import NDArray
 
+from fascat import _subprocess
 from fascat.io.gltf import validate_gltf
 
 RuntimeEngineName = Literal["unity", "unreal"]
@@ -281,18 +283,12 @@ def measure_browser_runtime(path: str | Path, options: RuntimeBrowserOptions | N
     if browser is None:
         return _unavailable_report(asset_path, validation_stats, "no chromium-compatible browser executable found")
 
-    with tempfile.TemporaryDirectory(prefix="fascat-runtime-") as directory:
+    with tempfile.TemporaryDirectory(prefix="fascat-runtime-", ignore_cleanup_errors=True) as directory:
         harness_path = Path(directory) / "runtime.html"
         harness_path.write_text(_runtime_harness_html(asset_path.resolve(), opts), encoding="utf-8")
         command = _browser_invocation(browser, harness_path, opts)
         try:
-            completed = subprocess.run(
-                command,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=opts.timeout_seconds,
-            )
+            completed = _subprocess.run_guarded(command, timeout=opts.timeout_seconds)
         except subprocess.TimeoutExpired:
             return _failed_report(asset_path, validation_stats, browser, "browser runtime validation timed out")
     if completed.returncode != 0:
@@ -319,7 +315,7 @@ def write_browser_render_preview(
 
     preflight = _browser_render_preflight(asset_path)
     output_path = Path(preview_path)
-    with tempfile.TemporaryDirectory(prefix="fascat-browser-render-") as directory:
+    with tempfile.TemporaryDirectory(prefix="fascat-browser-render-", ignore_cleanup_errors=True) as directory:
         workdir = Path(directory)
         render_asset_path = asset_path
         if preflight.draco_decode_required:
@@ -380,13 +376,7 @@ def write_browser_render_preview(
         harness_path.write_text(_runtime_browser_render_html(render_asset_path.resolve(), opts), encoding="utf-8")
         command = _browser_render_report_invocation(browser, harness_path, opts)
         try:
-            completed = subprocess.run(
-                command,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=opts.timeout_seconds,
-            )
+            completed = _subprocess.run_guarded(command, timeout=opts.timeout_seconds)
         except subprocess.TimeoutExpired:
             return _browser_render_report(
                 asset_path,
@@ -448,13 +438,7 @@ def write_browser_render_preview(
         if not isinstance(screenshot_data, str) or not _write_png_data_uri(screenshot_data, output_path):
             screenshot_command = _browser_render_screenshot_invocation(browser, harness_path, output_path, opts)
             try:
-                screenshot_completed = subprocess.run(
-                    screenshot_command,
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    timeout=opts.timeout_seconds,
-                )
+                screenshot_completed = _subprocess.run_guarded(screenshot_command, timeout=opts.timeout_seconds)
             except subprocess.TimeoutExpired:
                 return _browser_render_report(
                     asset_path,
@@ -534,7 +518,9 @@ def measure_engine_runtime(path: str | Path, options: RuntimeEngineOptions) -> R
             project=project,
         )
 
-    with tempfile.TemporaryDirectory(prefix=f"fascat-{options.engine}-runtime-") as directory:
+    with tempfile.TemporaryDirectory(
+        prefix=f"fascat-{options.engine}-runtime-", ignore_cleanup_errors=True
+    ) as directory:
         if project is None:
             try:
                 project = _copy_packaged_engine_harness(options.engine, Path(directory) / "harness")
@@ -553,13 +539,7 @@ def measure_engine_runtime(path: str | Path, options: RuntimeEngineOptions) -> R
         report_path = Path(directory) / "runtime-report.json"
         command = _engine_invocation(executable, project, asset_path, report_path, preview_path, options)
         try:
-            completed = subprocess.run(
-                command,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=options.timeout_seconds,
-            )
+            completed = _subprocess.run_guarded(command, timeout=options.timeout_seconds)
         except subprocess.TimeoutExpired:
             return _engine_failed_report(
                 asset_path,
@@ -1059,7 +1039,12 @@ def _run_gltf_transform_copy(input_path: Path, output_path: Path) -> None:
     from fascat.io.gltf import _gltf_transform_command
 
     command = [*_gltf_transform_command(), "copy", str(input_path), str(output_path)]
-    completed = subprocess.run(command, check=False, capture_output=True, text=True)
+    try:
+        completed = _subprocess.run_guarded(command, timeout=_subprocess.GLTF_TRANSFORM_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"glTF Transform copy timed out after {_subprocess.GLTF_TRANSFORM_TIMEOUT_SECONDS:g}s"
+        ) from exc
     if completed.returncode != 0:
         details = (completed.stderr or completed.stdout).strip()
         raise RuntimeError(f"glTF Transform copy failed: {details}")
@@ -1132,7 +1117,12 @@ def _run_gltf_transform_ktxdecompress(input_path: Path, output_path: Path) -> No
     from fascat.io.gltf import _gltf_transform_command
 
     command = [*_gltf_transform_command(), "ktxdecompress", str(input_path), str(output_path)]
-    completed = subprocess.run(command, check=False, capture_output=True, text=True)
+    try:
+        completed = _subprocess.run_guarded(command, timeout=_subprocess.GLTF_TRANSFORM_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"glTF Transform ktxdecompress timed out after {_subprocess.GLTF_TRANSFORM_TIMEOUT_SECONDS:g}s"
+        ) from exc
     if completed.returncode != 0:
         details = (completed.stderr or completed.stdout).strip()
         raise RuntimeError(f"glTF Transform ktxdecompress failed: {details}")
@@ -1253,7 +1243,8 @@ def _load_gltf_uri_bytes(uri: str, base_dir: Path) -> bytes:
     parsed = urlparse(uri)
     if parsed.scheme and parsed.scheme != "file":
         raise RuntimeError(f"unsupported external glTF URI scheme: {parsed.scheme}")
-    path = Path(unquote(parsed.path)) if parsed.scheme == "file" else base_dir / unquote(parsed.path)
+    # url2pathname handles the /C:/... form a file URI produces on Windows.
+    path = Path(url2pathname(parsed.path)) if parsed.scheme == "file" else base_dir / unquote(parsed.path)
     return path.read_bytes()
 
 

@@ -7,6 +7,7 @@ import numpy as np
 
 from fascat.asset import Asset, Node, Part
 from fascat.export_report import referenced_materials
+from fascat.io._atomic import atomic_outputs
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.options import ObjExportOptions
@@ -15,7 +16,7 @@ OBJ_SUFFIXES = {".obj"}
 
 
 def write_obj(asset: Asset, path: str | Path, *, options: ObjExportOptions | None = None) -> None:
-    _write_obj(asset, path, options=options, collect_stats=False)
+    _write_obj(asset, path, options=options, validate=False)
 
 
 def write_obj_with_validation_stats(
@@ -24,8 +25,7 @@ def write_obj_with_validation_stats(
     *,
     options: ObjExportOptions | None = None,
 ) -> dict[str, int] | None:
-    _write_obj(asset, path, options=options, collect_stats=False)
-    return validate_obj(path)
+    return _write_obj(asset, path, options=options, validate=True)
 
 
 def _write_obj(
@@ -33,7 +33,7 @@ def _write_obj(
     path: str | Path,
     *,
     options: ObjExportOptions | None,
-    collect_stats: bool,
+    validate: bool,
 ) -> dict[str, int] | None:
     opts = options or ObjExportOptions()
     output_path = Path(path)
@@ -78,12 +78,15 @@ def _write_obj(
         vertex_offset += mesh.vertex_count
         normal_offset += normals.values.shape[0]
 
-    output_path.write_text("".join(chunks), encoding="utf-8")
-    if opts.materials and opts.write_mtl and written_materials:
-        _write_mtl(output_path.with_suffix(".mtl"), written_materials)
-    if collect_stats and written_vertices > 0 and written_triangles > 0:
-        return {"meshes": 1, "points": written_vertices, "triangles": written_triangles}
-    return None
+    # The .mtl sidecar publishes before the .obj entry file, so a reader never
+    # sees an obj whose mtllib reference is missing.
+    mtl_path = output_path.with_suffix(".mtl")
+    with atomic_outputs((mtl_path, output_path)) as (temp_mtl, temp_obj):
+        temp_obj.write_text("".join(chunks), encoding="utf-8")
+        if opts.materials and opts.write_mtl and written_materials:
+            _write_mtl(temp_mtl, written_materials)
+        stats = validate_obj(temp_obj) if validate else None
+    return stats
 
 
 def validate_obj(path: str | Path) -> dict[str, int]:

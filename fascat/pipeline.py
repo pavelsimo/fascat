@@ -23,16 +23,13 @@ from fascat.io.stl import write_stl_with_validation_stats as _write_stl
 from fascat.io.usd import validate_usd
 from fascat.io.usd import write_usd_with_validation_stats as _write_usd
 from fascat.options import (
-    AabbProjectionOptions,
     AnalyzeOptions,
-    AtlasOptions,
     BakeMaterialOptions,
     BrepHealOptions,
     ConversionProfile,
     DecimateOptions,
     DeleteDegeneratePolygonsOptions,
     ExplodeOptions,
-    FaceOrientationStrategy,
     FbxExportOptions,
     GltfExportOptions,
     LODGeneratorOptions,
@@ -40,7 +37,6 @@ from fascat.options import (
     MergeOptions,
     MergeVerticesOptions,
     MetadataExportOptions,
-    NormalOrientationStrategy,
     ObjExportOptions,
     OptimizeOptions,
     RemoveHolesOptions,
@@ -52,10 +48,7 @@ from fascat.options import (
     StlExportOptions,
     TessellationOptions,
     TextureProcessOptions,
-    UnwrapOptions,
     UsdExportOptions,
-    UV0Mode,
-    UV1Mode,
     gltf_export_preset_texture_options,
     resolve_gltf_export_options,
 )
@@ -272,7 +265,7 @@ def convert(
                 stl_options=stl_options,
                 fbx_options=fbx_options,
             )
-    except Exception as exc:
+    except (KeyboardInterrupt, Exception) as exc:
         _record_failed_step(
             asset,
             "write",
@@ -807,7 +800,7 @@ def _record_failed_step(
     options: dict[str, object],
     before: dict[str, int],
     duration: float,
-    exc: Exception,
+    exc: BaseException,
 ) -> None:
     message = str(exc) or exc.__class__.__name__
     asset.report.add_error(message)
@@ -1815,300 +1808,3 @@ def _validate_options(output_format: ExportFormat) -> dict[str, object]:
     if output_format == "gltf":
         return {"backend": "fascat-gltf"}
     return {"backend": f"fascat-{output_format}"}
-
-
-def tessellate(
-    asset: Asset,
-    *,
-    sag: float = 0.1,
-    sag_ratio: float | None = None,
-    angle: float = 15.0,
-    relative: bool = True,
-    min_edge_length: float | None = None,
-    max_edge_length: float | None = None,
-    max_polygon_length: float | None = None,
-    preserve_boundaries: bool = True,
-    curvature_adaptive: bool = False,
-    detail_adaptive: bool = False,
-    avoid_skinny_triangles: bool = False,
-    quality_report: bool = False,
-    free_edge_report: bool = False,
-    create_normals: bool = True,
-    keep_brep: bool = False,
-    reuse_existing_meshes: bool = True,
-    part_settings: dict[str, dict[str, object]] | None = None,
-    where: Filter | None = None,
-) -> Asset:
-    return asset.tessellate(
-        TessellationOptions(
-            sag=sag,
-            sag_ratio=sag_ratio,
-            angle=angle,
-            relative=relative,
-            min_edge_length=min_edge_length,
-            max_edge_length=max_edge_length,
-            max_polygon_length=max_polygon_length,
-            preserve_boundaries=preserve_boundaries,
-            curvature_adaptive=curvature_adaptive,
-            detail_adaptive=detail_adaptive,
-            avoid_skinny_triangles=avoid_skinny_triangles,
-            quality_report=quality_report,
-            free_edge_report=free_edge_report,
-            create_normals=create_normals,
-            keep_brep=keep_brep,
-            reuse_existing_meshes=reuse_existing_meshes,
-            part_settings=part_settings or {},
-        ),
-        where=where,
-    )
-
-
-def repair(
-    asset: Asset,
-    *,
-    tolerance: float = 0.0,
-    face_orientation: FaceOrientationStrategy = "exterior",
-    normal_orientation: NormalOrientationStrategy = "from_faces",
-    viewer_position: tuple[float, float, float] | None = None,
-    quality_report: bool = False,
-    jobs: int = 1,
-    where: Filter | None = None,
-) -> Asset:
-    from fascat.options import RepairOptions
-
-    return asset.repair(
-        RepairOptions(
-            tolerance=tolerance,
-            face_orientation=face_orientation,
-            normal_orientation=normal_orientation,
-            viewer_position=viewer_position,
-            quality_report=quality_report,
-            jobs=jobs,
-        ),
-        where=where,
-    )
-
-
-def merge_vertices(
-    asset: Asset,
-    *,
-    options: MergeVerticesOptions | None = None,
-    tolerance: float | None = None,
-    jobs: int = 1,
-    where: Filter | None = None,
-) -> Asset:
-    if options is not None:
-        return asset.merge_vertices(options, where=where)
-    return asset.merge_vertices(
-        MergeVerticesOptions(tolerance=0.0 if tolerance is None else tolerance, jobs=jobs),
-        where=where,
-    )
-
-
-def delete_degenerate_polygons(
-    asset: Asset,
-    *,
-    options: DeleteDegeneratePolygonsOptions | None = None,
-    area_epsilon: float | None = None,
-    delete_duplicates: bool = True,
-    where: Filter | None = None,
-) -> Asset:
-    if options is not None:
-        return asset.delete_degenerate_polygons(options, where=where)
-    return asset.delete_degenerate_polygons(
-        DeleteDegeneratePolygonsOptions(
-            area_epsilon=1e-12 if area_epsilon is None else area_epsilon,
-            delete_duplicates=delete_duplicates,
-        ),
-        where=where,
-    )
-
-
-def heal_brep(
-    asset: Asset,
-    *,
-    options: BrepHealOptions | None = None,
-    where: Filter | None = None,
-) -> Asset:
-    return asset.heal_brep(options or BrepHealOptions(), where=where)
-
-
-def stage(
-    asset: Asset,
-    *,
-    materials: Literal["cad", "display", "none"] = "cad",
-    material_mode: Literal["cad", "pbr"] = "cad",
-    merge_equivalent_materials: bool = False,
-    normals: bool = True,
-    normal_mode: Literal["none", "smooth", "hard_edges", "flat"] = "smooth",
-    normal_weighting: Literal["angle", "area"] = "angle",
-    hard_edge_angle: float = 30.0,
-    preserve_face_boundaries: bool = False,
-    override_normals: bool = True,
-    tangents: bool = False,
-    tangent_uv_channel: int = 0,
-    override_tangents: bool = False,
-    validate_normals: bool = False,
-    unwrap: UnwrapOptions | None = None,
-    atlas: AtlasOptions | None = None,
-    aabb_projection: AabbProjectionOptions | None = None,
-    uv0: UV0Mode = "box",
-    uv1: UV1Mode | None = None,
-    normalize_uvs: tuple[int, ...] = (),
-    jobs: int = 1,
-    where: Filter | None = None,
-) -> Asset:
-    return asset.stage(
-        StageOptions(
-            materials=materials,
-            material_mode=material_mode,
-            merge_equivalent_materials=merge_equivalent_materials,
-            normals=normals,
-            normal_mode=normal_mode,
-            normal_weighting=normal_weighting,
-            hard_edge_angle=hard_edge_angle,
-            preserve_face_boundaries=preserve_face_boundaries,
-            override_normals=override_normals,
-            tangents=tangents,
-            tangent_uv_channel=tangent_uv_channel,
-            override_tangents=override_tangents,
-            validate_normals=validate_normals,
-            unwrap=unwrap or UnwrapOptions(),
-            atlas=atlas or AtlasOptions(),
-            aabb_projection=aabb_projection or AabbProjectionOptions(),
-            uv0=uv0,
-            uv1=uv1,
-            normalize_uvs=normalize_uvs,
-            jobs=jobs,
-        ),
-        where=where,
-    )
-
-
-def optimize(
-    asset: Asset,
-    *,
-    target_triangles: int | None = None,
-    ratio: float | None = None,
-    preserve_instances: bool = True,
-    simplify: bool = True,
-    optimize_buffers: bool = True,
-    preserve_hard_edges: bool = False,
-    hard_edge_angle: float = 30.0,
-    preserve_holes: bool = False,
-    preserve_material_boundaries: bool = False,
-    preserve_uv_seams: bool = False,
-    preserve_small_parts: bool = False,
-    small_part_triangle_threshold: int = 64,
-    preserve_silhouette: bool = False,
-    jobs: int = 1,
-    where: Filter | None = None,
-) -> Asset:
-    return asset.optimize(
-        OptimizeOptions(
-            target_triangles=target_triangles,
-            ratio=ratio,
-            preserve_instances=preserve_instances,
-            simplify=simplify,
-            optimize_buffers=optimize_buffers,
-            preserve_hard_edges=preserve_hard_edges,
-            hard_edge_angle=hard_edge_angle,
-            preserve_holes=preserve_holes,
-            preserve_material_boundaries=preserve_material_boundaries,
-            preserve_uv_seams=preserve_uv_seams,
-            preserve_small_parts=preserve_small_parts,
-            small_part_triangle_threshold=small_part_triangle_threshold,
-            preserve_silhouette=preserve_silhouette,
-            jobs=jobs,
-        ),
-        where=where,
-    )
-
-
-def merge(asset: Asset, *, options: MergeOptions | None = None, where: Filter | None = None) -> Asset:
-    return asset.merge(options or MergeOptions(), where=where)
-
-
-def explode(asset: Asset, *, options: ExplodeOptions | None = None, where: Filter | None = None) -> Asset:
-    return asset.explode(options or ExplodeOptions(), where=where)
-
-
-def replace(asset: Asset, *, options: ReplaceOptions | None = None, where: Filter | None = None) -> Asset:
-    return asset.replace(options or ReplaceOptions(), where=where)
-
-
-def optimize_scene(asset: Asset, *, options: SceneOptimizeOptions | None = None, where: Filter | None = None) -> Asset:
-    return asset.optimize_scene(options or SceneOptimizeOptions(), where=where)
-
-
-def bake_materials(
-    asset: Asset,
-    *,
-    options: BakeMaterialOptions | None = None,
-    where: Filter | None = None,
-) -> Asset:
-    return asset.bake_materials(options or BakeMaterialOptions(), where=where)
-
-
-def process_textures(asset: Asset, *, options: TextureProcessOptions | None = None) -> Asset:
-    return asset.process_textures(options or TextureProcessOptions())
-
-
-def decimate(asset: Asset, *, options: DecimateOptions | None = None, where: Filter | None = None) -> Asset:
-    return asset.decimate(options or DecimateOptions(), where=where)
-
-
-def remove_holes(asset: Asset, *, options: RemoveHolesOptions | None = None, where: Filter | None = None) -> Asset:
-    return asset.remove_holes(options or RemoveHolesOptions(), where=where)
-
-
-def remove_occluded(
-    asset: Asset,
-    *,
-    options: RemoveOccludedOptions | None = None,
-    where: Filter | None = None,
-) -> Asset:
-    return asset.remove_occluded(options or RemoveOccludedOptions(), where=where)
-
-
-def run_lod_generators(
-    asset: Asset,
-    *,
-    options: LODGeneratorOptions | None = None,
-    where: Filter | None = None,
-) -> Asset:
-    return asset.run_lod_generators(options or LODGeneratorOptions(), where=where)
-
-
-def lods(
-    asset: Asset,
-    *,
-    ratios: list[float] | tuple[float, ...] = (0.5, 0.25, 0.1),
-    mode: Literal["variants", "extras", "separate"] = "variants",
-    screen_coverage: list[float] | tuple[float, ...] | None = None,
-    per_part_budget: bool = False,
-    drop_tiny_parts: bool = False,
-    tiny_part_screen_size: float = 2.0,
-    engine_profile: Literal["generic", "unity", "unreal"] = "generic",
-    far_lod_bake: bool = False,
-    scene_far_proxy: bool = False,
-    validate: bool = False,
-    jobs: int = 1,
-    where: Filter | None = None,
-) -> Asset:
-    return asset.lods(
-        LODOptions(
-            tuple(ratios),
-            mode=mode,
-            screen_coverage=screen_coverage,
-            per_part_budget=per_part_budget,
-            drop_tiny_parts=drop_tiny_parts,
-            tiny_part_screen_size=tiny_part_screen_size,
-            engine_profile=engine_profile,
-            far_lod_bake=far_lod_bake,
-            scene_far_proxy=scene_far_proxy,
-            validate=validate,
-            jobs=jobs,
-        ),
-        where=where,
-    )

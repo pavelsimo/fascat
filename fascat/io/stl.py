@@ -8,6 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from fascat.asset import Asset, Node
+from fascat.io._atomic import atomic_output
 from fascat.options import StlExportOptions
 
 STL_SUFFIXES = {".stl"}
@@ -15,7 +16,7 @@ FloatArray = NDArray[np.float64]
 
 
 def write_stl(asset: Asset, path: str | Path, *, options: StlExportOptions | None = None) -> None:
-    _write_stl(asset, path, options=options, collect_stats=False)
+    _write_stl(asset, path, options=options, validate=False)
 
 
 def write_stl_with_validation_stats(
@@ -24,8 +25,7 @@ def write_stl_with_validation_stats(
     *,
     options: StlExportOptions | None = None,
 ) -> dict[str, int] | None:
-    _write_stl(asset, path, options=options, collect_stats=False)
-    return validate_stl(path)
+    return _write_stl(asset, path, options=options, validate=True)
 
 
 def _write_stl(
@@ -33,7 +33,7 @@ def _write_stl(
     path: str | Path,
     *,
     options: StlExportOptions | None,
-    collect_stats: bool,
+    validate: bool,
 ) -> dict[str, int] | None:
     opts = options or StlExportOptions()
     output_path = Path(path)
@@ -41,14 +41,13 @@ def _write_stl(
         raise ValueError(f"unsupported STL extension: {output_path.suffix or '<none>'}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     triangles = _triangles(asset)
-    if opts.binary:
-        output_path.write_bytes(_binary_stl(triangles))
-    else:
-        output_path.write_text(_ascii_stl(triangles), encoding="utf-8")
-    triangle_count = int(triangles.shape[0])
-    if collect_stats and (triangle_count > 0 or opts.binary):
-        return {"meshes": 1, "points": triangle_count * 3, "triangles": triangle_count}
-    return None
+    with atomic_output(output_path) as temp:
+        if opts.binary:
+            temp.write_bytes(_binary_stl(triangles))
+        else:
+            temp.write_text(_ascii_stl(triangles), encoding="utf-8")
+        stats = validate_stl(temp) if validate else None
+    return stats
 
 
 def validate_stl(path: str | Path) -> dict[str, int]:

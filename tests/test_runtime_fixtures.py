@@ -8,13 +8,18 @@ from typing import Any, cast
 
 from PIL import Image
 
-import fascat as fc
 from fascat.io.gltf import validate_gltf
 from fascat.runtime import RuntimeBrowserRenderReport, RuntimeEngineReport
 from fascat.runtime_fixtures import (
     audit_runtime_parity_goldens,
     capture_runtime_parity_suite,
     write_runtime_parity_suite,
+)
+from fascat.validation import (
+    RuntimeParityCaptureReport,
+    RuntimeParityGolden,
+    RuntimeParityGoldenCoverageReport,
+    RuntimeParitySuiteReport,
 )
 
 
@@ -23,7 +28,7 @@ def test_runtime_parity_suite_writes_assets_baselines_and_manifest(tmp_path: Pat
 
     report = write_runtime_parity_suite(suite_dir)
 
-    assert isinstance(report, fc.RuntimeParitySuiteReport)
+    assert isinstance(report, RuntimeParitySuiteReport)
     assert report.targets == ("browser", "unity", "unreal")
     assert len(report.fixtures) == 6
     assert Path(report.manifest_path).is_file()
@@ -202,7 +207,7 @@ def test_runtime_parity_capture_records_previews_diffs_and_goldens(
         promote_goldens=True,
     )
 
-    assert isinstance(report, fc.RuntimeParityCaptureReport)
+    assert isinstance(report, RuntimeParityCaptureReport)
     assert report.passed is True
     assert len(report.captures) == 12
     assert Path(report.results_path).is_file()
@@ -293,14 +298,14 @@ def test_runtime_parity_golden_audit_reports_missing_and_present_goldens(tmp_pat
 
     report = audit_runtime_parity_goldens(suite_dir, targets=("unity",))
 
-    assert isinstance(report, fc.RuntimeParityGoldenCoverageReport)
+    assert isinstance(report, RuntimeParityGoldenCoverageReport)
     assert report.passed is False
     assert report.present_count == 1
     assert report.missing_count == 5
     assert report.invalid_count == 0
     assert Path(report.results_path).is_file()
     present = next(golden for golden in report.goldens if golden.status == "present")
-    assert isinstance(present, fc.RuntimeParityGolden)
+    assert isinstance(present, RuntimeParityGolden)
     assert present.fixture == "pbr-material-grid"
     assert present.target == "unity"
     assert present.width == 512

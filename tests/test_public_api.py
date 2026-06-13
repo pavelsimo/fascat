@@ -6,9 +6,18 @@ import numpy as np
 import pytest
 
 import fascat as fc
+from fascat.options import AnalyzeOptions, MetadataExportOptions, ReplaceOptions
+from fascat.validation import (
+    VisualDiffOptions,
+    VisualDiffReport,
+    VisualPreviewOptions,
+    VisualPreviewReport,
+    compare_images,
+    write_preview,
+)
 
 
-def test_functional_api_wraps_asset_operations() -> None:
+def test_fluent_asset_operations_chain() -> None:
     mesh = fc.Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
         faces=np.array([[0, 1, 2], [2, 1, 3]], dtype=int),
@@ -18,22 +27,52 @@ def test_functional_api_wraps_asset_operations() -> None:
         parts={"part": fc.Part(id="part", name="Part", mesh=mesh)},
     )
 
-    repaired = fc.repair(asset)
-    merged = fc.merge_vertices(repaired)
-    cleaned = fc.delete_degenerate_polygons(merged)
-    staged = fc.stage(cleaned, uv0="box", uv1="box")
-    optimized = fc.optimize(staged, target_triangles=1, preserve_instances=True)
-    with_lods = fc.lods(optimized, ratios=(0.5,))
+    with_lods = (
+        asset.repair()
+        .merge_vertices()
+        .delete_degenerate_polygons()
+        .stage(fc.StageOptions(uv0="box", uv1="box"))
+        .optimize(fc.OptimizeOptions(target_triangles=1, preserve_instances=True))
+        .lods(fc.LODOptions(ratios=(0.5,)))
+    )
     lod_part = with_lods.parts["part"]
     assert lod_part.mesh is not None
     assert sorted(lod_part.mesh.uvs) == [0, 1]
     assert len(lod_part.lod_meshes) == 1
 
-    replaced = fc.replace(with_lods, options=fc.ReplaceOptions(mode="bounding_box"))
+    replaced = with_lods.replace(ReplaceOptions(mode="bounding_box"))
 
     part = next(iter(replaced.parts.values()))
     assert part.mesh is not None
     assert part.mesh.triangle_count == 12
+
+
+@pytest.mark.parametrize(
+    "removed",
+    [
+        "tessellate",
+        "repair",
+        "merge_vertices",
+        "delete_degenerate_polygons",
+        "heal_brep",
+        "stage",
+        "optimize",
+        "lods",
+        "merge",
+        "explode",
+        "replace",
+        "optimize_scene",
+        "bake_materials",
+        "process_textures",
+        "decimate",
+        "remove_holes",
+        "remove_occluded",
+        "run_lod_generators",
+    ],
+)
+def test_module_level_operation_wrappers_are_removed(removed: str) -> None:
+    assert not hasattr(fc, removed)
+    assert removed not in fc.__all__
 
 
 def test_public_api_exposes_quality_analysis() -> None:
@@ -46,7 +85,7 @@ def test_public_api_exposes_quality_analysis() -> None:
         parts={"part": fc.Part(id="part", name="Part", mesh=mesh)},
     )
 
-    report = fc.analyze(asset, options=fc.AnalyzeOptions(open_boundaries=True))
+    report = fc.analyze(asset, options=AnalyzeOptions(open_boundaries=True))
 
     assert isinstance(report, fc.AnalysisReport)
     assert report.summary["open_boundaries"] == 1
@@ -62,12 +101,12 @@ def test_public_api_exposes_visual_previews(tmp_path: Path) -> None:
         parts={"part": fc.Part(id="part", name="Part", mesh=mesh)},
     )
 
-    report = fc.write_preview(asset, tmp_path / "preview.png", fc.VisualPreviewOptions(width=64, height=64, padding=12))
-    diff = fc.compare_images(tmp_path / "preview.png", tmp_path / "preview.png", fc.VisualDiffOptions())
+    report = write_preview(asset, tmp_path / "preview.png", VisualPreviewOptions(width=64, height=64, padding=12))
+    diff = compare_images(tmp_path / "preview.png", tmp_path / "preview.png", VisualDiffOptions())
 
-    assert isinstance(report, fc.VisualPreviewReport)
+    assert isinstance(report, VisualPreviewReport)
     assert report.triangles == 1
-    assert isinstance(diff, fc.VisualDiffReport)
+    assert isinstance(diff, VisualDiffReport)
     assert diff.passed is True
 
 
@@ -81,36 +120,37 @@ def test_public_api_exposes_pipeline_spec(tmp_path: Path) -> None:
 
 
 def test_public_api_exposes_metadata_export_options() -> None:
-    options = fc.MetadataExportOptions(mode="summary", pmi="metadata-and-visuals")
+    options = MetadataExportOptions(mode="summary", pmi="metadata-and-visuals")
 
     assert options.to_dict() == {"mode": "summary", "pmi": "metadata_and_visuals"}
 
 
-def test_functional_api_wraps_tessellation_options() -> None:
+def test_tessellate_records_full_options_in_report() -> None:
     asset = fc.Asset(
         root=fc.Node(id="root", name="root", children=[fc.Node(id="node", name="node", part_id="part")]),
         parts={"part": fc.Part(id="part", name="Part")},
     )
 
-    tessellated = fc.tessellate(
-        asset,
-        sag=0.2,
-        sag_ratio=0.01,
-        angle=20.0,
-        relative=False,
-        min_edge_length=0.25,
-        max_edge_length=5.0,
-        max_polygon_length=4.0,
-        preserve_boundaries=False,
-        curvature_adaptive=True,
-        detail_adaptive=True,
-        avoid_skinny_triangles=True,
-        quality_report=True,
-        free_edge_report=True,
-        create_normals=False,
-        keep_brep=True,
-        reuse_existing_meshes=False,
-        part_settings={"Part": {"sag": 0.3}},
+    tessellated = asset.tessellate(
+        fc.TessellationOptions(
+            sag=0.2,
+            sag_ratio=0.01,
+            angle=20.0,
+            relative=False,
+            min_edge_length=0.25,
+            max_edge_length=5.0,
+            max_polygon_length=4.0,
+            preserve_boundaries=False,
+            curvature_adaptive=True,
+            detail_adaptive=True,
+            avoid_skinny_triangles=True,
+            quality_report=True,
+            free_edge_report=True,
+            create_normals=False,
+            keep_brep=True,
+            reuse_existing_meshes=False,
+            part_settings={"Part": {"sag": 0.3}},
+        )
     )
     step = tessellated.report.steps[-1]
 
@@ -250,6 +290,14 @@ def test_functional_write_gltf_records_report_step(monkeypatch, tmp_path: Path) 
         "jpeg_quality": 85,
         "file_size_budget_mb": None,
         "size_ladder": False,
+        "draco_compression_level": 5,
+        "draco_quantize_position": 14,
+        "draco_quantize_normal": 10,
+        "draco_quantize_texcoord": 12,
+        "draco_quantize_color": 8,
+        "ktx2_quality": 128,
+        "ktx2_effort": 2,
+        "ktx2_uastc": None,
         "metadata": {"mode": "full", "pmi": "metadata"},
     }
     assert runtime_dependencies["extensions_used"] == []
@@ -288,3 +336,72 @@ def test_node_to_dict_includes_transform() -> None:
     node = fc.Node(id="node", name="node", transform=transform)
 
     assert node.to_dict()["transform"] == transform.tolist()
+
+
+_TOP_LEVEL_API = [
+    "AnalysisReport",
+    "Asset",
+    "DecimateOptions",
+    "Filter",
+    "FilterExpressionError",
+    "GltfExportOptions",
+    "ImageResource",
+    "LODOptions",
+    "Material",
+    "MergeOptions",
+    "Mesh",
+    "MeshValidationError",
+    "Metadata",
+    "Node",
+    "OptimizeOptions",
+    "Part",
+    "PipelineSpec",
+    "PipelineStep",
+    "PlatformBudget",
+    "PmiAnnotation",
+    "RepairOptions",
+    "SelectionMatch",
+    "SelectionResult",
+    "StageOptions",
+    "TessellationOptions",
+    "Tolerance",
+    "UVOverlapError",
+    "UsdExportOptions",
+    "__version__",
+    "analyze",
+    "convert",
+    "profiles",
+    "read_brep",
+    "read_iges",
+    "read_step",
+    "read_step_many",
+    "validate_output",
+    "write_fbx",
+    "write_gltf",
+    "write_obj",
+    "write_stl",
+    "write_usd",
+]
+
+
+def test_top_level_namespace_is_locked() -> None:
+    assert sorted(fc.__all__) == _TOP_LEVEL_API
+
+
+def test_top_level_names_resolve() -> None:
+    for name in fc.__all__:
+        assert getattr(fc, name) is not None
+
+
+def test_validation_module_exposes_harness_surface() -> None:
+    import fascat.validation as validation
+
+    for name in validation.__all__:
+        assert getattr(validation, name) is not None
+    assert "measure_browser_runtime" in validation.__all__
+    assert "compare_images" in validation.__all__
+    assert "measure_gltf_size_ladder" in validation.__all__
+
+
+def test_package_ships_py_typed_marker() -> None:
+    assert (Path(fc.__file__).parent / "py.typed").is_file()

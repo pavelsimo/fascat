@@ -1324,6 +1324,14 @@ def test_convert_dispatches_gltf_writer_and_validator(monkeypatch, tmp_path: Pat
         "jpeg_quality": 85,
         "file_size_budget_mb": None,
         "size_ladder": False,
+        "draco_compression_level": 5,
+        "draco_quantize_position": 14,
+        "draco_quantize_normal": 10,
+        "draco_quantize_texcoord": 12,
+        "draco_quantize_color": 8,
+        "ktx2_quality": 128,
+        "ktx2_effort": 2,
+        "ktx2_uastc": None,
         "metadata": {"mode": "full", "pmi": "metadata"},
     }
     assert runtime_dependencies["extensions_used"] == []
@@ -1915,3 +1923,23 @@ def test_operation_report_step_captures_warnings() -> None:
     assert step.name == "tessellate"
     assert step.warnings == ["part has no source shape and cannot be tessellated: Missing"]
     assert tessellated.report.warnings == step.warnings
+
+
+def test_convert_records_failed_write_step_on_interrupt(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.pipeline as pipeline
+
+    asset = _triangle_asset()
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: asset)
+
+    def interrupt_write(*_args: object, **_kwargs: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(pipeline, "_write_usd", interrupt_write)
+
+    with pytest.raises(KeyboardInterrupt) as excinfo:
+        convert("input.step", tmp_path / "output.usdc", profile=_test_profile())
+
+    report = excinfo.value.report  # type: ignore[attr-defined]
+    assert report.errors == ["KeyboardInterrupt"]
+    assert any(step.name == "write" for step in report.steps)
+    assert report.finished_at is not None

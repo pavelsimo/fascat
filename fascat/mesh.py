@@ -25,6 +25,9 @@ _CachedValue = TypeVar("_CachedValue")
 # meshes, where the full scan is cheap anyway).
 _T_JUNCTION_CELL_BUDGET = 4096
 _NEAREST_CENTROID_PAIR_LIMIT = 4_000_000
+# Degenerate-face area threshold relative to the squared bbox diagonal, so the
+# default classification is scale-invariant (unit-scale meshes resolve to ~1e-12).
+_RELATIVE_AREA_EPSILON = 1e-12
 _GLOBAL_MESH_CACHE_MAX_ENTRIES = 256
 _GLOBAL_MESH_CACHE_NAMES = {
     "boundary_loops",
@@ -363,11 +366,28 @@ class Mesh:
     def _geometry_cache_token(self) -> tuple[object, ...]:
         return ("geometry", _array_cache_token(self.points), _array_cache_token(self.faces))
 
+    def __getstate__(self) -> dict[str, Any]:
+        state = self.__dict__.copy()
+        state["_cache"] = {}
+        return state
+
+    def __repr__(self) -> str:
+        from fascat._format import count_phrase
+
+        return f"<Mesh: {count_phrase(self.vertex_count, 'vertex')}, {count_phrase(self.triangle_count, 'triangle')}>"
+
     def bounds(self) -> tuple[FloatArray, FloatArray]:
         if self.vertex_count == 0:
             zero = np.zeros(3, dtype=np.float64)
             return zero.copy(), zero.copy()
         return self.points.min(axis=0), self.points.max(axis=0)
+
+    def _default_area_epsilon(self) -> float:
+        mins, maxs = self.bounds()
+        return _RELATIVE_AREA_EPSILON * float(np.sum((maxs - mins) ** 2))
+
+    def _resolve_area_epsilon(self, area_epsilon: float | None) -> float:
+        return self._default_area_epsilon() if area_epsilon is None else area_epsilon
 
     def repair(self, options: RepairOptions | None = None) -> Mesh:
         opts = options or RepairOptions()
@@ -378,15 +398,16 @@ class Mesh:
         mesh = mesh.remove_unreferenced_vertices()
         t_junction_tolerance = max(opts.tolerance, 1e-9)
         boundary_gap_tolerance = max(opts.tolerance, 1e-9)
+        area_epsilon = mesh._resolve_area_epsilon(opts.area_epsilon)
         if opts.quality_report:
-            before_metrics = mesh.quality_metrics(area_epsilon=opts.area_epsilon)
+            before_metrics = mesh.quality_metrics(area_epsilon=area_epsilon)
             before_t_junctions = mesh.t_junction_count(tolerance=t_junction_tolerance)
             before_boundary_gaps = mesh.boundary_gap_count(tolerance=boundary_gap_tolerance)
         if opts.merge_vertices and opts.tolerance > 0.0:
             mesh = mesh.merge_close_vertices(opts.tolerance)
         mesh = mesh.remove_duplicate_faces()
         if opts.delete_degenerate:
-            mesh = mesh.remove_degenerate_faces(opts.area_epsilon)
+            mesh = mesh.remove_degenerate_faces(area_epsilon)
         topology_metadata: dict[str, str] = {}
         if opts.stitch_boundary_gaps:
             gap_before = mesh.boundary_gap_count(tolerance=boundary_gap_tolerance)
@@ -415,9 +436,9 @@ class Mesh:
         else:
             topology_metadata["repair_t_junction_sewing"] = "disabled"
         if opts.crack_non_manifold_edges:
-            non_manifold_before = int(mesh.quality_metrics(area_epsilon=opts.area_epsilon)["non_manifold_edges"])
+            non_manifold_before = int(mesh.quality_metrics(area_epsilon=area_epsilon)["non_manifold_edges"])
             mesh = mesh.crack_non_manifold_edges()
-            non_manifold_after = int(mesh.quality_metrics(area_epsilon=opts.area_epsilon)["non_manifold_edges"])
+            non_manifold_after = int(mesh.quality_metrics(area_epsilon=area_epsilon)["non_manifold_edges"])
             topology_metadata.update(
                 {
                     "repair_non_manifold_edge_cracking": "cracked"
@@ -433,18 +454,18 @@ class Mesh:
             sliver_before = int(
                 mesh.quality_metrics(
                     skinny_aspect_ratio=opts.sliver_aspect_ratio,
-                    area_epsilon=opts.area_epsilon,
+                    area_epsilon=area_epsilon,
                 )["skinny_triangles"]
             )
             triangle_before = mesh.triangle_count
             mesh = mesh.remove_sliver_faces(
                 max_aspect_ratio=opts.sliver_aspect_ratio,
-                area_epsilon=opts.area_epsilon,
+                area_epsilon=area_epsilon,
             )
             sliver_after = int(
                 mesh.quality_metrics(
                     skinny_aspect_ratio=opts.sliver_aspect_ratio,
-                    area_epsilon=opts.area_epsilon,
+                    area_epsilon=area_epsilon,
                 )["skinny_triangles"]
             )
             topology_metadata.update(
@@ -479,7 +500,7 @@ class Mesh:
                 normal_orientation_status = "generated_after_hole_fill"
         if opts.quality_report:
             after_orientation_metrics = mesh.orientability_metrics()
-            after_metrics = mesh.quality_metrics(area_epsilon=opts.area_epsilon)
+            after_metrics = mesh.quality_metrics(area_epsilon=area_epsilon)
             after_t_junctions = mesh.t_junction_count(tolerance=t_junction_tolerance)
             after_boundary_gaps = mesh.boundary_gap_count(tolerance=boundary_gap_tolerance)
         repair_metadata = {
@@ -936,31 +957,34 @@ class Mesh:
         keep.sort()
         return self._filter_faces(keep)
 
-    def remove_degenerate_faces(self, area_epsilon: float = 1e-12) -> Mesh:
+    def remove_degenerate_faces(self, area_epsilon: float | None = None) -> Mesh:
         if self.triangle_count == 0:
             return self.copy()
+        epsilon = self._resolve_area_epsilon(area_epsilon)
         p0 = self.points[self.faces[:, 0]]
         p1 = self.points[self.faces[:, 1]]
         p2 = self.points[self.faces[:, 2]]
         areas = np.linalg.norm(np.cross(p1 - p0, p2 - p0), axis=1) * 0.5
-        keep = np.flatnonzero(areas > area_epsilon)
+        keep = np.flatnonzero(areas > epsilon)
         return self._filter_faces(keep).remove_unreferenced_vertices()
 
     def delete_degenerate_polygons(self, options: DeleteDegeneratePolygonsOptions | None = None) -> Mesh:
         opts = options or DeleteDegeneratePolygonsOptions()
+        area_epsilon = self._resolve_area_epsilon(opts.area_epsilon)
         before_vertex_count = self.vertex_count
         before_triangle_count = self.triangle_count
-        before_degenerate_count = int(self.quality_metrics(area_epsilon=opts.area_epsilon)["degenerate_triangles"])
-        reason_counts = self._degenerate_polygon_reason_counts(opts.area_epsilon)
-        mesh = self.remove_degenerate_faces(opts.area_epsilon)
-        duplicate_polygons_before = int(mesh.quality_metrics(area_epsilon=opts.area_epsilon)["duplicate_polygons"])
+        before_degenerate_count = int(self.quality_metrics(area_epsilon=area_epsilon)["degenerate_triangles"])
+        reason_counts = self._degenerate_polygon_reason_counts(area_epsilon)
+        mesh = self.remove_degenerate_faces(area_epsilon)
+        duplicate_polygons_before = int(mesh.quality_metrics(area_epsilon=area_epsilon)["duplicate_polygons"])
         if opts.delete_duplicates:
             mesh = mesh.remove_duplicate_faces().remove_unreferenced_vertices()
-        duplicate_polygons_after = int(mesh.quality_metrics(area_epsilon=opts.area_epsilon)["duplicate_polygons"])
-        after_degenerate_count = int(mesh.quality_metrics(area_epsilon=opts.area_epsilon)["degenerate_triangles"])
+        duplicate_polygons_after = int(mesh.quality_metrics(area_epsilon=area_epsilon)["duplicate_polygons"])
+        after_degenerate_count = int(mesh.quality_metrics(area_epsilon=area_epsilon)["degenerate_triangles"])
         mesh.metadata = {
             **mesh.metadata,
-            "delete_degenerate_polygons_area_epsilon": f"{opts.area_epsilon:g}",
+            "delete_degenerate_polygons_area_epsilon": f"{area_epsilon:g}",
+            "delete_degenerate_polygons_area_epsilon_mode": "explicit" if opts.area_epsilon is not None else "auto",
             "delete_degenerate_polygons_delete_duplicates": str(opts.delete_duplicates).lower(),
             "delete_degenerate_polygons_vertices_before": str(before_vertex_count),
             "delete_degenerate_polygons_vertices_after": str(mesh.vertex_count),
@@ -1016,8 +1040,9 @@ class Mesh:
         min_edge_length: float | None = None,
         max_edge_length: float | None = None,
         skinny_aspect_ratio: float = 20.0,
-        area_epsilon: float = 1e-12,
+        area_epsilon: float | None = None,
     ) -> dict[str, int | float]:
+        area_epsilon = self._resolve_area_epsilon(area_epsilon)
         if self.triangle_count == 0:
             return {
                 "vertices": self.vertex_count,
@@ -1381,13 +1406,41 @@ class Mesh:
         mesh = self.copy()
         mesh.points = self.points[unique_roots].copy()
         mesh.faces = inverse[self.faces]
-        mesh.normals = None
-        mesh.tangents = None
-        mesh.uvs = {}
+        # Merged vertices keep the union-find root's attributes: averaging UVs
+        # across merged vertices could blend coordinates from different islands.
+        if self.normals is not None:
+            mesh.normals = self.normals[unique_roots].copy()
+        if self.tangents is not None:
+            mesh.tangents = self.tangents[unique_roots].copy()
+        mesh.uvs = {channel: values[unique_roots].copy() for channel, values in self.uvs.items()}
+        uv_conflicts = self._uv_conflict_group_count(roots)
         mesh = mesh.remove_duplicate_faces().remove_degenerate_faces().remove_unreferenced_vertices()
-        mesh.metadata = {**mesh.metadata, "boundary_gap_stitching": "merged_boundary_vertices"}
+        mesh.metadata = {
+            **mesh.metadata,
+            "boundary_gap_stitching": "merged_boundary_vertices",
+            "boundary_gap_stitching_attributes": "representative_vertex",
+        }
+        if uv_conflicts:
+            mesh.metadata["boundary_gap_stitching_uv_conflicts"] = str(uv_conflicts)
         mesh.validate()
         return mesh
+
+    def _uv_conflict_group_count(self, roots: IntArray) -> int:
+        if not self.uvs:
+            return 0
+        conflicted: set[int] = set()
+        members_by_root: dict[int, list[int]] = {}
+        for vertex, root in enumerate(roots.tolist()):
+            members_by_root.setdefault(int(root), []).append(vertex)
+        for root, members in members_by_root.items():
+            if len(members) < 2:
+                continue
+            for values in self.uvs.values():
+                deltas = np.linalg.norm(values[members] - values[root], axis=1)
+                if float(deltas.max()) > 1e-6:
+                    conflicted.add(root)
+                    break
+        return len(conflicted)
 
     def crack_non_manifold_edges(self) -> Mesh:
         edge_faces = self._edge_faces_map()
@@ -1438,13 +1491,14 @@ class Mesh:
         mesh.validate()
         return mesh
 
-    def remove_sliver_faces(self, *, max_aspect_ratio: float = 20.0, area_epsilon: float = 1e-12) -> Mesh:
+    def remove_sliver_faces(self, *, max_aspect_ratio: float = 20.0, area_epsilon: float | None = None) -> Mesh:
         if max_aspect_ratio <= 1.0:
             raise ValueError("max_aspect_ratio must be greater than 1")
-        if area_epsilon < 0.0:
+        if area_epsilon is not None and area_epsilon < 0.0:
             raise ValueError("area_epsilon must be greater than or equal to 0")
         if self.triangle_count == 0:
             return self.copy()
+        area_epsilon = self._resolve_area_epsilon(area_epsilon)
         lengths = self._triangle_edge_lengths()
         areas = self._triangle_areas()
         min_lengths = lengths.min(axis=1)
@@ -2879,12 +2933,15 @@ class Mesh:
             return self.copy()
 
         mesh = self.copy()
-        mesh.faces = np.vstack([self.faces, np.asarray(fill_faces, dtype=np.int64)])
+        fill_array = np.asarray(fill_faces, dtype=np.int64)
+        mesh.faces = np.vstack([self.faces, fill_array])
         if self.material_indices is not None:
-            fill_material = int(self.material_indices[0]) if self.material_indices.size else 0
-            mesh.material_indices = np.concatenate(
-                [self.material_indices.copy(), np.full(len(fill_faces), fill_material, dtype=np.int64)]
-            )
+            fill_materials = self._assign_materials_by_nearest_centroid(self.points, fill_array)
+            if fill_materials is None:
+                fallback = int(self.material_indices[0]) if self.material_indices.size else 0
+                fill_materials = np.full(len(fill_faces), fallback, dtype=np.int64)
+            mesh.material_indices = np.concatenate([self.material_indices.copy(), fill_materials])
+        mesh.metadata = {**mesh.metadata, "hole_fill_faces": str(len(fill_faces))}
         return mesh
 
     def fix_winding(self) -> Mesh:
@@ -3033,8 +3090,16 @@ class Mesh:
         }
         return mesh
 
+    def _invalidate_face_attributes(self, reason: str) -> None:
+        self.material_indices = None
+        self.face_groups = {}
+        self.metadata = {**self.metadata, "face_attribute_remap_dropped": reason}
+
     def _remap_face_attributes_from(self, source: Mesh) -> None:
-        if source.triangle_count != self.triangle_count or (source.material_indices is None and not source.face_groups):
+        if source.material_indices is None and not source.face_groups:
+            return
+        if source.triangle_count != self.triangle_count:
+            self._invalidate_face_attributes("triangle_count_changed")
             return
 
         old_face_indices_by_key: dict[tuple[int, int, int], list[int]] = {}
@@ -3045,6 +3110,7 @@ class Mesh:
         for face in self.faces.astype(int).tolist():
             candidates = old_face_indices_by_key.get(tuple(sorted(face)))
             if not candidates:
+                self._invalidate_face_attributes("face_keys_unmatched")
                 return
             new_to_old.append(candidates.pop(0))
 

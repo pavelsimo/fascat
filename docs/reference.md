@@ -162,9 +162,9 @@ keeping the native source shape for tessellation and healing.
 | `--preserve-merge-vertex-attributes / --drop-merge-vertex-attributes` | `true` | Keep normals, tangents, and UV seams as merge constraints |
 | `--preserve-merge-vertex-material-boundaries / --ignore-merge-vertex-material-boundaries` | `true` | Keep material-boundary signatures as merge constraints |
 | `--delete-merge-vertex-degenerate / --keep-merge-vertex-degenerate` | `true` | Delete degenerate polygons created by vertex merging |
-| `--merge-vertex-area-epsilon` | `1e-12` | Area threshold for degenerate polygons after vertex merging |
+| `--merge-vertex-area-epsilon` | bbox-derived | Area threshold for degenerate polygons after vertex merging (default: 1e-12 × squared bbox diagonal) |
 | `--delete-degenerate-polygons` | `false` | Run standalone degenerate polygon cleanup after vertex merging |
-| `--degenerate-area-epsilon` | `1e-12` | Area threshold for standalone degenerate polygon cleanup |
+| `--degenerate-area-epsilon` | bbox-derived | Area threshold for standalone degenerate polygon cleanup (default: 1e-12 × squared bbox diagonal) |
 | `--delete-duplicate-polygons / --keep-duplicate-polygons` | `true` | Remove exact duplicate polygons during standalone degenerate polygon cleanup |
 | `--texel-density` | unset | UV texel density metadata for unwrap and atlas workflows |
 | `--uv-padding` | `2` | UV island padding metadata in pixels |
@@ -260,7 +260,15 @@ keeping the native source shape for tessellation and healing.
 | `--quantize` | `false` | Write glTF `KHR_mesh_quantization` accessors and node dequantization transforms |
 | `--meshopt` | `false` | Write glTF `EXT_meshopt_compression` bufferView payloads with fallback data |
 | `--draco` | `false` | Compress glTF geometry with `KHR_draco_mesh_compression` |
+| `--draco-compression-level` | `5` | Draco compression level, 0 (fastest) to 10 (smallest) |
+| `--draco-quantize-position` | `14` | Draco position quantization bits (1-30) |
+| `--draco-quantize-normal` | `10` | Draco normal quantization bits (1-30) |
+| `--draco-quantize-texcoord` | `12` | Draco texcoord quantization bits (1-30) |
+| `--draco-quantize-color` | `8` | Draco color quantization bits (1-30) |
 | `--texture-compression` | unset | Compress glTF textures with KTX2/Basis: `ktx2` or `basisu` |
+| `--ktx2-quality` | `128` | KTX2/Basis encoder quality level (0-255) |
+| `--ktx2-effort` | `2` | KTX2/Basis encoder compression effort (0-6) |
+| `--ktx2-uastc/--ktx2-etc1s` | derived | Force UASTC or ETC1S encoding (default derives from `--texture-compression`) |
 | `--texture-fallback-format` | `auto` | PNG/JPEG fallback policy when KTX2/Basis compression is not requested: `auto`, `png`, or `jpeg` |
 | `--png-compression` | `6` | PNG fallback compression level, 0 through 9 |
 | `--jpeg-quality` | `85` | JPEG fallback quality, 0 through 100 |
@@ -292,7 +300,7 @@ keeping the native source shape for tessellation and healing.
 
 - `face_orientation="exterior"` is the implemented closed-component winding path; source-trusted, preserve, viewer-standpoint, open-shell, and unstitched-group policies are explicit in metadata rather than hidden behind `fix_winding`.
 - `fix_winding` flips coherent closed shells with inward signed volume and records before/after flipped-component counts; it detects non-orientable shared-edge cycles first and warns on Möbius-like topology it cannot fix.
-- T-junctions and boundary gaps are **reported but not fixed** — non-zero counts after repair emit a warning, since sewing and stitching aren't implemented.
+- T-junctions and boundary gaps are reported by default and fixed only with the opt-in `fix_t_junctions` / `stitch_boundary_gaps` flags; stitched vertices keep the surviving representative vertex's normals, tangents, and UVs, and UV-conflicting merges are counted in metadata.
 - `--delete-degenerate-polygons` removes repeated-vertex, collapsed-edge, near-flat, and exact-duplicate polygons (separate report counts per reason); use `--keep-duplicate-polygons` to only report duplicates.
 
 ### Decimation
@@ -560,6 +568,16 @@ Supported output suffixes are `.usd`, `.usda`, `.usdc`, `.usdz`, `.gltf`, `.glb`
 
 `convert` validates the generated asset before reporting success. If validation fails, the command exits non-zero.
 
+`convert` prints up to 10 report warnings (budget violations, tessellation and UV
+advisories, export policy notes) on stderr after a successful run; `--quiet`
+suppresses them and `--json` keeps them in the JSON payload instead. Pass
+`--report report.json` for the full list.
+
+All exporters write transactionally: content is produced at a hidden temp file in the
+destination directory, validated there, and atomically renamed into place only on success.
+A failed or interrupted export never leaves a partial or corrupt file at the output path
+(sidecar files from a previous differently-named export are not garbage-collected).
+
 ## Benchmarking
 
 Use the benchmark harness before performance-sensitive changes:
@@ -596,6 +614,7 @@ Color is also disabled when `--no-color` is passed, `TERM=dumb`, or the relevant
 | `0` | Success |
 | `1` | Runtime failure |
 | `2` | Invalid usage |
+| `130` | Interrupted (Ctrl-C) — no partial output file is left behind |
 
 ## Shell completions
 

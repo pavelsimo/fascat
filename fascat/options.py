@@ -1,7 +1,47 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
-from typing import Literal, cast
+import os
+from dataclasses import MISSING, asdict, dataclass, field, fields, replace
+from typing import Any, Literal, cast
+
+from typing_extensions import TypedDict
+
+
+def _options_repr(options: object) -> str:
+    """Dataclass repr showing only fields that differ from their defaults."""
+    rendered: list[str] = []
+    for field_info in fields(cast(Any, options)):
+        if not field_info.repr:
+            continue
+        value = getattr(options, field_info.name)
+        if field_info.default is not MISSING and value == field_info.default:
+            continue
+        if field_info.default_factory is not MISSING and value == field_info.default_factory():
+            continue
+        rendered.append(f"{field_info.name}={value!r}")
+    return f"{type(options).__name__}({', '.join(rendered)})"
+
+
+def default_jobs() -> int:
+    """Default worker count for per-part mesh operations: min(4, CPU count).
+
+    The FASCAT_JOBS environment variable overrides (clamped to >= 1).
+    """
+    override = os.environ.get("FASCAT_JOBS")
+    if override:
+        try:
+            return max(1, int(override))
+        except ValueError:
+            pass
+    return max(1, min(4, os.cpu_count() or 1))
+
+
+class OptionsRepr:
+    """Mixin giving options dataclasses a non-default-fields-only repr."""
+
+    def __repr__(self) -> str:
+        return _options_repr(self)
+
 
 UV0Mode = Literal["none", "box", "unwrap", "lightmap"]
 UV1Mode = Literal["none", "box", "unwrap", "lightmap", "copy_uv0"]
@@ -138,8 +178,8 @@ def _validate_jobs(jobs: int) -> None:
         raise ValueError("jobs must be greater than or equal to 1")
 
 
-@dataclass(frozen=True)
-class TessellationOptions:
+@dataclass(frozen=True, repr=False)
+class TessellationOptions(OptionsRepr):
     sag: float = 0.1
     sag_ratio: float | None = None
     angle: float = 15.0
@@ -186,8 +226,8 @@ class TessellationOptions:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class RepairOptions:
+@dataclass(frozen=True, repr=False)
+class RepairOptions(OptionsRepr):
     tolerance: float = 0.0
     merge_vertices: bool = True
     delete_degenerate: bool = True
@@ -197,18 +237,18 @@ class RepairOptions:
     normal_orientation: NormalOrientationStrategy = "from_faces"
     viewer_position: tuple[float, float, float] | None = None
     fill_small_holes: bool = False
-    area_epsilon: float = 1e-12
+    area_epsilon: float | None = None
     fix_t_junctions: bool = False
     stitch_boundary_gaps: bool = False
     crack_non_manifold_edges: bool = False
     remove_sliver_faces: bool = False
     sliver_aspect_ratio: float = 20.0
-    jobs: int = 1
+    jobs: int = field(default_factory=default_jobs)
 
     def __post_init__(self) -> None:
         if self.tolerance < 0.0:
             raise ValueError("repair tolerance must be greater than or equal to 0")
-        if self.area_epsilon < 0.0:
+        if self.area_epsilon is not None and self.area_epsilon < 0.0:
             raise ValueError("area_epsilon must be greater than or equal to 0")
         if self.sliver_aspect_ratio <= 1.0:
             raise ValueError("sliver_aspect_ratio must be greater than 1")
@@ -243,8 +283,8 @@ class RepairOptions:
         return data
 
 
-@dataclass(frozen=True)
-class MergeVerticesOptions:
+@dataclass(frozen=True, repr=False)
+class MergeVerticesOptions(OptionsRepr):
     tolerance: float = 0.0
     preserve_normals: bool = True
     preserve_tangents: bool = True
@@ -252,13 +292,13 @@ class MergeVerticesOptions:
     preserve_material_boundaries: bool = True
     delete_degenerate: bool = True
     quality_report: bool = False
-    area_epsilon: float = 1e-12
-    jobs: int = 1
+    area_epsilon: float | None = None
+    jobs: int = field(default_factory=default_jobs)
 
     def __post_init__(self) -> None:
         if self.tolerance < 0.0:
             raise ValueError("merge vertices tolerance must be greater than or equal to 0")
-        if self.area_epsilon < 0.0:
+        if self.area_epsilon is not None and self.area_epsilon < 0.0:
             raise ValueError("area_epsilon must be greater than or equal to 0")
         _validate_jobs(self.jobs)
 
@@ -266,21 +306,21 @@ class MergeVerticesOptions:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class DeleteDegeneratePolygonsOptions:
-    area_epsilon: float = 1e-12
+@dataclass(frozen=True, repr=False)
+class DeleteDegeneratePolygonsOptions(OptionsRepr):
+    area_epsilon: float | None = None
     delete_duplicates: bool = True
 
     def __post_init__(self) -> None:
-        if self.area_epsilon < 0.0:
+        if self.area_epsilon is not None and self.area_epsilon < 0.0:
             raise ValueError("area_epsilon must be greater than or equal to 0")
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class StepReadOptions:
+@dataclass(frozen=True, repr=False)
+class StepReadOptions(OptionsRepr):
     metadata: bool = True
     product_metadata: bool = True
     properties: bool = True
@@ -357,14 +397,14 @@ class StepReadOptions:
         return data
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class IgesReadOptions(StepReadOptions):
     pmi: bool = False
     design_variants: bool = False
     multi_file: bool = False
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class BrepReadOptions(StepReadOptions):
     metadata: bool = True
     product_metadata: bool = False
@@ -377,8 +417,8 @@ class BrepReadOptions(StepReadOptions):
     multi_file: bool = False
 
 
-@dataclass(frozen=True)
-class BrepHealOptions:
+@dataclass(frozen=True, repr=False)
+class BrepHealOptions(OptionsRepr):
     tolerance: float = 0.05
     group_open_shells: bool = True
     sew_faces: bool = True
@@ -403,8 +443,8 @@ class BrepHealOptions:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class UnwrapOptions:
+@dataclass(frozen=True, repr=False)
+class UnwrapOptions(OptionsRepr):
     texel_density: float | None = None
     padding: int = 2
     max_stretch: float | None = None
@@ -432,8 +472,8 @@ class UnwrapOptions:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class AtlasOptions:
+@dataclass(frozen=True, repr=False)
+class AtlasOptions(OptionsRepr):
     enabled: bool = False
     max_size: int = 4096
 
@@ -445,8 +485,8 @@ class AtlasOptions:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class AabbProjectionOptions:
+@dataclass(frozen=True, repr=False)
+class AabbProjectionOptions(OptionsRepr):
     scope: AabbProjectionScope = "local"
     uv3d_size: float | None = None
     override_existing: bool = True
@@ -461,8 +501,8 @@ class AabbProjectionOptions:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class StageOptions:
+@dataclass(frozen=True, repr=False)
+class StageOptions(OptionsRepr):
     materials: MaterialMode = "cad"
     material_mode: MaterialPipelineMode = "cad"
     merge_equivalent_materials: bool = False
@@ -482,7 +522,7 @@ class StageOptions:
     uv0: UV0Mode | None = "box"
     uv1: UV1Mode | None = None
     normalize_uvs: tuple[int, ...] = ()
-    jobs: int = 1
+    jobs: int = field(default_factory=default_jobs)
 
     def __post_init__(self) -> None:
         if self.uv0 is None:
@@ -517,8 +557,8 @@ class StageOptions:
         return {**asdict(self), "normalize_uvs": list(self.normalize_uvs)}
 
 
-@dataclass(frozen=True)
-class OptimizeOptions:
+@dataclass(frozen=True, repr=False)
+class OptimizeOptions(OptionsRepr):
     target_triangles: int | None = None
     ratio: float | None = None
     preserve_instances: bool = True
@@ -532,7 +572,7 @@ class OptimizeOptions:
     preserve_small_parts: bool = False
     small_part_triangle_threshold: int = 64
     preserve_silhouette: bool = False
-    jobs: int = 1
+    jobs: int = field(default_factory=default_jobs)
 
     def __post_init__(self) -> None:
         if self.target_triangles is not None and self.target_triangles <= 0:
@@ -549,8 +589,8 @@ class OptimizeOptions:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class LODOptions:
+@dataclass(frozen=True, repr=False)
+class LODOptions(OptionsRepr):
     ratios: list[float] | tuple[float, ...] = (0.5, 0.25, 0.1)
     mode: LODMode = "variants"
     screen_coverage: list[float] | tuple[float, ...] | None = None
@@ -561,7 +601,7 @@ class LODOptions:
     far_lod_bake: bool = False
     scene_far_proxy: bool = False
     validate: bool = False
-    jobs: int = 1
+    jobs: int = field(default_factory=default_jobs)
 
     def __post_init__(self) -> None:
         ratios = tuple(float(ratio) for ratio in self.ratios)
@@ -605,8 +645,8 @@ class LODOptions:
         }
 
 
-@dataclass(frozen=True)
-class MergeOptions:
+@dataclass(frozen=True, repr=False)
+class MergeOptions(OptionsRepr):
     mode: MergeMode = "all"
     keep_parent: bool = True
     metadata: MergeMetadataPolicy = "preserve"
@@ -646,8 +686,8 @@ class MergeOptions:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class ExplodeOptions:
+@dataclass(frozen=True, repr=False)
+class ExplodeOptions(OptionsRepr):
     mode: ExplodeMode = "connected_components"
     metadata: MergeMetadataPolicy = "preserve"
     remove_empty_nodes: bool = True
@@ -662,8 +702,8 @@ class ExplodeOptions:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class ReplaceOptions:
+@dataclass(frozen=True, repr=False)
+class ReplaceOptions(OptionsRepr):
     mode: ReplaceMode = "bounding_box"
     preserve_transform: bool = True
     metadata: MergeMetadataPolicy = "preserve"
@@ -690,8 +730,8 @@ class ReplaceOptions:
         }
 
 
-@dataclass(frozen=True)
-class SceneOptimizeOptions:
+@dataclass(frozen=True, repr=False)
+class SceneOptimizeOptions(OptionsRepr):
     batch_by_material: bool = False
     merge_compatible_meshes: bool = False
     split_large_meshes: bool = False
@@ -720,8 +760,8 @@ class SceneOptimizeOptions:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class BakeMaterialOptions:
+@dataclass(frozen=True, repr=False)
+class BakeMaterialOptions(OptionsRepr):
     maps_resolution: int = 2048
     force_uv_generation: bool = False
     uv_channel: int = 0
@@ -749,8 +789,8 @@ class BakeMaterialOptions:
         return {**asdict(self), "bake": list(self.bake)}
 
 
-@dataclass(frozen=True)
-class TextureProcessOptions:
+@dataclass(frozen=True, repr=False)
+class TextureProcessOptions(OptionsRepr):
     max_resolution: int | None = None
     dedupe: bool = True
     fallback_format: TextureFallbackFormat = "auto"
@@ -779,8 +819,8 @@ class TextureProcessOptions:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class DecimateOptions:
+@dataclass(frozen=True, repr=False)
+class DecimateOptions(OptionsRepr):
     criterion: DecimateCriterion = "target"
     target_triangles: int | None = None
     target_ratio: float | None = 0.5
@@ -795,7 +835,7 @@ class DecimateOptions:
     uv_importance: DecimateUVImportance = "preserve_islands"
     cleanup_attributes: tuple[DecimateCleanupAttribute, ...] = ()
     iterative_threshold: int = 1_000_000
-    jobs: int = 1
+    jobs: int = field(default_factory=default_jobs)
 
     def __post_init__(self) -> None:
         cleanup_attributes = tuple(str(item).replace("-", "_") for item in self.cleanup_attributes)
@@ -831,8 +871,8 @@ class DecimateOptions:
         return {**asdict(self), "cleanup_attributes": list(self.cleanup_attributes)}
 
 
-@dataclass(frozen=True)
-class RemoveHolesOptions:
+@dataclass(frozen=True, repr=False)
+class RemoveHolesOptions(OptionsRepr):
     through: bool = True
     blind: bool = True
     surface: bool = True
@@ -849,8 +889,8 @@ class RemoveHolesOptions:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class RemoveOccludedOptions:
+@dataclass(frozen=True, repr=False)
+class RemoveOccludedOptions(OptionsRepr):
     strategy: OcclusionStrategy = "advanced"
     level: OcclusionLevel = "triangles"
     precision: int = 2048
@@ -876,8 +916,8 @@ class RemoveOccludedOptions:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class LODLevel:
+@dataclass(frozen=True, repr=False)
+class LODLevel(OptionsRepr):
     screen_coverage: float
     target_ratio: float
 
@@ -891,14 +931,14 @@ class LODLevel:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class LODGeneratorOptions:
+@dataclass(frozen=True, repr=False)
+class LODGeneratorOptions(OptionsRepr):
     preset: LODPreset = "desktop"
     levels: tuple[LODLevel, ...] = ()
     validate: bool = True
     output: LODOutput = "variants"
     allow_non_monotonic: bool = False
-    jobs: int = 1
+    jobs: int = field(default_factory=default_jobs)
 
     def __post_init__(self) -> None:
         if self.preset not in {"desktop", "web", "mobile", "vr"}:
@@ -938,8 +978,8 @@ def _lod_preset_levels(preset: LODPreset) -> tuple[LODLevel, ...]:
     return (LODLevel(0.5, 0.5), LODLevel(0.25, 0.25), LODLevel(0.1, 0.1))
 
 
-@dataclass(frozen=True)
-class AnalyzeOptions:
+@dataclass(frozen=True, repr=False)
+class AnalyzeOptions(OptionsRepr):
     non_manifold_edges: bool = False
     open_boundaries: bool = False
     self_intersections: bool = False
@@ -948,14 +988,14 @@ class AnalyzeOptions:
     draw_call_estimate: bool = False
     visual_risk: bool = False
     sliver_aspect_ratio: float = 20.0
-    degenerate_area_epsilon: float = 1e-12
+    degenerate_area_epsilon: float | None = None
     tiny_part_diagonal: float = 1.0
     max_self_intersection_pairs: int = 10_000
 
     def __post_init__(self) -> None:
         if self.sliver_aspect_ratio <= 1.0:
             raise ValueError("sliver_aspect_ratio must be greater than 1")
-        if self.degenerate_area_epsilon < 0.0:
+        if self.degenerate_area_epsilon is not None and self.degenerate_area_epsilon < 0.0:
             raise ValueError("degenerate_area_epsilon must be greater than or equal to 0")
         if self.tiny_part_diagonal < 0.0:
             raise ValueError("tiny_part_diagonal must be greater than or equal to 0")
@@ -966,8 +1006,8 @@ class AnalyzeOptions:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class MetadataExportOptions:
+@dataclass(frozen=True, repr=False)
+class MetadataExportOptions(OptionsRepr):
     mode: MetadataExportMode = "full"
     pmi: PmiExportMode = "metadata"
 
@@ -983,8 +1023,8 @@ class MetadataExportOptions:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class GltfExportOptions:
+@dataclass(frozen=True, repr=False)
+class GltfExportOptions(OptionsRepr):
     preset: GltfExportPreset | None = None
     quantize: bool = False
     meshopt: bool = False
@@ -995,6 +1035,14 @@ class GltfExportOptions:
     jpeg_quality: int = 85
     file_size_budget_mb: float | None = None
     size_ladder: bool = False
+    draco_compression_level: int = 5
+    draco_quantize_position: int = 14
+    draco_quantize_normal: int = 10
+    draco_quantize_texcoord: int = 12
+    draco_quantize_color: int = 8
+    ktx2_quality: int = 128
+    ktx2_effort: int = 2
+    ktx2_uastc: bool | None = None
     metadata: MetadataExportOptions = field(default_factory=MetadataExportOptions)
 
     def __post_init__(self) -> None:
@@ -1020,6 +1068,33 @@ class GltfExportOptions:
             raise ValueError("jpeg_quality must be between 0 and 100")
         if self.file_size_budget_mb is not None and self.file_size_budget_mb <= 0.0:
             raise ValueError("file_size_budget_mb must be greater than 0 when set")
+        if (
+            not isinstance(self.draco_compression_level, int)
+            or isinstance(self.draco_compression_level, bool)
+            or not 0 <= self.draco_compression_level <= 10
+        ):
+            raise ValueError("draco_compression_level must be an integer between 0 and 10")
+        for name in (
+            "draco_quantize_position",
+            "draco_quantize_normal",
+            "draco_quantize_texcoord",
+            "draco_quantize_color",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 30:
+                raise ValueError(f"{name} must be an integer between 1 and 30")
+        if (
+            not isinstance(self.ktx2_quality, int)
+            or isinstance(self.ktx2_quality, bool)
+            or not 0 <= self.ktx2_quality <= 255
+        ):
+            raise ValueError("ktx2_quality must be an integer between 0 and 255")
+        if (
+            not isinstance(self.ktx2_effort, int)
+            or isinstance(self.ktx2_effort, bool)
+            or not 0 <= self.ktx2_effort <= 6
+        ):
+            raise ValueError("ktx2_effort must be an integer between 0 and 6")
 
     def to_dict(self) -> dict[str, object]:
         return {**asdict(self), "metadata": self.metadata.to_dict()}
@@ -1087,8 +1162,10 @@ def resolve_gltf_export_options(options: GltfExportOptions | None = None) -> Glt
     if opts.preset is None:
         return opts
     preset = _GLTF_EXPORT_PRESET_OPTIONS[opts.preset]
-    return GltfExportOptions(
-        preset=opts.preset,
+    # dataclasses.replace keeps every field not named here, so new export
+    # options flow through presets automatically instead of being dropped.
+    return replace(
+        opts,
         quantize=bool(preset["quantize"]),
         meshopt=bool(preset["meshopt"]),
         draco=bool(preset["draco"]) or opts.draco,
@@ -1100,9 +1177,6 @@ def resolve_gltf_export_options(options: GltfExportOptions | None = None) -> Glt
         ),
         png_compression=opts.png_compression if opts.png_compression != 6 else cast(int, preset["png_compression"]),
         jpeg_quality=opts.jpeg_quality if opts.jpeg_quality != 85 else cast(int, preset["jpeg_quality"]),
-        file_size_budget_mb=opts.file_size_budget_mb,
-        size_ladder=opts.size_ladder,
-        metadata=opts.metadata,
     )
 
 
@@ -1119,8 +1193,8 @@ def gltf_export_preset_texture_options(options: GltfExportOptions | None) -> Tex
     )
 
 
-@dataclass(frozen=True)
-class UsdExportOptions:
+@dataclass(frozen=True, repr=False)
+class UsdExportOptions(OptionsRepr):
     package: UsdPackageMode = "default"
     file_size_budget_mb: float | None = None
     metadata: MetadataExportOptions = field(default_factory=MetadataExportOptions)
@@ -1135,8 +1209,8 @@ class UsdExportOptions:
         return {**asdict(self), "metadata": self.metadata.to_dict()}
 
 
-@dataclass(frozen=True)
-class ObjExportOptions:
+@dataclass(frozen=True, repr=False)
+class ObjExportOptions(OptionsRepr):
     materials: bool = True
     write_mtl: bool = True
     preserve_groups: bool = True
@@ -1150,8 +1224,8 @@ class ObjExportOptions:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class StlExportOptions:
+@dataclass(frozen=True, repr=False)
+class StlExportOptions(OptionsRepr):
     binary: bool = True
     merge: bool = True
     file_size_budget_mb: float | None = None
@@ -1164,8 +1238,8 @@ class StlExportOptions:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class FbxExportOptions:
+@dataclass(frozen=True, repr=False)
+class FbxExportOptions(OptionsRepr):
     materials: bool = True
     normals: bool = True
     tangents: bool = True
@@ -1180,8 +1254,8 @@ class FbxExportOptions:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class PlatformBudget:
+@dataclass(frozen=True, repr=False)
+class PlatformBudget(OptionsRepr):
     target_fps: int | None = None
     max_triangles: int | None = None
     max_vertices: int | None = None
@@ -1248,8 +1322,8 @@ class PlatformBudget:
         return data
 
 
-@dataclass(frozen=True)
-class WorkflowRecipeChoice:
+@dataclass(frozen=True, repr=False)
+class WorkflowRecipeChoice(OptionsRepr):
     stage: str
     setting: str
     value: object
@@ -1279,8 +1353,8 @@ class WorkflowRecipeChoice:
         return data
 
 
-@dataclass(frozen=True)
-class WorkflowRecipe:
+@dataclass(frozen=True, repr=False)
+class WorkflowRecipe(OptionsRepr):
     name: str
     target: str
     description: str
@@ -1304,8 +1378,8 @@ class WorkflowRecipe:
         }
 
 
-@dataclass(frozen=True)
-class ConversionProfile:
+@dataclass(frozen=True, repr=False)
+class ConversionProfile(OptionsRepr):
     name: str
     tessellation: TessellationOptions | None
     repair: RepairOptions
@@ -1336,3 +1410,288 @@ def _recipe_value(value: object) -> object:
     if isinstance(value, dict):
         return {str(key): _recipe_value(item) for key, item in value.items()}
     return value
+
+
+# Keyword-argument mirrors of the operation Options dataclasses (PEP 692).
+# Field names and types must match the backing dataclass exactly;
+# tests/test_options_kwargs_parity.py enforces parity in CI.
+
+
+class TessellateKwargs(TypedDict, total=False):
+    """Keyword arguments for :meth:`fascat.Asset.tessellate`; mirrors :class:`TessellationOptions`."""
+
+    sag: float
+    sag_ratio: float | None
+    angle: float
+    relative: bool
+    min_edge_length: float | None
+    max_edge_length: float | None
+    max_polygon_length: float | None
+    preserve_boundaries: bool
+    curvature_adaptive: bool
+    detail_adaptive: bool
+    avoid_skinny_triangles: bool
+    quality_report: bool
+    free_edge_report: bool
+    cad_uvs: bool
+    tessellate_tangents: bool
+    free_edge_geometry: bool
+    create_normals: bool
+    keep_brep: bool
+    reuse_existing_meshes: bool
+    part_settings: dict[str, dict[str, object]]
+
+
+class RepairKwargs(TypedDict, total=False):
+    """Keyword arguments for :meth:`fascat.Asset.repair`; mirrors :class:`RepairOptions`."""
+
+    tolerance: float
+    merge_vertices: bool
+    delete_degenerate: bool
+    fix_winding: bool
+    quality_report: bool
+    face_orientation: FaceOrientationStrategy
+    normal_orientation: NormalOrientationStrategy
+    viewer_position: tuple[float, float, float] | None
+    fill_small_holes: bool
+    area_epsilon: float | None
+    fix_t_junctions: bool
+    stitch_boundary_gaps: bool
+    crack_non_manifold_edges: bool
+    remove_sliver_faces: bool
+    sliver_aspect_ratio: float
+    jobs: int
+
+
+class MergeVerticesKwargs(TypedDict, total=False):
+    """Keyword arguments for :meth:`fascat.Asset.merge_vertices`; mirrors :class:`MergeVerticesOptions`."""
+
+    tolerance: float
+    preserve_normals: bool
+    preserve_tangents: bool
+    preserve_uvs: bool
+    preserve_material_boundaries: bool
+    delete_degenerate: bool
+    quality_report: bool
+    area_epsilon: float | None
+    jobs: int
+
+
+class DeleteDegeneratePolygonsKwargs(TypedDict, total=False):
+    """Keyword arguments for :meth:`fascat.Asset.delete_degenerate_polygons`; mirrors :class:`DeleteDegeneratePolygonsOptions`."""
+
+    area_epsilon: float | None
+    delete_duplicates: bool
+
+
+class HealBrepKwargs(TypedDict, total=False):
+    """Keyword arguments for :meth:`fascat.Asset.heal_brep`; mirrors :class:`BrepHealOptions`."""
+
+    tolerance: float
+    group_open_shells: bool
+    sew_faces: bool
+    fix_edges: bool
+    unify_same_domain: bool
+    remove_overlapping_faces: bool
+    overlap_area_ratio: float
+    remove_sliver_faces: bool
+    max_sliver_area: float
+    unify_tolerances: bool
+    fail_on_open_shells: bool
+
+
+class StageKwargs(TypedDict, total=False):
+    """Keyword arguments for :meth:`fascat.Asset.stage`; mirrors :class:`StageOptions`."""
+
+    materials: MaterialMode
+    material_mode: MaterialPipelineMode
+    merge_equivalent_materials: bool
+    normals: bool
+    normal_mode: NormalMode
+    normal_weighting: NormalWeighting
+    hard_edge_angle: float
+    preserve_face_boundaries: bool
+    override_normals: bool
+    tangents: bool
+    tangent_uv_channel: int
+    override_tangents: bool
+    validate_normals: bool
+    unwrap: UnwrapOptions
+    atlas: AtlasOptions
+    aabb_projection: AabbProjectionOptions
+    uv0: UV0Mode | None
+    uv1: UV1Mode | None
+    normalize_uvs: tuple[int, ...]
+    jobs: int
+
+
+class OptimizeKwargs(TypedDict, total=False):
+    """Keyword arguments for :meth:`fascat.Asset.optimize`; mirrors :class:`OptimizeOptions`."""
+
+    target_triangles: int | None
+    ratio: float | None
+    preserve_instances: bool
+    simplify: bool
+    optimize_buffers: bool
+    preserve_hard_edges: bool
+    hard_edge_angle: float
+    preserve_holes: bool
+    preserve_material_boundaries: bool
+    preserve_uv_seams: bool
+    preserve_small_parts: bool
+    small_part_triangle_threshold: int
+    preserve_silhouette: bool
+    jobs: int
+
+
+class LodsKwargs(TypedDict, total=False):
+    """Keyword arguments for :meth:`fascat.Asset.lods`; mirrors :class:`LODOptions`."""
+
+    ratios: list[float] | tuple[float, ...]
+    mode: LODMode
+    screen_coverage: list[float] | tuple[float, ...] | None
+    per_part_budget: bool
+    drop_tiny_parts: bool
+    tiny_part_screen_size: float
+    engine_profile: LODEngineProfile
+    far_lod_bake: bool
+    scene_far_proxy: bool
+    validate: bool
+    jobs: int
+
+
+class MergeKwargs(TypedDict, total=False):
+    """Keyword arguments for :meth:`fascat.Asset.merge`; mirrors :class:`MergeOptions`."""
+
+    mode: MergeMode
+    keep_parent: bool
+    metadata: MergeMetadataPolicy
+    max_vertices_per_mesh: int | None
+    preserve_materials: bool
+    hierarchy_level: int
+    region_size: float | None
+    merge_strategy: MergeStrategy
+    remove_empty_nodes: bool
+
+
+class ExplodeKwargs(TypedDict, total=False):
+    """Keyword arguments for :meth:`fascat.Asset.explode`; mirrors :class:`ExplodeOptions`."""
+
+    mode: ExplodeMode
+    metadata: MergeMetadataPolicy
+    remove_empty_nodes: bool
+
+
+class ReplaceKwargs(TypedDict, total=False):
+    """Keyword arguments for :meth:`fascat.Asset.replace`; mirrors :class:`ReplaceOptions`."""
+
+    mode: ReplaceMode
+    preserve_transform: bool
+    metadata: MergeMetadataPolicy
+    proxy_mesh: object | None
+    external_path: str | None
+
+
+class OptimizeSceneKwargs(TypedDict, total=False):
+    """Keyword arguments for :meth:`fascat.Asset.optimize_scene`; mirrors :class:`SceneOptimizeOptions`."""
+
+    batch_by_material: bool
+    merge_compatible_meshes: bool
+    split_large_meshes: bool
+    max_vertices_per_mesh: int | None
+    index_buffer: IndexBufferMode
+    flatten: FlattenMode
+    remove_empty_nodes: bool
+    instance_policy: InstancePolicy
+    instance_similarity_tolerance: float
+
+
+class BakeMaterialsKwargs(TypedDict, total=False):
+    """Keyword arguments for :meth:`fascat.Asset.bake_materials`; mirrors :class:`BakeMaterialOptions`."""
+
+    maps_resolution: int
+    force_uv_generation: bool
+    uv_channel: int
+    padding: int
+    bake: tuple[BakeMaterialMap, ...]
+    merge_output: bool
+
+
+class ProcessTexturesKwargs(TypedDict, total=False):
+    """Keyword arguments for :meth:`fascat.Asset.process_textures`; mirrors :class:`TextureProcessOptions`."""
+
+    max_resolution: int | None
+    dedupe: bool
+    fallback_format: TextureFallbackFormat
+    png_compression: int
+    jpeg_quality: int
+
+
+class DecimateKwargs(TypedDict, total=False):
+    """Keyword arguments for :meth:`fascat.Asset.decimate`; mirrors :class:`DecimateOptions`."""
+
+    criterion: DecimateCriterion
+    target_triangles: int | None
+    target_ratio: float | None
+    surface_tolerance: float | None
+    line_tolerance: float | None
+    normal_tolerance: float
+    uv_tolerance: float | None
+    protect_topology: bool
+    preserve_painted_areas: bool
+    preserve_ambient_occlusion: bool
+    budget_scope: BudgetScope
+    uv_importance: DecimateUVImportance
+    cleanup_attributes: tuple[DecimateCleanupAttribute, ...]
+    iterative_threshold: int
+    jobs: int
+
+
+class RemoveHolesKwargs(TypedDict, total=False):
+    """Keyword arguments for :meth:`fascat.Asset.remove_holes`; mirrors :class:`RemoveHolesOptions`."""
+
+    through: bool
+    blind: bool
+    surface: bool
+    max_diameter: float | None
+    prefer_brep: bool
+
+
+class RemoveOccludedKwargs(TypedDict, total=False):
+    """Keyword arguments for :meth:`fascat.Asset.remove_occluded`; mirrors :class:`RemoveOccludedOptions`."""
+
+    strategy: OcclusionStrategy
+    level: OcclusionLevel
+    precision: int
+    hemi_evaluation: bool
+    neighbors_preservation: int
+    consider_transparency_opaque: bool
+    preserve_cavities: bool
+    minimum_cavity_volume_m3: float
+
+
+class RunLodGeneratorsKwargs(TypedDict, total=False):
+    """Keyword arguments for :meth:`fascat.Asset.run_lod_generators`; mirrors :class:`LODGeneratorOptions`."""
+
+    preset: LODPreset
+    levels: tuple[LODLevel, ...]
+    validate: bool
+    output: LODOutput
+    allow_non_monotonic: bool
+    jobs: int
+
+
+class AnalyzeKwargs(TypedDict, total=False):
+    """Keyword arguments for :meth:`fascat.Asset.analyze`; mirrors :class:`AnalyzeOptions`."""
+
+    non_manifold_edges: bool
+    open_boundaries: bool
+    self_intersections: bool
+    sliver_triangles: bool
+    tiny_parts: bool
+    draw_call_estimate: bool
+    visual_risk: bool
+    sliver_aspect_ratio: float
+    degenerate_area_epsilon: float | None
+    tiny_part_diagonal: float
+    max_self_intersection_pairs: int

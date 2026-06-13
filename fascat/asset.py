@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import Unpack
 
+from fascat._format import count_phrase
 from fascat.export_report import stats_with_file_size as _stats_with_file_size
 from fascat.image import ImageResource
 from fascat.material import Material
@@ -14,27 +17,46 @@ from fascat.mesh import Mesh
 from fascat.metadata import Metadata, PmiAnnotation
 from fascat.ops.parallel import parallel_map
 from fascat.options import (
+    AnalyzeKwargs,
     AnalyzeOptions,
     BakeMaterialOptions,
+    BakeMaterialsKwargs,
     BrepHealOptions,
+    DecimateKwargs,
     DecimateOptions,
+    DeleteDegeneratePolygonsKwargs,
     DeleteDegeneratePolygonsOptions,
+    ExplodeKwargs,
     ExplodeOptions,
     FbxExportOptions,
     GltfExportOptions,
+    HealBrepKwargs,
     LODGeneratorOptions,
     LODOptions,
+    LodsKwargs,
+    MergeKwargs,
     MergeOptions,
+    MergeVerticesKwargs,
     MergeVerticesOptions,
     ObjExportOptions,
+    OptimizeKwargs,
     OptimizeOptions,
+    OptimizeSceneKwargs,
+    ProcessTexturesKwargs,
+    RemoveHolesKwargs,
     RemoveHolesOptions,
+    RemoveOccludedKwargs,
     RemoveOccludedOptions,
+    RepairKwargs,
     RepairOptions,
+    ReplaceKwargs,
     ReplaceOptions,
+    RunLodGeneratorsKwargs,
     SceneOptimizeOptions,
+    StageKwargs,
     StageOptions,
     StlExportOptions,
+    TessellateKwargs,
     TessellationOptions,
     TextureProcessOptions,
     UsdExportOptions,
@@ -45,6 +67,19 @@ if TYPE_CHECKING:
     from fascat.analysis import AnalysisReport
 
 Transform = NDArray[np.float64]
+
+_OptionsT = TypeVar("_OptionsT")
+
+
+def _make_options(
+    factory: Callable[..., _OptionsT], options: _OptionsT | None, kwargs: Mapping[str, object]
+) -> _OptionsT:
+    if options is not None:
+        if kwargs:
+            names = ", ".join(sorted(kwargs))
+            raise TypeError(f"pass either options= or keyword arguments ({names}), not both")
+        return options
+    return factory(**kwargs)
 
 
 def identity_transform() -> Transform:
@@ -96,6 +131,12 @@ class Node:
             transform=self.transform.copy(),
             metadata=dict(self.metadata),
         )
+
+    def __repr__(self) -> str:
+        part = "" if self.part_id is None else f" part={self.part_id}"
+        label = "child" if len(self.children) == 1 else "children"
+        children = "" if not self.children else f", {len(self.children)} {label}"
+        return f"<Node {self.id} {self.name!r}{part}{children}>"
 
     def walk(self) -> list[Node]:
         nodes = [self]
@@ -168,6 +209,14 @@ class Part:
             lod_meshes=[mesh.copy() for mesh in self.lod_meshes],
         )
 
+    def __repr__(self) -> str:
+        detail = "no mesh" if self.mesh is None else count_phrase(self.mesh.triangle_count, "triangle")
+        if self.material_ids:
+            detail += f", {count_phrase(len(self.material_ids), 'material')}"
+        if self.lod_meshes:
+            detail += f", {count_phrase(len(self.lod_meshes), 'LOD')}"
+        return f"<Part {self.id} {self.name!r}: {detail}>"
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
@@ -186,6 +235,26 @@ class _MeshPartResult:
     part_id: str
     mesh: Mesh
     fingerprint: str
+
+
+@dataclass(frozen=True)
+class _MeshOpPayload:
+    part_id: str
+    mesh: Mesh
+    options: Any
+    unit_metadata: dict[str, object]
+
+
+def _repair_part_worker(payload: _MeshOpPayload) -> _MeshPartResult:
+    mesh = payload.mesh.repair(payload.options)
+    mesh.metadata = {**payload.unit_metadata, **mesh.metadata}
+    return _MeshPartResult(part_id=payload.part_id, mesh=mesh, fingerprint=mesh.fingerprint())
+
+
+def _merge_vertices_part_worker(payload: _MeshOpPayload) -> _MeshPartResult:
+    mesh = payload.mesh.merge_vertices(payload.options)
+    mesh.metadata = {**mesh.metadata, **payload.unit_metadata}
+    return _MeshPartResult(part_id=payload.part_id, mesh=mesh, fingerprint=mesh.fingerprint())
 
 
 @dataclass
@@ -240,6 +309,13 @@ class Asset:
         asset.pmi = pmi
         asset.report = report
         return asset
+
+    def __repr__(self) -> str:
+        return (
+            f"<Asset: {count_phrase(self.part_count, 'part')}, "
+            f"{count_phrase(self.triangle_count, 'triangle')}, "
+            f"{count_phrase(self.material_count, 'material')}>"
+        )
 
     @property
     def part_count(self) -> int:
@@ -357,20 +433,32 @@ class Asset:
 
         return build_tessellation_quality_report(self)
 
-    def analyze(self, options: AnalyzeOptions | None = None, *, where: Any | None = None) -> AnalysisReport:
+    def analyze(
+        self,
+        options: AnalyzeOptions | None = None,
+        *,
+        where: Any | None = None,
+        **kwargs: Unpack[AnalyzeKwargs],
+    ) -> AnalysisReport:
         from fascat.analysis import analyze_asset
 
-        opts = options or AnalyzeOptions()
+        opts = _make_options(AnalyzeOptions, options, kwargs)
         scope = self._operation_scope(where)
         return analyze_asset(scope.asset, opts, source_path=self.source_path)
 
     def _report_stats(self) -> dict[str, int]:
         return self.stats(include_lods=any(part.lod_meshes for part in self.parts.values()))
 
-    def tessellate(self, options: TessellationOptions | None = None, *, where: Any | None = None) -> Asset:
+    def tessellate(
+        self,
+        options: TessellationOptions | None = None,
+        *,
+        where: Any | None = None,
+        **kwargs: Unpack[TessellateKwargs],
+    ) -> Asset:
         from fascat.ops.tessellate import tessellate_asset, tessellation_tolerance_policy
 
-        opts = options or TessellationOptions()
+        opts = _make_options(TessellationOptions, options, kwargs)
         scope = self._operation_scope(where)
         before = self.stats()
         warning_count = len(self.report.warnings)
@@ -388,8 +476,14 @@ class Asset:
         )
         return asset
 
-    def repair(self, options: RepairOptions | None = None, *, where: Any | None = None) -> Asset:
-        opts = options or RepairOptions()
+    def repair(
+        self,
+        options: RepairOptions | None = None,
+        *,
+        where: Any | None = None,
+        **kwargs: Unpack[RepairKwargs],
+    ) -> Asset:
+        opts = _make_options(RepairOptions, options, kwargs)
         scope = self._operation_scope(where)
         before = self.stats()
         warning_count = len(self.report.warnings)
@@ -415,16 +509,16 @@ class Asset:
         with timed_step() as timer:
             asset = scope.asset.copy(keep_source=True)
             part_ids = _mesh_part_ids(asset, scope.selected_part_ids)
-
-            def repair_part(part_id: str) -> _MeshPartResult:
+            payloads: list[_MeshOpPayload] = []
+            for part_id in part_ids:
                 part = asset.parts[part_id]
                 if part.mesh is None:
                     raise AssertionError("selected repair part must have a mesh")
-                mesh = part.mesh.repair(opts)
-                mesh.metadata = {**repair_unit_metadata, **mesh.metadata}
-                return _MeshPartResult(part_id=part.id, mesh=mesh, fingerprint=mesh.fingerprint())
+                payloads.append(
+                    _MeshOpPayload(part_id=part.id, mesh=part.mesh, options=opts, unit_metadata=repair_unit_metadata)
+                )
 
-            for repaired in parallel_map(part_ids, repair_part, jobs=opts.jobs):
+            for repaired in parallel_map(payloads, _repair_part_worker, jobs=opts.jobs, executor="process"):
                 part = asset.parts[repaired.part_id]
                 part.mesh = repaired.mesh
                 part.fingerprint = repaired.fingerprint
@@ -441,8 +535,14 @@ class Asset:
         )
         return asset
 
-    def merge_vertices(self, options: MergeVerticesOptions | None = None, *, where: Any | None = None) -> Asset:
-        opts = options or MergeVerticesOptions()
+    def merge_vertices(
+        self,
+        options: MergeVerticesOptions | None = None,
+        *,
+        where: Any | None = None,
+        **kwargs: Unpack[MergeVerticesKwargs],
+    ) -> Asset:
+        opts = _make_options(MergeVerticesOptions, options, kwargs)
         scope = self._operation_scope(where)
         before = self.stats()
         warning_count = len(self.report.warnings)
@@ -464,16 +564,16 @@ class Asset:
         with timed_step() as timer:
             asset = scope.asset.copy(keep_source=True)
             part_ids = _mesh_part_ids(asset, scope.selected_part_ids)
-
-            def merge_part_vertices(part_id: str) -> _MeshPartResult:
+            payloads: list[_MeshOpPayload] = []
+            for part_id in part_ids:
                 part = asset.parts[part_id]
                 if part.mesh is None:
                     raise AssertionError("selected merge_vertices part must have a mesh")
-                mesh = part.mesh.merge_vertices(opts)
-                mesh.metadata = {**mesh.metadata, **merge_unit_metadata}
-                return _MeshPartResult(part_id=part.id, mesh=mesh, fingerprint=mesh.fingerprint())
+                payloads.append(
+                    _MeshOpPayload(part_id=part.id, mesh=part.mesh, options=opts, unit_metadata=merge_unit_metadata)
+                )
 
-            for merged in parallel_map(part_ids, merge_part_vertices, jobs=opts.jobs):
+            for merged in parallel_map(payloads, _merge_vertices_part_worker, jobs=opts.jobs, executor="process"):
                 part = asset.parts[merged.part_id]
                 part.mesh = merged.mesh
                 part.fingerprint = merged.fingerprint
@@ -495,8 +595,9 @@ class Asset:
         options: DeleteDegeneratePolygonsOptions | None = None,
         *,
         where: Any | None = None,
+        **kwargs: Unpack[DeleteDegeneratePolygonsKwargs],
     ) -> Asset:
-        opts = options or DeleteDegeneratePolygonsOptions()
+        opts = _make_options(DeleteDegeneratePolygonsOptions, options, kwargs)
         scope = self._operation_scope(where)
         before = self.stats()
         tolerance_policy = _tolerance_policy(
@@ -527,15 +628,35 @@ class Asset:
         )
         return asset
 
-    def stage(self, options: StageOptions | None = None, *, where: Any | None = None) -> Asset:
+    def stage(
+        self,
+        options: StageOptions | None = None,
+        *,
+        where: Any | None = None,
+        **kwargs: Unpack[StageKwargs],
+    ) -> Asset:
         from fascat.ops.stage import stage_asset
 
-        opts = options or StageOptions()
+        opts = _make_options(StageOptions, options, kwargs)
         scope = self._operation_scope(where)
         before = self.stats()
         warning_count = len(self.report.warnings)
-        with timed_step() as timer:
-            asset = stage_asset(scope.asset, opts, selected_part_ids=scope.selected_part_ids)
+        timer = timed_step()
+        try:
+            with timer:
+                asset = stage_asset(scope.asset, opts, selected_part_ids=scope.selected_part_ids)
+        except Exception as exc:
+            self.report.add_error(str(exc) or exc.__class__.__name__)
+            self.report.add_step(
+                "stage",
+                options=_options_with_scope(opts.to_dict(), scope),
+                before=before,
+                after=self._report_stats(),
+                duration=timer.duration,
+            )
+            self.report.finish(self._report_stats())
+            cast(Any, exc).report = self.report
+            raise
         step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
             "stage",
@@ -547,10 +668,16 @@ class Asset:
         )
         return asset
 
-    def optimize(self, options: OptimizeOptions | None = None, *, where: Any | None = None) -> Asset:
+    def optimize(
+        self,
+        options: OptimizeOptions | None = None,
+        *,
+        where: Any | None = None,
+        **kwargs: Unpack[OptimizeKwargs],
+    ) -> Asset:
         from fascat.ops.optimize import optimize_asset
 
-        opts = options or OptimizeOptions()
+        opts = _make_options(OptimizeOptions, options, kwargs)
         scope = self._operation_scope(where)
         before = self.stats()
         warning_count = len(self.report.warnings)
@@ -567,10 +694,21 @@ class Asset:
         )
         return asset
 
-    def lods(self, options: LODOptions | None = None, *, where: Any | None = None) -> Asset:
+    def lods(
+        self,
+        options: LODOptions | Sequence[float] | None = None,
+        *,
+        where: Any | None = None,
+        **kwargs: Unpack[LodsKwargs],
+    ) -> Asset:
         from fascat.ops.lod import build_lods
 
-        opts = options or LODOptions()
+        if options is not None and not isinstance(options, LODOptions):
+            if "ratios" in kwargs:
+                raise TypeError("pass LOD ratios either positionally or as ratios=, not both")
+            opts = LODOptions(ratios=tuple(options), **cast(Any, kwargs))
+        else:
+            opts = _make_options(LODOptions, options, kwargs)
         scope = self._operation_scope(where)
         before = self.stats(include_lods=True)
         warning_count = len(self.report.warnings)
@@ -587,10 +725,16 @@ class Asset:
         )
         return asset
 
-    def merge(self, options: MergeOptions | None = None, *, where: Any | None = None) -> Asset:
+    def merge(
+        self,
+        options: MergeOptions | None = None,
+        *,
+        where: Any | None = None,
+        **kwargs: Unpack[MergeKwargs],
+    ) -> Asset:
         from fascat.ops.hierarchy import merge_asset
 
-        opts = options or MergeOptions()
+        opts = _make_options(MergeOptions, options, kwargs)
         scope = self._operation_scope(where)
         selected_node_ids = (
             scope.selection.node_ids
@@ -615,10 +759,16 @@ class Asset:
         )
         return asset
 
-    def explode(self, options: ExplodeOptions | None = None, *, where: Any | None = None) -> Asset:
+    def explode(
+        self,
+        options: ExplodeOptions | None = None,
+        *,
+        where: Any | None = None,
+        **kwargs: Unpack[ExplodeKwargs],
+    ) -> Asset:
         from fascat.ops.hierarchy import explode_asset
 
-        opts = options or ExplodeOptions()
+        opts = _make_options(ExplodeOptions, options, kwargs)
         scope = self._operation_scope(where)
         selected_node_ids = (
             scope.selection.node_ids
@@ -640,10 +790,16 @@ class Asset:
         )
         return asset
 
-    def replace(self, options: ReplaceOptions | None = None, *, where: Any | None = None) -> Asset:
+    def replace(
+        self,
+        options: ReplaceOptions | None = None,
+        *,
+        where: Any | None = None,
+        **kwargs: Unpack[ReplaceKwargs],
+    ) -> Asset:
         from fascat.ops.hierarchy import replace_asset
 
-        opts = options or ReplaceOptions()
+        opts = _make_options(ReplaceOptions, options, kwargs)
         scope = self._operation_scope(where)
         selected_node_ids = (
             scope.selection.node_ids
@@ -665,10 +821,16 @@ class Asset:
         )
         return asset
 
-    def optimize_scene(self, options: SceneOptimizeOptions | None = None, *, where: Any | None = None) -> Asset:
+    def optimize_scene(
+        self,
+        options: SceneOptimizeOptions | None = None,
+        *,
+        where: Any | None = None,
+        **kwargs: Unpack[OptimizeSceneKwargs],
+    ) -> Asset:
         from fascat.ops.scene import optimize_scene_asset
 
-        opts = options or SceneOptimizeOptions()
+        opts = _make_options(SceneOptimizeOptions, options, kwargs)
         scope = self._operation_scope(where)
         selected_node_ids = (
             scope.selection.node_ids
@@ -694,10 +856,16 @@ class Asset:
         )
         return asset
 
-    def bake_materials(self, options: BakeMaterialOptions | None = None, *, where: Any | None = None) -> Asset:
+    def bake_materials(
+        self,
+        options: BakeMaterialOptions | None = None,
+        *,
+        where: Any | None = None,
+        **kwargs: Unpack[BakeMaterialsKwargs],
+    ) -> Asset:
         from fascat.ops.actions import bake_materials_asset
 
-        opts = options or BakeMaterialOptions()
+        opts = _make_options(BakeMaterialOptions, options, kwargs)
         scope = self._operation_scope(where)
         before = _hierarchy_report_stats(self)
         warning_count = len(self.report.warnings)
@@ -714,10 +882,14 @@ class Asset:
         )
         return asset
 
-    def process_textures(self, options: TextureProcessOptions | None = None) -> Asset:
+    def process_textures(
+        self,
+        options: TextureProcessOptions | None = None,
+        **kwargs: Unpack[ProcessTexturesKwargs],
+    ) -> Asset:
         from fascat.ops.textures import process_textures_asset
 
-        opts = options or TextureProcessOptions()
+        opts = _make_options(TextureProcessOptions, options, kwargs)
         before = self.stats(include_lods=True)
         warning_count = len(self.report.warnings)
         with timed_step() as timer:
@@ -733,10 +905,16 @@ class Asset:
         )
         return asset
 
-    def decimate(self, options: DecimateOptions | None = None, *, where: Any | None = None) -> Asset:
+    def decimate(
+        self,
+        options: DecimateOptions | None = None,
+        *,
+        where: Any | None = None,
+        **kwargs: Unpack[DecimateKwargs],
+    ) -> Asset:
         from fascat.ops.actions import decimate_asset, decimation_target_strategy
 
-        opts = options or DecimateOptions()
+        opts = _make_options(DecimateOptions, options, kwargs)
         scope = self._operation_scope(where)
         before = _hierarchy_report_stats(self)
         warning_count = len(self.report.warnings)
@@ -754,10 +932,16 @@ class Asset:
         )
         return asset
 
-    def remove_holes(self, options: RemoveHolesOptions | None = None, *, where: Any | None = None) -> Asset:
+    def remove_holes(
+        self,
+        options: RemoveHolesOptions | None = None,
+        *,
+        where: Any | None = None,
+        **kwargs: Unpack[RemoveHolesKwargs],
+    ) -> Asset:
         from fascat.ops.actions import remove_holes_asset
 
-        opts = options or RemoveHolesOptions()
+        opts = _make_options(RemoveHolesOptions, options, kwargs)
         scope = self._operation_scope(where)
         before = _hierarchy_report_stats(self)
         warning_count = len(self.report.warnings)
@@ -774,10 +958,16 @@ class Asset:
         )
         return asset
 
-    def remove_occluded(self, options: RemoveOccludedOptions | None = None, *, where: Any | None = None) -> Asset:
+    def remove_occluded(
+        self,
+        options: RemoveOccludedOptions | None = None,
+        *,
+        where: Any | None = None,
+        **kwargs: Unpack[RemoveOccludedKwargs],
+    ) -> Asset:
         from fascat.ops.actions import remove_occluded_asset
 
-        opts = options or RemoveOccludedOptions()
+        opts = _make_options(RemoveOccludedOptions, options, kwargs)
         scope = self._operation_scope(where)
         selected_node_ids = (
             scope.selection.node_ids
@@ -799,10 +989,16 @@ class Asset:
         )
         return asset
 
-    def run_lod_generators(self, options: LODGeneratorOptions | None = None, *, where: Any | None = None) -> Asset:
+    def run_lod_generators(
+        self,
+        options: LODGeneratorOptions | None = None,
+        *,
+        where: Any | None = None,
+        **kwargs: Unpack[RunLodGeneratorsKwargs],
+    ) -> Asset:
         from fascat.ops.actions import run_lod_generators_asset
 
-        opts = options or LODGeneratorOptions()
+        opts = _make_options(LODGeneratorOptions, options, kwargs)
         scope = self._operation_scope(where)
         before = _hierarchy_report_stats(self)
         warning_count = len(self.report.warnings)
@@ -819,10 +1015,16 @@ class Asset:
         )
         return asset
 
-    def heal_brep(self, options: BrepHealOptions | None = None, *, where: Any | None = None) -> Asset:
+    def heal_brep(
+        self,
+        options: BrepHealOptions | None = None,
+        *,
+        where: Any | None = None,
+        **kwargs: Unpack[HealBrepKwargs],
+    ) -> Asset:
         from fascat.ops.heal import heal_brep_asset
 
-        opts = options or BrepHealOptions()
+        opts = _make_options(BrepHealOptions, options, kwargs)
         scope = self._operation_scope(where)
         before = self.stats()
         warning_count = len(self.report.warnings)
@@ -1116,7 +1318,7 @@ def _tolerance_policy(
     asset: Asset,
     *,
     length_tolerance: float,
-    area_tolerance: float,
+    area_tolerance: float | None,
     length_key: str,
     area_key: str,
     operations: dict[str, str],
@@ -1128,7 +1330,7 @@ def _tolerance_policy(
         if source_units != asset.units or not np.isclose(source_meters_per_unit, asset.meters_per_unit)
         else "asset"
     )
-    return {
+    policy: dict[str, object] = {
         "coordinate_space": coordinate_space,
         "effective_units": source_units,
         "effective_meters_per_unit": source_meters_per_unit,
@@ -1138,10 +1340,14 @@ def _tolerance_policy(
         "target_meters_per_unit": asset.meters_per_unit,
         length_key: length_tolerance,
         f"{length_key}_meters": length_tolerance * source_meters_per_unit,
-        area_key: area_tolerance,
-        f"{area_key}_square_meters": area_tolerance * source_meters_per_unit * source_meters_per_unit,
         "operations": dict(operations),
     }
+    if area_tolerance is None:
+        policy[area_key] = "auto_bbox_derived"
+    else:
+        policy[area_key] = area_tolerance
+        policy[f"{area_key}_square_meters"] = area_tolerance * source_meters_per_unit * source_meters_per_unit
+    return policy
 
 
 def _tolerance_policy_metadata(prefix: str, policy: dict[str, object]) -> dict[str, object]:

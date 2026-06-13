@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -49,7 +50,7 @@ from fascat.report import Report
 def test_read_step_bytes_closes_and_removes_temporary_file(monkeypatch: pytest.MonkeyPatch) -> None:
     seen_paths: list[Path] = []
 
-    def fake_read_step_path(path: Path, *, source_identity: str, options: fc.StepReadOptions) -> fc.Asset:
+    def fake_read_step_path(path: Path, *, source_identity: str, options: StepReadOptions) -> fc.Asset:
         assert source_identity == "stdin.step"
         assert path.exists()
         seen_paths.append(path)
@@ -4409,6 +4410,255 @@ def test_step_source_texture_extraction_reports_missing_references(tmp_path: Pat
     assert extraction.warnings == ["source texture reference could not be resolved: missing_normal.jpg"]
 
 
+def test_resolve_source_texture_rejects_parent_directory_traversal(tmp_path: Path) -> None:
+    from fascat.io.step import _resolve_source_texture
+
+    root = tmp_path / "cad"
+    root.mkdir()
+    outside = tmp_path / "leak.png"
+    outside.write_bytes(b"png")
+
+    assert _resolve_source_texture("../leak.png", [root]) is None
+
+
+def test_resolve_source_texture_rejects_absolute_reference_outside_roots(tmp_path: Path) -> None:
+    from fascat.io.step import _resolve_source_texture
+
+    root = tmp_path / "cad"
+    root.mkdir()
+    outside = tmp_path / "secret.png"
+    outside.write_bytes(b"png")
+
+    assert _resolve_source_texture(str(outside), [root]) is None
+
+
+def test_resolve_source_texture_allows_absolute_reference_inside_search_root(tmp_path: Path) -> None:
+    from fascat.io.step import _resolve_source_texture
+
+    root = tmp_path / "cad"
+    root.mkdir()
+    inside = root / "panel.png"
+    inside.write_bytes(b"png")
+
+    assert _resolve_source_texture(str(inside), [root]) == inside
+
+
+def test_resolve_source_texture_allows_dotdot_that_stays_within_root(tmp_path: Path) -> None:
+    from fascat.io.step import _resolve_source_texture
+
+    root = tmp_path / "cad"
+    (root / "sub").mkdir(parents=True)
+    inside = root / "panel.png"
+    inside.write_bytes(b"png")
+
+    resolved = _resolve_source_texture("sub/../panel.png", [root])
+
+    assert resolved is not None
+    assert resolved.resolve() == inside.resolve()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_resolve_source_texture_rejects_symlink_escape(tmp_path: Path) -> None:
+    from fascat.io.step import _resolve_source_texture
+
+    root = tmp_path / "cad"
+    root.mkdir()
+    outside = tmp_path / "secret.png"
+    outside.write_bytes(b"png")
+    (root / "alias.png").symlink_to(outside)
+
+    assert _resolve_source_texture("alias.png", [root]) is None
+
+
+def test_resolve_material_library_reference_rejects_traversal(tmp_path: Path) -> None:
+    from fascat.io.step import _resolve_material_library_reference
+
+    root = tmp_path / "cad"
+    root.mkdir()
+    outside = tmp_path / "library.json"
+    outside.write_text("{}", encoding="utf-8")
+
+    assert _resolve_material_library_reference("../library.json", [root]) is None
+    assert _resolve_material_library_reference(str(outside), [root]) is None
+
+
+def test_step_source_texture_extraction_does_not_resolve_traversal_reference(tmp_path: Path) -> None:
+    root = tmp_path / "cad"
+    root.mkdir()
+    leak = tmp_path / "leak.png"
+    Image.new("RGBA", (2, 2), (1, 2, 3, 255)).save(leak)
+    source = root / "panel.step"
+    source.write_text(
+        "ISO-10303-21;\nDATA;\n#1=EXTERNAL_REFERENCE('../leak.png');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    extraction = _extract_source_textures(source, "panel.step", StepReadOptions())
+
+    assert extraction.images == {}
+    assert extraction.summary["missing"] == 1
+    assert extraction.summary["resolved"] == 0
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("plain", "plain"),
+        (r"a\\b", "a\\b"),
+        (r"caf\S\i", "café"),
+        (r"\PG\\S\d", "δ"),
+        (r"\X\C4", "Ä"),
+        (r"\X2\00E9\X0\ acute", "é acute"),
+        ("\\X2\\004100E9\\X0\\", "Aé"),
+        ("\\X4\\0001F600\\X0\\", "😀"),
+        (r"\PE\\S\T\S\5", "дЕ"),
+    ],
+)
+def test_decode_step_string_directives(raw: str, expected: str) -> None:
+    assert step_io._decode_step_string(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "\\X2\\12\\X0\\",
+        r"\X2\00E9",
+        r"\X\ZZ",
+        "trailing\\",
+        r"bare \S",
+        r"\PZ\page",
+        "\\X4\\FFFFFFFF\\X0\\",
+    ],
+)
+def test_decode_step_string_keeps_malformed_sequences_literal(raw: str) -> None:
+    assert step_io._decode_step_string(raw) == raw
+
+
+def test_step_string_values_decodes_iso_escapes() -> None:
+    assert step_io._step_string_values(r"('NAME \X2\00E9\X0\')") == ["NAME é"]
+
+
+def test_step_pmi_annotation_text_decodes_unicode_escapes(tmp_path: Path) -> None:
+    source = tmp_path / "pmi.step"
+    source.write_text(
+        "ISO-10303-21;\nDATA;\n#1=ANNOTATION_TEXT_OCCURRENCE('len \\X2\\00B5\\X0\\m');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    annotations = step_io._extract_step_pmi_annotations(source, StepReadOptions(pmi=True))
+
+    assert any("µm" in annotation.text for annotation in annotations)
+
+
+def test_step_source_texture_reference_decodes_unicode_filename(tmp_path: Path) -> None:
+    texture = tmp_path / "panél.png"
+    Image.new("RGBA", (2, 2), (10, 20, 30, 255)).save(texture)
+    source = tmp_path / "panel.step"
+    source.write_text(
+        "ISO-10303-21;\nDATA;\n#1=EXTERNAL_REFERENCE('pan\\X2\\00E9\\X0\\l.png');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    extraction = _extract_source_textures(source, "panel.step", StepReadOptions())
+
+    assert extraction.summary["resolved"] == 1
+
+
+def test_find_step_record_args_end_bounds_unterminated_string() -> None:
+    text = "('unterminated " + "x" * 2_000_000
+
+    assert step_io._find_step_record_args_end(text, 0) is None
+
+
+def test_find_step_record_args_end_respects_explicit_bound() -> None:
+    text = "('payload value')"
+
+    assert step_io._find_step_record_args_end(text, 0, max_scan=8) is None
+    assert step_io._find_step_record_args_end(text, 0) == len(text) - 1
+
+
+def test_iter_step_records_recovers_after_unterminated_record() -> None:
+    text = "#1=BROKEN_ENTITY('unterminated\n#2=DIMENSIONAL_SIZE(#9,'diameter 5.0');\n"
+
+    records = step_io._iter_step_records(text)
+
+    assert any(record.entity == "DIMENSIONAL_SIZE" for record in records)
+
+
+def test_pmi_extraction_completes_on_unterminated_string(tmp_path: Path) -> None:
+    source = tmp_path / "pmi.step"
+    source.write_text(
+        "ISO-10303-21;\nDATA;\n"
+        "#1=BROKEN_ENTITY('unterminated\n"
+        "#2=DIMENSIONAL_SIZE(#9,'diameter 5.0');\n"
+        "ENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    annotations = step_io._extract_step_pmi_annotations(source, StepReadOptions(pmi=True))
+
+    assert any("diameter" in annotation.text for annotation in annotations)
+
+
+def test_oversized_step_skips_auxiliary_scans(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(step_io, "_MAX_STEP_SCAN_BYTES", 16)
+    texture = tmp_path / "panel.png"
+    Image.new("RGBA", (2, 2), (1, 2, 3, 255)).save(texture)
+    source = tmp_path / "panel.step"
+    source.write_text(
+        "ISO-10303-21;\nDATA;\n"
+        "#1=EXTERNAL_REFERENCE('panel.png');\n"
+        "#2=DIMENSIONAL_SIZE(#9,'diameter 5.0');\n"
+        "ENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    annotations = step_io._extract_step_pmi_annotations(source, StepReadOptions(pmi=True))
+    extraction = _extract_source_textures(source, "panel.step", StepReadOptions())
+    warnings = step_io._import_warnings(
+        StepReadOptions(),
+        step_io._step_header_info(source),
+        0,
+        scan_capped=step_io._step_scan_capped(source),
+    )
+
+    assert annotations == []
+    assert extraction.summary["references"] == 0
+    assert any("auxiliary STEP text scans skipped" in warning for warning in warnings)
+
+
+def test_oversized_material_library_is_reported_unreadable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(step_io, "_MAX_MATERIAL_LIBRARY_BYTES", 4)
+    library = tmp_path / "materials.json"
+    library.write_text('{"materials": [{"name": "steel"}]}', encoding="utf-8")
+    source = tmp_path / "panel.step"
+    source.write_text(
+        "ISO-10303-21;\nDATA;\n#1=EXTERNAL_REFERENCE('materials.json');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    extraction = _extract_material_libraries(source, "panel.step", StepReadOptions())
+
+    assert extraction.summary["unreadable"] == 1
+    assert any("is too large" in warning for warning in extraction.warnings)
+
+
+def test_oversized_source_texture_is_reported_unreadable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(step_io, "_MAX_SOURCE_TEXTURE_BYTES", 4)
+    texture = tmp_path / "panel.png"
+    Image.new("RGBA", (2, 2), (1, 2, 3, 255)).save(texture)
+    source = tmp_path / "panel.step"
+    source.write_text(
+        "ISO-10303-21;\nDATA;\n#1=EXTERNAL_REFERENCE('panel.png');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    extraction = _extract_source_textures(source, "panel.step", StepReadOptions())
+
+    assert extraction.summary["unreadable"] == 1
+    assert any("is too large" in warning for warning in extraction.warnings)
+
+
 def test_step_material_library_json_maps_pbr_factors_and_textures(tmp_path: Path) -> None:
     texture = tmp_path / "steel_baseColor.png"
     Image.new("RGBA", (2, 2), (200, 210, 220, 255)).save(texture)
@@ -5011,3 +5261,9 @@ def test_step_shape_fingerprints_are_stable_across_imports() -> None:
     assert [part.metadata["shape_fingerprint"] for part in first.parts.values()] == [
         part.metadata["shape_fingerprint"] for part in second.parts.values()
     ]
+
+
+def test_step_string_values_preserve_decoded_non_breaking_space() -> None:
+    values = step_io._step_string_values("('a\\S\\ b')")
+
+    assert values == ["a\xa0b"]

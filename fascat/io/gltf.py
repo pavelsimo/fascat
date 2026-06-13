@@ -16,14 +16,17 @@ from urllib.parse import unquote, urlparse
 import numpy as np
 from numpy.typing import NDArray
 
+from fascat import _subprocess
 from fascat.asset import Asset, Node, Part
 from fascat.export_report import referenced_materials
 from fascat.image import ImageResource
+from fascat.io._atomic import atomic_output, publish_staged
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.metadata import pmi_ids_by_part
 from fascat.options import GltfExportOptions, MetadataExportOptions, resolve_gltf_export_options
 from fascat.pmi_visuals import PmiVisualMarker, build_pmi_visual_markers
+from fascat.report import Report
 
 GLTF_SUFFIXES = {".gltf", ".glb"}
 BinaryPayload = bytes | bytearray | memoryview
@@ -186,15 +189,16 @@ def _write_gltf(
     if opts.meshopt:
         binary = _apply_meshopt_compression(document, binary)
     if opts.draco or opts.texture_compression is not None:
-        _write_gltf_with_external_compression(document, binary, output_path, opts)
-        return validate_gltf(output_path) if validate else None
-    if suffix == ".gltf":
+        return _write_gltf_with_external_compression(document, binary, output_path, opts, validate=validate)
+    if suffix == ".gltf" and binary:
         _embed_binary_uri(document, binary)
-    if suffix == ".glb":
-        output_path.write_bytes(_pack_glb(document, binary))
-    else:
-        output_path.write_text(json.dumps(document, indent=2, sort_keys=False) + "\n", encoding="utf-8")
-    return validate_gltf(output_path) if validate else None
+    with atomic_output(output_path) as temp:
+        if suffix == ".glb":
+            temp.write_bytes(_pack_glb(document, binary))
+        else:
+            temp.write_text(json.dumps(document, indent=2, sort_keys=False) + "\n", encoding="utf-8")
+        stats = validate_gltf(temp) if validate else None
+    return stats
 
 
 def runtime_dependency_report(asset: Asset, options: GltfExportOptions | None = None) -> dict[str, object]:
@@ -681,7 +685,7 @@ def _build_document(
     for part in asset.parts.values():
         if part.mesh is None:
             continue
-        part_meshes[part.id] = _append_mesh(
+        base_index = _append_mesh(
             builder,
             meshes,
             part,
@@ -692,7 +696,11 @@ def _build_document(
             quantization.get(part.id),
             lod=0,
             pmi_ids=pmi_by_part.get(part.id, []),
+            report=asset.report,
         )
+        if base_index is None:
+            continue
+        part_meshes[part.id] = base_index
         lod_entries: list[dict[str, object]] = []
         for lod, lod_mesh in enumerate(part.lod_meshes, start=1):
             mesh_index = _append_mesh(
@@ -706,7 +714,10 @@ def _build_document(
                 quantization.get(part.id),
                 lod=lod,
                 pmi_ids=pmi_by_part.get(part.id, []),
+                report=asset.report,
             )
+            if mesh_index is None:
+                continue
             lod_entries.append(_lod_entry(mesh_index, lod, lod_mesh))
         if lod_entries:
             part_lods[part.id] = lod_entries
@@ -727,7 +738,6 @@ def _build_document(
             pmi_visual_material_index,
         )
     binary = builder.data
-    buffers: list[dict[str, object]] = [{"byteLength": len(binary)}]
     fascat_extras = {
         "units": asset.units,
         "metersPerUnit": asset.meters_per_unit,
@@ -748,12 +758,14 @@ def _build_document(
         "scene": 0,
         "scenes": [{"name": asset.root.name or "Scene", "nodes": scene_nodes}],
         "nodes": nodes,
-        "buffers": buffers,
-        "bufferViews": builder.buffer_views,
-        "accessors": builder.accessors,
-        "meshes": meshes,
         "extras": {"fascat": fascat_extras},
     }
+    if binary:
+        document["buffers"] = [{"byteLength": len(binary)}]
+        document["bufferViews"] = builder.buffer_views
+        document["accessors"] = builder.accessors
+    if meshes:
+        document["meshes"] = meshes
     if material_indices:
         document["materials"] = [
             {key: value for key, value in material.items() if key != "_fascat_index"}
@@ -1162,8 +1174,19 @@ def _append_mesh(
     *,
     lod: int,
     pmi_ids: list[str],
-) -> int:
+    report: Report,
+) -> int | None:
     mesh.validate()
+    face_groups = _face_groups(part, mesh)
+    if face_groups.out_of_bounds:
+        report.add_warning(
+            f"glTF export: part '{part.name or part.id}' lod {lod} has material indices "
+            f"{face_groups.out_of_bounds} outside its {len(part.material_ids)} material binding(s); "
+            "affected faces export without a material"
+        )
+    if not any(faces.size for _material_id, faces in face_groups.groups):
+        report.add_warning(f"glTF export skipped '{part.name or part.id}' lod {lod}: mesh has no renderable faces")
+        return None
     points = _points_to_export_space(mesh.points, export_space.linear)
     if quantization is None:
         float_points = points.astype(np.float32)
@@ -1259,7 +1282,7 @@ def _append_mesh(
             )
 
     primitives: list[dict[str, Any]] = []
-    for material_id, faces in _face_groups(part, mesh):
+    for material_id, faces in face_groups.groups:
         if faces.size == 0:
             continue
         indices = mesh.faces[faces].reshape(-1)
@@ -1318,53 +1341,112 @@ def _write_gltf_with_external_compression(
     binary: BinaryPayload,
     output_path: Path,
     options: GltfExportOptions,
-) -> None:
+    *,
+    validate: bool,
+) -> dict[str, int] | None:
     with tempfile.TemporaryDirectory(prefix="fascat-gltf-") as directory:
         workdir = Path(directory)
         current = workdir / "source.glb"
         current.write_bytes(_pack_glb(document, binary))
         if options.draco:
             draco_output = workdir / "draco.glb"
-            _run_gltf_transform(("draco", str(current), str(draco_output)))
+            # gltf-transform's encode-speed is inverse to draco's compression
+            # level; the tool requires 1-10, so level 10 clamps to speed 1.
+            encode_speed = max(1, 10 - options.draco_compression_level)
+            _run_gltf_transform(
+                (
+                    "draco",
+                    str(current),
+                    str(draco_output),
+                    "--encode-speed",
+                    str(encode_speed),
+                    "--quantize-position",
+                    str(options.draco_quantize_position),
+                    "--quantize-normal",
+                    str(options.draco_quantize_normal),
+                    "--quantize-texcoord",
+                    str(options.draco_quantize_texcoord),
+                    "--quantize-color",
+                    str(options.draco_quantize_color),
+                )
+            )
             current = draco_output
         if options.texture_compression is not None:
             texture_output = workdir / "textures.glb"
-            _run_ktx2_transform(current, texture_output, mode=options.texture_compression)
+            _run_ktx2_transform(current, texture_output, mode=options.texture_compression, options=options)
             current = texture_output
         if output_path.suffix.lower() == ".glb":
-            shutil.copyfile(current, output_path)
-            return
-        _run_gltf_transform(("copy", str(current), str(output_path)))
+            stats = validate_gltf(current) if validate else None
+            with atomic_output(output_path) as temp:
+                shutil.copyfile(current, temp)
+            return stats
+        # Stage the .gltf under its final name so relative sidecar URIs (the
+        # transform copy step emits an external .bin) resolve both during
+        # staged validation and after publication.
+        staged_dir = workdir / "staged"
+        staged_dir.mkdir()
+        staged_entry = staged_dir / output_path.name
+        _run_gltf_transform(("copy", str(current), str(staged_entry)))
+        stats = validate_gltf(staged_entry) if validate else None
+        sidecars = sorted(item for item in staged_dir.iterdir() if item != staged_entry)
+        publish_staged(
+            [*sidecars, staged_entry],
+            [*(output_path.parent / sidecar.name for sidecar in sidecars), output_path],
+        )
+        return stats
 
 
 def _run_gltf_transform(arguments: Sequence[str]) -> None:
     command = _gltf_transform_command()
-    completed = subprocess.run(
-        [*command, *arguments],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        completed = _subprocess.run_guarded(
+            [*command, *arguments],
+            timeout=_subprocess.GLTF_TRANSFORM_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"glTF Transform {' '.join(arguments[:1])} timed out after {_subprocess.GLTF_TRANSFORM_TIMEOUT_SECONDS:g}s"
+        ) from exc
     if completed.returncode != 0:
         details = (completed.stderr or completed.stdout).strip()
         raise RuntimeError(f"glTF Transform {' '.join(arguments[:1])} failed: {details}")
 
 
-def _run_ktx2_transform(input_path: Path, output_path: Path, *, mode: str) -> None:
+def _run_ktx2_transform(
+    input_path: Path,
+    output_path: Path,
+    *,
+    mode: str,
+    options: GltfExportOptions | None = None,
+) -> None:
     node = shutil.which("node")
     if node is None:
         raise RuntimeError("KTX2/Basis export requires node and installed KTX2 encoder packages")
-    with tempfile.TemporaryDirectory(prefix="fascat-ktx2-") as directory:
+    resolved = options or GltfExportOptions()
+    uastc_argument = "auto" if resolved.ktx2_uastc is None else ("1" if resolved.ktx2_uastc else "0")
+    with tempfile.TemporaryDirectory(prefix="fascat-ktx2-", ignore_cleanup_errors=True) as directory:
         workdir = Path(directory)
         script = workdir / "encode-ktx2.mjs"
         script.write_text(_KTX2_TRANSFORM_SCRIPT, encoding="utf-8")
-        completed = subprocess.run(
-            [node, str(script), str(input_path), str(output_path), mode],
-            cwd=Path.cwd(),
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            completed = _subprocess.run_guarded(
+                [
+                    node,
+                    str(script),
+                    str(input_path),
+                    str(output_path),
+                    mode,
+                    str(resolved.ktx2_quality),
+                    str(resolved.ktx2_effort),
+                    uastc_argument,
+                ],
+                timeout=_subprocess.KTX2_ENCODE_TIMEOUT_SECONDS,
+                cwd=Path.cwd(),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"KTX2/Basis texture compression timed out after {_subprocess.KTX2_ENCODE_TIMEOUT_SECONDS:g}s"
+            ) from exc
         if completed.returncode != 0:
             details = (completed.stderr or completed.stdout).strip()
             raise RuntimeError(
@@ -1386,7 +1468,8 @@ const { KHRTextureBasisu } = await import(pathToFileURL(require.resolve('@gltf-t
 const { ktx2 } = await import(pathToFileURL(require.resolve('ktx2-encoder/gltf-transform')).href);
 const sharp = (await import(pathToFileURL(require.resolve('sharp')).href)).default;
 
-const [input, output, mode] = process.argv.slice(2);
+const [input, output, mode, quality, effort, uastc] = process.argv.slice(2);
+const isUASTC = uastc === 'auto' ? mode === 'ktx2' : uastc === '1';
 const imageDecoder = async (buffer) => {
   const { data, info } = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   return { width: info.width, height: info.height, data: new Uint8Array(data) };
@@ -1395,9 +1478,11 @@ const io = new NodeIO().registerExtensions([KHRTextureBasisu]);
 const document = await io.read(input);
 await document.transform(
   ktx2({
-    isUASTC: mode === 'ktx2',
+    isUASTC,
     isKTX2File: true,
     generateMipmap: true,
+    qualityLevel: Number(quality),
+    compressionLevel: Number(effort),
     imageDecoder,
   })
 );
@@ -1574,16 +1659,29 @@ def _metadata_float(value: object) -> object:
         return str(value)
 
 
-def _face_groups(part: Part, mesh: Mesh) -> list[tuple[str | None, NDArray[np.int64]]]:
+@dataclass(frozen=True)
+class _FaceGroupResult:
+    groups: list[tuple[str | None, NDArray[np.int64]]]
+    out_of_bounds: list[int]
+
+
+def _face_groups(part: Part, mesh: Mesh) -> _FaceGroupResult:
     all_faces = np.arange(mesh.triangle_count, dtype=np.int64)
     if mesh.material_indices is None:
         material_id = part.material_ids[0] if part.material_ids else None
-        return [(material_id, all_faces)]
+        return _FaceGroupResult(groups=[(material_id, all_faces)], out_of_bounds=[])
     groups: list[tuple[str | None, NDArray[np.int64]]] = []
+    out_of_bounds: list[int] = []
     for material_index in sorted(set(mesh.material_indices.astype(int).tolist())):
-        material_id = part.material_ids[material_index] if material_index < len(part.material_ids) else None
+        # An explicit bounds check: negative indices must not wrap around via
+        # Python indexing and silently bind the wrong material.
+        if 0 <= material_index < len(part.material_ids):
+            material_id = part.material_ids[material_index]
+        else:
+            material_id = None
+            out_of_bounds.append(material_index)
         groups.append((material_id, np.flatnonzero(mesh.material_indices == material_index).astype(np.int64)))
-    return groups
+    return _FaceGroupResult(groups=groups, out_of_bounds=out_of_bounds)
 
 
 def _append_node(

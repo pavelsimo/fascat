@@ -717,6 +717,52 @@ def test_repair_can_stitch_boundary_gaps() -> None:
     assert repaired.metadata["repair_boundary_gap_stitching"] == "stitched"
 
 
+def _gap_mesh_with_attributes(*, gap_uvs: bool) -> Mesh:
+    points = np.array(
+        [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1.005, 0, 0], [2, 0, 0], [1.005, 1, 0]],
+        dtype=float,
+    )
+    uvs = points[:, :2].copy()
+    if gap_uvs:
+        uvs[3] = [5.0, 5.0]
+    else:
+        uvs[3] = uvs[1]
+    normals = np.tile([0.0, 0.0, 1.0], (6, 1))
+    tangents = np.tile([1.0, 0.0, 0.0, 1.0], (6, 1))
+    return Mesh(
+        points=points,
+        faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=int),
+        normals=normals,
+        tangents=tangents,
+        uvs={0: uvs},
+    )
+
+
+def test_stitch_boundary_gaps_preserves_vertex_attributes() -> None:
+    mesh = _gap_mesh_with_attributes(gap_uvs=False)
+
+    stitched = mesh.stitch_boundary_gaps(0.01)
+
+    assert stitched.vertex_count == 5
+    assert stitched.normals is not None and stitched.normals.shape == (5, 3)
+    assert stitched.tangents is not None and stitched.tangents.shape == (5, 4)
+    assert 0 in stitched.uvs and stitched.uvs[0].shape == (5, 2)
+    original_uv_rows = {tuple(row) for row in mesh.uvs[0].tolist()}
+    assert all(tuple(row) in original_uv_rows for row in stitched.uvs[0].tolist())
+    assert np.allclose(stitched.normals, [0.0, 0.0, 1.0])
+    assert stitched.metadata["boundary_gap_stitching_attributes"] == "representative_vertex"
+    assert "boundary_gap_stitching_uv_conflicts" not in stitched.metadata
+
+
+def test_stitch_boundary_gaps_records_uv_seam_conflicts() -> None:
+    mesh = _gap_mesh_with_attributes(gap_uvs=True)
+
+    stitched = mesh.stitch_boundary_gaps(0.01)
+
+    assert stitched.uvs[0].shape == (5, 2)
+    assert stitched.metadata["boundary_gap_stitching_uv_conflicts"] == "1"
+
+
 def test_repair_can_crack_non_manifold_edges() -> None:
     mesh = Mesh(
         points=np.array(
@@ -1485,6 +1531,42 @@ def test_fill_holes_is_limited_to_small_non_planar_boundaries() -> None:
     assert open_tetrahedron.fill_holes().triangle_count == 4
 
 
+def test_fill_holes_assigns_materials_from_nearest_faces() -> None:
+    mesh = Mesh(
+        points=np.array(
+            [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [10, 0, 0], [11, 0, 0], [10, 1, 0], [10, 0, 1]],
+            dtype=float,
+        ),
+        faces=np.array([[0, 2, 1], [0, 1, 3], [1, 2, 3], [4, 6, 5], [4, 5, 7], [5, 6, 7]], dtype=int),
+        material_indices=np.array([1, 1, 1, 0, 0, 0], dtype=int),
+    )
+
+    filled = mesh.fill_holes()
+
+    assert filled.triangle_count == 8
+    assert filled.material_indices is not None
+    assert filled.material_indices[:6].tolist() == [1, 1, 1, 0, 0, 0]
+    for face, material in zip(filled.faces[6:].tolist(), filled.material_indices[6:].tolist(), strict=True):
+        expected = 1 if all(vertex < 4 for vertex in face) else 0
+        assert material == expected
+    assert filled.metadata["hole_fill_faces"] == "2"
+
+
+def test_fill_holes_leaves_face_groups_unchanged() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float),
+        faces=np.array([[0, 2, 1], [0, 1, 3], [1, 2, 3]], dtype=int),
+        face_groups={"cap": np.array([0], dtype=int)},
+    )
+
+    filled = mesh.fill_holes()
+
+    assert filled.triangle_count == 4
+    assert filled.face_groups["cap"].tolist() == [0]
+    assert all(indices.max() < 3 for indices in filled.face_groups.values())
+    assert filled.metadata["hole_fill_faces"] == "1"
+
+
 @pytest.mark.requires_xatlas
 def test_unwrap_uv_uses_xatlas_backend() -> None:
     pytest.importorskip("xatlas")
@@ -1498,6 +1580,116 @@ def test_unwrap_uv_uses_xatlas_backend() -> None:
     assert unwrapped.metadata["uv0"] == "xatlas"
     assert unwrapped.uvs[0].shape == (unwrapped.vertex_count, 2)
     assert np.isfinite(unwrapped.uvs[0]).all()
+
+
+@pytest.mark.parametrize("scale", [1.0, 1e-6, 1e3])
+def test_remove_degenerate_faces_default_epsilon_is_scale_invariant(scale: float) -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float) * scale,
+        faces=np.array([[0, 1, 2], [2, 1, 3]], dtype=int),
+    )
+
+    assert mesh.remove_degenerate_faces().triangle_count == 2
+
+
+def test_remove_degenerate_faces_removes_relative_slivers_in_large_models() -> None:
+    # The third face is a sliver whose area (~5e-10) is negligible relative to a
+    # 1000-unit model but far above the historic fixed 1e-12 threshold.
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [1000, 0, 0],
+                [0, 1000, 0],
+                [1000, 1000, 0],
+                [500, 500, 0],
+                [501, 500, 0],
+                [500.5, 500 + 1e-9, 0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [2, 1, 3], [4, 5, 6]], dtype=int),
+    )
+
+    cleaned = mesh.remove_degenerate_faces()
+
+    assert cleaned.triangle_count == 2
+    assert mesh.remove_degenerate_faces(area_epsilon=1e-12).triangle_count == 3
+
+
+def test_remove_degenerate_faces_explicit_epsilon_is_authoritative() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+
+    assert mesh.remove_degenerate_faces(area_epsilon=10.0).triangle_count == 0
+    assert mesh.remove_degenerate_faces(area_epsilon=0.0).triangle_count == 1
+
+
+def test_delete_degenerate_polygons_reports_resolved_epsilon_mode() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+
+    auto = mesh.delete_degenerate_polygons()
+    explicit = mesh.delete_degenerate_polygons(DeleteDegeneratePolygonsOptions(area_epsilon=1e-9))
+
+    assert auto.metadata["delete_degenerate_polygons_area_epsilon_mode"] == "auto"
+    assert float(auto.metadata["delete_degenerate_polygons_area_epsilon"]) == pytest.approx(2e-12)
+    assert explicit.metadata["delete_degenerate_polygons_area_epsilon_mode"] == "explicit"
+    assert explicit.metadata["delete_degenerate_polygons_area_epsilon"] == "1e-09"
+
+
+def test_remap_face_attributes_invalidates_on_unmatched_faces() -> None:
+    source = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [2, 1, 3]], dtype=int),
+        material_indices=np.array([0, 1], dtype=int),
+        face_groups={"panel": np.array([1], dtype=int)},
+    )
+    target = source.copy()
+    target.faces = np.array([[0, 1, 2], [0, 1, 3]], dtype=int)
+
+    target._remap_face_attributes_from(source)
+
+    assert target.material_indices is None
+    assert target.face_groups == {}
+    assert target.metadata["face_attribute_remap_dropped"] == "face_keys_unmatched"
+
+
+def test_remap_face_attributes_invalidates_on_count_change() -> None:
+    source = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [2, 1, 3]], dtype=int),
+        material_indices=np.array([0, 1], dtype=int),
+    )
+    target = source.copy()
+    target.faces = np.array([[0, 1, 2]], dtype=int)
+
+    target._remap_face_attributes_from(source)
+
+    assert target.material_indices is None
+    assert target.metadata["face_attribute_remap_dropped"] == "triangle_count_changed"
+
+
+def test_remap_face_attributes_follows_face_permutation() -> None:
+    source = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [2, 1, 3]], dtype=int),
+        material_indices=np.array([0, 1], dtype=int),
+        face_groups={"panel": np.array([1], dtype=int)},
+    )
+    target = source.copy()
+    target.faces = np.array([[1, 3, 2], [2, 1, 0]], dtype=int)
+
+    target._remap_face_attributes_from(source)
+
+    assert target.material_indices is not None
+    assert target.material_indices.tolist() == [1, 0]
+    assert target.face_groups["panel"].tolist() == [0]
+    assert "face_attribute_remap_dropped" not in target.metadata
 
 
 def _brute_force_nearest_materials(source: Mesh, points: np.ndarray, faces: np.ndarray) -> list[int]:

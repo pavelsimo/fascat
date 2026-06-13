@@ -92,62 +92,22 @@ Fascat follows standard CLI stream conventions: primary output and JSON go to st
 ```python
 import fascat as fc
 
-asset = fc.read_step("motor.step")
-# Or:
-# asset = fc.read_iges("legacy.igs")
-# asset = fc.read_brep("native.brep")
+asset = fc.read_step("motor.step")          # or read_iges(...) / read_brep(...)
 
-asset = asset.tessellate(
-    fc.TessellationOptions(
-        sag=0.1,
-        sag_ratio=None,
-        angle=15.0,
-        relative=True,
-        max_edge_length=None,
-        max_polygon_length=None,
-        free_edge_report=False,
-        reuse_existing_meshes=True,
-    )
-)
-
-asset = asset.repair(
-    fc.RepairOptions(
-        tolerance=0.05,
-        merge_vertices=True,
-        delete_degenerate=True,
-        fix_winding=True,
-        fill_small_holes=False,
-    )
-)
-
-asset = asset.stage(
-    fc.StageOptions(
-        materials="cad",
-        normals=True,
-        uv0="box",
-        uv1=None,
-    )
-)
-
-asset = asset.optimize(
-    fc.OptimizeOptions(
-        target_triangles=500_000,
-        preserve_instances=True,
-        simplify=True,
-        optimize_buffers=True,
-    )
-)
-
-asset = asset.lods(
-    fc.LODOptions(
-        ratios=[0.5, 0.25, 0.1],
-        mode="variants",
-    )
+asset = (
+    asset.tessellate(sag=0.1, angle=15.0)
+    .repair(tolerance=0.05)
+    .stage(materials="cad", uv0="box")
+    .optimize(target_triangles=500_000)
+    .lods([0.5, 0.25, 0.1])
 )
 
 asset.write_usd("motor.usdc")
 asset.write_gltf("motor.glb")
 ```
+
+Keyword arguments mirror each operation's `*Options` dataclass; pass a prebuilt
+options object instead when you prefer (`asset.repair(fc.RepairOptions(tolerance=0.05))`).
 
 ## Docs
 

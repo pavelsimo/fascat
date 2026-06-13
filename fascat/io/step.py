@@ -14,7 +14,6 @@ from typing import Any, cast
 from urllib.parse import unquote, urlparse
 
 import numpy as np
-from PIL import Image
 
 from fascat._ocp import shape_fingerprint as _shape_fingerprint
 from fascat.asset import Asset, Node, Part
@@ -61,6 +60,13 @@ _MATERIAL_LIBRARY_SUFFIXES = _MATERIAL_RECORD_SUFFIXES | _MATERIAL_LIBRARY_CONTA
 _MATERIAL_LIBRARY_REF_RE = re.compile(r"'([^']+\.(?:json|mtl|zip)(?:[#?][^']*)?)'", re.IGNORECASE)
 _STEP_SUFFIXES = {".step", ".stp"}
 _STEP_EXTERNAL_REF_RE = re.compile(r"'([^']+\.(?:step|stp)(?:[#?][^']*)?)'", re.IGNORECASE)
+# Resource caps for the auxiliary textual passes over untrusted input (PMI,
+# design variants, external/texture/library references). OCCT geometry import
+# is unaffected: oversized files skip these passes with a report warning, and
+# oversized sidecar files are reported unreadable instead of being loaded.
+_MAX_STEP_SCAN_BYTES = 64 * 1024 * 1024
+_MAX_MATERIAL_LIBRARY_BYTES = 16 * 1024 * 1024
+_MAX_SOURCE_TEXTURE_BYTES = 64 * 1024 * 1024
 _STEP_RECORD_START_RE = re.compile(r"#(\d+)\s*=\s*([A-Z0-9_]+)\s*\(", re.IGNORECASE)
 _STEP_REFERENCE_RE = re.compile(r"#(\d+)")
 _STEP_NUMBER_RE = re.compile(r"(?<![#A-Za-z0-9_])[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[Ee][-+]?\d+)?")
@@ -870,6 +876,29 @@ def _read_step_with_external_references(source: Path, options: StepReadOptions) 
     return asset
 
 
+def _step_scan_capped(source: Path) -> bool:
+    try:
+        return source.stat().st_size > _MAX_STEP_SCAN_BYTES
+    except OSError:
+        return False
+
+
+def _read_step_scan_text(source: Path) -> str | None:
+    """Read a STEP file for an auxiliary text pass; None when over the scan cap."""
+    if _step_scan_capped(source):
+        return None
+    return source.read_text(encoding="utf-8", errors="ignore")
+
+
+def _ensure_loadable_file_size(path: Path, limit: int, label: str) -> None:
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return
+    if size > limit:
+        raise ValueError(f"{label} is too large: {path} ({size} bytes exceeds {limit} byte limit)")
+
+
 def _resolve_step_external_reference_graph(source: Path) -> _StepExternalReferenceGraph:
     root = source
     root_key = str(root.resolve())
@@ -882,6 +911,9 @@ def _resolve_step_external_reference_graph(source: Path) -> _StepExternalReferen
 
     while queue:
         current = queue.pop(0)
+        if _step_scan_capped(current):
+            warnings.append(f"external reference scan skipped: {current} exceeds {_MAX_STEP_SCAN_BYTES} bytes")
+            continue
         for reference in _step_external_references(current):
             cleaned, unsupported_reason = _clean_step_external_reference(reference)
             if cleaned is None:
@@ -939,7 +971,9 @@ def _resolve_step_external_reference_graph(source: Path) -> _StepExternalReferen
 
 
 def _step_external_references(source: Path) -> list[str]:
-    text = source.read_text(encoding="utf-8", errors="ignore")
+    text = _read_step_scan_text(source)
+    if text is None:
+        return []
     references: list[str] = []
     for match in _STEP_EXTERNAL_REF_RE.finditer(text):
         reference = match.group(1).replace("''", "'").strip()
@@ -950,7 +984,7 @@ def _step_external_references(source: Path) -> list[str]:
 
 
 def _clean_step_external_reference(reference: str) -> tuple[str | None, str | None]:
-    value = reference.replace("''", "'").strip().strip('"<>')
+    value = _decode_step_string(reference.replace("''", "'")).strip().strip('"<>')
     parsed = urlparse(value)
     if parsed.scheme and not _looks_like_windows_path(value):
         if parsed.scheme.lower() != "file":
@@ -1096,6 +1130,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
             header_info,
             unsupported_pmi_count,
             design_variant_count=design_variants.summary["records"],
+            scan_capped=_step_scan_capped(source),
         ),
         *source_textures.warnings,
         *material_libraries.warnings,
@@ -1872,7 +1907,9 @@ def _step_header_info(source: Path) -> _StepHeaderInfo:
 def _extract_step_pmi_annotations(source: Path, options: StepReadOptions) -> list[PmiAnnotation]:
     if not options.pmi:
         return []
-    text = source.read_text(encoding="utf-8", errors="ignore")
+    text = _read_step_scan_text(source)
+    if text is None:
+        return []
     annotations: list[PmiAnnotation] = []
     for record in _iter_step_records(text):
         kind = _STEP_PMI_ENTITY_KINDS.get(record.entity)
@@ -1913,7 +1950,14 @@ def _extract_step_pmi_semantic_graph(source: Path, options: StepReadOptions) -> 
             warnings=(),
         )
 
-    text = source.read_text(encoding="utf-8", errors="ignore")
+    text = _read_step_scan_text(source)
+    if text is None:
+        return _StepPmiSemanticGraphExtraction(
+            nodes=(),
+            edges=(),
+            summary=_empty_pmi_semantic_graph_summary(),
+            warnings=(),
+        )
     records = {f"#{record.number}": record for record in _iter_step_records(text)}
     pmi_ids = tuple(record_id for record_id, record in records.items() if record.entity in _STEP_PMI_ENTITY_KINDS)
     if not pmi_ids:
@@ -2067,7 +2111,9 @@ def _extract_step_design_variants(source: Path, options: StepReadOptions) -> _St
     if not options.design_variants and not options.design_variant_selection:
         return _StepDesignVariantExtraction(records=(), summary=_empty_design_variant_summary(), warnings=())
 
-    text = source.read_text(encoding="utf-8", errors="ignore")
+    text = _read_step_scan_text(source)
+    if text is None:
+        return _StepDesignVariantExtraction(records=(), summary=_empty_design_variant_summary(), warnings=())
     step_records = {f"#{record.number}": record for record in _iter_step_records(text)}
     records: list[_StepDesignVariantRecord] = []
     for record in step_records.values():
@@ -3953,11 +3999,22 @@ def _iter_step_records(text: str) -> list[_StepRecord]:
     return records
 
 
-def _find_step_record_args_end(text: str, open_paren_index: int) -> int | None:
+# Bounds the forward scan for a record's closing parenthesis: an unterminated
+# string would otherwise scan to EOF for every record lookup (O(file size)
+# each). Legitimate argument lists stay far below 1 MiB, and records past the
+# bound are skipped by the textual scanner only — geometry import goes through
+# OCCT separately.
+_MAX_STEP_RECORD_ARGS_BYTES = 1_048_576
+
+
+def _find_step_record_args_end(
+    text: str, open_paren_index: int, *, max_scan: int = _MAX_STEP_RECORD_ARGS_BYTES
+) -> int | None:
     depth = 0
     in_string = False
     index = open_paren_index
-    while index < len(text):
+    limit = min(len(text), open_paren_index + max_scan)
+    while index < limit:
         char = text[index]
         if in_string:
             if char == "'":
@@ -3981,6 +4038,99 @@ def _find_step_record_args_end(text: str, open_paren_index: int) -> int | None:
     return None
 
 
+_ASCII_WHITESPACE_RE = re.compile(r"[ \t\r\n\f\v]+")
+
+# ISO 10303-21 §6.4.3 control-directive codepages for \P?\ and \S\ sequences.
+_STEP_CODEPAGES = {
+    "A": "iso8859-1",
+    "B": "iso8859-2",
+    "C": "iso8859-3",
+    "D": "iso8859-4",
+    "E": "iso8859-5",
+    "F": "iso8859-6",
+    "G": "iso8859-7",
+    "H": "iso8859-8",
+    "I": "iso8859-9",
+}
+
+
+def _decode_step_hex_groups(digits: str, group_size: int) -> str | None:
+    if not digits or len(digits) % group_size != 0:
+        return None
+    try:
+        if group_size == 4:
+            return bytes.fromhex(digits).decode("utf-16-be")
+        characters: list[str] = []
+        for start in range(0, len(digits), 8):
+            code_point = int(digits[start : start + 8], 16)
+            if code_point > 0x10FFFF or 0xD800 <= code_point <= 0xDFFF:
+                return None
+            characters.append(chr(code_point))
+        return "".join(characters)
+    except ValueError:
+        return None
+
+
+def _decode_step_string(value: str) -> str:
+    """Decode ISO 10303-21 string control directives.
+
+    Handles ``\\\\``, ``\\S\\c`` (codepage high half), ``\\P{A-I}\\`` (codepage
+    selection), ``\\X\\HH`` (Latin-1), ``\\X2\\…\\X0\\`` (UTF-16BE groups), and
+    ``\\X4\\…\\X0\\`` (UCS-4 groups). Malformed or incomplete directives stay
+    literal — untrusted input must never raise here.
+    """
+    if "\\" not in value:
+        return value
+    result: list[str] = []
+    codepage = _STEP_CODEPAGES["A"]
+    index = 0
+    length = len(value)
+    while index < length:
+        char = value[index]
+        if char != "\\":
+            result.append(char)
+            index += 1
+            continue
+        if value.startswith("\\\\", index):
+            result.append("\\")
+            index += 2
+            continue
+        if value.startswith("\\S\\", index) and index + 3 < length:
+            target = value[index + 3]
+            if ord(target) < 0x80:
+                try:
+                    result.append(bytes([ord(target) + 0x80]).decode(codepage))
+                    index += 4
+                    continue
+                except UnicodeDecodeError:
+                    pass
+        if value.startswith("\\P", index) and index + 3 < length and value[index + 3] == "\\":
+            mapped = _STEP_CODEPAGES.get(value[index + 2].upper())
+            if mapped is not None:
+                codepage = mapped
+                index += 4
+                continue
+        if value.startswith(("\\X2\\", "\\X4\\"), index):
+            group_size = 4 if value[index + 2] == "2" else 8
+            terminator = value.find("\\X0\\", index + 4)
+            if terminator != -1:
+                decoded = _decode_step_hex_groups(value[index + 4 : terminator], group_size)
+                if decoded is not None:
+                    result.append(decoded)
+                    index = terminator + 4
+                    continue
+        if value.startswith("\\X\\", index) and index + 5 <= length:
+            try:
+                result.append(chr(int(value[index + 3 : index + 5], 16)))
+                index += 5
+                continue
+            except ValueError:
+                pass
+        result.append(char)
+        index += 1
+    return "".join(result)
+
+
 def _step_string_values(text: str) -> list[str]:
     values: list[str] = []
     index = 0
@@ -4001,7 +4151,9 @@ def _step_string_values(text: str) -> list[str]:
                 break
             value.append(char)
             index += 1
-        cleaned = " ".join("".join(value).split())
+        # Collapse only ASCII whitespace: decoded directives can produce
+        # meaningful Unicode whitespace (e.g. \S\<space> -> NBSP) that must survive.
+        cleaned = _ASCII_WHITESPACE_RE.sub(" ", _decode_step_string("".join(value))).strip()
         if cleaned:
             values.append(cleaned)
     return values
@@ -4074,8 +4226,15 @@ def _import_warnings(
     unsupported_pmi_count: int,
     *,
     design_variant_count: int = 0,
+    scan_capped: bool = False,
 ) -> list[str]:
     warnings: list[str] = []
+    if scan_capped:
+        warnings.append(
+            "auxiliary STEP text scans skipped: file exceeds "
+            f"{_MAX_STEP_SCAN_BYTES} bytes (textual PMI, design variants, "
+            "source textures, material libraries)"
+        )
     if options.pmi and unsupported_pmi_count:
         warnings.append(
             "STEP file advertises AP242 PMI, but no supported typed PMI entities were extracted; annotations are omitted"
@@ -5297,6 +5456,8 @@ def _extract_material_libraries(
 
 
 def _material_library_references(source: Path) -> list[str]:
+    if _step_scan_capped(source):
+        return []
     try:
         text = source.read_text(encoding="utf-8", errors="ignore")
     except OSError:
@@ -5312,6 +5473,26 @@ def _material_library_references(source: Path) -> list[str]:
     return references
 
 
+def _confine_to_search_roots(candidate: Path, search_roots: list[Path]) -> bool:
+    """True when the candidate's resolved path stays inside at least one search root.
+
+    References come from untrusted STEP file content; resolving both sides
+    rejects ``..`` traversal and symlink escapes while still allowing
+    references that re-enter a configured root.
+    """
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        return False
+    for root in search_roots:
+        try:
+            if resolved.is_relative_to(root.resolve()):
+                return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
 def _resolve_material_library_reference(reference: str, search_roots: list[Path]) -> Path | None:
     candidate = Path(reference)
     candidates: list[Path] = []
@@ -5323,6 +5504,8 @@ def _resolve_material_library_reference(reference: str, search_roots: list[Path]
             if candidate.name != str(candidate):
                 candidates.append(root / candidate.name)
     for item in candidates:
+        if not _confine_to_search_roots(item, search_roots):
+            continue
         try:
             if item.is_file() and item.suffix.lower() in _MATERIAL_LIBRARY_SUFFIXES:
                 return item
@@ -5392,6 +5575,7 @@ def _load_json_material_library(
     seen_texture_paths: set[str],
     search_roots: list[Path],
 ) -> tuple[list[_MaterialLibrarySpec], dict[str, int]]:
+    _ensure_loadable_file_size(path, _MAX_MATERIAL_LIBRARY_BYTES, "material library")
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -5431,6 +5615,7 @@ def _load_zipped_material_library(
     search_roots: list[Path],
 ) -> tuple[list[_MaterialLibrarySpec], dict[str, int]]:
     _ = search_roots
+    _ensure_loadable_file_size(path, _MAX_MATERIAL_LIBRARY_BYTES, "material library archive")
     try:
         with zipfile.ZipFile(path) as archive:
             material_members = _archive_material_members(archive)
@@ -5809,6 +5994,7 @@ def _load_mtl_material_library(
     seen_texture_paths: set[str],
     search_roots: list[Path],
 ) -> tuple[list[_MaterialLibrarySpec], dict[str, int]]:
+    _ensure_loadable_file_size(path, _MAX_MATERIAL_LIBRARY_BYTES, "material library")
     try:
         lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
     except OSError as exc:
@@ -6186,6 +6372,8 @@ def _extract_source_textures(source: Path, source_identity: str, options: StepRe
 
 
 def _source_texture_references(source: Path) -> list[str]:
+    if _step_scan_capped(source):
+        return []
     try:
         text = source.read_text(encoding="utf-8", errors="ignore")
     except OSError:
@@ -6202,7 +6390,7 @@ def _source_texture_references(source: Path) -> list[str]:
 
 
 def _clean_source_texture_reference(reference: str) -> str:
-    value = reference.replace("''", "'").strip().strip('"<>')
+    value = _decode_step_string(reference.replace("''", "'")).strip().strip('"<>')
     if not value:
         return ""
     if value.lower().startswith("file://"):
@@ -6223,6 +6411,8 @@ def _resolve_source_texture(reference: str, search_roots: list[Path]) -> Path | 
             if candidate.name != str(candidate):
                 candidates.append(root / candidate.name)
     for item in candidates:
+        if not _confine_to_search_roots(item, search_roots):
+            continue
         try:
             if item.is_file():
                 return item
@@ -6232,6 +6422,7 @@ def _resolve_source_texture(reference: str, search_roots: list[Path]) -> Path | 
 
 
 def _load_source_texture(path: Path, *, source_identity: str, reference: str) -> ImageResource:
+    _ensure_loadable_file_size(path, _MAX_SOURCE_TEXTURE_BYTES, "source texture")
     data = path.read_bytes()
     return _load_source_texture_data(
         data,
@@ -6262,6 +6453,8 @@ def _load_source_texture_data(
         mime_type: ImageMimeType = "image/ktx2"
     else:
         try:
+            from PIL import Image
+
             with Image.open(BytesIO(data)) as image:
                 image.load()
                 width, height = image.size

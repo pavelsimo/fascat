@@ -22,9 +22,9 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Multimedia :: Graphics :: 3D Modeling",
+    "Typing :: Typed",
 ]
 dependencies = [
-    "alktx2>=0.1.6; python_version >= '3.11' and ((sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'win32' and (platform_machine == 'AMD64' or platform_machine == 'x86_64')))",
     "cadquery-ocp>=7.7",
     "fast-simplification>=0.1",
     "meshoptimizer>=0.2.30a0,<0.3",

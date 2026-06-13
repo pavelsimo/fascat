@@ -52,18 +52,36 @@ def optimize_asset(asset: Asset, options: OptimizeOptions, *, selected_part_ids:
         if (selected_part_ids is None or part.id in selected_part_ids) and part.mesh is not None
     ]
 
-    def optimize_part(part_id: str) -> _OptimizedPart:
+    payloads: list[_OptimizePayload] = []
+    for part_id in part_ids:
         part = result.parts[part_id]
         if part.mesh is None:
             raise AssertionError("selected optimize part must have a mesh")
-        return _optimize_part(part, options, target=targets.get(part.id) if targets is not None else None)
+        payloads.append(
+            _OptimizePayload(
+                part=part.copy(keep_source=False),
+                options=options,
+                target=targets.get(part.id) if targets is not None else None,
+            )
+        )
 
-    for optimized in parallel_map(part_ids, optimize_part, jobs=options.jobs):
+    for optimized in parallel_map(payloads, _optimize_part_worker, jobs=options.jobs, executor="process"):
         part = result.parts[optimized.part_id]
         part.mesh = optimized.mesh
         part.metadata = optimized.metadata
         part.fingerprint = optimized.fingerprint
     return result
+
+
+@dataclass(frozen=True)
+class _OptimizePayload:
+    part: Part
+    options: OptimizeOptions
+    target: int | None
+
+
+def _optimize_part_worker(payload: _OptimizePayload) -> _OptimizedPart:
+    return _optimize_part(payload.part, payload.options, target=payload.target)
 
 
 def _optimize_part(part: Part, options: OptimizeOptions, *, target: int | None) -> _OptimizedPart:

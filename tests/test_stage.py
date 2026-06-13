@@ -783,8 +783,8 @@ def test_stage_unwrap_uv_uses_xatlas_backend() -> None:
     assert staged_mesh.metadata["uv0_sharp_to_seam_status"] == "intent"
     assert staged_mesh.metadata["uv0_forbid_overlapping_requested"] == "true"
     assert staged_mesh.metadata["uv0_forbid_overlapping_effective"] == "true"
-    assert staged_mesh.metadata["uv0_forbid_overlapping_enforced"] == "false"
-    assert staged_mesh.metadata["uv0_forbid_overlapping_status"] == "validated_not_enforced"
+    assert staged_mesh.metadata["uv0_forbid_overlapping_enforced"] == "true"
+    assert staged_mesh.metadata["uv0_forbid_overlapping_status"] == "validated"
     assert staged.metadata["stage_uv_policy_intent_channels"] == "4"
     assert staged.report.steps[-1].after["stage_uv_policy_intent_channels"] == 4
     assert sorted(staged_mesh.uvs) == [0, 1]
@@ -797,7 +797,7 @@ def test_stage_unwrap_uv_uses_xatlas_backend() -> None:
     )
 
 
-def test_stage_records_forbid_overlapping_policy_for_tileable_uv0() -> None:
+def test_stage_enforces_forbid_overlapping_policy_for_tileable_uv0() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
         faces=np.array([[0, 1, 2], [1, 3, 2]], dtype=int),
@@ -808,20 +808,10 @@ def test_stage_records_forbid_overlapping_policy_for_tileable_uv0() -> None:
         parts={"part": Part(id="part", name="Part", mesh=mesh)},
     )
 
-    staged = asset.stage(StageOptions(uv0="none", uv1=None, unwrap=UnwrapOptions(forbid_overlapping=True)))
-    staged_mesh = staged.parts["part"].mesh
+    from fascat.ops.stage import UVOverlapError
 
-    assert staged_mesh is not None
-    assert staged_mesh.metadata["uv0_domain"] == "tileable"
-    assert staged_mesh.metadata["uv0_forbid_overlapping_requested"] == "true"
-    assert staged_mesh.metadata["uv0_forbid_overlapping_effective"] == "true"
-    assert staged_mesh.metadata["uv0_forbid_overlapping_status"] == "violation"
-    assert staged_mesh.metadata["uv0_overlap_check"] == "checked"
-    assert staged_mesh.metadata["uv0_overlap_pairs"] == "1"
-    assert staged_mesh.metadata["uv0_validation_status"] == "overlap_pairs"
-    assert staged.metadata["stage_uv_forbid_overlapping_violations"] == "1"
-    assert staged.report.steps[-1].after["stage_uv_forbid_overlapping_violations"] == 1
-    assert any("violates requested forbid-overlapping UV policy" in warning for warning in staged.report.warnings)
+    with pytest.raises(UVOverlapError, match=r"part uv0 \(1 overlapping pairs\)"):
+        asset.stage(StageOptions(uv0="none", uv1=None, unwrap=UnwrapOptions(forbid_overlapping=True)))
 
 
 @pytest.mark.requires_xatlas
@@ -849,3 +839,71 @@ def test_stage_repacks_and_pads_unwrapped_bake_uvs() -> None:
     assert staged.metadata["stage_bake_uv_channels_repacked"] == "1"
     assert staged.report.steps[-1].after["stage_bake_uv_channels_repacked"] == 1
     assert warnings == []
+
+
+def _overlapping_uv_mesh(channel: int) -> Mesh:
+    # Two faces mapped onto identical UV coordinates: guaranteed overlap.
+    uvs = np.array([[0.1, 0.1], [0.9, 0.1], [0.1, 0.9], [0.9, 0.9]], dtype=float)
+    return Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 1]], dtype=float),
+        faces=np.array([[0, 1, 2], [1, 0, 3]], dtype=int),
+        uvs={channel: uvs.copy()},
+    )
+
+
+def _single_part_asset(mesh: Mesh) -> Asset:
+    return Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+
+def test_stage_explicit_forbid_overlapping_raises() -> None:
+    from fascat.ops.stage import UVOverlapError
+
+    asset = _single_part_asset(_overlapping_uv_mesh(0))
+
+    with pytest.raises(UVOverlapError, match=r"part uv0 \(\d+ overlapping pairs\)"):
+        asset.stage(StageOptions(uv0=None, uv1=None, unwrap=UnwrapOptions(forbid_overlapping=True)))
+
+
+def test_stage_bake_domain_overlap_warns_without_failing() -> None:
+    asset = _single_part_asset(_overlapping_uv_mesh(1))
+
+    staged = asset.stage(StageOptions(uv0=None, uv1=None))
+    staged_mesh = staged.parts["part"].mesh
+
+    assert staged_mesh is not None
+    assert staged_mesh.metadata["uv1_forbid_overlapping_status"] == "violation"
+    assert staged_mesh.metadata["uv1_forbid_overlapping_enforced"] == "false"
+    assert any("will corrupt AO, lightmap, and material bakes" in warning for warning in staged.report.warnings)
+
+
+def test_stage_forbid_overlapping_clean_uvs_passes() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+        uvs={0: np.array([[0.1, 0.1], [0.9, 0.1], [0.1, 0.9]], dtype=float)},
+    )
+    asset = _single_part_asset(mesh)
+
+    staged = asset.stage(StageOptions(uv0=None, uv1=None, unwrap=UnwrapOptions(forbid_overlapping=True)))
+    staged_mesh = staged.parts["part"].mesh
+
+    assert staged_mesh is not None
+    assert staged_mesh.metadata["uv0_forbid_overlapping_status"] == "validated"
+    assert staged_mesh.metadata["uv0_forbid_overlapping_enforced"] == "true"
+
+
+def test_stage_uv_overlap_error_carries_failure_report() -> None:
+    from fascat.ops.stage import UVOverlapError
+
+    asset = _single_part_asset(_overlapping_uv_mesh(0))
+
+    with pytest.raises(UVOverlapError) as excinfo:
+        asset.stage(StageOptions(uv0=None, uv1=None, unwrap=UnwrapOptions(forbid_overlapping=True)))
+
+    report = excinfo.value.report  # type: ignore[attr-defined]
+    assert report is asset.report
+    assert any("overlapping UV faces remain" in error for error in report.errors)
+    assert report.finished_at is not None

@@ -7,7 +7,8 @@ import subprocess
 import sys
 from io import BytesIO
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 import numpy as np
 import pytest
@@ -73,7 +74,7 @@ def test_browser_runtime_parses_headless_browser_measurements(
         """
         return subprocess.CompletedProcess(["fake-browser"], 0, stdout=stdout, stderr="")
 
-    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fake_run)
 
     report = measure_browser_runtime(output, RuntimeBrowserOptions(browser="fake-browser"))
 
@@ -130,7 +131,7 @@ def test_browser_render_preview_writes_screenshot_and_report(
         )
         return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
-    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fake_run)
 
     report = write_browser_render_preview(
         output,
@@ -180,7 +181,7 @@ def test_browser_render_preview_writes_screenshot_data_from_payload(
         )
         return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
-    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fake_run)
 
     report = write_browser_render_preview(
         output,
@@ -216,7 +217,7 @@ def test_browser_render_preview_reports_unsupported_draco_decode_failure_without
         raise AssertionError("browser should not run for unsupported Draco preview")
 
     monkeypatch.setattr("fascat.runtime._run_gltf_transform_copy", fake_copy)
-    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fake_run)
 
     report = write_browser_render_preview(
         output,
@@ -255,12 +256,12 @@ def test_browser_render_preview_decodes_draco_geometry(
 
     def fake_run(command: list[str], *_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         assert "--dump-dom" in command
-        harness_path = Path(urlparse(command[-1]).path)
+        harness_path = Path(url2pathname(urlparse(command[-1]).path))
         harness = harness_path.read_text(encoding="utf-8")
         match = re.search(r"const ASSET_URL = (?P<value>.*?);", harness)
         assert match is not None
         decoded_url = json.loads(match.group("value"))
-        decoded_path = Path(unquote(urlparse(decoded_url).path))
+        decoded_path = Path(url2pathname(urlparse(decoded_url).path))
         assert decoded_path.name == "draco-decoded.glb"
         assert validate_gltf(decoded_path)["triangles"] == 1
         stdout = (
@@ -272,7 +273,7 @@ def test_browser_render_preview_decodes_draco_geometry(
         return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
     monkeypatch.setattr("fascat.runtime._run_gltf_transform_copy", fake_copy)
-    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fake_run)
 
     report = write_browser_render_preview(
         output,
@@ -316,12 +317,12 @@ def test_browser_render_preview_decodes_meshopt_only_buffer_views(
 
     def fake_run(command: list[str], *_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         assert "--dump-dom" in command
-        harness_path = Path(urlparse(command[-1]).path)
+        harness_path = Path(url2pathname(urlparse(command[-1]).path))
         harness = harness_path.read_text(encoding="utf-8")
         match = re.search(r"const ASSET_URL = (?P<value>.*?);", harness)
         assert match is not None
         decoded_url = json.loads(match.group("value"))
-        decoded_path = Path(unquote(urlparse(decoded_url).path))
+        decoded_path = Path(url2pathname(urlparse(decoded_url).path))
         decoded_document = json.loads(decoded_path.read_text(encoding="utf-8"))
         assert "EXT_meshopt_compression" not in decoded_document.get("extensionsRequired", [])
         assert all(
@@ -336,7 +337,7 @@ def test_browser_render_preview_decodes_meshopt_only_buffer_views(
         )
         return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
-    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fake_run)
 
     report = write_browser_render_preview(
         output,
@@ -382,7 +383,7 @@ def test_browser_render_preview_marks_ktx2_texture_preview_partial(
         return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
     monkeypatch.setattr("fascat.runtime._run_gltf_transform_ktxdecompress", fake_ktxdecompress)
-    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fake_run)
 
     report = write_browser_render_preview(
         output,
@@ -422,12 +423,12 @@ def test_browser_render_preview_decodes_ktx2_textures(
 
     def fake_run(command: list[str], *_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         assert "--dump-dom" in command
-        harness_path = Path(urlparse(command[-1]).path)
+        harness_path = Path(url2pathname(urlparse(command[-1]).path))
         harness = harness_path.read_text(encoding="utf-8")
         match = re.search(r"const ASSET_URL = (?P<value>.*?);", harness)
         assert match is not None
         decoded_url = json.loads(match.group("value"))
-        decoded_path = Path(unquote(urlparse(decoded_url).path))
+        decoded_path = Path(url2pathname(urlparse(decoded_url).path))
         assert decoded_path.name == "ktx2-decoded.glb"
         assert validate_gltf(decoded_path)["triangles"] == 1
         stdout = (
@@ -440,7 +441,7 @@ def test_browser_render_preview_decodes_ktx2_textures(
         return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
     monkeypatch.setattr("fascat.runtime._run_gltf_transform_ktxdecompress", fake_ktxdecompress)
-    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fake_run)
 
     report = write_browser_render_preview(
         output,
@@ -491,12 +492,12 @@ def test_browser_render_preview_decodes_ktx2_textures_with_optional_python_decod
 
     def fake_run(command: list[str], *_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         assert "--dump-dom" in command
-        harness_path = Path(urlparse(command[-1]).path)
+        harness_path = Path(url2pathname(urlparse(command[-1]).path))
         harness = harness_path.read_text(encoding="utf-8")
         match = re.search(r"const ASSET_URL = (?P<value>.*?);", harness)
         assert match is not None
         decoded_url = json.loads(match.group("value"))
-        decoded_path = Path(unquote(urlparse(decoded_url).path))
+        decoded_path = Path(url2pathname(urlparse(decoded_url).path))
         assert decoded_path.name == "ktx2-decoded.gltf"
         decoded_document = json.loads(decoded_path.read_text(encoding="utf-8"))
         assert "KHR_texture_basisu" not in decoded_document.get("extensionsUsed", [])
@@ -516,7 +517,7 @@ def test_browser_render_preview_decodes_ktx2_textures_with_optional_python_decod
 
     monkeypatch.setitem(sys.modules, "alktx2", FakeAlktx2)
     monkeypatch.setattr("fascat.runtime._run_gltf_transform_ktxdecompress", fail_ktxdecompress)
-    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fake_run)
 
     report = write_browser_render_preview(
         output,
@@ -550,12 +551,12 @@ def test_browser_render_preview_decodes_bundled_ktx2_with_default_python_decoder
 
     def fake_run(command: list[str], *_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         assert "--dump-dom" in command
-        harness_path = Path(urlparse(command[-1]).path)
+        harness_path = Path(url2pathname(urlparse(command[-1]).path))
         harness = harness_path.read_text(encoding="utf-8")
         match = re.search(r"const ASSET_URL = (?P<value>.*?);", harness)
         assert match is not None
         decoded_url = json.loads(match.group("value"))
-        decoded_path = Path(unquote(urlparse(decoded_url).path))
+        decoded_path = Path(url2pathname(urlparse(decoded_url).path))
         assert decoded_path.name == "ktx2-decoded.gltf"
         decoded_document = json.loads(decoded_path.read_text(encoding="utf-8"))
         assert "KHR_texture_basisu" not in decoded_document.get("extensionsUsed", [])
@@ -574,7 +575,7 @@ def test_browser_render_preview_decodes_bundled_ktx2_with_default_python_decoder
         return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
     monkeypatch.setattr("fascat.runtime._run_gltf_transform_ktxdecompress", fail_ktxdecompress)
-    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fake_run)
 
     report = write_browser_render_preview(
         fixture.asset_path,
@@ -591,15 +592,17 @@ def test_browser_render_preview_decodes_bundled_ktx2_with_default_python_decoder
     assert Image.open(preview).getpixel((0, 0)) == (115, 125, 135, 255)
 
 
-def test_supported_platforms_install_ktx2_python_decoder_by_default() -> None:
+def test_ktx2_python_decoder_is_extra_only() -> None:
     metadata = tomli.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     dependencies = metadata["project"]["dependencies"]
-    default_ktx2 = next(item for item in dependencies if item.startswith("alktx2"))
+    extras = metadata["project"]["optional-dependencies"]["ktx2"]
 
-    assert "python_version >= '3.11'" in default_ktx2
-    assert "sys_platform == 'linux'" in default_ktx2
-    assert "sys_platform == 'win32'" in default_ktx2
-    assert "platform_machine" in default_ktx2
+    assert not any(item.startswith("alktx2") for item in dependencies)
+    extra_ktx2 = next(item for item in extras if item.startswith("alktx2"))
+    assert "python_version >= '3.11'" in extra_ktx2
+    assert "sys_platform == 'linux'" in extra_ktx2
+    assert "sys_platform == 'win32'" in extra_ktx2
+    assert "platform_machine" in extra_ktx2
 
 
 def test_browser_render_preview_harness_samples_base_color_textures(tmp_path: Path) -> None:
@@ -694,7 +697,7 @@ def test_engine_runtime_parses_unity_harness_measurements(
         )
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fake_run)
 
     report = measure_engine_runtime(
         output,
@@ -820,13 +823,13 @@ def test_engine_runtime_uses_packaged_unity_harness_when_project_is_omitted(
         )
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fake_run)
 
     report = measure_engine_runtime(output, RuntimeEngineOptions(engine="unity", executable="Unity"))
 
     assert report.status == "measured"
     assert report.project is not None
-    assert report.project.endswith("/harness")
+    assert Path(report.project).name == "harness"
     assert report.load_time_ms == 33
     assert report.meshes == 1
     assert report.triangles == 1
@@ -847,7 +850,7 @@ def test_engine_runtime_parses_unreal_stdout_measurements(
         stdout = '{"status":"measured","engine_version":"Unreal 5.4","load_time_ms":55,"measured_fps":90}'
         return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
-    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fake_run)
 
     report = measure_engine_runtime(
         output,
@@ -880,7 +883,7 @@ def test_engine_runtime_reports_requested_preview_when_custom_harness_writes_fil
         stdout = '{"status":"measured","engine_version":"Unreal 5.4","load_time_ms":55}'
         return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
-    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fake_run)
 
     report = measure_engine_runtime(
         output,
@@ -918,13 +921,14 @@ def test_engine_runtime_uses_packaged_unreal_harness_when_project_is_omitted(
         )
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fake_run)
 
     report = measure_engine_runtime(output, RuntimeEngineOptions(engine="unreal", executable="UnrealEditor-Cmd"))
 
     assert report.status == "measured"
     assert report.project is not None
-    assert report.project.endswith("/harness/FascatUnrealHarness.uproject")
+    assert Path(report.project).name == "FascatUnrealHarness.uproject"
+    assert Path(report.project).parent.name == "harness"
     assert report.load_time_ms == 44
     assert report.meshes == 1
     assert report.triangles == 1
@@ -979,7 +983,7 @@ def test_engine_runtime_uses_packaged_unreal_harness_preview_when_project_is_omi
         )
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("fascat.runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fake_run)
 
     report = measure_engine_runtime(
         output,
@@ -988,7 +992,8 @@ def test_engine_runtime_uses_packaged_unreal_harness_preview_when_project_is_omi
 
     assert report.status == "measured"
     assert report.project is not None
-    assert report.project.endswith("/harness/FascatUnrealHarness.uproject")
+    assert Path(report.project).name == "FascatUnrealHarness.uproject"
+    assert Path(report.project).parent.name == "harness"
     assert report.preview_path == str(preview)
     assert report.render_status == "rendered"
     assert report.render_time_ms == 20
@@ -1014,3 +1019,21 @@ def _asset() -> Asset:
         parts={"part": Part(id="part", name="Triangle", mesh=mesh)},
         up_axis="Y",
     )
+
+
+def test_browser_runtime_timeout_returns_failed_report(
+    monkeypatch,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "asset.glb"
+    _asset().write_gltf(output)
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(command, 1.0)
+
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fake_run)
+
+    report = measure_browser_runtime(output, RuntimeBrowserOptions(browser="fake-browser"))
+
+    assert report.status == "failed"
+    assert "timed out" in str(report.error)

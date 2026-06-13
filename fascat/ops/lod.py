@@ -62,17 +62,19 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
     culling_changed_levels = 0
     part_ids = [part.id for part in result.parts.values() if selected_part_ids is None or part.id in selected_part_ids]
 
-    def build_part(part_id: str) -> _LodPartResult:
-        return _build_part_lods(
-            result.parts[part_id],
-            options,
-            screen_coverage,
-            export_mode,
-            level_policy_advisories,
+    payloads = [
+        _LodBuildPayload(
+            part=result.parts[part_id].copy(keep_source=False),
+            options=options,
+            screen_coverage=screen_coverage,
+            export_mode=export_mode,
+            level_policy_advisories=level_policy_advisories,
             part_occurrences=occurrence_counts.get(part_id, 0),
         )
+        for part_id in part_ids
+    ]
 
-    for built in parallel_map(part_ids, build_part, jobs=options.jobs):
+    for built in parallel_map(payloads, _lod_build_worker, jobs=options.jobs, executor="process"):
         part = result.parts[built.part_id]
         part.lod_meshes = built.lod_meshes
         part.metadata = built.metadata
@@ -135,6 +137,27 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
     if options.validate:
         _validate_lods(result, selected_part_ids=selected_part_ids)
     return result
+
+
+@dataclass(frozen=True)
+class _LodBuildPayload:
+    part: Part
+    options: LODOptions
+    screen_coverage: tuple[float, ...]
+    export_mode: str
+    level_policy_advisories: tuple[str, ...]
+    part_occurrences: int
+
+
+def _lod_build_worker(payload: _LodBuildPayload) -> _LodPartResult:
+    return _build_part_lods(
+        payload.part,
+        payload.options,
+        payload.screen_coverage,
+        payload.export_mode,
+        payload.level_policy_advisories,
+        part_occurrences=payload.part_occurrences,
+    )
 
 
 def _build_part_lods(

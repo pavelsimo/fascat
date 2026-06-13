@@ -886,7 +886,7 @@ def _repair_options(values: dict[str, object]) -> RepairOptions:
         normal_orientation=cast(Any, _literal(values.get("normal_orientation", "from_faces"))),
         viewer_position=_float3(values.get("viewer_position")) if values.get("viewer_position") is not None else None,
         fill_small_holes=bool(values.get("fill_small_holes", False)),
-        area_epsilon=_as_float(values.get("area_epsilon", 1e-12)),
+        area_epsilon=_as_optional_float(values.get("area_epsilon")),
         fix_t_junctions=bool(values.get("fix_t_junctions", False)),
         stitch_boundary_gaps=bool(values.get("stitch_boundary_gaps", False)),
         crack_non_manifold_edges=bool(values.get("crack_non_manifold_edges", False)),
@@ -905,14 +905,14 @@ def _merge_vertices_options(values: dict[str, object]) -> MergeVerticesOptions:
         preserve_material_boundaries=bool(values.get("preserve_material_boundaries", True)),
         delete_degenerate=bool(values.get("delete_degenerate", True)),
         quality_report=bool(values.get("quality_report", False)),
-        area_epsilon=_as_float(values.get("area_epsilon", 1e-12)),
+        area_epsilon=_as_optional_float(values.get("area_epsilon")),
         jobs=_as_int(values.get("jobs", 1)),
     )
 
 
 def _delete_degenerate_polygons_options(values: dict[str, object]) -> DeleteDegeneratePolygonsOptions:
     return DeleteDegeneratePolygonsOptions(
-        area_epsilon=_as_float(values.get("area_epsilon", 1e-12)),
+        area_epsilon=_as_optional_float(values.get("area_epsilon")),
         delete_duplicates=bool(values.get("delete_duplicates", True)),
     )
 

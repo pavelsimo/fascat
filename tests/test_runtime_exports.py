@@ -354,7 +354,7 @@ def test_gltf_write_invokes_draco_and_ktx2_export_backends(monkeypatch, tmp_path
     asset.materials["mat"].metadata["baked_texture_base_color_image"] = "paint_base_color"
     calls: list[tuple[str, ...]] = []
 
-    def fake_ktx2_transform(input_path, output_path, *, mode):  # type: ignore[no-untyped-def]
+    def fake_ktx2_transform(input_path, output_path, *, mode, options=None):  # type: ignore[no-untyped-def]
         calls.append(("ktx2", str(input_path), str(output_path), mode))
         output_path.write_bytes(input_path.read_bytes())
 
@@ -392,7 +392,7 @@ def test_ktx2_transform_uses_preinstalled_node_packages_without_npm(monkeypatch,
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(gltf.shutil, "which", fake_which)
-    monkeypatch.setattr(gltf.subprocess, "run", fake_run)
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fake_run)
 
     gltf._run_ktx2_transform(tmp_path / "input.glb", tmp_path / "output.glb", mode="ktx2")
 
@@ -662,3 +662,114 @@ def test_cli_validate_writes_geometry_quality_report(tmp_path) -> None:  # type:
     assert payload["analysis"]["summary"]["draw_call_estimate"] == 1
     assert report["summary"]["boundary_edges"] == 3
     assert report["stats"]["validated_triangles"] == 1
+
+
+def test_failed_stl_validation_leaves_no_output(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.io.stl as stl
+
+    def boom(path: object) -> dict[str, int]:
+        raise RuntimeError("forced validation failure")
+
+    monkeypatch.setattr(stl, "validate_stl", boom)
+    output = tmp_path / "model.stl"
+
+    with pytest.raises(RuntimeError, match="forced validation failure"):
+        stl.write_stl_with_validation_stats(_asset(), output)
+
+    assert not output.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_failed_fbx_validation_leaves_no_output(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.io.fbx as fbx
+
+    def boom(path: object) -> dict[str, int]:
+        raise RuntimeError("forced validation failure")
+
+    monkeypatch.setattr(fbx, "validate_fbx", boom)
+    output = tmp_path / "model.fbx"
+
+    with pytest.raises(RuntimeError, match="forced validation failure"):
+        fbx.write_fbx_with_validation_stats(_asset(), output)
+
+    assert not output.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_failed_obj_validation_leaves_no_obj_or_mtl(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.io.obj as obj
+
+    def boom(path: object) -> dict[str, int]:
+        raise RuntimeError("forced validation failure")
+
+    monkeypatch.setattr(obj, "validate_obj", boom)
+    output = tmp_path / "model.obj"
+
+    with pytest.raises(RuntimeError, match="forced validation failure"):
+        obj.write_obj_with_validation_stats(_asset(), output)
+
+    assert not output.exists()
+    assert not (tmp_path / "model.mtl").exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_obj_export_publishes_mtl_sidecar_with_entry_file(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.io.obj as obj
+
+    output = tmp_path / "model.obj"
+
+    stats = obj.write_obj_with_validation_stats(_asset(), output)
+
+    assert stats is not None and stats["triangles"] == 1
+    assert output.exists()
+    assert (tmp_path / "model.mtl").exists()
+    assert "mtllib model.mtl" in output.read_text(encoding="utf-8")
+
+
+def test_ktx2_transform_receives_quality_effort_and_uastc(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.io.gltf as gltf
+
+    commands: list[list[str]] = []
+
+    def fake_which(name: str) -> str | None:
+        return "/usr/bin/node" if name == "node" else None
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(gltf.shutil, "which", fake_which)
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fake_run)
+
+    gltf._run_ktx2_transform(tmp_path / "input.glb", tmp_path / "output.glb", mode="ktx2")
+    gltf._run_ktx2_transform(
+        tmp_path / "input.glb",
+        tmp_path / "output.glb",
+        mode="basisu",
+        options=GltfExportOptions(ktx2_quality=200, ktx2_effort=5, ktx2_uastc=True),
+    )
+
+    assert commands[0][-3:] == ["128", "2", "auto"]
+    assert commands[1][-4:] == ["basisu", "200", "5", "1"]
+    assert "qualityLevel: Number(quality)" in gltf._KTX2_TRANSFORM_SCRIPT
+    assert "compressionLevel: Number(effort)" in gltf._KTX2_TRANSFORM_SCRIPT
+
+
+@pytest.mark.parametrize("kwargs", [{"ktx2_quality": -1}, {"ktx2_quality": 256}, {"ktx2_effort": 7}])
+def test_gltf_export_options_validate_ktx2_ranges(kwargs: dict[str, int]) -> None:
+    with pytest.raises(ValueError, match="ktx2"):
+        GltfExportOptions(**kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"draco_compression_level": True},
+        {"draco_quantize_position": True},
+        {"ktx2_quality": True},
+        {"ktx2_effort": False},
+    ],
+)
+def test_gltf_export_options_reject_bool_compression_values(kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        GltfExportOptions(**kwargs)  # type: ignore[arg-type]

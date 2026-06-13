@@ -10,7 +10,7 @@ from fascat.asset import Asset, Node, Part
 from fascat.io.usd import _usd_custom_data, validate_usd, write_usd, write_usd_with_validation_stats
 from fascat.material import Material
 from fascat.mesh import Mesh
-from fascat.options import MetadataExportOptions, OptimizeOptions, UsdExportOptions
+from fascat.options import MetadataExportOptions, OptimizeOptions, ReplaceOptions, UsdExportOptions
 
 pytestmark = pytest.mark.requires_usd
 pytest.importorskip("pxr")
@@ -246,7 +246,7 @@ def test_usd_export_resolves_pmi_links_through_source_part_metadata(tmp_path: Pa
         parts={"cube": Part(id="cube", name="Cube", mesh=mesh, metadata={"layer": "A"})},
         materials={},
         pmi=[fc.PmiAnnotation(id="pmi_001", kind="dimension", text="10", applies_to=["cube"])],
-    ).replace(fc.ReplaceOptions(mode="bounding_box"), where=fc.Filter.part("cube"))
+    ).replace(ReplaceOptions(mode="bounding_box"), where=fc.Filter.part("cube"))
     output = tmp_path / "metadata-replaced.usda"
 
     write_usd(asset, output)
@@ -718,3 +718,23 @@ def test_usd_export_authors_debug_metadata_and_display_color_only_materials(tmp_
 
     assert usd_mesh.GetDisplayColorAttr().Get()[0] == (0.1, 0.2, 0.3)
     assert usd_mesh.GetDisplayOpacityAttr().Get()[0] == pytest.approx(0.4)
+
+
+def test_failed_usd_validation_leaves_no_output_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import fascat.io.usd as usd
+
+    def boom(path: object) -> dict[str, int]:
+        raise RuntimeError("forced validation failure")
+
+    monkeypatch.setattr(usd, "validate_usd", boom)
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="n1", name="Cube", part_id="cube")]),
+        parts={"cube": Part(id="cube", name="Cube", mesh=cube_mesh())},
+    )
+    output = tmp_path / "scene.usda"
+
+    with pytest.raises(RuntimeError, match="forced validation failure"):
+        write_usd(asset, output)
+
+    assert not output.exists()
+    assert list(tmp_path.iterdir()) == []

@@ -1,250 +1,154 @@
-"""Convert CAD data into realtime-ready OpenUSD, glTF, OBJ, STL, and FBX assets."""
+"""Convert CAD data into realtime-ready OpenUSD, glTF, OBJ, STL, and FBX assets.
 
-from fascat import profiles
-from fascat.analysis import AnalysisReport
-from fascat.asset import Asset, Node, Part
-from fascat.filter import Filter, FilterExpressionError, SelectionMatch, SelectionResult
-from fascat.image import ImageResource
-from fascat.io.brep import read_brep
-from fascat.io.fbx import validate_fbx
-from fascat.io.gltf import validate_gltf
-from fascat.io.iges import read_iges
-from fascat.io.step import read_step, read_step_many
-from fascat.io.usd import validate_usd
-from fascat.material import Material
-from fascat.mesh import Mesh, MeshValidationError
-from fascat.metadata import Metadata, PmiAnnotation, Tolerance
-from fascat.options import (
-    AabbProjectionOptions,
-    AnalyzeOptions,
-    AtlasOptions,
-    BakeMaterialOptions,
-    BrepHealOptions,
-    BrepReadOptions,
-    DecimateOptions,
-    DeleteDegeneratePolygonsOptions,
-    ExplodeOptions,
-    FbxExportOptions,
-    GltfExportOptions,
-    IgesReadOptions,
-    LODGeneratorOptions,
-    LODLevel,
-    LODOptions,
-    MergeOptions,
-    MergeVerticesOptions,
-    MetadataExportOptions,
-    ObjExportOptions,
-    OptimizeOptions,
-    PlatformBudget,
-    RemoveHolesOptions,
-    RemoveOccludedOptions,
-    RepairOptions,
-    ReplaceOptions,
-    SceneOptimizeOptions,
-    StageOptions,
-    StepReadOptions,
-    StlExportOptions,
-    TessellationOptions,
-    TextureProcessOptions,
-    UnwrapOptions,
-    UsdExportOptions,
-    WorkflowRecipe,
-    WorkflowRecipeChoice,
-    gltf_export_preset_texture_options,
-    resolve_gltf_export_options,
-)
-from fascat.pipeline import (
-    analyze,
-    bake_materials,
-    convert,
-    decimate,
-    delete_degenerate_polygons,
-    explode,
-    heal_brep,
-    lods,
-    merge,
-    merge_vertices,
-    optimize,
-    optimize_scene,
-    process_textures,
-    remove_holes,
-    remove_occluded,
-    repair,
-    replace,
-    run_lod_generators,
-    stage,
-    tessellate,
-    validate_output,
-    write_fbx,
-    write_gltf,
-    write_obj,
-    write_stl,
-    write_usd,
-)
-from fascat.pipeline_file import PipelineSpec, PipelineStep
-from fascat.runtime import (
-    RuntimeBrowserOptions,
-    RuntimeBrowserRenderOptions,
-    RuntimeBrowserRenderReport,
-    RuntimeBrowserReport,
-    RuntimeEngineOptions,
-    RuntimeEngineReport,
-    copy_engine_runtime_harness,
-    measure_browser_runtime,
-    measure_engine_runtime,
-    write_browser_render_preview,
-)
-from fascat.runtime_fixtures import (
-    RuntimeParityCapture,
-    RuntimeParityCaptureReport,
-    RuntimeParityFixture,
-    RuntimeParityGolden,
-    RuntimeParityGoldenCoverageReport,
-    RuntimeParitySuiteReport,
-    audit_runtime_parity_goldens,
-    capture_runtime_parity_suite,
-    write_runtime_parity_suite,
-)
-from fascat.size_ladder import GltfSizeLadderReport, GltfSizeLadderVariant, measure_gltf_size_ladder
-from fascat.visual import (
-    LodSwitchPreviewReport,
-    VisualComparisonReport,
-    VisualDiffOptions,
-    VisualDiffReport,
-    VisualPreviewOptions,
-    VisualPreviewReport,
-    compare_images,
-    write_before_after_previews,
-    write_lod_switch_previews,
-    write_output_lod_switch_previews,
-    write_output_preview,
-    write_preview,
-)
+The public surface loads lazily (PEP 562): ``import fascat`` is cheap, and each
+name pulls in its home module on first attribute access.
+"""
 
-__version__ = "0.3.0"
+from typing import TYPE_CHECKING, Any
+
+__version__ = "0.4.0"
+
+if TYPE_CHECKING:  # static names for type checkers and IDEs; never executed at runtime
+    from fascat import options, profiles, validation  # noqa: F401
+    from fascat.analysis import AnalysisReport  # noqa: F401
+    from fascat.asset import Asset, Node, Part  # noqa: F401
+    from fascat.filter import Filter, FilterExpressionError, SelectionMatch, SelectionResult  # noqa: F401
+    from fascat.image import ImageResource  # noqa: F401
+    from fascat.io.brep import read_brep  # noqa: F401
+    from fascat.io.iges import read_iges  # noqa: F401
+    from fascat.io.step import read_step, read_step_many  # noqa: F401
+    from fascat.material import Material  # noqa: F401
+    from fascat.mesh import Mesh, MeshValidationError  # noqa: F401
+    from fascat.metadata import Metadata, PmiAnnotation, Tolerance  # noqa: F401
+    from fascat.ops.stage import UVOverlapError  # noqa: F401
+    from fascat.options import (  # noqa: F401
+        DecimateOptions,
+        GltfExportOptions,
+        LODOptions,
+        MergeOptions,
+        OptimizeOptions,
+        PlatformBudget,
+        RepairOptions,
+        StageOptions,
+        TessellationOptions,
+        UsdExportOptions,
+    )
+    from fascat.pipeline import (  # noqa: F401
+        analyze,
+        convert,
+        validate_output,
+        write_fbx,
+        write_gltf,
+        write_obj,
+        write_stl,
+        write_usd,
+    )
+    from fascat.pipeline_file import PipelineSpec, PipelineStep  # noqa: F401
+
+_SUBMODULES = frozenset({"options", "profiles", "validation"})
+_EXPORTS: dict[str, str] = {
+    "AnalysisReport": "fascat.analysis",
+    "Asset": "fascat.asset",
+    "Node": "fascat.asset",
+    "Part": "fascat.asset",
+    "Filter": "fascat.filter",
+    "FilterExpressionError": "fascat.filter",
+    "SelectionMatch": "fascat.filter",
+    "SelectionResult": "fascat.filter",
+    "ImageResource": "fascat.image",
+    "read_brep": "fascat.io.brep",
+    "read_iges": "fascat.io.iges",
+    "read_step": "fascat.io.step",
+    "read_step_many": "fascat.io.step",
+    "Material": "fascat.material",
+    "UVOverlapError": "fascat.ops.stage",
+    "Mesh": "fascat.mesh",
+    "MeshValidationError": "fascat.mesh",
+    "Metadata": "fascat.metadata",
+    "PmiAnnotation": "fascat.metadata",
+    "Tolerance": "fascat.metadata",
+    "DecimateOptions": "fascat.options",
+    "GltfExportOptions": "fascat.options",
+    "LODOptions": "fascat.options",
+    "MergeOptions": "fascat.options",
+    "OptimizeOptions": "fascat.options",
+    "PlatformBudget": "fascat.options",
+    "RepairOptions": "fascat.options",
+    "StageOptions": "fascat.options",
+    "TessellationOptions": "fascat.options",
+    "UsdExportOptions": "fascat.options",
+    "analyze": "fascat.pipeline",
+    "convert": "fascat.pipeline",
+    "validate_output": "fascat.pipeline",
+    "write_fbx": "fascat.pipeline",
+    "write_gltf": "fascat.pipeline",
+    "write_obj": "fascat.pipeline",
+    "write_stl": "fascat.pipeline",
+    "write_usd": "fascat.pipeline",
+    "PipelineSpec": "fascat.pipeline_file",
+    "PipelineStep": "fascat.pipeline_file",
+}
 
 __all__ = [
-    "Asset",
-    "AabbProjectionOptions",
     "AnalysisReport",
-    "AnalyzeOptions",
-    "AtlasOptions",
-    "BakeMaterialOptions",
-    "BrepHealOptions",
-    "BrepReadOptions",
+    "Asset",
     "DecimateOptions",
-    "DeleteDegeneratePolygonsOptions",
-    "ExplodeOptions",
-    "FbxExportOptions",
     "Filter",
     "FilterExpressionError",
     "GltfExportOptions",
-    "GltfSizeLadderReport",
-    "GltfSizeLadderVariant",
-    "IgesReadOptions",
     "ImageResource",
-    "LODGeneratorOptions",
-    "LODLevel",
     "LODOptions",
     "Material",
-    "Metadata",
-    "MetadataExportOptions",
     "MergeOptions",
-    "MergeVerticesOptions",
     "Mesh",
     "MeshValidationError",
+    "Metadata",
     "Node",
-    "ObjExportOptions",
     "OptimizeOptions",
-    "PlatformBudget",
     "Part",
-    "PmiAnnotation",
     "PipelineSpec",
     "PipelineStep",
+    "PlatformBudget",
+    "PmiAnnotation",
     "RepairOptions",
-    "RemoveHolesOptions",
-    "RemoveOccludedOptions",
-    "RuntimeBrowserOptions",
-    "RuntimeBrowserRenderOptions",
-    "RuntimeBrowserRenderReport",
-    "RuntimeBrowserReport",
-    "RuntimeEngineOptions",
-    "RuntimeEngineReport",
-    "RuntimeParityCapture",
-    "RuntimeParityCaptureReport",
-    "RuntimeParityFixture",
-    "RuntimeParityGolden",
-    "RuntimeParityGoldenCoverageReport",
-    "RuntimeParitySuiteReport",
-    "SceneOptimizeOptions",
-    "ReplaceOptions",
     "SelectionMatch",
     "SelectionResult",
     "StageOptions",
-    "StepReadOptions",
-    "StlExportOptions",
     "TessellationOptions",
-    "TextureProcessOptions",
     "Tolerance",
-    "UnwrapOptions",
+    "UVOverlapError",
     "UsdExportOptions",
-    "LodSwitchPreviewReport",
-    "VisualComparisonReport",
-    "VisualDiffOptions",
-    "VisualDiffReport",
-    "VisualPreviewOptions",
-    "VisualPreviewReport",
-    "WorkflowRecipe",
-    "WorkflowRecipeChoice",
     "__version__",
     "analyze",
-    "bake_materials",
-    "compare_images",
     "convert",
-    "copy_engine_runtime_harness",
-    "audit_runtime_parity_goldens",
-    "capture_runtime_parity_suite",
-    "decimate",
-    "delete_degenerate_polygons",
-    "explode",
-    "heal_brep",
-    "lods",
-    "merge",
-    "merge_vertices",
-    "measure_gltf_size_ladder",
-    "measure_browser_runtime",
-    "measure_engine_runtime",
-    "optimize",
-    "optimize_scene",
-    "process_textures",
     "profiles",
-    "read_step",
-    "read_step_many",
     "read_brep",
     "read_iges",
-    "repair",
-    "remove_holes",
-    "remove_occluded",
-    "replace",
-    "resolve_gltf_export_options",
-    "run_lod_generators",
-    "stage",
-    "tessellate",
-    "validate_gltf",
-    "validate_fbx",
+    "read_step",
+    "read_step_many",
     "validate_output",
-    "validate_usd",
+    "write_fbx",
     "write_gltf",
-    "write_runtime_parity_suite",
     "write_obj",
     "write_stl",
-    "write_fbx",
     "write_usd",
-    "write_before_after_previews",
-    "write_browser_render_preview",
-    "write_lod_switch_previews",
-    "write_output_lod_switch_previews",
-    "write_output_preview",
-    "write_preview",
-    "gltf_export_preset_texture_options",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    import importlib
+
+    if name in _SUBMODULES:
+        module = importlib.import_module(f"fascat.{name}")
+        globals()[name] = module
+        return module
+    home = _EXPORTS.get(name)
+    if home is None:
+        raise AttributeError(f"module 'fascat' has no attribute {name!r}")
+    value = getattr(importlib.import_module(home), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(__all__) | _SUBMODULES)

@@ -11,6 +11,7 @@ import numpy as np
 from fascat.asset import Asset, Node, Part
 from fascat.export_report import referenced_materials
 from fascat.image import ImageResource
+from fascat.io._atomic import atomic_output
 from fascat.material import Material
 from fascat.metadata import pmi_ids_by_part
 from fascat.options import MetadataExportOptions, UsdExportOptions
@@ -90,11 +91,13 @@ def write_usd_with_validation_stats(
         raise ValueError("USDZ package export requires a .usdz output path")
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if opts.package == "usdz":
-        _write_usdz_package(asset, output_path, debug, opts, Sdf, Usd, UsdGeom, UsdUtils)
-        return validate_usd(output_path)
-    _write_usd_stage(asset, output_path, debug, opts, Usd, UsdGeom)
-    return validate_usd(output_path)
+    with atomic_output(output_path) as temp:
+        if opts.package == "usdz":
+            _write_usdz_package(asset, temp, debug, opts, Sdf, Usd, UsdGeom, UsdUtils, layer_stem=output_path.stem)
+        else:
+            _write_usd_stage(asset, temp, debug, opts, Usd, UsdGeom)
+        stats = validate_usd(temp)
+    return stats
 
 
 def _write_usdz_package(
@@ -106,13 +109,15 @@ def _write_usdz_package(
     Usd: Any,
     UsdGeom: Any,
     UsdUtils: Any,
+    *,
+    layer_stem: str,
 ) -> None:
     with tempfile.TemporaryDirectory(prefix="fascat-usdz-") as directory:
         package_root = Path(directory)
-        stage_path = package_root / f"{output_path.stem}.usdc"
+        # layer_stem keeps the user-visible name on the packaged layer even
+        # when output_path is an atomic-write temp file.
+        stage_path = package_root / f"{layer_stem}.usdc"
         _write_usd_stage(asset, stage_path, debug, options, Usd, UsdGeom)
-        if output_path.exists():
-            output_path.unlink()
         created = UsdUtils.CreateNewUsdzPackage(
             Sdf.AssetPath(str(stage_path)),
             str(output_path),

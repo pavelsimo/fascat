@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 
 from fascat.asset import Asset, Node, Part
 from fascat.export_report import referenced_materials
+from fascat.io._atomic import atomic_output
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.options import FbxExportOptions
@@ -54,10 +55,10 @@ def _write_fbx(
 
     ids = _object_ids(asset, opts)
     text = _fbx_document(asset, opts, ids)
-    output_path.write_text(text, encoding="utf-8")
-    if not collect_stats:
-        return None
-    return validate_fbx(output_path)
+    with atomic_output(output_path) as temp:
+        temp.write_text(text, encoding="utf-8")
+        stats = validate_fbx(temp) if collect_stats else None
+    return stats
 
 
 def validate_fbx(path: str | Path) -> dict[str, int]:

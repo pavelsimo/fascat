@@ -4,7 +4,9 @@ description: Use fascat from Python
 ---
 
 The Python API runs the same pipeline as the CLI, but keeps each conversion step
-explicit and composable.
+explicit and composable. The package is PEP 561 typed (`py.typed` ships in the
+wheel), so mypy and IDEs see the full strict-mode annotations. `import fascat` is lazy — heavy stacks (numpy, Pillow,
+runtime harnesses) load on first use, so importing the package costs almost nothing.
 
 ## Start here
 
@@ -19,24 +21,28 @@ print(asset.report.summary())
 ```
 
 When you need control over individual steps, build the pipeline yourself. Each
-method returns a **new** `Asset`, and every `*Options` object has sensible defaults —
-set only what you want to change:
+method returns a **new** `Asset` and accepts keyword arguments directly — set only
+what you want to change:
 
 ```python
 import fascat as fc
 
 asset = (
     fc.read_step("motor.step")          # or read_iges(...) / read_brep(...)
-    .tessellate(fc.TessellationOptions(sag=0.1, angle=15.0))
-    .repair(fc.RepairOptions(tolerance=0.05))
-    .stage(fc.StageOptions(materials="cad", uv0="box"))
-    .optimize(fc.OptimizeOptions(target_triangles=500_000))
-    .lods(fc.LODOptions(ratios=[0.5, 0.25, 0.1]))
+    .tessellate(sag=0.1, angle=15.0)
+    .repair(tolerance=0.05)
+    .stage(materials="cad", uv0="box")
+    .optimize(target_triangles=500_000)
+    .lods([0.5, 0.25, 0.1])
 )
 
 asset.write_gltf("motor.glb")
 asset.write_usd("motor.usdc")
 ```
+
+Keyword arguments mirror the matching `*Options` dataclass field-for-field. For a
+prebuilt configuration, pass `options=` (or the options object positionally)
+instead — never both: `asset.repair(fc.RepairOptions(tolerance=0.05))`.
 
 The rest of this page documents each step and every option. Two things apply
 throughout:
@@ -44,11 +50,13 @@ throughout:
 - **Reports.** Write calls append a write step to the asset report, and every step
   records its options, before/after counts, and warnings. See [Reports and
   stats](#reports-and-stats).
-- **Parallelism.** Mesh-heavy per-part operations accept `jobs` to fan out
-  independent parts and reassemble them in deterministic order. `jobs=1` is the
-  default; raise it on `RepairOptions`, `MergeVerticesOptions`, `StageOptions`,
-  `OptimizeOptions`, `DecimateOptions`, `LODOptions`, or `LODGeneratorOptions` for
-  large multi-part assets.
+- **Parallelism.** Mesh-heavy per-part operations fan independent parts out to a
+  process pool and reassemble them in deterministic order. `jobs` defaults to
+  `min(4, CPU count)` on `RepairOptions`, `MergeVerticesOptions`, `StageOptions`,
+  `OptimizeOptions`, `DecimateOptions`, `LODOptions`, and `LODGeneratorOptions`;
+  the `FASCAT_JOBS` environment variable overrides the default, and `jobs=1`
+  disables pooling entirely. Worker processes start via spawn, so assemblies with
+  only a handful of small parts can be faster with `jobs=1`.
 
 Core pipeline calls:
 
@@ -58,13 +66,13 @@ Core pipeline calls:
 | `fc.read_step_many(paths, options=None, continue_on_error=False)` | `paths` is an ordered list of `.step` / `.stp` files. | Import explicit multi-root STEP members into deterministic per-file namespaces, prefix member warnings, and preserve each member as a top-level root. |
 | `fc.read_iges(path, options=None)` | `path` ends in `.igs` or `.iges`. `options` is `IgesReadOptions`. | Import IGES geometry through the same OCP/XDE hierarchy, transform, color, and material path used by STEP. |
 | `fc.read_brep(path, options=None)` | `path` ends in `.brep`. `options` is `BrepReadOptions`. | Import a native OpenCASCADE BREP file as one root occurrence and one source-shape part. |
-| `asset.tessellate(options, where=None)` | `options` is `TessellationOptions`. `where` optionally scopes the operation with a `Filter`. | Convert source BREP geometry into meshes. |
-| `asset.repair(options, where=None)` | `options` is `RepairOptions`. `where` optionally scopes selected parts. | Clean mesh-level issues after tessellation. |
-| `asset.merge_vertices(options, where=None)` | `options` is `MergeVerticesOptions`. `where` optionally scopes selected parts. | Merge exact or tolerance-close vertices with attribute and material-boundary protection. |
-| `asset.delete_degenerate_polygons(options, where=None)` | `options` is `DeleteDegeneratePolygonsOptions`. `where` optionally scopes selected parts. | Remove repeated-vertex, duplicate, or near-zero-area triangles as a standalone cleanup step. |
-| `asset.stage(options, where=None)` | `options` is `StageOptions`. `where` optionally scopes selected parts. | Prepare materials, normals, tangents, and UV metadata for runtime export. |
-| `asset.optimize(options, where=None)` | `options` is `OptimizeOptions`. `where` optionally scopes selected parts. | Reduce mesh complexity while preserving selected mechanical features. |
-| `asset.lods(options, where=None)` | `options` is `LODOptions`. `where` optionally scopes selected parts. | Generate lower-detail runtime meshes. |
+| `asset.tessellate(options=None, *, where=None, **kwargs)` | Keyword args mirror `TessellationOptions`. `where` optionally scopes the operation with a `Filter`. | Convert source BREP geometry into meshes. |
+| `asset.repair(options=None, *, where=None, **kwargs)` | Keyword args mirror `RepairOptions`. `where` optionally scopes selected parts. | Clean mesh-level issues after tessellation. |
+| `asset.merge_vertices(options=None, *, where=None, **kwargs)` | Keyword args mirror `MergeVerticesOptions`. `where` optionally scopes selected parts. | Merge exact or tolerance-close vertices with attribute and material-boundary protection. |
+| `asset.delete_degenerate_polygons(options=None, *, where=None, **kwargs)` | Keyword args mirror `DeleteDegeneratePolygonsOptions`. `where` optionally scopes selected parts. | Remove repeated-vertex, duplicate, or near-zero-area triangles as a standalone cleanup step. |
+| `asset.stage(options=None, *, where=None, **kwargs)` | Keyword args mirror `StageOptions`. `where` optionally scopes selected parts. | Prepare materials, normals, tangents, and UV metadata for runtime export. |
+| `asset.optimize(options=None, *, where=None, **kwargs)` | Keyword args mirror `OptimizeOptions`. `where` optionally scopes selected parts. | Reduce mesh complexity while preserving selected mechanical features. |
+| `asset.lods(options=None, *, where=None, **kwargs)` | `options` may also be a bare ratio sequence; keyword args mirror `LODOptions`. `where` optionally scopes selected parts. | Generate lower-detail runtime meshes. |
 | `asset.write_usd(path, options=None)` | `path` ends in `.usd`, `.usda`, `.usdc`, or `.usdz`. `options` is `UsdExportOptions`. | Write OpenUSD output and append a write step to the report. |
 | `asset.write_gltf(path, options=None)` | `path` ends in `.gltf` or `.glb`. `options` is `GltfExportOptions`. | Write glTF 2.0 output and append a write step to the report. |
 | `asset.write_fbx(path, options=None)` | `path` ends in `.fbx`. `options` is `FbxExportOptions`. | Write ASCII FBX output and append a write step to the report. |
@@ -160,12 +168,12 @@ Use `explode()` when runtime tools need separate meshes by material or connected
 
 ```python
 asset = asset.explode(
-    fc.ExplodeOptions(mode="connected_components"),
+    fc.options.ExplodeOptions(mode="connected_components"),
     where=fc.Filter.material("rubber"),
 )
 
 asset = asset.replace(
-    fc.ReplaceOptions(mode="bounding_box", preserve_transform=True),
+    fc.options.ReplaceOptions(mode="bounding_box", preserve_transform=True),
     where=fc.Filter.triangle_count(max=12),
 )
 ```
@@ -203,7 +211,7 @@ import fascat as fc
 
 asset = fc.read_step(
     "motor.step",
-    options=fc.StepReadOptions(
+    options=fc.options.StepReadOptions(
         metadata=True,
         product_metadata=True,
         properties=True,
@@ -249,7 +257,10 @@ glTF export writes metadata and PMI into `extras.fascat`. USD export writes Fasc
 
 When `pmi=True`, STEP AP242 import runs a textual scan and turns supported records
 into typed `PmiAnnotation` objects with source STEP entity ids, references, and
-numeric tolerance bounds where available. Supported record families:
+numeric tolerance bounds where available. ISO-10303-21 string escape directives
+(`\X2\…\X0\`, `\X4\…\X0\`, `\X\HH`, `\S\`, `\P?\`, `\\`) are decoded in PMI text,
+design-variant labels, and external/texture references; malformed sequences stay
+literal. Supported record families:
 
 - **Dimensions** — `DIMENSIONAL_SIZE`, `DIMENSIONAL_LOCATION`
 - **Tolerances** — `PLUS_MINUS_TOLERANCE`, `GEOMETRIC_TOLERANCE`, and named subtypes such as `FLATNESS_TOLERANCE`, `POSITION_TOLERANCE`, `SURFACE_PROFILE_TOLERANCE`
@@ -322,6 +333,19 @@ from the CAD source — as JSON/MTL files, ZIP packages, or folders. Imported re
 update matching CAD materials with PBR factors and texture slots, and the import
 report records resolved, missing, unreadable, matched, and unmatched counts.
 
+Texture and material-library references found inside CAD file content are confined
+to the CAD source directory plus the configured search paths: absolute paths, `..`
+traversal, and symlinks that escape every search root are reported as missing instead
+of being read. (External STEP assembly references are guarded separately by strict
+`.step`/`.stp` extension validation.) Library
+files passed explicitly via `material_library_paths` are trusted CLI/API input and
+are not subject to confinement.
+
+Auxiliary text scans are also size-capped: STEP files over 64 MiB skip the textual
+PMI/variant/reference passes with a report warning (geometry import is unaffected),
+and sidecar material libraries (16 MiB) or textures (64 MiB) over their caps are
+reported unreadable instead of being loaded into memory.
+
 ### Construction curves
 
 Construction-only line shapes follow the `construction_curve_policy`:
@@ -386,14 +410,14 @@ Metadata and PMI parameters:
 asset.write_gltf(
     "motor.glb",
     options=fc.GltfExportOptions(
-        metadata=fc.MetadataExportOptions(mode="full", pmi="metadata"),
+        metadata=fc.options.MetadataExportOptions(mode="full", pmi="metadata"),
     ),
 )
 
 asset.write_usd(
     "motor.usdc",
     options=fc.UsdExportOptions(
-        metadata=fc.MetadataExportOptions(mode="full", pmi="metadata_and_visuals"),
+        metadata=fc.options.MetadataExportOptions(mode="full", pmi="metadata_and_visuals"),
     ),
 )
 ```
@@ -404,7 +428,7 @@ Run BREP healing before tessellation when STEP topology needs sewing, edge fixin
 
 ```python
 asset = fc.read_step("motor.step").heal_brep(
-    fc.BrepHealOptions(
+    fc.options.BrepHealOptions(
         tolerance=0.05,
         group_open_shells=True,
         sew_faces=True,
@@ -422,7 +446,7 @@ asset = fc.read_step("motor.step").heal_brep(
 ```
 
 Healing stores per-part `brep_*` metadata and records a `heal_brep` report step.
-You can also run it inside a one-shot conversion: `fc.convert(..., heal_brep=fc.BrepHealOptions())`.
+You can also run it inside a one-shot conversion: `fc.convert(..., heal_brep=fc.options.BrepHealOptions())`.
 
 What it does:
 
@@ -546,8 +570,8 @@ Repair parameters:
 | `face_orientation` | Face-orientation policy: `exterior` runs the current closed-component outward winding path; `source_trusted` and `preserve` keep source winding; `viewer_standpoint`, `single_sided_open_shell`, and `unstitched_groups` are recorded as intent until those strategies have a backend. |
 | `normal_orientation` | Normal-orientation policy: `from_faces` regenerates normals from repaired faces; `source_trusted` and `preserve` keep compatible source normals when possible; `viewer_standpoint` is recorded as intent until implemented. |
 | `viewer_position` | Three-number viewer position required when either orientation policy is `viewer_standpoint`. Recorded in metadata and reports. |
-| `fill_small_holes` | Fill small mesh boundary loops as a fallback mesh repair step. |
-| `area_epsilon` | Area threshold used to classify degenerate triangles. |
+| `fill_small_holes` | Fill small mesh boundary loops as a fallback mesh repair step. Fill faces inherit the material of the nearest neighboring face. |
+| `area_epsilon` | Area threshold used to classify degenerate triangles. Defaults to a scale-invariant value derived from the mesh bounding box (1e-12 × squared diagonal); pass a value to override. |
 | `jobs` | Worker count for independent mesh-bearing parts. `1` keeps serial behavior. |
 
 Repair always records orientation policy metadata
@@ -562,7 +586,7 @@ degenerate triangles, boundary edges, non-manifold edges, T-junctions, boundary
 gaps, and orientability. Note:
 
 - **Duplicate polygons** are triangles referencing the same three vertices, regardless of winding.
-- **T-junctions** and **boundary gaps** are reported but **not** fixed — non-zero counts after repair emit a warning, because T-junction sewing and boundary stitching are not yet implemented.
+- **T-junctions** and **boundary gaps** are reported by default but only fixed when the opt-in `fix_t_junctions` / `stitch_boundary_gaps` flags are set — non-zero counts after a report-only repair emit a warning. Stitched vertices keep the attributes (normals, tangents, UVs) of the surviving representative vertex; when merged vertices disagreed on UVs, the count of conflicting merges is recorded as `boundary_gap_stitching_uv_conflicts` metadata.
 
 `MergeVerticesOptions` gives you vertex merging as a standalone step (rather than the
 broad repair pass). `tolerance=0.0` merges exact duplicate positions; larger values
@@ -589,7 +613,7 @@ polygons, plus the unit-aware area threshold.
 
 | Parameter | Meaning |
 |-----------|---------|
-| `area_epsilon` | Area threshold used to classify near-flat triangles as degenerate. |
+| `area_epsilon` | Area threshold used to classify near-flat triangles as degenerate. Defaults to a bounding-box-derived, scale-invariant value. |
 | `delete_duplicates` | Remove exact duplicate polygons after degenerate triangles are removed. |
 
 ## Feature-Preserving Simplification
@@ -694,7 +718,7 @@ asset = asset.stage(
         merge_equivalent_materials=True,
         uv0="unwrap",
         uv1="lightmap",
-        unwrap=fc.UnwrapOptions(
+        unwrap=fc.options.UnwrapOptions(
             texel_density=256.0,
             padding=4,
             max_stretch=0.15,
@@ -704,7 +728,7 @@ asset = asset.stage(
             sharp_to_seam=True,
             forbid_overlapping=True,
         ),
-        atlas=fc.AtlasOptions(
+        atlas=fc.options.AtlasOptions(
             enabled=True,
             max_size=4096,
         ),
@@ -735,7 +759,7 @@ since the current xatlas path doesn't expose them directly.
 asset = asset.stage(
     fc.StageOptions(
         uv0="box",
-        aabb_projection=fc.AabbProjectionOptions(
+        aabb_projection=fc.options.AabbProjectionOptions(
             scope="shared",
             uv3d_size=1.0,
             override_existing=True,
@@ -770,7 +794,7 @@ Staging, UV, and material parameters:
 | `UnwrapOptions` | `iterations` | Requested unwrap solver iteration budget. Recorded as intent until a backend exposes this control. |
 | `UnwrapOptions` | `tolerance` | Requested unwrap solver error threshold. Recorded as intent until a backend exposes this control. |
 | `UnwrapOptions` | `sharp_to_seam` | Request sharp edges as UV seams for unwrap/lightmap channels. Recorded as intent until a backend exposes explicit seam policy controls. |
-| `UnwrapOptions` | `forbid_overlapping` | Request non-overlapping UV islands. Current backends validate and warn about overlaps instead of guaranteeing repacking. |
+| `UnwrapOptions` | `forbid_overlapping` | Require non-overlapping UV islands. When set explicitly, staging raises `UVOverlapError` if overlapping UV faces remain; bake-domain channels (UV1/lightmap) are always checked and warn loudly by default. |
 | `AtlasOptions` | `enabled` | Record atlas metadata and prepare materials for later baking. |
 | `AtlasOptions` | `max_size` | Maximum atlas texture size in pixels. |
 
@@ -789,7 +813,7 @@ advisor used by explicit merge operations.
 
 ```python
 asset = asset.optimize_scene(
-    fc.SceneOptimizeOptions(
+    fc.options.SceneOptimizeOptions(
         batch_by_material=True,
         merge_compatible_meshes=True,
         split_large_meshes=True,
@@ -823,7 +847,7 @@ Use explicit optimization actions when a realtime pipeline needs named preparati
 
 ```python
 asset = asset.bake_materials(
-    fc.BakeMaterialOptions(
+    fc.options.BakeMaterialOptions(
         maps_resolution=2048,
         force_uv_generation=True,
         bake=("base_color", "opacity"),
@@ -848,15 +872,15 @@ asset = asset.decimate(
     )
 )
 
-asset = asset.remove_holes(fc.RemoveHolesOptions(max_diameter=3.0, prefer_brep=True))
-asset = asset.remove_occluded(fc.RemoveOccludedOptions(strategy="advanced", level="triangles"))
+asset = asset.remove_holes(fc.options.RemoveHolesOptions(max_diameter=3.0, prefer_brep=True))
+asset = asset.remove_occluded(fc.options.RemoveOccludedOptions(strategy="advanced", level="triangles"))
 asset = asset.run_lod_generators(
-    fc.LODGeneratorOptions(
+    fc.options.LODGeneratorOptions(
         preset="vr",
         levels=(
-            fc.LODLevel(screen_coverage=0.5, target_ratio=0.5),
-            fc.LODLevel(screen_coverage=0.2, target_ratio=0.25),
-            fc.LODLevel(screen_coverage=0.05, target_ratio=0.1),
+            fc.options.LODLevel(screen_coverage=0.5, target_ratio=0.5),
+            fc.options.LODLevel(screen_coverage=0.2, target_ratio=0.25),
+            fc.options.LODLevel(screen_coverage=0.05, target_ratio=0.1),
         ),
         validate=True,
     )
@@ -1096,7 +1120,7 @@ asset.write_gltf(
         jpeg_quality=85,
         file_size_budget_mb=50,
         size_ladder=True,
-        metadata=fc.MetadataExportOptions(mode="summary", pmi="metadata"),
+        metadata=fc.options.MetadataExportOptions(mode="summary", pmi="metadata"),
     ),
 )
 
@@ -1105,9 +1129,9 @@ asset.write_usd(
     options=fc.UsdExportOptions(package="usdz", file_size_budget_mb=100),
 )
 
-asset.write_obj("motor.obj", options=fc.ObjExportOptions(materials=True, write_mtl=True))
-asset.write_stl("motor.stl", options=fc.StlExportOptions(binary=True, merge=True))
-asset.write_fbx("motor.fbx", options=fc.FbxExportOptions(materials=True, normals=True, uvs=True))
+asset.write_obj("motor.obj", options=fc.options.ObjExportOptions(materials=True, write_mtl=True))
+asset.write_stl("motor.stl", options=fc.options.StlExportOptions(binary=True, merge=True))
+asset.write_fbx("motor.fbx", options=fc.options.FbxExportOptions(materials=True, normals=True, uvs=True))
 ```
 
 **Presets** — `preset="web"` (also `mobile`, `desktop`, `vr`, `ar`) resolves to
@@ -1155,6 +1179,11 @@ Export option parameters:
 | `GltfExportOptions` | `quantize` | Write `KHR_mesh_quantization` accessors and dequantization transforms. |
 | `GltfExportOptions` | `meshopt` | Write `EXT_meshopt_compression` payloads with fallback uncompressed data. |
 | `GltfExportOptions` | `draco` | Run Draco geometry compression and require `KHR_draco_mesh_compression` when mesh payloads are present. |
+| `GltfExportOptions` | `draco_compression_level` | Draco compression level, 0 (fastest) to 10 (smallest). Default 5 matches the encoder default. |
+| `GltfExportOptions` | `draco_quantize_position` / `draco_quantize_normal` / `draco_quantize_texcoord` / `draco_quantize_color` | Per-attribute Draco quantization bits (1-30). Defaults 14/10/12/8 match the encoder defaults. |
+| `GltfExportOptions` | `ktx2_quality` | KTX2/Basis encoder quality level (0-255), default 128. |
+| `GltfExportOptions` | `ktx2_effort` | KTX2/Basis encoder compression effort (0-6), default 2. |
+| `GltfExportOptions` | `ktx2_uastc` | Force UASTC (`True`) or ETC1S (`False`); `None` derives from `texture_compression`. |
 | `GltfExportOptions` | `texture_compression` | Run KTX2/Basis texture compression for referenced texture images: `ktx2` or `basisu`. |
 | `GltfExportOptions` | `texture_fallback_format` | PNG/JPEG fallback policy when KTX2/Basis compression is not requested: `auto`, `png`, or `jpeg`. `auto` keeps alpha-bearing texture sets PNG-safe and color-only sets JPEG-compatible. |
 | `GltfExportOptions` | `png_compression` | PNG fallback compression level, 0 through 9. |
@@ -1244,26 +1273,6 @@ base profile. Notes:
 - An overridden `max_triangles` becomes the optimization target (and the explicit decimation target when `--decimate` is used without `--target-triangles`/`--ratio`); `max_vertices` defaults to 3× the triangle budget unless set.
 - `supported_compression` and `supported_runtime_extensions` are optional caps; the profile budget report records a violation when the write emits anything outside them.
 
-## Functional wrappers
-
-The top-level functions mirror the fluent `Asset` methods.
-
-```python
-import fascat as fc
-
-asset = fc.read_step("motor.step")
-asset = fc.tessellate(asset, sag=0.1, angle=15.0)
-asset = fc.repair(asset, tolerance=0.05)
-asset = fc.merge_vertices(asset, tolerance=0.001)
-asset = fc.delete_degenerate_polygons(asset, area_epsilon=1e-12)
-asset = fc.stage(asset, materials="cad", uv0="box")
-asset = fc.optimize(asset, target_triangles=500_000)
-asset = fc.lods(asset, ratios=(0.5, 0.25, 0.1))
-
-fc.write_usd(asset, "motor.usdc")
-fc.write_gltf(asset, "motor.glb")
-```
-
 ## Reports and stats
 
 Every imported or converted asset carries a report.
@@ -1294,7 +1303,7 @@ Use `Asset.analyze()` when you need geometry quality risks beyond raw part and t
 
 ```python
 report = asset.analyze(
-    fc.AnalyzeOptions(
+    fc.options.AnalyzeOptions(
         non_manifold_edges=True,
         open_boundaries=True,
         self_intersections=True,
@@ -1332,7 +1341,7 @@ Analysis parameters:
 | `draw_call_estimate` | Include estimated draw calls, mesh count, referenced material count, submesh/material slots, instances, and merged batch counts. |
 | `visual_risk` | Enable risk-oriented warnings from geometry quality and report steps. |
 | `sliver_aspect_ratio` | Aspect-ratio threshold used to classify sliver triangles. |
-| `degenerate_area_epsilon` | Triangle area threshold used to classify degenerates. |
+| `degenerate_area_epsilon` | Triangle area threshold used to classify degenerates. Defaults to a bounding-box-derived, scale-invariant value. |
 | `tiny_part_diagonal` | Bounding-box diagonal threshold used to classify tiny parts. |
 | `max_self_intersection_pairs` | Maximum non-adjacent triangle pairs to check before reporting a lower-bound result. |
 
@@ -1340,12 +1349,14 @@ Use the visual preview helpers when you need deterministic review artifacts in C
 or before handing an asset to a runtime viewer:
 
 ```python
-preview = fc.write_preview(asset, "preview.png")
-comparison = fc.write_before_after_previews(before_asset, after_asset, "visual-review/")
-lod_contact_sheet = fc.write_lod_switch_previews(asset_with_lods, "lod-previews/")
-diff = fc.compare_images("baseline.png", "preview.png", fc.VisualDiffOptions(pixel_tolerance=2))
-suite = fc.write_runtime_parity_suite("runtime-parity/")
-captures = fc.capture_runtime_parity_suite(
+from fascat import validation
+
+preview = validation.write_preview(asset, "preview.png")
+comparison = validation.write_before_after_previews(before_asset, after_asset, "visual-review/")
+lod_contact_sheet = validation.write_lod_switch_previews(asset_with_lods, "lod-previews/")
+diff = validation.compare_images("baseline.png", "preview.png", validation.VisualDiffOptions(pixel_tolerance=2))
+suite = validation.write_runtime_parity_suite("runtime-parity/")
+captures = validation.capture_runtime_parity_suite(
     "runtime-parity/",
     targets=("browser", "unity"),
     unity_command="Unity",
@@ -1371,26 +1382,30 @@ golden corpus is incomplete.
 
 ## Validation
 
-Direct write calls produce files but do not automatically reopen and validate them. Validate direct writes explicitly when you need the same safety as `fc.convert()`.
+Direct write calls produce files but do not automatically reopen and validate them. Validate direct writes explicitly when you need the same safety as `fc.convert()`. `fc.validate_output` dispatches by suffix; per-format validators live on the io modules, and the runtime/visual/parity harness machinery lives in `fascat.validation` — one import surface for everything measurement-related.
 
 ```python
+from fascat import validation
+from fascat.io.gltf import validate_gltf
+from fascat.io.usd import validate_usd
+
 asset.write_usd("motor.usdc")
-usd_stats = fc.validate_usd("motor.usdc")
+usd_stats = validate_usd("motor.usdc")
 
 asset.write_gltf("motor.glb")
-gltf_stats = fc.validate_gltf("motor.glb")
+gltf_stats = validate_gltf("motor.glb")
 
 stats = fc.validate_output("motor.glb")
 
-runtime = fc.measure_browser_runtime(
+runtime = validation.measure_browser_runtime(
     "motor.glb",
-    options=fc.RuntimeBrowserOptions(duration_seconds=2.0),
+    options=validation.RuntimeBrowserOptions(duration_seconds=2.0),
 )
 
-unity_project = fc.copy_engine_runtime_harness("unity", "FascatUnityHarness")
-unity_runtime = fc.measure_engine_runtime(
+unity_project = validation.copy_engine_runtime_harness("unity", "FascatUnityHarness")
+unity_runtime = validation.measure_engine_runtime(
     "motor.glb",
-    options=fc.RuntimeEngineOptions(
+    options=validation.RuntimeEngineOptions(
         engine="unity",
         executable="Unity",
         project=unity_project,
@@ -1398,8 +1413,8 @@ unity_runtime = fc.measure_engine_runtime(
     ),
 )
 
-preview = fc.write_output_preview("motor.glb", "motor-preview.png")
-browser_preview = fc.write_browser_render_preview("motor.glb", "motor-browser.png")
+preview = validation.write_output_preview("motor.glb", "motor-preview.png")
+browser_preview = validation.write_browser_render_preview("motor.glb", "motor-browser.png")
 ```
 
 The CLI can write a validation-time quality report for exported assets:
@@ -1457,7 +1472,7 @@ browser, runs a bounded WebGL workload, and reports load time, FPS, frame count,
 memory, and workload scale. `--runtime-browser-preview` renders a real WebGL
 screenshot — node transforms, base-color factors, quantized attributes, Draco
 (via an installed glTF Transform CLI), meshopt (fallback or local `meshoptimizer`), KTX2/Basis
-(default Python `alktx2` on supported platforms, else installed glTF Transform + KTX-Software),
+(Python `alktx2` with the `ktx2` extra installed, else installed glTF Transform + KTX-Software),
 and base-color textures. Decoded payloads are listed in `decoded_extensions`; if
 Draco/meshopt tooling is missing the preview is `unsupported` (no misleading image),
 and missing KTX2/Basis tooling falls back to `status="rendered_partial"`. Set
@@ -1466,7 +1481,7 @@ browser, the report is `status="unavailable"` rather than an estimate.
 
 **Engine (glTF/GLB).** `--runtime-engine unity|unreal` runs a packaged harness (copied
 to a temp dir) or a custom one via `--runtime-engine-project`; use
-`fc.copy_engine_runtime_harness(engine, path)` for a persistent project. It records
+`validation.copy_engine_runtime_harness(engine, path)` for a persistent project. It records
 load/parse time, frame count, memory, engine version, and mesh/triangle counts.
 `--runtime-engine-preview` requests a PNG and records `render_status`,
 `render_backend`, `render_time_ms`, and limitations; `--runtime-engine-baseline`

@@ -429,3 +429,219 @@ def test_gltf_validation_rejects_assets_without_scene_meshes(tmp_path: Path) -> 
 
     with pytest.raises(RuntimeError, match="contains no meshes"):
         validate_gltf(output)
+
+
+def test_failed_gltf_validation_leaves_no_output_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import fascat.io.gltf as gltf
+
+    def boom(path: object) -> dict[str, int]:
+        raise RuntimeError("forced validation failure")
+
+    monkeypatch.setattr(gltf, "validate_gltf", boom)
+    output = tmp_path / "model.glb"
+
+    with pytest.raises(RuntimeError, match="forced validation failure"):
+        write_gltf_with_validation(_asset_with_materials_and_lods(), output)
+
+    assert not output.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_draco_export_validation_failure_leaves_no_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import fascat.io.gltf as gltf
+
+    def fake_draco_transform(arguments: tuple[str, ...]) -> None:
+        Path(arguments[2]).write_bytes(Path(arguments[1]).read_bytes())
+
+    def boom(path: object) -> dict[str, int]:
+        raise RuntimeError("forced validation failure")
+
+    monkeypatch.setattr(gltf, "_run_gltf_transform", fake_draco_transform)
+    monkeypatch.setattr(gltf, "validate_gltf", boom)
+    output = tmp_path / "model.glb"
+
+    with pytest.raises(RuntimeError, match="forced validation failure"):
+        write_gltf_with_validation(_asset_with_materials_and_lods(), output, options=GltfExportOptions(draco=True))
+
+    assert not output.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def _two_part_asset(second_mesh: Mesh, *, second_materials: list[str] | None = None) -> Asset:
+    solid = Mesh(
+        points=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    return Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="n_solid", name="Solid", part_id="solid"),
+                Node(id="n_other", name="Other", part_id="other"),
+            ],
+        ),
+        parts={
+            "solid": Part(id="solid", name="Solid", mesh=solid, material_ids=["mat"]),
+            "other": Part(id="other", name="Other", mesh=second_mesh, material_ids=second_materials or []),
+        },
+        materials={"mat": Material(id="mat", name="Mat", base_color=(0.5, 0.5, 0.5, 1.0))},
+    )
+
+
+def test_zero_triangle_mesh_is_skipped_not_emitted_as_empty_primitives(tmp_path: Path) -> None:
+    empty = Mesh(
+        points=np.array([[0.0, 0.0, 0.0]], dtype=float),
+        faces=np.empty((0, 3), dtype=int),
+    )
+    asset = _two_part_asset(empty)
+    output = tmp_path / "skipped.gltf"
+
+    write_gltf(asset, output)
+
+    document = json.loads(output.read_text(encoding="utf-8"))
+    assert len(document["meshes"]) == 1
+    assert all(mesh["primitives"] for mesh in document["meshes"])
+    empty_nodes = [node for node in document["nodes"] if node.get("name") == "Other"]
+    assert empty_nodes and "mesh" not in empty_nodes[0]
+    assert any("no renderable faces" in warning for warning in asset.report.warnings)
+
+
+def test_empty_lod_mesh_drops_lod_entry_with_warning(tmp_path: Path) -> None:
+    solid = Mesh(
+        points=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    empty_lod = Mesh(
+        points=np.array([[0.0, 0.0, 0.0]], dtype=float),
+        faces=np.empty((0, 3), dtype=int),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="n1", name="Solid", part_id="solid")]),
+        parts={"solid": Part(id="solid", name="Solid", mesh=solid, lod_meshes=[empty_lod])},
+    )
+    output = tmp_path / "lods.gltf"
+
+    write_gltf(asset, output)
+
+    document = json.loads(output.read_text(encoding="utf-8"))
+    assert len(document["meshes"]) == 1
+    assert any("lod 1" in warning and "no renderable faces" in warning for warning in asset.report.warnings)
+
+
+def test_out_of_bounds_material_index_emits_report_warning_and_unbound_primitive(tmp_path: Path) -> None:
+    mesh = Mesh(
+        points=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0]], dtype=float),
+        faces=np.array([[0, 1, 2], [2, 1, 3]], dtype=int),
+        material_indices=np.array([0, 5], dtype=int),
+    )
+    asset = _two_part_asset(mesh, second_materials=["mat"])
+    output = tmp_path / "oob.gltf"
+
+    write_gltf(asset, output)
+
+    document = json.loads(output.read_text(encoding="utf-8"))
+    other = next(m for m in document["meshes"] if m["extras"]["fascat"]["partId"] == "other")
+    bound = [p for p in other["primitives"] if "material" in p]
+    unbound = [p for p in other["primitives"] if "material" not in p]
+    assert len(bound) == 1 and len(unbound) == 1
+    assert any("[5]" in warning and "without a material" in warning for warning in asset.report.warnings)
+
+
+def test_negative_material_index_does_not_wrap() -> None:
+    # Mesh.validate() rejects negative material indices before export, so this
+    # exercises the _face_groups bounds check directly as defense in depth: a
+    # negative index must bind no material instead of wrapping to the last one.
+    from fascat.io.gltf import _face_groups
+
+    mesh = Mesh(
+        points=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    mesh.material_indices = np.array([-1], dtype=np.int64)
+    part = Part(id="p", name="P", mesh=mesh, material_ids=["a", "b"])
+
+    result = _face_groups(part, mesh)
+
+    assert result.out_of_bounds == [-1]
+    assert result.groups[0][0] is None
+
+
+def test_all_empty_meshes_export_gltf_without_buffers(tmp_path: Path) -> None:
+    empty = Mesh(
+        points=np.array([[0.0, 0.0, 0.0]], dtype=float),
+        faces=np.empty((0, 3), dtype=int),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="n1", name="Empty", part_id="empty")]),
+        parts={"empty": Part(id="empty", name="Empty", mesh=empty)},
+    )
+    output = tmp_path / "empty.gltf"
+
+    write_gltf(asset, output)
+
+    document = json.loads(output.read_text(encoding="utf-8"))
+    assert "buffers" not in document
+    assert "meshes" not in document
+    assert any("no renderable faces" in warning for warning in asset.report.warnings)
+
+
+def test_draco_export_passes_compression_parameters(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import fascat.io.gltf as gltf
+
+    captured: list[tuple[str, ...]] = []
+
+    def fake_transform(arguments: tuple[str, ...]) -> None:
+        captured.append(tuple(arguments))
+        Path(arguments[2]).write_bytes(Path(arguments[1]).read_bytes())
+
+    monkeypatch.setattr(gltf, "_run_gltf_transform", fake_transform)
+    asset = _asset_with_materials_and_lods()
+
+    write_gltf(asset, tmp_path / "default.glb", options=GltfExportOptions(draco=True))
+    write_gltf(
+        asset,
+        tmp_path / "custom.glb",
+        options=GltfExportOptions(draco=True, draco_compression_level=10, draco_quantize_position=11),
+    )
+
+    default_args = captured[0]
+    assert default_args[0] == "draco"
+    assert default_args[default_args.index("--encode-speed") : default_args.index("--encode-speed") + 2] == (
+        "--encode-speed",
+        "5",
+    )
+    assert ("--quantize-position", "14") in zip(default_args, default_args[1:], strict=False)
+    assert ("--quantize-normal", "10") in zip(default_args, default_args[1:], strict=False)
+    assert ("--quantize-texcoord", "12") in zip(default_args, default_args[1:], strict=False)
+    assert ("--quantize-color", "8") in zip(default_args, default_args[1:], strict=False)
+    custom_args = captured[1]
+    assert ("--encode-speed", "1") in zip(custom_args, custom_args[1:], strict=False)
+    assert ("--quantize-position", "11") in zip(custom_args, custom_args[1:], strict=False)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"draco_compression_level": -1},
+        {"draco_compression_level": 11},
+        {"draco_quantize_position": 0},
+        {"draco_quantize_normal": 31},
+    ],
+)
+def test_gltf_export_options_validate_draco_ranges(kwargs: dict[str, int]) -> None:
+    with pytest.raises(ValueError, match="draco"):
+        GltfExportOptions(**kwargs)  # type: ignore[arg-type]
+
+
+def test_resolve_gltf_export_options_carries_draco_params_through_presets() -> None:
+    from fascat.options import resolve_gltf_export_options
+
+    resolved = resolve_gltf_export_options(
+        GltfExportOptions(preset="web", draco=True, draco_compression_level=9, draco_quantize_position=12)
+    )
+
+    assert resolved.preset == "web"
+    assert resolved.draco is True
+    assert resolved.draco_compression_level == 9
+    assert resolved.draco_quantize_position == 12

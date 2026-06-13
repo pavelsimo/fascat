@@ -150,10 +150,12 @@ def decimate_asset(
     _warn_aggressive_lod0_decimation(result, source_meshes, options)
     part_ids = _selected_mesh_part_id_list(result, selected_part_ids)
 
-    def decimate_part(part_id: str) -> _DecimatedPart:
-        return _decimate_part_budget(result.parts[part_id], options, ratio)
+    payloads = [
+        _DecimateBudgetPayload(part=result.parts[part_id].copy(keep_source=False), options=options, ratio=ratio)
+        for part_id in part_ids
+    ]
 
-    for decimated in parallel_map(part_ids, decimate_part, jobs=options.jobs):
+    for decimated in parallel_map(payloads, _decimate_budget_worker, jobs=options.jobs, executor="process"):
         part = result.parts[decimated.part_id]
         part.mesh = decimated.mesh
         part.fingerprint = decimated.fingerprint
@@ -475,6 +477,29 @@ def _decimate_selection_part(
         pass_count=counts,
         target_budget=target_budget,
     )
+
+
+@dataclass(frozen=True)
+class _DecimateBudgetPayload:
+    part: Part
+    options: DecimateOptions
+    ratio: float | None
+
+
+def _decimate_budget_worker(payload: _DecimateBudgetPayload) -> _DecimatedPart:
+    return _decimate_part_budget(payload.part, payload.options, payload.ratio)
+
+
+@dataclass(frozen=True)
+class _DecimateSelectionPayload:
+    part: Part
+    options: DecimateOptions
+    target: int | None
+    ratio: float | None
+
+
+def _decimate_selection_worker(payload: _DecimateSelectionPayload) -> _DecimatedPart:
+    return _decimate_selection_part(payload.part, payload.options, target=payload.target, ratio=payload.ratio)
 
 
 def _decimate_part_budget(part: Part, options: DecimateOptions, ratio: float | None) -> _DecimatedPart:
@@ -1128,16 +1153,17 @@ def _decimate_selection_budget(
     part_targets: dict[str, int] = {}
     part_ids = _selected_mesh_part_id_list(result, selected_part_ids)
 
-    def decimate_part(part_id: str) -> _DecimatedPart:
-        part = result.parts[part_id]
-        return _decimate_selection_part(
-            part,
-            options,
-            target=targets.get(part.id) if targets is not None else None,
+    payloads = [
+        _DecimateSelectionPayload(
+            part=result.parts[part_id].copy(keep_source=False),
+            options=options,
+            target=targets.get(part_id) if targets is not None else None,
             ratio=ratio,
         )
+        for part_id in part_ids
+    ]
 
-    for decimated in parallel_map(part_ids, decimate_part, jobs=options.jobs):
+    for decimated in parallel_map(payloads, _decimate_selection_worker, jobs=options.jobs, executor="process"):
         part = result.parts[decimated.part_id]
         part.mesh = decimated.mesh
         part.fingerprint = decimated.fingerprint

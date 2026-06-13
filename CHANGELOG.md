@@ -7,17 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-13
+
 ### Added
+- ship the PEP 561 `py.typed` marker so downstream type checkers consume fascat's strict-mode hints
+- print conversion report warnings (including platform budget violations) on stderr, capped at 10 lines with an overflow pointer to `--report`
+- expose KTX2/Basis encoder quality (0-255), compression effort (0-6), and a UASTC/ETC1S override on `GltfExportOptions` plus `--ktx2-*` convert flags
+- expose Draco compression level and per-attribute quantization bits on `GltfExportOptions` and matching `--draco-*` convert flags (defaults reproduce previous output)
+- add concise reprs for Asset, Node, Part, Mesh, and options (options show non-default fields only)
+- accept keyword arguments directly on every Asset operation (`asset.tessellate(sag=0.1)`); `options=` stays as the prebuilt escape hatch, and `asset.lods` accepts a bare ratio sequence
 - add stdout format selection for streaming USD, glTF, GLB, OBJ, STL, and FBX conversions
 
 ### Changed
+- expand CI to a lint job plus a test matrix: ubuntu across Python 3.10-3.13 with windows and macos spot cells
+- move `alktx2` out of core dependencies; install the `ktx2` extra for the Python KTX2 preview decoder
+- **breaking:** explicit `forbid_overlapping=True` now raises `UVOverlapError` when overlapping UV faces remain after staging; bake-domain defaults keep warnings
+- run per-part mesh operations in process pools with `jobs` defaulting to `min(4, CPU count)` (override with `FASCAT_JOBS` or `jobs=1`); thread-based execution previously serialized CPU-bound work behind the GIL
+- load the public api lazily: `import fascat` drops from ~190ms to ~30ms and no longer pulls numpy, Pillow, or the runtime harness stacks until first use
 - require preinstalled glTF compression tooling instead of installing Node packages during export
 - document glTF compression tooling requirements and prefer pipx for installation guidance
 
 ### Removed
+- **breaking:** shrink the top-level namespace to 41 core names; the validation/runtime/visual harness surface moves to `fascat.validation`, remaining options classes stay importable from `fascat.options`, and per-format validators live on `fascat.io.*`
+- **breaking:** remove the 18 module-level operation wrappers (`fc.tessellate(asset, ...)` etc.); use the fluent `Asset` methods
 - remove unsupported Homebrew formula, install instructions, and release automation
 
+### Security
+- cap auxiliary STEP text scans and sidecar library/texture loads with size limits
+- bound per-record STEP argument scanning so unterminated strings cannot trigger whole-file rescans
+- confine STEP texture and material-library references to the CAD source directory and configured search paths; escaping references are reported as missing
+
 ### Fixed
+- fill holes with the material of the nearest neighboring face instead of stamping `material_indices[0]`
+- preserve normals, tangents, and UV channels when stitching boundary gaps (representative-vertex carry; UV-conflicting merges are counted in metadata)
+- invalidate stale per-face materials and face groups when the winding remap cannot match the new faces, instead of leaving silently misaligned assignments
+- make all exporters write transactionally via same-directory temp files and atomic renames — failed validation or Ctrl-C never leaves a partial or corrupt output file
+- kill the whole subprocess process group when browser/engine/encoder tools time out, and bound gltf-transform and KTX2 encoder invocations with timeouts
+- derive the degenerate-face area epsilon from the mesh bounding box by default (scale-invariant; explicit values stay authoritative)
+- skip zero-triangle meshes during glTF export instead of emitting invalid empty primitives, and report out-of-bounds material indices as warnings
+- exit with code 130 and a clean message on Ctrl-C instead of a traceback
+- decode ISO-10303-21 string escape directives in PMI text, design-variant labels, and sidecar references
 - validate final written USD, glTF, OBJ, and STL artifacts after export
 - validate glTF files that use external binary buffers or Draco-compressed accessors
 - avoid locked temporary files during stdin import and stdout conversion workflows
@@ -89,7 +118,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - improve CLI behavior for help, color handling, quiet mode, backend failures, and validation errors
 - keep asset, mesh, material, report, and node models isolated from caller-owned mutable inputs
 
-[Unreleased]: https://github.com/pavelsimo/fascat/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/pavelsimo/fascat/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/pavelsimo/fascat/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/pavelsimo/fascat/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/pavelsimo/fascat/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/pavelsimo/fascat/releases/tag/v0.1.0

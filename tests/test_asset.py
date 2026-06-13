@@ -476,6 +476,14 @@ def test_asset_write_gltf_records_report_step(monkeypatch: pytest.MonkeyPatch, t
         "jpeg_quality": 85,
         "file_size_budget_mb": None,
         "size_ladder": False,
+        "draco_compression_level": 5,
+        "draco_quantize_position": 14,
+        "draco_quantize_normal": 10,
+        "draco_quantize_texcoord": 12,
+        "draco_quantize_color": 8,
+        "ktx2_quality": 128,
+        "ktx2_effort": 2,
+        "ktx2_uastc": None,
         "metadata": {"mode": "full", "pmi": "metadata"},
     }
     assert runtime_dependencies["extensions_used"] == []

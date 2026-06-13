@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 import fascat as fc
+from fascat.io.usd import validate_usd
 
 pytestmark = [pytest.mark.requires_ocp, pytest.mark.requires_usd]
 
@@ -101,7 +102,7 @@ def test_generated_step_assembly_preserves_repeated_occurrences_and_transforms_i
         optimize=fc.OptimizeOptions(simplify=False, optimize_buffers=False),
         lods=None,
     )
-    validation_stats = fc.validate_usd(output)
+    validation_stats = validate_usd(output)
     stage = Usd.Stage.Open(str(output))
     assert stage is not None
     instance_prims = [prim for prim in Usd.PrimRange(stage.GetDefaultPrim()) if prim.IsInstanceable()]
@@ -190,7 +191,7 @@ def test_step_fixture_converts_to_valid_usd_with_report(tmp_path: Path) -> None:
         "validate",
     }
     assert asset.report.finished_at is not None
-    assert fc.validate_usd(output)["triangles"] == asset.triangle_count
+    assert validate_usd(output)["triangles"] == asset.triangle_count
 
 
 def test_tessellation_max_edge_length_limits_fixture_edges() -> None:
