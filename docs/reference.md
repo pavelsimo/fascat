@@ -16,19 +16,111 @@ fascat inspect input.step --json
 |------|-------|---------|-------------|
 | `--help` | `-h` | — | Show help for the current command |
 | `--version` | `-V` | — | Show version and exit |
-| `--verbose` | `-v` | `false` | Enable verbose output |
+| `--verbose` | `-v` | `false` | Enable verbose diagnostics; conversion warnings are not truncated |
 | `--quiet` | `-q` | `false` | Suppress non-essential output |
 | `--json` | — | `false` | Output results as JSON |
 | `--no-color` | — | `false` | Disable ANSI color output |
 | `--dry-run` | `-n` | `false` | Preview changes without applying them |
-| `--no-input` | — | `false` | Disable interactive prompts |
+| `--no-input` | — | `false` | Reserved guard for non-interactive runs; commands must not prompt when set |
 
 `-h` / `--help` and `-V` / `--version` are invocation-wide controls. They work before or after subcommands and ignore other arguments.
+
+`--verbose` expands diagnostic output on stderr. Conversion report warnings are normally capped after 10 messages; with `--verbose`, Fascat prints the full warning list. `--quiet` suppresses non-essential diagnostics even when `--verbose` is also set.
+
+`--no-input` is reserved for non-interactive automation. Fascat does not prompt today, and future prompts must first check that stdin is a TTY and that `--no-input` is not set.
 
 A `convert --dry-run` emits JSON with `operation_diagnostics` — planned operations
 each tagged `exact`, `approximate`, or `metadata_only`. With `--pipeline` it also adds
 `pipeline_advisories` warning about ordering issues (decimation before repair, tangents
 without UV0, AO baking without UV1, LOD generation before LOD0 optimization).
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Command completed successfully |
+| `1` | Runtime failure, validation failure, missing file, unsupported backend, or failed conversion |
+| `2` | Usage error, invalid option combination, unsupported extension, or invalid argument value |
+| `130` | Interrupted by Ctrl-C / SIGINT |
+
+Errors are written to stderr in human mode. With `--json`, command errors are emitted as a single JSON object on stdout with the same command context plus an `error` string, while diagnostics remain on stderr.
+
+## JSON output schemas
+
+All `--json` payloads are one JSON object on stdout. Optional sections are omitted when the matching flag or workflow is not used.
+
+### `version`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `command` | string | Always `version` |
+| `version` | string | Fascat package version |
+
+### `inspect`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `command` | string | Always `inspect` |
+| `input` | string | Input path, or `-` for stdin |
+| `profile` | string | Inspection profile name |
+| `dry_run` | boolean | Whether execution was skipped |
+| `stats` | object | Asset counts such as parts, occurrences, materials, vertices, and triangles |
+| `options` | object | Resolved profile options |
+| `root` | object | Root node dictionary |
+| `parts` | array | Part dictionaries |
+| `materials` | array | Material dictionaries |
+| `metadata_summary` | object | Compact metadata counts and keys |
+| `pmi_summary` | object | Compact PMI counts and types |
+| `report` | object | Import/conversion warnings and report steps |
+| `selection` | object | Present when filters are used |
+| `error` | string | Present only on failure |
+
+### `convert`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `command` | string | Always `convert` |
+| `input` | string or array | Input path, stdin marker, or multi-root input list |
+| `output` | string | Output path, or `-` for stdout |
+| `profile` | string | Resolved conversion profile |
+| `dry_run` | boolean | Whether execution was skipped |
+| `operation_diagnostics` | array | Dry-run operation entries with `operation`, `level`, and `message` |
+| `pipeline_advisories` | array | Dry-run pipeline-ordering warnings when `--pipeline` is used |
+| `stats` | object | Output asset counts on successful conversion |
+| `report` | object | Report warnings and workflow steps on successful conversion |
+| `error` | string | Present only on failure |
+
+### `validate`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `command` | string | Always `validate` |
+| `output` | string | Output path, or `-` for stdin |
+| `dry_run` | boolean | Whether execution was skipped |
+| `stats` | object | Validation stats from the selected exporter validator |
+| `analysis` | object | Present with geometry quality checks, reports, or filters |
+| `runtime_browser` | object | Present with `--runtime-browser` |
+| `runtime_browser_preview` | object | Present with `--runtime-browser-preview` |
+| `runtime_engine` | object | Present with `--runtime-engine` |
+| `runtime_engine_diff` | object | Present when engine preview baseline comparison runs |
+| `visual_preview` | object | Present with `--visual-preview` |
+| `visual_diff` | object | Present with `--visual-baseline` |
+| `lod_preview` | object | Present with `--lod-preview-dir` |
+| `error` | string | Present only on failure |
+
+### `runtime-fixtures`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `command` | string | Always `runtime-fixtures` |
+| `output_dir` | string | Target suite directory |
+| `dry_run` | boolean | Whether files or captures were skipped |
+| `fixtures` | array | Fixture entries written or planned |
+| `manifest` | string | Manifest path when a suite is written |
+| `capture` | string or null | Requested capture target |
+| `captures` | array | Capture results when a runtime target is used |
+| `golden_coverage` | object | Golden-image coverage report when requested |
+| `error` | string | Present only on failure |
 
 Conversion reports wrap the run in four steps: `preflight` (before expensive work —
 flags missing patch cleanup, orientation prep, UV/tangent ordering, AO-bake UV1

@@ -346,22 +346,30 @@ class CliState:
     no_input: bool
 
 
-def _version_callback(value: bool) -> None:
+def _version_payload() -> dict[str, str]:
+    return {"command": "version", "version": __version__}
+
+
+def _version_callback(ctx: typer.Context, value: bool) -> None:
     if value:
-        out.print(f"fascat {__version__}")
+        if _json_requested_for_version_callback(ctx):
+            out.print_json(json.dumps(_version_payload()))
+        else:
+            out.print(f"fascat {__version__}")
         raise typer.Exit()
 
 
 @app.callback()
 def main(
     ctx: typer.Context,
+    json_output: Annotated[bool, typer.Option("--json", help="Output results as JSON.", is_eager=True)] = False,
     _version: Annotated[
         bool | None,
         typer.Option(
             "--version",
             "-V",
             callback=_version_callback,
-            is_eager=True,
+            is_eager=False,
             help="Show version and exit.",
         ),
     ] = None,
@@ -370,7 +378,6 @@ def main(
         typer.Option("--verbose", "-v", help="Enable verbose output.", is_eager=False),
     ] = False,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Suppress non-essential output.")] = False,
-    json_output: Annotated[bool, typer.Option("--json", help="Output results as JSON.")] = False,
     no_color: Annotated[
         bool,
         typer.Option(
@@ -2803,9 +2810,9 @@ def cmd_runtime_fixtures(
 
 
 @app.command("version", epilog=f"Docs: {DOCS_URL}")
-def cmd_version() -> None:
+def cmd_version(ctx: typer.Context) -> None:
     """Show the version and exit."""
-    out.print(f"fascat {__version__}")
+    _emit(ctx, _version_payload(), f"fascat {__version__}")
 
 
 @app.command(
@@ -2857,6 +2864,10 @@ def _state(ctx: typer.Context) -> CliState:
     if isinstance(ctx.obj, CliState):
         return ctx.obj
     return CliState(verbose=False, quiet=False, json_output=False, no_color=False, dry_run=False, no_input=False)
+
+
+def _json_requested_for_version_callback(ctx: typer.Context) -> bool:
+    return ctx.params.get("json_output") is True
 
 
 def _emit(ctx: typer.Context, payload: dict[str, Any], human_message: str) -> None:
@@ -3360,12 +3371,13 @@ def _print_report_warnings(ctx: typer.Context, report: Report, *, limit: int = _
     state = _state(ctx)
     if state.quiet or state.json_output or not report.warnings:
         return
-    for warning in report.warnings[:limit]:
+    display_limit = len(report.warnings) if state.verbose else limit
+    for warning in report.warnings[:display_limit]:
         err.print(f"warning: {warning}", style="yellow", markup=False, soft_wrap=True)
-    hidden = len(report.warnings) - limit
+    hidden = len(report.warnings) - display_limit
     if hidden > 0:
         err.print(
-            f"... and {hidden} more warning(s); pass --report report.json for the full list",
+            f"... and {hidden} more warning(s); pass --verbose or --report report.json for the full list",
             style="yellow",
             markup=False,
         )
@@ -3851,7 +3863,10 @@ def _format_stats(stats: dict[str, int]) -> str:
 def _normalize_args(args: Sequence[str]) -> list[str]:
     raw_args = list(args)
     if any(arg in VERSION_FLAGS for arg in raw_args):
-        return ["--version"]
+        version_args = ["--version"]
+        if "--json" in raw_args:
+            version_args.insert(0, "--json")
+        return version_args
 
     if any(arg in HELP_FLAGS for arg in raw_args):
         command = _first_command(raw_args)

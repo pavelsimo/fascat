@@ -158,11 +158,11 @@ Audit verdict: the AGENTS.md contract is largely honored — exit codes 0/1/2 ar
 JSON output is clean, NO_COLOR/TTY handling is correct.
 
 - [x] **P1** Ctrl-C mid-conversion leaves a partial output file: `KeyboardInterrupt` bypasses the `except Exception` handlers (`fascat/cli.py:2166`, `fascat/pipeline.py:275`) and `_StageReporter.__exit__` only stops the progress bar (`fascat/cli.py:3612`); fixed by the §1 transactional temp-file + atomic-rename writes (`fascat/cli.py:2131`)
-- [ ] **P2** `fascat --json --version` emits plain text — the version callback ignores JSON mode (`fascat/cli.py:362`)
-- [ ] **P2** `--verbose`/`-v` is registered and stored but never read anywhere — implement or remove (`fascat/cli.py:381`)
-- [ ] **P2** Document the exit-code table in docs/reference.md (0 success / 1 runtime / 2 usage)
-- [ ] **P2** Document `--json` output schemas (success/failure payloads per subcommand)
-- [ ] **P3** `--no-input` is inert (no prompts exist anywhere) — document as reserved or remove (`fascat/cli.py:396`)
+- [x] **P2** `fascat --json --version` emits plain text — the version callback ignores JSON mode (`fascat/cli.py:362`)
+- [x] **P2** `--verbose`/`-v` is registered and stored but never read anywhere — implement or remove (`fascat/cli.py:381`)
+- [x] **P2** Document the exit-code table in docs/reference.md (0 success / 1 runtime / 2 usage)
+- [x] **P2** Document `--json` output schemas (success/failure payloads per subcommand)
+- [x] **P3** `--no-input` is inert (no prompts exist anywhere) — document as reserved or remove (`fascat/cli.py:396`)
 
 ## 6. Production defaults & guideline alignment
 
@@ -199,7 +199,7 @@ JSON output is clean, NO_COLOR/TTY handling is correct.
 - [x] **P1** Ship `fascat/py.typed` (PEP 561) — strict-mode type hints are currently unusable downstream
 - [ ] **P2** Resolve the meshoptimizer pre-release pin `>=0.2.30a0,<0.3`, or document why it's required (`pyproject.toml:30`)
 - [ ] **P2** Rename the `uv` extra → `unwrap` (collides with the uv package manager and UV-coordinate jargon) (`pyproject.toml:45`)
-- [ ] **P2** Docs: error-handling section + exit codes + JSON schemas (pairs with §5)
+- [x] **P2** Docs: error-handling section + exit codes + JSON schemas (pairs with §5)
 - [ ] **P3** FBX epoch CreationTime: document the reproducibility rationale (`fascat/io/fbx.py:140`)
 
 ## 9. Carried-forward feature roadmap
