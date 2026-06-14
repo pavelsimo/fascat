@@ -281,6 +281,7 @@ def test_step_pmi_semantic_graph_records_referenced_entities(tmp_path: Path) -> 
         "referenced_nodes": 2,
         "edges": 5,
         "missing_references": 1,
+        "cycles": 0,
     }
     assert [node["id"] for node in payload["nodes"]] == ["#20", "#21", "#30", "#31", "#32"]
     assert payload["nodes"][0]["kind"] == "pmi_target"
@@ -293,6 +294,31 @@ def test_step_pmi_semantic_graph_records_referenced_entities(tmp_path: Path) -> 
     assert {"source": "#31", "target": "#999", "relationship": "step_reference"} in payload["edges"]
     assert {"source": "#32", "target": "#30", "relationship": "step_reference"} in payload["edges"]
     assert graph.warnings == ("STEP PMI semantic graph has 1 reference(s) to records that were not found",)
+
+
+def test_step_pmi_semantic_graph_reports_cycles(tmp_path: Path) -> None:
+    source = tmp_path / "pmi-cycle.step"
+    source.write_text(
+        "ISO-10303-21;\n"
+        "DATA;\n"
+        "#21=SHAPE_ASPECT('hole face','',#40,.T.);\n"
+        "#30=DIMENSIONAL_SIZE(#21,'hole diameter 12.5 mm',12.5);\n"
+        "#40=SHAPE_ASPECT_RELATIONSHIP('cyclic target','',#21,#30);\n"
+        "ENDSEC;\n"
+        "END-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    graph = _extract_step_pmi_semantic_graph(source, StepReadOptions(pmi=True))
+    payload = graph.to_dict()
+
+    assert graph.summary["cycles"] == 1
+    assert graph.summary["missing_references"] == 0
+    assert {node["id"] for node in payload["nodes"]} == {"#21", "#30", "#40"}
+    assert {"source": "#30", "target": "#21", "relationship": "step_reference"} in payload["edges"]
+    assert {"source": "#21", "target": "#40", "relationship": "step_reference"} in payload["edges"]
+    assert {"source": "#40", "target": "#30", "relationship": "step_reference"} in payload["edges"]
+    assert graph.warnings == ("STEP PMI semantic graph contains 1 cycle(s)",)
 
 
 def test_step_pmi_semantic_graph_includes_callout_and_associativity_records(tmp_path: Path) -> None:
@@ -321,6 +347,7 @@ def test_step_pmi_semantic_graph_includes_callout_and_associativity_records(tmp_
         "referenced_nodes": 4,
         "edges": 9,
         "missing_references": 0,
+        "cycles": 0,
     }
     assert [node["id"] for node in payload["nodes"]] == ["#20", "#21", "#30", "#31", "#40", "#41", "#42"]
     assert payload["nodes"][5]["kind"] == "pmi_relationship"
@@ -357,6 +384,7 @@ def test_step_pmi_semantic_graph_includes_tolerance_zone_records(tmp_path: Path)
         "referenced_nodes": 5,
         "edges": 7,
         "missing_references": 0,
+        "cycles": 0,
     }
     assert [node["id"] for node in payload["nodes"]] == ["#20", "#21", "#30", "#40", "#42", "#43"]
     assert payload["nodes"][3]["kind"] == "pmi_tolerance_zone_form"
@@ -399,6 +427,7 @@ def test_step_pmi_semantic_graph_includes_annotation_presentation_records(tmp_pa
         "referenced_nodes": 10,
         "edges": 14,
         "missing_references": 0,
+        "cycles": 0,
     }
     assert [node["id"] for node in payload["nodes"]] == [
         "#20",
@@ -3822,6 +3851,20 @@ def test_step_design_variant_selection_evaluates_elementary_numeric_functions(
     assert "condition expression was not satisfied" in target_selection.warnings[0]
 
 
+@pytest.mark.parametrize(
+    ("operator", "values"),
+    [
+        ("numeric_log", [0.0]),
+        ("numeric_log", [-1.0]),
+        ("numeric_log2", [0.0]),
+        ("numeric_log10", [-10.0]),
+        ("numeric_sqrt", [-1.0]),
+    ],
+)
+def test_numeric_function_value_rejects_invalid_log_and_sqrt_domains(operator: str, values: list[float]) -> None:
+    assert step_io._numeric_function_value(operator, values) is None
+
+
 def test_step_design_variant_selection_evaluates_binary_atan_function(tmp_path: Path) -> None:
     source = tmp_path / "variants.step"
     source.write_text(
@@ -4329,6 +4372,7 @@ def test_step_import_decisions_report_extracted_typed_pmi() -> None:
             "referenced_nodes": 2,
             "edges": 3,
             "missing_references": 0,
+            "cycles": 0,
         },
     )
 
@@ -4340,6 +4384,7 @@ def test_step_import_decisions_report_extracted_typed_pmi() -> None:
         "semantic_graph_nodes": 4,
         "semantic_graph_edges": 3,
         "semantic_graph_missing_references": 0,
+        "semantic_graph_cycles": 0,
     }
 
 
