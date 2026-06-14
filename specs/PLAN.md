@@ -43,7 +43,7 @@ glTF/OBJ/STL/FBX writers, trimesh + numpy (mesh ops).
 - [ ] **P2** Color range heuristic (any component > 1.0 ⇒ assume 0–255) misreads HDR-ish inputs; make the color space explicit (`fascat/io/step.py:5694`)
 - [ ] **P2** Texture slot matching can bind the same slot twice — dedupe by slot (`fascat/io/step.py:5753`)
 - [ ] **P2** Mirrored transforms (negative determinant) are neither detected nor documented; risk of inverted normals on mirrored instances (`fascat/io/step.py:1476`, `fascat/io/step.py:4551`)
-- [ ] **P3** Stale "multi-file import not implemented" warning contradicts the shipped external-reference graph (`fascat/io/step.py:4087`)
+- [x] **P3** Stale "multi-file import not implemented" warning contradicts the shipped external-reference graph (`fascat/io/step.py:4087`)
 
 ### Mesh repair / tessellation
 

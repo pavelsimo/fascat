@@ -35,6 +35,7 @@ from fascat.io.step import (
     _material_binding_plan,
     _mixed_construction_curve_metadata,
     _mixed_construction_curve_shape,
+    _multi_file_import_decisions,
     _resolve_step_external_reference_graph,
     _shape_fingerprint,
     _shape_topology_counts,
@@ -156,8 +157,8 @@ def test_step_import_warnings_report_unsupported_import_intent() -> None:
     assert warnings == [
         "STEP file advertises AP242 PMI, but no supported typed PMI entities were extracted; annotations are omitted",
         "STEP design variant import was requested, but no supported design variant records were detected",
-        "multi-file STEP assembly import is not implemented; external references are not loaded",
     ]
+    assert not any("multi-file" in warning and "not implemented" in warning for warning in warnings)
 
 
 def test_step_text_pmi_extraction_reads_common_ap242_records(tmp_path: Path) -> None:
@@ -4297,7 +4298,8 @@ def test_step_import_decisions_report_requested_effective_states() -> None:
     assert decisions["pmi"]["state"] == "unsupported"
     assert decisions["design_variants"]["state"] == "not_present"
     assert decisions["design_variants"]["counts"]["records"] == 0
-    assert decisions["multi_file"]["state"] == "unsupported"
+    assert decisions["multi_file"]["state"] == "delegated"
+    assert "not implemented" not in decisions["multi_file"]["detail"]
     assert decisions["source_textures"]["state"] == "honored"
     assert decisions["material_library_mapping"]["state"] == "honored"
     assert decisions["delete_free_vertices"]["state"] == "honored"
@@ -4811,6 +4813,15 @@ def test_step_material_library_zip_container_maps_pbr_and_textures(tmp_path: Pat
     assert image.mime_type == "image/png"
     assert image.metadata["source_texture_path"].endswith("vendor-materials.zip!/textures/copper_baseColor.png")
     assert "vendor-materials.zip!/" in image.metadata["source_texture_identity"]
+
+
+def test_read_step_many_decision_detail_references_supported_external_graph() -> None:
+    decisions = _multi_file_import_decisions(StepReadOptions(multi_file=True), 2, 0)
+    detail = decisions["multi_file"]["detail"]
+
+    assert decisions["multi_file"]["state"] == "honored"
+    assert "read_step(..., multi_file=True)" in detail
+    assert "unsupported" not in detail
 
 
 def test_read_step_many_namespaces_members_and_prefixes_member_warnings(
