@@ -109,7 +109,7 @@ handling were each independently challenged and held up.
 
 - [x] **P1** Parallelism is effectively off: every op defaults `jobs=1`, and `parallel_map` uses `ThreadPoolExecutor` for CPU-bound (GIL-bound) mesh work (`fascat/ops/parallel.py:11-24`); default `jobs=min(4, cpu_count())` and use process pools for tessellate/simplify-class stages
 - [x] **P2** Cache topology metrics: `orientability_metrics` (O(F) BFS, `fascat/mesh.py:1516`) is recomputed via `stats()` after every stage whenever a progress callback is set — and the CLI always sets one (`fascat/pipeline.py:134+`, `fascat/asset.py:368`)
-- [ ] **P2** Cache `Node.walk()` results per operation scope — repeated full-tree walks in stats/draw-call/occurrence paths (`fascat/asset.py:100`, `fascat/asset.py:335`)
+- [x] **P2** Cache `Node.walk()` results per operation scope — repeated full-tree walks in stats/draw-call/occurrence paths (`fascat/asset.py:100`, `fascat/asset.py:335`)
 - [ ] **P2** `read_step_many` doesn't dedupe identical parts across member files — shared library parts are tessellated and stored N times (`fascat/io/step.py:809`)
 - [ ] **P2** Memoize design-variant selector term resolution (`fascat/io/step.py:2548`)
 - [ ] **P2** Audit `Asset.__post_init__` deep-copy amplification: the constructor deep-copies root/parts/materials/images (`fascat/asset.py:205-212`); verify all hot paths use `_adopt` and document the contract

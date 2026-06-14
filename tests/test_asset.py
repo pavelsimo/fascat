@@ -319,6 +319,37 @@ def test_hierarchy_report_stats_reuses_single_hierarchy_walk(monkeypatch: pytest
     assert stats["draw_calls"] == 3
 
 
+def test_asset_stat_paths_share_cached_hierarchy_walk(monkeypatch: pytest.MonkeyPatch) -> None:
+    asset = _scoped_asset()
+    original_walk = asset.root.walk
+    calls = 0
+
+    def counting_walk() -> list[Node]:
+        nonlocal calls
+        calls += 1
+        return original_walk()
+
+    monkeypatch.setattr(asset.root, "walk", counting_walk)
+
+    assert asset.stats()["occurrences"] == 3
+    assert asset.draw_call_breakdown()["draw_calls"] == 3
+    assert asset.occurrence_count == 3
+    assert _hierarchy_report_stats(asset)["nodes"] == 4
+
+    assert calls == 1
+
+
+def test_asset_hierarchy_walk_cache_invalidates_when_root_is_replaced() -> None:
+    asset = _scoped_asset()
+
+    assert asset.stats()["nodes"] == 4
+
+    asset.root = Node(id="replacement", name="replacement")
+
+    assert asset.stats()["nodes"] == 1
+    assert asset.occurrence_count == 0
+
+
 def test_operation_scope_skips_asset_copy_when_selection_does_not_split_occurrences(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
