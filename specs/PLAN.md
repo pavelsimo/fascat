@@ -149,7 +149,7 @@ asset                                                # <Asset: 412 parts, 1.2M t
 - [x] **P2** Consistency pass: document method/property boundaries and keep compatibility aliases (`selection()` for inspection, `lods()` accepts generator options while `run_lod_generators()` remains supported, `clone()` complements `copy(keep_source=...)`)
 - [x] **P2** Docstrings on all public classes/methods (document the asset tree model: nodes/parts/occurrences); error-handling examples in docs
 - [x] **P2** Fail fast on unwritable output paths in `write_*`; add `dry_run` to `write_*` for parity with `convert`
-- [ ] **P3** Convenience predicates (`is_empty`, `has_meshes`, `has_lods`); `to_trimesh()` interop helpers
+- [x] **P3** Convenience predicates (`is_empty`, `has_meshes`, `has_lods`); `to_trimesh()` interop helpers
 - [ ] **P3** Document/normalize implicit conversions in `Filter` (fnmatch patterns) (`fascat/filter.py:101`)
 
 ## 5. CLI

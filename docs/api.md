@@ -46,6 +46,13 @@ instead — never both: `asset.repair(fc.RepairOptions(tolerance=0.05))`. Write
 methods accept `dry_run=True` to validate the destination and record the write
 report step without creating or replacing the output file.
 
+Use `asset.is_empty`, `asset.has_meshes`, and `asset.has_lods` for quick guards
+before expensive operations. For Python mesh tooling, `mesh.to_trimesh()` returns
+a copied `trimesh.Trimesh`; `asset.to_trimesh(include_lods=False)` returns a
+`trimesh.Scene` with one geometry per mesh-bearing occurrence and node transforms
+preserved. Pass `include_lods=True` to include generated LOD meshes as sibling
+scene nodes.
+
 The rest of this page documents each step and every option. Two things apply
 throughout:
 

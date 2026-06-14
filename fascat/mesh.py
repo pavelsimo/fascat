@@ -315,6 +315,35 @@ class Mesh:
         mesh._cache = _clone_cache_entries(self._cache)
         return mesh
 
+    def to_trimesh(self) -> Any:
+        """Return this mesh as a copied ``trimesh.Trimesh`` object."""
+        import trimesh
+
+        vertex_attributes: dict[str, FloatArray] = {
+            f"uv{channel}": values.copy() for channel, values in self.uvs.items()
+        }
+        if self.tangents is not None:
+            vertex_attributes["tangents"] = self.tangents.copy()
+
+        face_attributes: dict[str, IntArray] = {}
+        if self.material_indices is not None:
+            face_attributes["material_indices"] = self.material_indices.copy()
+
+        kwargs: dict[str, object] = {
+            "vertices": self.points.copy(),
+            "faces": self.faces.copy(),
+            "metadata": dict(self.metadata),
+            "process": False,
+        }
+        if self.normals is not None:
+            kwargs["vertex_normals"] = self.normals.copy()
+        if vertex_attributes:
+            kwargs["vertex_attributes"] = vertex_attributes
+        if face_attributes:
+            kwargs["face_attributes"] = face_attributes
+        trimesh_mesh = cast(Any, trimesh.Trimesh)
+        return cast(Any, trimesh_mesh(**kwargs))
+
     def validate(self) -> None:
         """Validate mesh array shapes, indices, attributes, and metadata."""
         if self.points.ndim != 2 or self.points.shape[1] != 3:
