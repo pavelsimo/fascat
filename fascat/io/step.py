@@ -1257,9 +1257,11 @@ def _merge_step_member_assets(
     images: dict[str, ImageResource] = {}
     pmi: list[PmiAnnotation] = []
     member_records: list[dict[str, object]] = []
+    part_dedupe_index: dict[tuple[object, ...], str] = {}
 
     for member in members:
         maps = _step_namespace_maps(member.asset, member.namespace)
+        deduplicated_parts = _dedupe_step_member_parts(member.asset, maps, part_dedupe_index)
         root = _namespace_step_node(member.asset.root, maps)
         root.metadata.update(
             {
@@ -1286,7 +1288,10 @@ def _merge_step_member_assets(
         for material_id, material in member.asset.materials.items():
             materials[maps.materials[material_id]] = _namespace_step_material(material, maps, member)
         for part_id, part in member.asset.parts.items():
-            parts[maps.parts[part_id]] = _namespace_step_part(part, maps, member)
+            namespaced_part_id = maps.parts[part_id]
+            if namespaced_part_id in parts:
+                continue
+            parts[namespaced_part_id] = _namespace_step_part(part, maps, member)
         pmi.extend(_namespace_step_pmi(annotation, maps, member) for annotation in member.asset.pmi)
 
         member_records.append(
@@ -1298,6 +1303,7 @@ def _merge_step_member_assets(
                 "root_node_id": root.id,
                 "nodes": len(member.asset.root.walk()),
                 "parts": len(member.asset.parts),
+                "deduplicated_parts": deduplicated_parts,
                 "materials": len(member.asset.materials),
                 "images": len(member.asset.images),
                 "warnings": len(member.asset.report.warnings),
@@ -1396,6 +1402,88 @@ def _step_namespace_maps(asset: Asset, namespace: str) -> _StepNamespaceMaps:
         materials={material_id: f"{namespace}__{material_id}" for material_id in asset.materials},
         images={image_id: f"{namespace}__{image_id}" for image_id in asset.images},
     )
+
+
+def _dedupe_step_member_parts(
+    asset: Asset,
+    maps: _StepNamespaceMaps,
+    part_dedupe_index: dict[tuple[object, ...], str],
+) -> int:
+    deduplicated = 0
+    for part_id, part in asset.parts.items():
+        key = _step_member_part_dedupe_key(part, asset)
+        if key is None:
+            continue
+        canonical_part_id = part_dedupe_index.get(key)
+        if canonical_part_id is None:
+            part_dedupe_index[key] = maps.parts[part_id]
+            continue
+        maps.parts[part_id] = canonical_part_id
+        deduplicated += 1
+    return deduplicated
+
+
+def _step_member_part_dedupe_key(part: Part, asset: Asset) -> tuple[object, ...] | None:
+    fingerprint = part.fingerprint
+    if fingerprint is None and part.mesh is not None:
+        fingerprint = part.mesh.fingerprint()
+    if fingerprint is None:
+        return None
+    material_keys = tuple(_step_member_material_dedupe_key(material_id, asset) for material_id in part.material_ids)
+    lod_keys = tuple(mesh.fingerprint() for mesh in part.lod_meshes)
+    return (
+        fingerprint,
+        part.metadata.get("loaded_representation", ""),
+        part.metadata.get("occt_face_material_indices", ""),
+        material_keys,
+        lod_keys,
+    )
+
+
+def _step_member_material_dedupe_key(material_id: str, asset: Asset) -> tuple[object, ...]:
+    material = asset.materials.get(material_id)
+    if material is None:
+        return ("missing", material_id)
+    payload_metadata = {
+        key: value
+        for key, value in material.metadata.items()
+        if key
+        not in {
+            "material_library_path",
+            "material_library_reference",
+            "material_library_container",
+        }
+        and not key.endswith("_name")
+    }
+    return (
+        material.name,
+        material.base_color,
+        material.metallic,
+        material.roughness,
+        material.opacity,
+        _step_member_metadata_dedupe_value(payload_metadata, asset.images),
+    )
+
+
+def _step_member_metadata_dedupe_value(value: object, images: dict[str, ImageResource]) -> object:
+    if isinstance(value, str):
+        image = images.get(value)
+        if image is not None:
+            return ("image", _step_member_image_dedupe_key(image))
+        return value
+    if isinstance(value, dict):
+        return tuple(
+            sorted((str(key), _step_member_metadata_dedupe_value(item, images)) for key, item in value.items())
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_step_member_metadata_dedupe_value(item, images) for item in value)
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return repr(value)
+
+
+def _step_member_image_dedupe_key(image: ImageResource) -> tuple[object, ...]:
+    return (image.mime_type, image.width, image.height, image.data)
 
 
 def _namespace_step_node(node: Node, maps: _StepNamespaceMaps) -> Node:

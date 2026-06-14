@@ -5169,6 +5169,91 @@ def test_read_step_many_namespaces_members_and_prefixes_member_warnings(
     assert asset.metadata["multi_file_import"]["member_count"] == 2
 
 
+def test_read_step_many_reuses_identical_member_parts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_read_step_path(source: Path, *, source_identity: str, options: StepReadOptions) -> fc.Asset:
+        _ = source_identity, options
+        image_id = f"img-{source.stem}"
+        material = fc.Material(
+            id="mat",
+            name="Paint",
+            base_color=(0.8, 0.2, 0.1, 1.0),
+            metadata={
+                "source_texture_base_color_image": image_id,
+                "source_texture_base_color_name": f"{source.stem}.png",
+                "material_library_path": f"/vendor/{source.stem}/materials.json",
+                "material_library_reference": f"{source.stem}/materials.json",
+                "material_library_container": f"{source.stem}.zip",
+            },
+        )
+        image = fc.ImageResource(
+            id=image_id,
+            name=f"{source.stem}.png",
+            mime_type="image/png",
+            data=b"same-png",
+            width=2,
+            height=2,
+        )
+        return fc.Asset(
+            root=fc.Node(
+                id="root",
+                name=source.stem,
+                children=[fc.Node(id="occurrence", name="occurrence", part_id="part")],
+            ),
+            parts={"part": fc.Part(id="part", name="Part", material_ids=["mat"], fingerprint="shared-shape")},
+            materials={"mat": material},
+            images={image_id: image},
+        )
+
+    monkeypatch.setattr(step_io, "_read_step_path", fake_read_step_path)
+
+    first = tmp_path / "assembly-a.step"
+    second = tmp_path / "assembly-b.step"
+    asset = read_step_many([first, second], options=StepReadOptions(multi_file=True))
+
+    member_part_ids = [child.children[0].part_id for child in asset.root.children]
+
+    assert asset.stats()["parts"] == 1
+    assert asset.stats()["occurrences"] == 2
+    assert len(set(member_part_ids)) == 1
+    assert member_part_ids[0] in asset.parts
+    assert asset.report.steps[0].options["members"][0]["deduplicated_parts"] == 0
+    assert asset.report.steps[0].options["members"][1]["deduplicated_parts"] == 1
+    assert asset.metadata["multi_file_import"]["members"][1]["deduplicated_parts"] == 1
+
+
+def test_read_step_many_keeps_matching_shape_with_different_materials_separate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_read_step_path(source: Path, *, source_identity: str, options: StepReadOptions) -> fc.Asset:
+        _ = source_identity, options
+        color = (0.8, 0.2, 0.1, 1.0) if source.stem.endswith("a") else (0.1, 0.2, 0.8, 1.0)
+        return fc.Asset(
+            root=fc.Node(
+                id="root",
+                name=source.stem,
+                children=[fc.Node(id="occurrence", name="occurrence", part_id="part")],
+            ),
+            parts={"part": fc.Part(id="part", name="Part", material_ids=["mat"], fingerprint="shared-shape")},
+            materials={"mat": fc.Material(id="mat", name="Paint", base_color=color)},
+        )
+
+    monkeypatch.setattr(step_io, "_read_step_path", fake_read_step_path)
+
+    first = tmp_path / "assembly-a.step"
+    second = tmp_path / "assembly-b.step"
+    asset = read_step_many([first, second], options=StepReadOptions(multi_file=True))
+
+    member_part_ids = [child.children[0].part_id for child in asset.root.children]
+
+    assert asset.stats()["parts"] == 2
+    assert len(set(member_part_ids)) == 2
+    assert asset.report.steps[0].options["members"][1]["deduplicated_parts"] == 0
+
+
 def test_read_step_many_can_continue_after_member_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
