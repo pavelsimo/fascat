@@ -324,6 +324,37 @@ def test_bake_materials_merges_selected_material_slots() -> None:
         assert baked.report.steps[-1].warnings == []
 
 
+def test_bake_materials_records_emissive_material_vs_fallback_source() -> None:
+    mesh = Mesh(
+        points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.asarray([[0, 1, 2], [2, 1, 3]], dtype=int),
+        material_indices=np.asarray([0, 1], dtype=int),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="panel", name="Panel", part_id="panel")]),
+        parts={"panel": Part(id="panel", name="Panel", mesh=mesh, material_ids=["explicit", "fallback"])},
+        materials={
+            "explicit": Material(
+                id="explicit",
+                name="Explicit Black Emissive",
+                base_color=(1.0, 1.0, 1.0, 1.0),
+                metadata={"emissive_color": "0,0,0"},
+            ),
+            "fallback": Material(id="fallback", name="Fallback", base_color=(1.0, 1.0, 1.0, 1.0)),
+        },
+    )
+
+    baked = asset.bake_materials(BakeMaterialOptions(maps_resolution=16, force_uv_generation=True, bake=("emissive",)))
+
+    expected = {
+        "baked_emissive_source": "mixed",
+        "baked_emissive_material_faces": "1",
+        "baked_emissive_fallback_faces": "1",
+    }
+    assert baked.images["baked_emissive"].metadata.items() >= expected.items()
+    assert baked.materials["baked_material"].metadata.items() >= expected.items()
+
+
 def test_decimate_uses_selection_budget() -> None:
     asset = Asset(
         root=Node(id="root", name="root", children=[Node(id="body", name="Body", part_id="body")]),

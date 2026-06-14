@@ -895,6 +895,8 @@ and bound by glTF/USD exports through texture slots or `UsdUVTexture` networks.
 When multiple source materials are collapsed into the baked output material, Fascat uses a simple arithmetic mean for base color, metallic, roughness, and opacity. The average is not currently weighted by face area, texel coverage, or material usage.
 `ambient_occlusion_strategy` selects conservative, exterior, or advanced direction
 sets when baking AO maps or protecting low-AO faces during decimation.
+Emissive bakes record `baked_emissive_source` plus material/fallback face counts
+so explicit material emission can be distinguished from the black fallback.
 
 **Hole removal** uses mesh boundary classification and filling when BREP feature
 editing is unavailable. **Occlusion removal** uses deterministic visibility sampling;
