@@ -42,6 +42,7 @@ _ENGINE_CANDIDATES: dict[RuntimeEngineName, tuple[str, ...]] = {
     "unity": ("Unity", "unity", "unity-editor"),
     "unreal": ("UnrealEditor-Cmd", "UnrealEditor", "UE4Editor-Cmd", "UE4Editor"),
 }
+_MAX_BROWSER_RENDER_SCREENSHOT_DATA_URI_LENGTH = 16 * 1024 * 1024
 
 
 class _ResourceNode(Protocol):
@@ -772,6 +773,8 @@ def _parse_browser_payload(output: str) -> dict[str, object] | None:
 def _write_png_data_uri(value: str, path: Path) -> bool:
     prefix = "data:image/png;base64,"
     if not value.startswith(prefix):
+        return False
+    if len(value) > _MAX_BROWSER_RENDER_SCREENSHOT_DATA_URI_LENGTH:
         return False
     try:
         data = base64.b64decode(value[len(prefix) :], validate=True)

@@ -225,6 +225,49 @@ def test_gltf_transform_runtime_helpers_report_missing_cli_before_subprocess(
         helper(tmp_path / "input.gltf", tmp_path / "output.gltf")
 
 
+def test_browser_render_preview_falls_back_when_screenshot_data_exceeds_cap(
+    monkeypatch,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "asset.glb"
+    preview = tmp_path / "browser-preview.png"
+    _asset().write_gltf(output)
+    oversized_screenshot_data = "data:image/png;base64," + ("A" * 64)
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr("fascat.runtime._MAX_BROWSER_RENDER_SCREENSHOT_DATA_URI_LENGTH", 40)
+
+    def fake_run(command: list[str], *_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        screenshot_args = [item for item in command if item.startswith("--screenshot=")]
+        if screenshot_args:
+            screenshot_path = Path(screenshot_args[0].split("=", 1)[1])
+            Image.new("RGBA", (2, 2), (10, 20, 30, 255)).save(screenshot_path)
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        stdout = (
+            '<html><body><pre id="result">'
+            '{"status":"rendered","meshes":1,"triangles":1,'
+            '"textured_primitives":0,"sampled_textures":0,'
+            '"quantized_primitives":0,'
+            f'"screenshot_data":"{oversized_screenshot_data}"'
+            "}</pre></body></html>"
+        )
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fake_run)
+
+    report = write_browser_render_preview(
+        output,
+        preview,
+        RuntimeBrowserRenderOptions(browser="fake-browser", timeout_seconds=3.0),
+    )
+
+    assert len(calls) == 2
+    assert any(item.startswith("--screenshot=") for item in calls[1])
+    assert report.status == "rendered"
+    assert Image.open(preview).getpixel((0, 0)) == (10, 20, 30, 255)
+
+
 def test_browser_render_preview_reports_unsupported_draco_decode_failure_without_running_browser(
     monkeypatch,  # type: ignore[no-untyped-def]
     tmp_path: Path,
