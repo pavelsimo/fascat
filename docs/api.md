@@ -72,7 +72,7 @@ Core pipeline calls:
 | `asset.delete_degenerate_polygons(options=None, *, where=None, **kwargs)` | Keyword args mirror `DeleteDegeneratePolygonsOptions`. `where` optionally scopes selected parts. | Remove repeated-vertex, duplicate, or near-zero-area triangles as a standalone cleanup step. |
 | `asset.stage(options=None, *, where=None, **kwargs)` | Keyword args mirror `StageOptions`. `where` optionally scopes selected parts. | Prepare materials, normals, tangents, and UV metadata for runtime export. |
 | `asset.optimize(options=None, *, where=None, **kwargs)` | Keyword args mirror `OptimizeOptions`. `where` optionally scopes selected parts. | Reduce mesh complexity while preserving selected mechanical features. |
-| `asset.lods(options=None, *, where=None, **kwargs)` | `options` may also be a bare ratio sequence; keyword args mirror `LODOptions`. `where` optionally scopes selected parts. | Generate lower-detail runtime meshes. |
+| `asset.lods(options=None, *, where=None, **kwargs)` | `options` may also be a bare ratio sequence or `LODGeneratorOptions`; keyword args mirror `LODOptions`. `where` optionally scopes selected parts. | Generate lower-detail runtime meshes. |
 | `asset.write_usd(path, options=None)` | `path` ends in `.usd`, `.usda`, `.usdc`, or `.usdz`. `options` is `UsdExportOptions`. | Write OpenUSD output and append a write step to the report. |
 | `asset.write_gltf(path, options=None)` | `path` ends in `.gltf` or `.glb`. `options` is `GltfExportOptions`. | Write glTF 2.0 output and append a write step to the report. |
 | `asset.write_fbx(path, options=None)` | `path` ends in `.fbx`. `options` is `FbxExportOptions`. | Write ASCII FBX output and append a write step to the report. |
@@ -80,6 +80,7 @@ Core pipeline calls:
 ## Assembly filters
 
 Use `Filter` selectors to inspect or process one branch of an assembly while leaving the rest unchanged.
+Scalar counts such as `triangle_count`, `vertex_count`, and `draw_call_count` are properties. Aggregate summaries such as `stats()` and `draw_call_breakdown()` stay as methods because they allocate dictionaries and can include optional detail. `select()` and its `selection()` alias are inspection-only; use the `where=` keyword to scope mutating operations. Use `clone()` for public asset copies. `copy(keep_source=...)` remains available for advanced source-handle control.
 
 ```python
 import fascat as fc
@@ -874,7 +875,7 @@ asset = asset.decimate(
 
 asset = asset.remove_holes(fc.options.RemoveHolesOptions(max_diameter=3.0, prefer_brep=True))
 asset = asset.remove_occluded(fc.options.RemoveOccludedOptions(strategy="advanced", level="triangles"))
-asset = asset.run_lod_generators(
+asset = asset.lods(
     fc.options.LODGeneratorOptions(
         preset="vr",
         levels=(

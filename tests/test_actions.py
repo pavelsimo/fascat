@@ -951,6 +951,35 @@ def test_run_lod_generators_records_screen_coverage_metadata() -> None:
     assert with_lods.report.steps[-1].name == "run_lod_generators"
 
 
+def test_lods_accepts_generator_options_as_primary_entry_point() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="cube", name="Cube", part_id="cube")]),
+        parts={"cube": Part(id="cube", name="Cube", mesh=_cube_mesh())},
+    )
+
+    with_lods = asset.lods(
+        LODGeneratorOptions(
+            preset="vr",
+            levels=(LODLevel(screen_coverage=0.5, target_ratio=0.5),),
+            validate=True,
+        )
+    )
+
+    assert len(with_lods.parts["cube"].lod_meshes) == 1
+    assert with_lods.parts["cube"].metadata["lod_screen_coverage"] == "0.5"
+    assert with_lods.report.steps[-1].name == "run_lod_generators"
+
+
+def test_lods_rejects_generator_options_with_ratio_kwargs() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="cube", name="Cube", part_id="cube")]),
+        parts={"cube": Part(id="cube", name="Cube", mesh=_cube_mesh())},
+    )
+
+    with pytest.raises(TypeError, match="LOD generator options"):
+        asset.lods(LODGeneratorOptions(), ratios=(0.5,))
+
+
 def test_run_lod_generators_warns_for_untessellated_parts() -> None:
     asset = Asset(
         root=Node(id="root", name="root", children=[Node(id="empty", name="Untessellated", part_id="empty")]),

@@ -488,7 +488,7 @@ above and on the [Python API page](api.html) document each field.
 | Hole removal | Approximate | `remove_holes` (warns on mesh-fill fallback) | BREP feature-level removal for closed holes |
 | Occlusion removal | Approximate | `remove_occluded` (sample/direction coverage, confidence) | Acceleration structures and raster/GPU backends |
 | Decimation | Partial | `decimate` (target strategy, RAM/pass estimates, protected/importance counts) | Continuous weighted decimation and retopology |
-| LOD generation | Partial | `lods` / `run_lod_generators` (per-level counts, chain advisories, engine export mode) | Measured engine runtime validation of LOD profiles |
+| LOD generation | Partial | `lods` with ratio or generator options; `run_lod_generators` compatibility alias (per-level counts, chain advisories, engine export mode) | Measured engine runtime validation of LOD profiles |
 | Instance reconstruction | Partial | `optimize_scene` (reconstructed counts, savings, draw-call breakdown) | Transform-aware matching; compressed size estimates |
 | Runtime compression | Implemented | `write` `runtime_dependencies` / `runtime_decision_matrix` (quantize, meshopt, Draco, KTX2/Basis) | Full renderer/material validation |
 | Export and budgets | Implemented for USD, USDZ, glTF/GLB, OBJ, STL | `write`, `gltf_size_ladder`, `texture_export_policy`, `profile_budget`; `validate` runtime/preview reports | Fallback-free KTX2/Basis decode; full Unreal scene rendering; engine golden corpora |
