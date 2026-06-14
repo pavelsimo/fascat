@@ -114,7 +114,7 @@ handling were each independently challenged and held up.
 - [ ] **P2** Memoize design-variant selector term resolution (`fascat/io/step.py:2548`)
 - [ ] **P2** Audit `Asset.__post_init__` deep-copy amplification: the constructor deep-copies root/parts/materials/images (`fascat/asset.py:205-212`); verify all hot paths use `_adopt` and document the contract
 - [ ] **P3** Cache the nearest-centroid KD-tree across repeated simplifications of the same source (`fascat/mesh.py:2098`)
-- [ ] **P3** Cache per-channel UV layout/seam-graph stats in `_tag_uv_layout_quality` (`fascat/ops/stage.py:620-641`)
+- [x] **P3** Cache per-channel UV layout/seam-graph stats in `_tag_uv_layout_quality` (`fascat/ops/stage.py:620-641`)
 - [ ] **P3** Restrict the instance-reconstruction second tree walk to nodes referencing replaced parts (`fascat/ops/scene.py:154`)
 - [ ] **P3** Early-exit `orientability_metrics` for manifestly non-manifold meshes (`fascat/mesh.py:1516`)
 - [ ] **P3** Profile on real large CAD corpora (10k+ parts) and record numbers in [PERFORMANCE.md](PERFORMANCE.md)

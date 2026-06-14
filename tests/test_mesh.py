@@ -1059,6 +1059,119 @@ def test_uv_layout_stats_detects_overlap_bounds_and_degenerate_faces() -> None:
     assert skipped["overlapping_face_pairs"] == 0
 
 
+def test_uv_layout_stats_cache_is_per_channel_and_returns_copy(monkeypatch: pytest.MonkeyPatch) -> None:
+    uv = np.array(
+        [
+            [0, 0],
+            [1, 0],
+            [0, 1],
+            [0, 0],
+            [1, 0],
+            [0, 1],
+        ],
+        dtype=float,
+    )
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [0, 0, 1],
+                [1, 0, 1],
+                [0, 1, 1],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=int),
+        uvs={0: uv.copy(), 1: uv.copy()},
+    )
+    original_overlap = mesh_module._triangle_overlap_area_2d
+    overlap_calls = 0
+
+    def count_overlap(left: np.ndarray, right: np.ndarray, *, tolerance: float) -> float:
+        nonlocal overlap_calls
+        overlap_calls += 1
+        return original_overlap(left, right, tolerance=tolerance)
+
+    monkeypatch.setattr(mesh_module, "_triangle_overlap_area_2d", count_overlap)
+
+    first = mesh.uv_layout_stats(0)
+    mesh.uv_layout_stats(1)
+    third = mesh.uv_layout_stats(0)
+
+    assert first == third
+    assert overlap_calls == 2
+    first["overlapping_face_pairs"] = 99
+    assert mesh.uv_layout_stats(0)["overlapping_face_pairs"] == 1
+    assert overlap_calls == 2
+
+    mesh.uvs[0] = mesh.uvs[0].copy()
+    mesh.uvs[0][0, 0] = 0.25
+    mesh.uv_layout_stats(0)
+
+    assert overlap_calls == 3
+
+
+def test_uv_seam_graph_stats_cache_is_per_channel_and_returns_copy(monkeypatch: pytest.MonkeyPatch) -> None:
+    uv = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [0.1, 0.2],
+            [0.9, 0.2],
+            [1.0, -1.0],
+        ],
+        dtype=float,
+    )
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [0, 0, 0],
+                [1, 0, 0],
+                [1, -1, 0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=int),
+        uvs={0: uv.copy(), 1: uv.copy()},
+    )
+    original_rounded_key = mesh_module._rounded_key
+    rounded_key_calls = 0
+
+    def count_rounded_key(values: np.ndarray, decimals: int) -> tuple[float, ...]:
+        nonlocal rounded_key_calls
+        rounded_key_calls += 1
+        return original_rounded_key(values, decimals)
+
+    monkeypatch.setattr(mesh_module, "_rounded_key", count_rounded_key)
+
+    first = mesh.uv_seam_graph_stats(0)
+    calls_after_first = rounded_key_calls
+    mesh.uv_seam_graph_stats(1)
+    calls_after_second = rounded_key_calls
+    third = mesh.uv_seam_graph_stats(0)
+
+    assert first == third
+    assert int(first["edges"]) == 1
+    assert calls_after_first > 0
+    assert calls_after_second > calls_after_first
+    assert rounded_key_calls == calls_after_second
+    first["edges"] = 99
+    assert mesh.uv_seam_graph_stats(0)["edges"] == 1
+    assert rounded_key_calls == calls_after_second
+
+    mesh.uvs[0] = mesh.uvs[0].copy()
+    mesh.uvs[0][0, 0] = 0.05
+    mesh.uv_seam_graph_stats(0)
+
+    assert rounded_key_calls > calls_after_second
+
+
 def test_uv_distortion_metrics_record_islands_pack_and_stretch() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
