@@ -67,6 +67,7 @@ _STEP_EXTERNAL_REF_RE = re.compile(r"'([^']+\.(?:step|stp)(?:[#?][^']*)?)'", re.
 _MAX_STEP_SCAN_BYTES = 64 * 1024 * 1024
 _MAX_MATERIAL_LIBRARY_BYTES = 16 * 1024 * 1024
 _MAX_SOURCE_TEXTURE_BYTES = 64 * 1024 * 1024
+_MIRRORED_TRANSFORM_DETERMINANT_EPSILON = 1e-12
 _STEP_RECORD_START_RE = re.compile(r"#(\d+)\s*=\s*([A-Z0-9_]+)\s*\(", re.IGNORECASE)
 _STEP_REFERENCE_RE = re.compile(r"#(\d+)")
 _STEP_NUMBER_RE = re.compile(r"(?<![#A-Za-z0-9_])[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[Ee][-+]?\d+)?")
@@ -773,6 +774,14 @@ class _SpaceNormalization:
     def changed(self) -> bool:
         return not np.allclose(self.transform, np.eye(4, dtype=np.float64))
 
+    @property
+    def determinant(self) -> float:
+        return _transform_determinant(self.transform)
+
+    @property
+    def mirrored(self) -> bool:
+        return _is_mirrored_determinant(self.determinant)
+
     def metadata(self) -> dict[str, object]:
         return {
             "source_units": self.source_units,
@@ -784,6 +793,8 @@ class _SpaceNormalization:
             "target_up_axis": self.target_up_axis,
             "target_handedness": self.target_handedness,
             "transform": self.transform.tolist(),
+            "determinant": self.determinant,
+            "mirrored": self.mirrored,
             "changed": self.changed,
         }
 
@@ -1069,6 +1080,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         images = {**source_textures.images, **material_libraries.images}
         pmi = _extract_step_pmi_annotations(source, options)
         pmi_semantic_graph = _extract_step_pmi_semantic_graph(source, options)
+        mirrored_transforms = _annotate_mirrored_transforms(root)
 
     report = Report(source_path=str(source))
     asset = Asset(
@@ -1089,6 +1101,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
             space,
             pmi_count=len(pmi),
             design_variant_summary=design_variants.summary,
+            mirrored_transform_summary=mirrored_transforms,
         ),
         pmi=pmi,
         report=report,
@@ -1110,6 +1123,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         pmi_semantic_graph_summary=pmi_semantic_graph.summary,
         design_variant_summary=design_variants.summary,
         design_variant_selection_summary=design_variant_selection.to_dict(),
+        mirrored_transform_summary=mirrored_transforms,
     )
     loaded_representations = _loaded_representation_report(asset)
     if asset.metadata:
@@ -1122,6 +1136,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         asset.metadata["pmi_semantic_graph"] = pmi_semantic_graph.to_dict()
         asset.metadata["design_variant_import"] = design_variants.summary
         asset.metadata["design_variant_selection"] = design_variant_selection.to_dict()
+        asset.metadata["mirrored_transforms"] = mirrored_transforms
         if design_variants.records:
             asset.metadata["design_variants"] = [record.to_dict() for record in design_variants.records]
     import_warnings = [
@@ -1137,6 +1152,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
         *pmi_semantic_graph.warnings,
         *design_variants.warnings,
         *design_variant_selection.warnings,
+        *_mirrored_transform_warnings(mirrored_transforms),
     ]
     for warning in import_warnings:
         asset.report.add_warning(warning)
@@ -1162,6 +1178,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
             "material_library_bindings": material_library_binding_summary,
             "import_decisions": import_decisions,
             "loaded_representations": loaded_representations,
+            "mirrored_transforms": mirrored_transforms,
         },
         before={"nodes": 0, "parts": 0, "occurrences": 0, "materials": 0, "vertices": 0, "triangles": 0},
         after=asset.stats(),
@@ -1824,6 +1841,55 @@ def _space_transform(
     return transform
 
 
+def _empty_mirrored_transform_summary() -> dict[str, int]:
+    return {"local_mirrored_nodes": 0, "world_mirrored_nodes": 0, "mirrored_part_occurrences": 0}
+
+
+def _transform_determinant(transform: np.ndarray) -> float:
+    linear = np.asarray(transform, dtype=np.float64)[:3, :3]
+    return float(np.linalg.det(linear))
+
+
+def _is_mirrored_determinant(determinant: float) -> bool:
+    return np.isfinite(determinant) and determinant < -_MIRRORED_TRANSFORM_DETERMINANT_EPSILON
+
+
+def _annotate_mirrored_transforms(root: Node) -> dict[str, int]:
+    summary = _empty_mirrored_transform_summary()
+
+    def walk(node: Node, parent_world: np.ndarray) -> None:
+        local_determinant = _transform_determinant(node.transform)
+        world = parent_world @ node.transform
+        world_determinant = _transform_determinant(world)
+        if _is_mirrored_determinant(local_determinant):
+            summary["local_mirrored_nodes"] += 1
+            node.metadata["local_transform_determinant"] = local_determinant
+            node.metadata["local_transform_mirrored"] = "true"
+        if _is_mirrored_determinant(world_determinant):
+            summary["world_mirrored_nodes"] += 1
+            node.metadata["world_transform_determinant"] = world_determinant
+            node.metadata["world_transform_mirrored"] = "true"
+            if node.part_id is not None:
+                summary["mirrored_part_occurrences"] += 1
+        for child in node.children:
+            walk(child, world)
+
+    walk(root, np.eye(4, dtype=np.float64))
+    return summary
+
+
+def _mirrored_transform_warnings(summary: dict[str, int]) -> list[str]:
+    if summary["local_mirrored_nodes"] == 0 and summary["world_mirrored_nodes"] == 0:
+        return []
+    return [
+        "STEP import detected "
+        f"{summary['local_mirrored_nodes']} local mirrored transform(s) and "
+        f"{summary['world_mirrored_nodes']} mirrored world transform(s) with negative determinants; "
+        f"{summary['mirrored_part_occurrences']} part occurrence(s) may need normal/winding compensation "
+        "in downstream viewers"
+    ]
+
+
 def _to_canonical_space(up_axis: str, handedness: str) -> np.ndarray:
     if up_axis == "Z":
         axis = np.array(
@@ -1854,6 +1920,7 @@ def _asset_metadata(
     texture_binding_summary: dict[str, int] | None = None,
     material_library_summary: dict[str, int] | None = None,
     material_library_binding_summary: dict[str, int] | None = None,
+    mirrored_transform_summary: dict[str, int] | None = None,
 ) -> Metadata:
     if not options.metadata:
         return {}
@@ -1871,6 +1938,7 @@ def _asset_metadata(
         "space_normalization": space.metadata(),
         "metadata_options": options.to_dict(),
         "import_cleanup": cleanup.to_dict(),
+        "mirrored_transforms": mirrored_transform_summary or _empty_mirrored_transform_summary(),
     }
     if source_texture_summary is not None:
         metadata["source_texture_import"] = source_texture_summary
@@ -4263,6 +4331,7 @@ def _import_decisions(
     pmi_semantic_graph_summary: dict[str, int] | None = None,
     design_variant_summary: dict[str, int] | None = None,
     design_variant_selection_summary: dict[str, object] | None = None,
+    mirrored_transform_summary: dict[str, int] | None = None,
 ) -> dict[str, object]:
     cleanup_counts = cleanup.to_dict()
     texture_summary = source_texture_summary or {
@@ -4277,6 +4346,8 @@ def _import_decisions(
     library_binding_summary = material_library_binding_summary or _empty_material_library_binding_summary()
     pmi_graph_summary = {**_empty_pmi_semantic_graph_summary(), **(pmi_semantic_graph_summary or {})}
     variant_summary = {**_empty_design_variant_summary(), **(design_variant_summary or {})}
+    mirrored_summary = {**_empty_mirrored_transform_summary(), **(mirrored_transform_summary or {})}
+    mirrored_detected = mirrored_summary["local_mirrored_nodes"] > 0 or mirrored_summary["world_mirrored_nodes"] > 0
     return {
         "metadata": _import_decision(
             requested=options.metadata,
@@ -4376,6 +4447,16 @@ def _import_decisions(
             },
         ),
         "construction_curves": _construction_curve_import_decision(options, cleanup_counts),
+        "mirrored_transforms": _import_decision(
+            requested=True,
+            effective=mirrored_detected,
+            state="detected" if mirrored_detected else "not_present",
+            detail=(
+                "negative-determinant transforms are preserved and reported; downstream normal/winding "
+                "compensation may be required"
+            ),
+            counts=mirrored_summary,
+        ),
         "space_normalization": _import_decision(
             requested={
                 "source_units": options.source_units,
