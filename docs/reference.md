@@ -183,6 +183,7 @@ keeping the native source shape for tessellation and healing.
 | `--import-existing-meshes / --no-import-existing-meshes` | `true` | Prefer existing STEP tessellation payloads when the importer exposes them |
 | `--multi-file-import / --single-file-import` | `false` | Resolve quoted external STEP references from a master STEP file |
 | `--material-library` | unset | Vendor material-library JSON/MTL/ZIP file or folder to apply during import; may be passed more than once |
+| `--material-library-color-space` | `auto` | Numeric material-library color interpretation: `auto`, `linear`, or `srgb255` |
 | `--delete-free-vertices / --keep-free-vertices` | `false` | Drop construction-only point shapes during STEP import |
 | `--delete-lines / --keep-lines` | `false` | Drop construction-only line shapes during STEP import |
 | `--construction-curve-policy` | `preserve-metadata` | Construction-only line policy: `preserve-metadata`, `delete`, or `tessellate-tubes` |
@@ -351,6 +352,7 @@ keeping the native source shape for tessellation and healing.
 | `--import-existing-meshes / --no-import-existing-meshes` | `true` | Prefer existing STEP tessellation payloads when the importer exposes them |
 | `--multi-file-import / --single-file-import` | `false` | Resolve quoted external STEP references from a master STEP file |
 | `--material-library` | unset | Vendor material-library JSON/MTL/ZIP file or folder to apply during import; may be passed more than once |
+| `--material-library-color-space` | `auto` | Numeric material-library color interpretation: `auto`, `linear`, or `srgb255` |
 | `--delete-free-vertices / --keep-free-vertices` | `false` | Drop construction-only point shapes during STEP import |
 | `--delete-lines / --keep-lines` | `false` | Drop construction-only line shapes during STEP import |
 | `--construction-curve-policy` | `preserve-metadata` | Construction-only line policy: `preserve-metadata`, `delete`, or `tessellate-tubes` |
@@ -401,6 +403,7 @@ design_variant_selection = []
 existing_meshes = true
 multi_file = false
 material_library_paths = ["vendor-materials.json"]
+material_library_color_space = "auto"
 delete_free_vertices = false
 delete_lines = false
 construction_curve_policy = "preserve_metadata"

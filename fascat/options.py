@@ -92,6 +92,7 @@ LODOutput = Literal["variants", "extras", "separate"]
 LODEngineProfile = Literal["generic", "unity", "unreal"]
 TextureCompression = Literal["ktx2", "basisu"]
 TextureFallbackFormat = Literal["auto", "png", "jpeg"]
+MaterialLibraryColorSpace = Literal["auto", "linear", "srgb255"]
 GltfExportPreset = Literal["desktop", "web", "mobile", "vr", "ar"]
 UsdPackageMode = Literal["default", "usdz"]
 MetadataExportMode = Literal["none", "summary", "full"]
@@ -335,6 +336,7 @@ class StepReadOptions(OptionsRepr):
     source_texture_search_paths: tuple[str, ...] = ()
     material_library_mapping: bool = True
     material_library_paths: tuple[str, ...] = ()
+    material_library_color_space: MaterialLibraryColorSpace = "auto"
     delete_free_vertices: bool = False
     delete_lines: bool = False
     construction_curve_policy: ConstructionCurvePolicy = "preserve_metadata"
@@ -349,6 +351,8 @@ class StepReadOptions(OptionsRepr):
     target_handedness: Handedness | None = None
 
     def __post_init__(self) -> None:
+        if self.material_library_color_space not in {"auto", "linear", "srgb255"}:
+            raise ValueError("material_library_color_space must be one of: auto, linear, srgb255")
         if self.source_meters_per_unit is not None and self.source_meters_per_unit <= 0.0:
             raise ValueError("source_meters_per_unit must be greater than 0 when set")
         if self.target_meters_per_unit is not None and self.target_meters_per_unit <= 0.0:
