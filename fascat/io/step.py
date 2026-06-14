@@ -4,7 +4,7 @@ import json
 import re
 import tempfile
 import zipfile
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
@@ -2137,24 +2137,86 @@ def _extract_step_pmi_semantic_graph(source: Path, options: StepReadOptions) -> 
         )
         for record_id in node_ids
     )
+    cycle_count = _step_pmi_semantic_cycle_count(edges)
     summary = {
         "nodes": len(nodes),
         "pmi_nodes": len(pmi_ids),
         "referenced_nodes": len(nodes) - len(pmi_ids),
         "edges": len(edges),
         "missing_references": missing_references,
+        "cycles": cycle_count,
     }
-    warnings = (
-        (f"STEP PMI semantic graph has {missing_references} reference(s) to records that were not found",)
-        if missing_references
-        else ()
-    )
+    warnings: list[str] = []
+    if missing_references:
+        warnings.append(f"STEP PMI semantic graph has {missing_references} reference(s) to records that were not found")
+    if cycle_count:
+        warnings.append(f"STEP PMI semantic graph contains {cycle_count} cycle(s)")
     return _StepPmiSemanticGraphExtraction(
         nodes=nodes,
         edges=tuple(edges),
         summary=summary,
-        warnings=warnings,
+        warnings=tuple(warnings),
     )
+
+
+def _step_pmi_semantic_cycle_count(edges: list[_StepPmiSemanticGraphEdge]) -> int:
+    adjacency: dict[str, set[str]] = {}
+    for edge in edges:
+        adjacency.setdefault(edge.source, set()).add(edge.target)
+        adjacency.setdefault(edge.target, set())
+
+    index = 0
+    indices: dict[str, int] = {}
+    lowlinks: dict[str, int] = {}
+    stack: list[str] = []
+    on_stack: set[str] = set()
+    cycle_count = 0
+
+    def start_visit(start: str) -> None:
+        nonlocal index, cycle_count
+
+        indices[start] = index
+        lowlinks[start] = index
+        index += 1
+        stack.append(start)
+        on_stack.add(start)
+        call_stack: list[tuple[str, Iterator[str]]] = [(start, iter(adjacency[start]))]
+
+        while call_stack:
+            node, targets = call_stack[-1]
+            try:
+                target = next(targets)
+            except StopIteration:
+                call_stack.pop()
+                if lowlinks[node] == indices[node]:
+                    component: list[str] = []
+                    while True:
+                        member = stack.pop()
+                        on_stack.remove(member)
+                        component.append(member)
+                        if member == node:
+                            break
+                    if len(component) > 1 or any(member in adjacency[member] for member in component):
+                        cycle_count += 1
+                if call_stack:
+                    parent = call_stack[-1][0]
+                    lowlinks[parent] = min(lowlinks[parent], lowlinks[node])
+                continue
+
+            if target not in indices:
+                indices[target] = index
+                lowlinks[target] = index
+                index += 1
+                stack.append(target)
+                on_stack.add(target)
+                call_stack.append((target, iter(adjacency[target])))
+            elif target in on_stack:
+                lowlinks[node] = min(lowlinks[node], indices[target])
+
+    for node in adjacency:
+        if node not in indices:
+            start_visit(node)
+    return cycle_count
 
 
 def _empty_pmi_semantic_graph_summary() -> dict[str, int]:
@@ -2164,6 +2226,7 @@ def _empty_pmi_semantic_graph_summary() -> dict[str, int]:
         "referenced_nodes": 0,
         "edges": 0,
         "missing_references": 0,
+        "cycles": 0,
     }
 
 
@@ -3654,7 +3717,7 @@ def _numeric_function_value(operator: str, values: list[float]) -> float | None:
     if operator == "numeric_sqrt" and len(values) == 1:
         if values[0] < 0:
             return None
-        return float(values[0] ** 0.5)
+        return _finite_numeric_result(float(values[0] ** 0.5))
     if operator == "numeric_tan" and len(values) == 1:
         return _finite_numeric_result(float(np.tan(values[0])))
     if operator == "numeric_max":
@@ -4538,6 +4601,7 @@ def _pmi_import_decision(
         "semantic_graph_nodes": semantic_graph_summary["nodes"],
         "semantic_graph_edges": semantic_graph_summary["edges"],
         "semantic_graph_missing_references": semantic_graph_summary["missing_references"],
+        "semantic_graph_cycles": semantic_graph_summary.get("cycles", 0),
     }
     if not options.pmi:
         return _import_decision(requested=False, effective=False, state="disabled")
