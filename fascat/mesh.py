@@ -211,6 +211,14 @@ def _triangle_overlap_area_2d(left: FloatArray, right: FloatArray, *, tolerance:
 
 @dataclass
 class Mesh:
+    """Mutable triangle mesh that owns its NumPy arrays.
+
+    Construction copies every supplied array and `copy()` returns independent
+    arrays. In-place geometry edits are supported for advanced callers, but
+    callers must preserve array shapes and indices, run `validate()` after
+    structural edits, and update any owning part fingerprint they rely on.
+    """
+
     points: FloatArray
     faces: IntArray
     normals: FloatArray | None = None
@@ -275,6 +283,7 @@ class Mesh:
         return int(self.faces.shape[0])
 
     def copy(self) -> Mesh:
+        """Return an independent mesh copy, including cloned cache entries."""
         mesh = Mesh._adopt(
             points=self.points.copy(),
             faces=self.faces.copy(),
