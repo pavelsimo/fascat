@@ -909,7 +909,7 @@ and the report notes that thin occluders may need higher precision.
 
 **Decimation** records what it did and how aggressively:
 
-- **Strategy** — `target_strategy` (and `decimate_target_strategy` metadata) marks the run as explicit target count, target ratio, or quality/error-bounded; `decimate_requested_keep_ratio` is recorded when derivable. Keeping under 20% of source triangles warns, since that suits distant LODs more than LOD0.
+- **Strategy** — `target_strategy` (and `decimate_target_strategy` metadata) marks the run as explicit target count, target ratio, or quality/error-hint simplification; `decimate_requested_keep_ratio` is recorded when derivable. Keeping under 20% of source triangles warns, since that suits distant LODs more than LOD0.
 - **Memory & passes** — a RAM estimate (Unity's ~5 GB per million source triangles), `iterative_threshold` control, and `decimate_simplification_passes` / `decimate_iterative_passes` / `decimate_iterative_recommended`.
 - **Selection budgets** — selection-wide runs record per-part target allocation (assigned targets, reduced-vs-preserved counts, min/max), showing which dense parts absorbed the reduction.
 - **Protected features** — counts for hard edges, hole boundaries, material boundaries, UV seams, and silhouette faces. `preserve_painted_areas` protects painted/protected/weighted/important face groups; `preserve_ambient_occlusion` protects low-AO faces.
@@ -938,7 +938,7 @@ Optimization action parameters:
 | `BakeMaterialOptions` | `bake` | Maps to bake, such as `base_color`, `opacity`, `normal`, `roughness`, `metallic`, `ao`, or `emissive`. |
 | `BakeMaterialOptions` | `merge_output` | Replace selected materials with a shared baked output material. |
 | `BakeMaterialOptions` | `ambient_occlusion_strategy` | Direction set for baked AO maps: `conservative`, `exterior`, or `advanced`. |
-| `DecimateOptions` | `criterion` | `target` prioritizes a triangle budget. `quality` passes the largest configured tolerance as a target error bound to the simplification backend and records bound/result metadata. Report `target_strategy` identifies whether the effective workflow was target count, target ratio, or quality/error-bounded simplification. |
+| `DecimateOptions` | `criterion` | `target` prioritizes a triangle budget. `quality` passes the largest configured tolerance as a target-error hint to the simplification backend and records requested/result metadata. Reports use `decimate_quality_bound_policy="hint"` because the backend can exceed the hint instead of enforcing it. |
 | `DecimateOptions` | `target_triangles` | Absolute triangle target for selected geometry. In the CLI, `--decimate` uses the selected profile or target-device triangle budget when no explicit target or ratio is supplied. |
 | `DecimateOptions` | `target_ratio` | Fraction of source triangles to keep when no absolute target is set. Ratios below 20% produce an LOD0 distortion warning. |
 | `DecimateOptions` | `surface_tolerance` | Surface tolerance input used by `criterion="quality"` to derive the simplification target error bound. |

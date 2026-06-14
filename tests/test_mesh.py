@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import math
+import sys
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -1351,6 +1353,37 @@ def test_simplify_preserves_material_indices() -> None:
     assert simplified.material_indices is not None
     assert simplified.material_indices.shape == (simplified.triangle_count,)
     assert set(simplified.material_indices.tolist()).issubset({0, 1})
+
+
+def test_simplify_target_error_metadata_reports_hint_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [2, 1, 3]], dtype=int),
+    )
+
+    def fake_simplify(
+        destination: np.ndarray,
+        indices: np.ndarray,
+        positions: np.ndarray,
+        *,
+        vertex_count: int,
+        target_index_count: int,
+        target_error: float,
+        result_error: np.ndarray,
+    ) -> int:
+        _ = positions, vertex_count, target_index_count
+        destination[:3] = indices[:3]
+        result_error[0] = target_error * 2.0
+        return 3
+
+    monkeypatch.setitem(sys.modules, "meshoptimizer", SimpleNamespace(simplify=fake_simplify))
+
+    simplified = mesh.simplify(target_triangles=1, target_error=0.125)
+
+    assert simplified.metadata["simplify_error_bound"] == "0.125"
+    assert simplified.metadata["simplify_error_bound_policy"] == "hint"
+    assert simplified.metadata["simplify_result_error"] == "0.25"
+    assert simplified.metadata["simplify_error_bound_status"] == "exceeded_hint"
 
 
 def test_simplify_preserves_explicit_protected_faces() -> None:

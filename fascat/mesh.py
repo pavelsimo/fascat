@@ -2433,8 +2433,11 @@ class Mesh:
                 mesh.metadata = {
                     **mesh.metadata,
                     "simplify_error_bound": f"{error_bound:.9g}",
+                    "simplify_error_bound_policy": "hint",
                     "simplify_result_error": f"{measured_error:.9g}",
-                    "simplify_error_bound_status": "enforced" if measured_error <= error_bound + 1e-9 else "exceeded",
+                    "simplify_error_bound_status": "within_hint"
+                    if measured_error <= error_bound + 1e-9
+                    else "exceeded_hint",
                 }
             mesh.validate()
             return mesh
