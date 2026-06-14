@@ -5996,7 +5996,7 @@ def _json_material_texture_images(
         if reference:
             references.append((slot, reference))
     return _load_material_library_texture_references(
-        references,
+        _dedupe_texture_references(references),
         library_path,
         source_identity=source_identity,
         images=images,
@@ -6007,6 +6007,17 @@ def _json_material_texture_images(
         archive_textures=archive_textures,
         archive_container=archive_container,
     )
+
+
+def _dedupe_texture_references(references: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    deduped: list[tuple[str, str]] = []
+    seen_slots: set[str] = set()
+    for slot, reference in references:
+        if slot in seen_slots:
+            continue
+        seen_slots.add(slot)
+        deduped.append((slot, reference))
+    return deduped
 
 
 def _texture_reference_from_value(value: object) -> str:
