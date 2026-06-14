@@ -4,10 +4,11 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 import tomli
+from typing_extensions import TypedDict, Unpack
 
 from fascat.options import (
     ConversionProfile,
@@ -39,6 +40,23 @@ _BUDGET_FILE_KEYS = frozenset(
         "unity_reference_draw_calls",
     }
 )
+
+ProfileName = Literal[
+    "inspect-only",
+    "realtime-desktop",
+    "realtime-web",
+    "realtime-mobile",
+    "virtual-reality",
+    "augmented-reality",
+    "mixed-reality",
+]
+
+
+class ProfileOverrides(TypedDict, total=False):
+    tessellation_sag: float
+    angle: float
+    max_triangles: int
+    lod_ratios: list[float] | tuple[float, ...]
 
 
 @dataclass(frozen=True)
@@ -496,22 +514,29 @@ def mixed_reality(
     )
 
 
-def by_name(name: str) -> ConversionProfile:
+def by_name(name: ProfileName | str, **overrides: Unpack[ProfileOverrides]) -> ConversionProfile:
     if name == "inspect-only":
+        _reject_profile_overrides(name, overrides)
         return inspect_only()
     if name == "realtime-desktop":
-        return realtime_desktop()
+        return realtime_desktop(**overrides)
     if name == "realtime-web":
-        return realtime_web()
+        return realtime_web(**overrides)
     if name == "realtime-mobile":
-        return realtime_mobile()
+        return realtime_mobile(**overrides)
     if name == "virtual-reality":
-        return virtual_reality()
+        return virtual_reality(**overrides)
     if name == "augmented-reality":
-        return augmented_reality()
+        return augmented_reality(**overrides)
     if name == "mixed-reality":
-        return mixed_reality()
+        return mixed_reality(**overrides)
     raise ValueError(f"unknown profile: {name}")
+
+
+def _reject_profile_overrides(name: str, overrides: ProfileOverrides) -> None:
+    if overrides:
+        fields = ", ".join(sorted(overrides))
+        raise TypeError(f"profile {name!r} does not accept override(s): {fields}")
 
 
 def _load_profile_file(path: str | Path) -> dict[str, object]:

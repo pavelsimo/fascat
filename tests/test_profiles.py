@@ -254,6 +254,32 @@ def test_lod_options_normalize_list_ratios() -> None:
     assert options.to_dict()["ratios"] == [0.5, 0.25, 0.1]
 
 
+def test_profile_name_overrides_builtin_factory_options() -> None:
+    profile = profiles.by_name(
+        "realtime-web",
+        tessellation_sag=0.075,
+        angle=12.0,
+        max_triangles=123_456,
+        lod_ratios=(0.4,),
+    )
+
+    assert profile.tessellation is not None
+    assert profile.tessellation.sag == 0.075
+    assert profile.tessellation.angle == 12.0
+    assert profile.optimize is not None
+    assert profile.optimize.target_triangles == 123_456
+    assert profile.lods is not None
+    assert profile.lods.ratios == (0.4,)
+    assert profile.budget is not None
+    assert profile.budget.max_triangles == 123_456
+    assert profile.budget.max_vertices == 370_368
+
+
+def test_inspect_only_rejects_profile_overrides() -> None:
+    with pytest.raises(TypeError, match="inspect-only"):
+        profiles.by_name("inspect-only", max_triangles=10)
+
+
 def test_builtin_profiles_expose_unity_workflow_recipes() -> None:
     recipes = {
         "inspect-only": "inspectable-cad",

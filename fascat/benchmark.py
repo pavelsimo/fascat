@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from fascat import profiles
 from fascat.pipeline import convert
 
 
@@ -13,7 +14,7 @@ class BenchmarkOptions:
     inputs: tuple[Path, ...]
     output_dir: Path
     output_suffix: str = ".glb"
-    profile: str = "realtime-desktop"
+    profile: profiles.ProfileName = "realtime-desktop"
     repeat: int = 1
     validate_output: bool = False
 

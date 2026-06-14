@@ -4,6 +4,8 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from typing_extensions import Unpack
+
 from fascat import profiles
 from fascat.asset import Asset
 from fascat.export_report import referenced_materials
@@ -80,7 +82,7 @@ def convert(
     input_path: InputPath,
     output_path: str | Path,
     *,
-    profile: str | ConversionProfile = "realtime-desktop",
+    profile: profiles.ProfileName | ConversionProfile = "realtime-desktop",
     import_options: StepReadOptions | None = None,
     tessellation: TessellationOptions | None = None,
     heal_brep: BrepHealOptions | None = None,
@@ -109,6 +111,7 @@ def convert(
     fbx_options: FbxExportOptions | None = None,
     pipeline: PipelineSpec | None = None,
     where: Filter | None = None,
+    **profile_overrides: Unpack[profiles.ProfileOverrides],
 ) -> Asset:
     output_format = _export_format(output_path)
     output_suffix = Path(output_path).suffix.lower()
@@ -118,7 +121,7 @@ def convert(
         gltf_options = resolve_gltf_export_options(gltf_options)
     preset_texture_options = gltf_export_preset_texture_options(gltf_options) if output_format == "gltf" else None
     manifest_process_textures = process_textures or preset_texture_options
-    selected = profiles.by_name(profile) if isinstance(profile, str) else profile
+    selected = _profile_from_value(profile, profile_overrides)
     effective_import_options = import_options
     if effective_import_options is None and pipeline is not None:
         effective_import_options = pipeline.import_options
@@ -357,6 +360,18 @@ def convert(
     _add_profile_budget_report(asset, selected)
     asset.report.finish(_report_stats(asset))
     return asset
+
+
+def _profile_from_value(
+    profile: profiles.ProfileName | ConversionProfile,
+    overrides: profiles.ProfileOverrides,
+) -> ConversionProfile:
+    if isinstance(profile, str):
+        return profiles.by_name(profile, **overrides)
+    if overrides:
+        fields = ", ".join(sorted(overrides))
+        raise TypeError(f"profile overrides require a built-in profile name, got {profile.name!r}: {fields}")
+    return profile
 
 
 def _read_input(path: InputPath, *, options: StepReadOptions | None = None) -> Asset:

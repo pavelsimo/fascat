@@ -1861,6 +1861,45 @@ def test_convert_report_finishes_when_validation_is_disabled(monkeypatch, tmp_pa
     assert converted.report.output_stats == converted.stats()
 
 
+def test_convert_accepts_profile_name_overrides(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.pipeline as pipeline
+
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False, options=None: None)
+
+    converted = convert(
+        "input.step",
+        tmp_path / "output.usdc",
+        profile="realtime-web",
+        tessellation_sag=0.05,
+        angle=10.0,
+        max_triangles=50_000,
+        lod_ratios=(),
+        validate_output=False,
+    )
+    manifest_step = next(step for step in converted.report.steps if step.name == "conversion_manifest")
+    budget_step = next(step for step in converted.report.steps if step.name == "profile_budget")
+    profile = manifest_step.options["profile"]  # type: ignore[index]
+
+    assert profile["name"] == "realtime-web"  # type: ignore[index]
+    assert profile["tessellation"]["sag"] == 0.05  # type: ignore[index]
+    assert profile["tessellation"]["angle"] == 10.0  # type: ignore[index]
+    assert profile["optimize"]["target_triangles"] == 50_000  # type: ignore[index]
+    assert profile["lods"] is None  # type: ignore[index]
+    assert budget_step.options["max_triangles"] == 50_000
+
+
+def test_convert_rejects_profile_overrides_for_profile_objects(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match="built-in profile name"):
+        convert(
+            "input.step",
+            tmp_path / "output.usdc",
+            profile=_test_profile(),
+            max_triangles=50_000,
+            validate_output=False,
+        )
+
+
 def test_convert_report_records_write_failure(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     import fascat.pipeline as pipeline
 

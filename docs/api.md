@@ -1020,6 +1020,7 @@ asset = fc.convert(
     "motor.step",
     "motor.usdc",
     profile="realtime-desktop",
+    max_triangles=500_000,
     where=fc.Filter.path("*/Fasteners/*"),
     merge=fc.MergeOptions(mode="by_material", metadata="combine"),
 )
@@ -1036,7 +1037,7 @@ fc.convert("motor.step", "motor.usda", debug=True)
 fc.convert("motor.step", "motor.glb", profile="virtual-reality")
 fc.convert("motor.step", "motor.glb", profile="realtime-mobile")
 fc.convert("motor.step", "motor.glb", profile="mixed-reality")
-fc.convert("motor.step", "motor.gltf", profile="realtime-web")
+fc.convert("motor.step", "motor.gltf", profile="realtime-web", max_triangles=120_000)
 fc.convert("legacy.igs", "legacy.glb")
 fc.convert("native.brep", "native.usdc")
 ```
@@ -1050,7 +1051,8 @@ Conversion parameters:
 |-----------|---------|
 | `input_path` | CAD input path ending in `.step`, `.stp`, `.igs`, `.iges`, or `.brep`; Python callers may pass a sequence of STEP paths for explicit multi-root import, and the CLI accepts repeated `--input` STEP roots. CLI stdin remains STEP-oriented because stdin has no suffix. |
 | `output_path` | Output path. Suffix selects USD, glTF, OBJ, STL, or FBX. |
-| `profile` | Profile name or `ConversionProfile` that supplies default tessellation, repair, stage, optimize, LOD, budget, and workflow-recipe metadata. |
+| `profile` | Built-in profile name (`inspect-only`, `realtime-desktop`, `realtime-web`, `realtime-mobile`, `virtual-reality`, `augmented-reality`, `mixed-reality`) or a `ConversionProfile` that supplies default tessellation, repair, stage, optimize, LOD, budget, and workflow-recipe metadata. |
+| `tessellation_sag`, `angle`, `max_triangles`, `lod_ratios` | Profile override keywords for built-in realtime profiles. They are applied while constructing the named profile, before explicit option objects such as `tessellation=...` or `optimize=...` override individual pipeline steps. |
 | `import_options` | `StepReadOptions` for STEP metadata and PMI import. |
 | `tessellation` | Overrides the profile tessellation step. |
 | `heal_brep` | Optional BREP healing step before tessellation. |
