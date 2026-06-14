@@ -4862,6 +4862,7 @@ def test_material_library_zip_uncompressed_size_cap_is_reported_unreadable(
     library = tmp_path / "vendor-materials.zip"
     with zipfile.ZipFile(library, "w") as archive:
         archive.writestr("materials/vendor.json", '{"materials":[{"name":"steel"}]}')
+
     source = tmp_path / "panel.step"
     source.write_text(
         "ISO-10303-21;\nDATA;\n#1=EXTERNAL_REFERENCE('vendor-materials.zip');\nENDSEC;\nEND-ISO-10303-21;\n",
@@ -4872,6 +4873,47 @@ def test_material_library_zip_uncompressed_size_cap_is_reported_unreadable(
 
     assert extraction.summary["unreadable"] == 1
     assert any("uncompressed payload is too large" in warning for warning in extraction.warnings)
+
+
+def test_material_library_json_depth_cap_is_reported_unreadable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(step_io, "_MAX_MATERIAL_LIBRARY_JSON_DEPTH", 1)
+    library = tmp_path / "vendor-materials.json"
+    library.write_text(
+        json.dumps({"library": {"library": {"materials": [{"name": "steel"}]}}}),
+        encoding="utf-8",
+    )
+    source = tmp_path / "panel.step"
+    source.write_text(
+        "ISO-10303-21;\nDATA;\n#1=EXTERNAL_REFERENCE('vendor-materials.json');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    extraction = _extract_material_libraries(source, "panel.step", StepReadOptions())
+
+    assert extraction.summary["unreadable"] == 1
+    assert any("JSON nesting is too deep" in warning for warning in extraction.warnings)
+
+
+def test_material_library_zip_json_depth_cap_is_reported_unreadable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(step_io, "_MAX_MATERIAL_LIBRARY_JSON_DEPTH", 1)
+    library = tmp_path / "vendor-materials.zip"
+    payload = {"library": {"library": {"materials": [{"name": "steel"}]}}}
+    with zipfile.ZipFile(library, "w") as archive:
+        archive.writestr("materials/vendor.json", json.dumps(payload))
+    source = tmp_path / "panel.step"
+    source.write_text(
+        "ISO-10303-21;\nDATA;\n#1=EXTERNAL_REFERENCE('vendor-materials.zip');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    extraction = _extract_material_libraries(source, "panel.step", StepReadOptions())
+
+    assert extraction.summary["unreadable"] == 1
+    assert any("JSON nesting is too deep" in warning for warning in extraction.warnings)
 
 
 def test_step_material_library_zip_container_maps_pbr_and_textures(tmp_path: Path) -> None:

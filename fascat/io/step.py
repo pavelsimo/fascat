@@ -68,6 +68,7 @@ _MAX_STEP_SCAN_BYTES = 64 * 1024 * 1024
 _MAX_MATERIAL_LIBRARY_BYTES = 16 * 1024 * 1024
 _MAX_MATERIAL_LIBRARY_ARCHIVE_ENTRIES = 512
 _MAX_MATERIAL_LIBRARY_ARCHIVE_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
+_MAX_MATERIAL_LIBRARY_JSON_DEPTH = 64
 _MAX_SOURCE_TEXTURE_BYTES = 64 * 1024 * 1024
 _MIRRORED_TRANSFORM_DETERMINANT_EPSILON = 1e-12
 _STEP_RECORD_START_RE = re.compile(r"#(\d+)\s*=\s*([A-Z0-9_]+)\s*\(", re.IGNORECASE)
@@ -5836,7 +5837,7 @@ def _archive_member_key(name: str) -> str:
     return "/".join(parts).lower()
 
 
-def _json_material_entries(payload: object) -> list[dict[str, object]]:
+def _json_material_entries(payload: object, *, depth: int = 0) -> list[dict[str, object]]:
     if isinstance(payload, list):
         return [cast(dict[str, object], item) for item in payload if isinstance(item, dict)]
     if not isinstance(payload, dict):
@@ -5846,7 +5847,9 @@ def _json_material_entries(payload: object) -> list[dict[str, object]]:
         if isinstance(value, list):
             return [cast(dict[str, object], item) for item in value if isinstance(item, dict)]
         if isinstance(value, dict):
-            return _json_material_entries(value)
+            if depth >= _MAX_MATERIAL_LIBRARY_JSON_DEPTH:
+                raise ValueError("material library JSON nesting is too deep")
+            return _json_material_entries(value, depth=depth + 1)
     entries: list[dict[str, object]] = []
     for key, value in payload.items():
         if not isinstance(value, dict):
