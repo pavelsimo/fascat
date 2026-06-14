@@ -151,6 +151,19 @@ def test_version_flag() -> None:
     assert __version__ in result.output
 
 
+@pytest.mark.parametrize("args", [["--json", "--version"], ["--version", "--json"]])
+def test_json_version_flag(args: list[str]) -> None:
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {"command": "version", "version": __version__}
+
+
+def test_json_version_subcommand() -> None:
+    result = runner.invoke(app, ["--json", "version"])
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {"command": "version", "version": __version__}
+
+
 def test_version_subcommand() -> None:
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
@@ -2418,6 +2431,13 @@ def test_version_wins_after_subcommand(capsys) -> None:  # type: ignore[no-untyp
     assert result.stderr == ""
 
 
+def test_json_version_wins_after_subcommand(capsys) -> None:  # type: ignore[no-untyped-def]
+    result = invoke_run(["convert", "input.step", "output.usdc", "--json", "--version"], capsys)
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {"command": "version", "version": __version__}
+    assert result.stderr == ""
+
+
 def test_global_flags_work_after_subcommand(capsys) -> None:  # type: ignore[no-untyped-def]
     result = invoke_run(["convert", "input.step", "output.usdc", "--json", "--dry-run"], capsys)
     assert result.exit_code == 0
@@ -2630,6 +2650,14 @@ def test_convert_quiet_suppresses_warning_lines(monkeypatch: pytest.MonkeyPatch,
     result = _convert_with_synthetic_warnings(monkeypatch, tmp_path, 2, ["--quiet"])
 
     assert "warning:" not in result.stderr
+
+
+def test_convert_verbose_prints_all_report_warnings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    result = _convert_with_synthetic_warnings(monkeypatch, tmp_path, 15, ["--verbose"])
+
+    assert result.exit_code == 0
+    assert result.stderr.count("warning:") == 15
+    assert "more warning(s)" not in result.stderr
 
 
 def test_convert_json_keeps_warnings_in_payload_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
