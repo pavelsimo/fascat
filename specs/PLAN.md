@@ -117,7 +117,7 @@ handling were each independently challenged and held up.
 - [x] **P3** Cache per-channel UV layout/seam-graph stats in `_tag_uv_layout_quality` (`fascat/ops/stage.py:620-641`)
 - [x] **P3** Restrict the instance-reconstruction second tree walk to nodes referencing replaced parts (`fascat/ops/scene.py:154`)
 - [x] **P3** Early-exit `orientability_metrics` for manifestly non-manifold meshes (`fascat/mesh.py:1516`)
-- [ ] **P3** Profile on real large CAD corpora (10k+ parts) and record numbers in [PERFORMANCE.md](PERFORMANCE.md)
+- [ ] **P3** Profile on real large CAD corpora (10k+ parts) and record numbers in [PERFORMANCE.md](PERFORMANCE.md) — fallback fixture baseline recorded; actual 10k+ part corpus profiling still needed
 
 ## 4. Python API redesign — 0.4.0, breaking (Shapely-inspired)
 

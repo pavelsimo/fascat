@@ -9,6 +9,38 @@ original code location, why it was slow, and the resolution that closed it.
 > **Measure before fixing.** Use `make benchmark` or `scripts/benchmark.py` on a representative
 > CAD file first so effort lands on the real bottleneck rather than a guessed one.
 
+## Measured conversion baselines
+
+### 2026-06-14 — bundled real STEP fixture corpus
+
+This run records the largest real CAD corpus available locally at the time of measurement. The repo,
+`~/Workspace`, `~/Downloads`, `~/Documents`, `~/Desktop`, and `/tmp` were searched for STEP/IGES/BREP
+inputs. No qualifying 10k+ part real CAD corpus was present; the only reusable real CAD inputs were
+the bundled/user test-data STEP fixtures listed below. Treat these numbers as a reproducible local
+baseline, not as a claim about 10k+ part assembly throughput.
+
+- **Command:** `uv run python scripts/benchmark.py tests/fixtures/prusacaster.step tests/fixtures/fortune-cookie.step tests/fixtures/spool-clamp-lid.step tests/fixtures/raspberry-pi-camera-3-mount.step tests/fixtures/dji-osmo-action-6.step tests/fixtures/radial-fan-50x15.step tests/fixtures/spool-clamp-body.step tests/fixtures/vertical-screw.step --output-dir dist/benchmarks/2026-06-14 --output-suffix .glb --profile realtime-desktop --repeat 1`
+- **Commit:** `c081c64`
+- **Host:** Linux 6.14.0-37-generic, Python 3.13.5, Intel Core i7-7700K @ 4.20 GHz, 8 logical CPUs, 15 GiB RAM
+- **Profile/output:** `realtime-desktop` to `.glb`, `validate_output=false`, one run per input
+- **Aggregate:** 8 STEP files, 9 imported parts, 9 occurrences, 188,697 output triangles, 94,127 output vertices, 162,092 LOD triangles, 665.3 MiB max observed process RSS, 75.19 s total wall time
+
+| Input | Size | Parts | Occurrences | Triangles | LOD triangles | Wall time | Peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `dji-osmo-action-6.step` | 7.8 MB | 1 | 1 | 120,864 | 102,734 | 50.81 s | 665.3 MiB |
+| `vertical-screw.step` | 706 KB | 2 | 2 | 13,727 | 11,897 | 10.37 s | 665.3 MiB |
+| `prusacaster.step` | 654 KB | 1 | 1 | 12,344 | 11,606 | 4.89 s | 484.8 MiB |
+| `fortune-cookie.step` | 219 KB | 1 | 1 | 20,586 | 17,495 | 3.41 s | 484.8 MiB |
+| `raspberry-pi-camera-3-mount.step` | 529 KB | 1 | 1 | 11,248 | 9,558 | 2.87 s | 488.2 MiB |
+| `radial-fan-50x15.step` | 549 KB | 1 | 1 | 7,976 | 6,942 | 2.49 s | 665.3 MiB |
+| `spool-clamp-body.step` | 35 KB | 1 | 1 | 1,344 | 1,290 | 0.25 s | 665.3 MiB |
+| `spool-clamp-lid.step` | 51 KB | 1 | 1 | 608 | 570 | 0.09 s | 484.8 MiB |
+
+Stage totals from the run show import and LOD generation dominate this corpus: import 31.80 s,
+LOD generation 20.53 s, tessellation 8.39 s, repair 5.36 s, stage 5.01 s, optimize 3.84 s, and
+write 0.11 s. The largest single file, `dji-osmo-action-6.step`, accounts for 50.81 s of the
+75.19 s total wall time, with import alone taking 25.88 s.
+
 ## Priority summary
 
 | #   | Item                                                            | Category      | Severity |
