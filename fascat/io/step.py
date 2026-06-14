@@ -1599,7 +1599,7 @@ def _multi_file_import_decisions(
             state="approximated" if failed_member_count else "honored",
             detail=(
                 "explicit STEP member paths were imported as separate deterministic namespaces; "
-                "single-file external STEP reference resolution remains unsupported"
+                "quoted external STEP references are resolved by read_step(..., multi_file=True)"
             ),
             counts={"members": member_count, "failed_members": failed_member_count},
         )
@@ -4311,8 +4311,6 @@ def _import_warnings(
         warnings.append(
             "STEP design variant import was requested, but no supported design variant records were detected"
         )
-    if options.multi_file:
-        warnings.append("multi-file STEP assembly import is not implemented; external references are not loaded")
     return warnings
 
 
@@ -4389,7 +4387,10 @@ def _import_decisions(
             requested=options.multi_file,
             effective=False,
             state="unsupported" if options.multi_file else "disabled",
-            detail="multi-file STEP external-reference resolution is not implemented",
+            detail=(
+                "single-file STEP import does not resolve external-reference graphs; "
+                "use read_step(..., multi_file=True) or read_step_many(...) for multi-file imports"
+            ),
         ),
         "source_textures": _import_decision(
             requested=options.source_textures,
