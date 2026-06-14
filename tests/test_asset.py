@@ -221,6 +221,38 @@ def test_asset_copies_report_on_construction() -> None:
     assert asset.report.input_stats == {"parts": 1}
 
 
+def test_asset_adopt_reuses_already_owned_containers_without_defensive_copies() -> None:
+    root = Node(id="root", name="root")
+    parts = {"part": Part(id="part", name="Part")}
+    materials = {"red": Material(id="red", name="Red", base_color=(1.0, 0.0, 0.0, 1.0))}
+    images: dict[str, Any] = {}
+    metadata = {"source": "owned"}
+    pmi = []
+    report = Report(warnings=["owned"])
+
+    asset = Asset._adopt(
+        root=root,
+        parts=parts,
+        materials=materials,
+        images=images,
+        units="millimetre",
+        meters_per_unit=0.001,
+        up_axis="Z",
+        source_path=None,
+        metadata=metadata,
+        pmi=pmi,
+        report=report,
+    )
+
+    assert asset.root is root
+    assert asset.parts is parts
+    assert asset.materials is materials
+    assert asset.images is images
+    assert asset.metadata is metadata
+    assert asset.pmi is pmi
+    assert asset.report is report
+
+
 def test_asset_copy_does_not_reenter_defensive_constructors(monkeypatch: pytest.MonkeyPatch) -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
