@@ -159,7 +159,7 @@ JSON output is clean, NO_COLOR/TTY handling is correct.
 
 - [x] **P1** Ctrl-C mid-conversion leaves a partial output file: `KeyboardInterrupt` bypasses the `except Exception` handlers (`fascat/cli.py:2166`, `fascat/pipeline.py:275`) and `_StageReporter.__exit__` only stops the progress bar (`fascat/cli.py:3612`); fixed by the §1 transactional temp-file + atomic-rename writes (`fascat/cli.py:2131`)
 - [ ] **P2** `fascat --json --version` emits plain text — the version callback ignores JSON mode (`fascat/cli.py:362`)
-- [ ] **P2** `--verbose`/`-v` is registered and stored but never read anywhere — implement or remove (`fascat/cli.py:381`)
+- [x] **P2** `--verbose`/`-v` is registered and stored but never read anywhere — implement or remove (`fascat/cli.py:381`)
 - [ ] **P2** Document the exit-code table in docs/reference.md (0 success / 1 runtime / 2 usage)
 - [ ] **P2** Document `--json` output schemas (success/failure payloads per subcommand)
 - [ ] **P3** `--no-input` is inert (no prompts exist anywhere) — document as reserved or remove (`fascat/cli.py:396`)
