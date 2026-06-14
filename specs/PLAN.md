@@ -76,7 +76,7 @@ handling were each independently challenged and held up.
 - [ ] **P2** USD `display_color` metadata parse failures fall back silently (`fascat/io/usd.py:512-525`)
 - [ ] **P2** USD UV conversion lacks (N,2) shape validation (`fascat/io/usd.py:504`)
 - [ ] **P3** Warn when ASCII STL is chosen for >10k-triangle meshes (`fascat/io/stl.py:17`)
-- [ ] **P3** USD name sanitization collision policy documented/enforced (`fascat/io/usd.py:681`)
+- [x] **P3** USD name sanitization collision policy documented/enforced (`fascat/io/usd.py:681`)
 
 ### Optimize / LOD
 
