@@ -2186,6 +2186,14 @@ def _validate_mesh(context: _GltfValidationContext, mesh_index: int, stats: dict
         position_accessor = _require_accessor(context, position_index, accessor_type="VEC3")
         if not _position_accessor_allowed(context.document, position_accessor):
             raise RuntimeError("glTF POSITION accessor must use FLOAT or KHR_mesh_quantization component types")
+        normal_value = attributes.get("NORMAL")
+        if normal_value is not None:
+            normal_index = _int(normal_value, f"mesh {mesh_index} NORMAL accessor")
+            normal_accessor = _require_accessor(context, normal_index, accessor_type="VEC3")
+            if not _normal_accessor_allowed(context.document, normal_accessor):
+                raise RuntimeError(
+                    "glTF NORMAL accessor must use FLOAT or normalized KHR_mesh_quantization component types"
+                )
         position_accessors.add(position_index)
         indices = primitive.get("indices")
         if indices is None:
@@ -2243,6 +2251,17 @@ def _position_accessor_allowed(document: dict[str, Any], accessor: dict[str, Any
         _SHORT,
         _UNSIGNED_SHORT,
     }
+
+
+def _normal_accessor_allowed(document: dict[str, Any], accessor: dict[str, Any]) -> bool:
+    component_type = _int(accessor.get("componentType"), "NORMAL accessor componentType")
+    if component_type == _FLOAT:
+        return True
+    return (
+        _has_extension(document, _KHR_MESH_QUANTIZATION)
+        and accessor.get("normalized") is True
+        and component_type in {_BYTE, _SHORT}
+    )
 
 
 def _has_extension(document: dict[str, Any], extension: str) -> bool:
