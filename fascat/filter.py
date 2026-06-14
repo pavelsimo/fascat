@@ -120,11 +120,11 @@ class Filter:
         _mode: FilterMode = "criteria",
         _children: Sequence[Filter] = (),
     ) -> None:
-        self.path_patterns = _patterns(path)
-        self.name_patterns = _patterns(name)
-        self.part_name_patterns = _patterns(part_name)
-        self.part_id_patterns = _patterns(part_id)
-        self.material_patterns = _patterns(material)
+        self.path_patterns = _patterns(path, "path")
+        self.name_patterns = _patterns(name, "name")
+        self.part_name_patterns = _patterns(part_name, "part_name")
+        self.part_id_patterns = _patterns(part_id, "part_id")
+        self.material_patterns = _patterns(material, "material")
         self.metadata = dict(metadata or {})
         self.min_bounds = _point(min_bounds, "min_bounds") if min_bounds is not None else None
         self.max_bounds = _point(max_bounds, "max_bounds") if max_bounds is not None else None
@@ -557,12 +557,17 @@ def _coerce_filter(value: Filter) -> Filter:
     return value
 
 
-def _patterns(value: PatternValue | None) -> tuple[str, ...]:
+def _patterns(value: PatternValue | None, label: str) -> tuple[str, ...]:
     if value is None:
         return ()
     if isinstance(value, str):
         return (value,)
-    return tuple(str(item) for item in value)
+    if not isinstance(value, Sequence) or isinstance(value, bytes | bytearray):
+        raise TypeError(f"filter {label} patterns must be a string or sequence of strings")
+    patterns = tuple(value)
+    if any(not isinstance(item, str) for item in patterns):
+        raise TypeError(f"filter {label} patterns must be a string or sequence of strings")
+    return patterns
 
 
 def _point(value: Sequence[float], label: str) -> tuple[float, float, float]:

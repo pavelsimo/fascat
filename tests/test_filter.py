@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pytest
 from typer.testing import CliRunner
 
 from fascat.asset import Asset, Node, Part
@@ -114,6 +115,22 @@ def test_filter_logical_composition_and_cli_parser() -> None:
     selection = _asset().select(selector)
 
     assert {match.node_name for match in selection.matches if match.part_id is not None} == {"Bolt A", "Nut A"}
+
+
+def test_filter_pattern_fields_are_case_sensitive_fnmatch_patterns() -> None:
+    asset = _asset()
+
+    assert [match.node_name for match in asset.select(Filter.name(["Bolt*", "Nut*"])).matches] == ["Bolt A", "Nut A"]
+    assert asset.select(Filter.name("bolt*")).matches == ()
+    assert asset.select(Filter.path("root/[FH]*/*")).stats()["occurrences"] == 2
+    assert asset.select(Filter.material(["*Steel", "paint"])).stats()["occurrences"] == 3
+    assert Filter.part(("bolt", "housing")).to_dict()["criteria"] == {"part_id": ["bolt", "housing"]}
+
+
+@pytest.mark.parametrize("value", [[123], ("Bolt*", 123), b"Bolt*"])
+def test_filter_rejects_non_string_pattern_values(value: object) -> None:
+    with pytest.raises(TypeError, match="filter name patterns must be a string or sequence of strings"):
+        Filter.name(value)  # type: ignore[arg-type]
 
 
 def test_scoped_stage_isolates_selected_occurrences_and_preserves_unmatched_parts() -> None:
