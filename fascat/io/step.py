@@ -513,6 +513,7 @@ class _StepExternalReferenceGraph:
             "resolved": sum(1 for record in self.records if record.status == "resolved"),
             "missing": sum(1 for record in self.records if record.status == "missing"),
             "unsupported": sum(1 for record in self.records if record.status == "unsupported"),
+            "cycles": sum(1 for record in self.records if record.status == "cycle"),
             "sources": len(self.sources),
             "resolved_sources": len(resolved_sources),
             "member_sources": len(self.member_sources),
@@ -921,16 +922,22 @@ def _resolve_step_external_reference_graph(source: Path) -> _StepExternalReferen
     sources = [root]
     member_sources = [root]
     seen_sources = {root_key}
+    reference_cache: dict[str, list[str]] = {}
     records: list[_StepExternalReferenceRecord] = []
     warnings: list[str] = []
-    queue = [root]
+    queue: list[tuple[Path, tuple[str, ...]]] = [(root, (root_key,))]
 
     while queue:
-        current = queue.pop(0)
+        current, path_keys = queue.pop(0)
         if _step_scan_capped(current):
             warnings.append(f"external reference scan skipped: {current} exceeds {_MAX_STEP_SCAN_BYTES} bytes")
             continue
-        for reference in _step_external_references(current):
+        current_key = str(current.resolve())
+        references = reference_cache.get(current_key)
+        if references is None:
+            references = _step_external_references(current)
+            reference_cache[current_key] = references
+        for reference in references:
             cleaned, unsupported_reason = _clean_step_external_reference(reference)
             if cleaned is None:
                 records.append(
@@ -960,6 +967,23 @@ def _resolve_step_external_reference_graph(source: Path) -> _StepExternalReferen
                 warnings.append(f"STEP external reference could not be resolved: {reference} (referenced by {current})")
                 continue
 
+            resolved_key = str(resolved.resolve())
+            if resolved_key in path_keys:
+                records.append(
+                    _StepExternalReferenceRecord(
+                        source=current,
+                        reference=reference,
+                        status="cycle",
+                        resolved=resolved,
+                        reason="external STEP reference cycle detected",
+                    )
+                )
+                warnings.append(
+                    f"STEP external reference cycle detected: {reference} "
+                    f"(referenced by {current}; resolves to {resolved})"
+                )
+                continue
+
             records.append(
                 _StepExternalReferenceRecord(
                     source=current,
@@ -968,14 +992,12 @@ def _resolve_step_external_reference_graph(source: Path) -> _StepExternalReferen
                     resolved=resolved,
                 )
             )
-            resolved_key = str(resolved.resolve())
             if resolved_key != root_key:
                 member_sources.append(resolved)
-            if resolved_key in seen_sources:
-                continue
-            seen_sources.add(resolved_key)
-            sources.append(resolved)
-            queue.append(resolved)
+            if resolved_key not in seen_sources:
+                seen_sources.add(resolved_key)
+                sources.append(resolved)
+            queue.append((resolved, (*path_keys, resolved_key)))
 
     return _StepExternalReferenceGraph(
         root=root,
@@ -1620,10 +1642,13 @@ def _external_reference_import_decision(
 ) -> dict[str, object]:
     summary = graph.summary()
     missing_or_unsupported = summary["missing"] + summary["unsupported"]
+    cycle_count = summary.get("cycles", 0)
     if failed_member_count:
         state = "approximated"
     elif missing_or_unsupported:
         state = "missing_sources"
+    elif cycle_count:
+        state = "approximated"
     else:
         state = "honored"
     detail = (
