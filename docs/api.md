@@ -44,6 +44,13 @@ Keyword arguments mirror the matching `*Options` dataclass field-for-field. For 
 prebuilt configuration, pass `options=` (or the options object positionally)
 instead — never both: `asset.repair(fc.RepairOptions(tolerance=0.05))`.
 
+Use `asset.is_empty`, `asset.has_meshes`, and `asset.has_lods` for quick guards
+before expensive operations. For Python mesh tooling, `mesh.to_trimesh()` returns
+a copied `trimesh.Trimesh`; `asset.to_trimesh(include_lods=False)` returns a
+`trimesh.Scene` with one geometry per mesh-bearing occurrence and node transforms
+preserved. Pass `include_lods=True` to include generated LOD meshes as sibling
+scene nodes.
+
 The rest of this page documents each step and every option. Two things apply
 throughout:
 

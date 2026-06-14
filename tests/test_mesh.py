@@ -1767,3 +1767,32 @@ def test_assign_materials_by_nearest_centroid_is_memory_bounded() -> None:
     assert assigned is not None
     assert assigned.shape == (100,)
     assert assigned.min() >= 0 and assigned.max() < 8
+
+
+def test_mesh_to_trimesh_copies_geometry_and_attributes() -> None:
+    trimesh = pytest.importorskip("trimesh")
+    points = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float)
+    faces = np.array([[0, 1, 2]], dtype=int)
+    normals = np.array([[0, 0, 1], [0, 0, 1], [0, 0, 1]], dtype=float)
+    uvs = {0: np.array([[0, 0], [1, 0], [0, 1]], dtype=float)}
+    material_indices = np.array([2], dtype=int)
+    mesh = Mesh(
+        points=points,
+        faces=faces,
+        normals=normals,
+        uvs=uvs,
+        material_indices=material_indices,
+        metadata={"source": "cad"},
+    )
+
+    converted = mesh.to_trimesh()
+    mesh.points[0, 0] = 9.0
+    mesh.material_indices[0] = 7
+
+    assert isinstance(converted, trimesh.Trimesh)
+    np.testing.assert_allclose(converted.vertices, points)
+    np.testing.assert_array_equal(converted.faces, faces)
+    np.testing.assert_allclose(converted.vertex_normals, normals)
+    np.testing.assert_allclose(converted.vertex_attributes["uv0"], uvs[0])
+    np.testing.assert_array_equal(converted.face_attributes["material_indices"], material_indices)
+    assert converted.metadata == {"source": "cad"}

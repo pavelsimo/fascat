@@ -341,6 +341,21 @@ class Asset:
     def draw_call_count(self) -> int:
         return self.draw_call_breakdown()["draw_calls"]
 
+    @property
+    def is_empty(self) -> bool:
+        """Whether this asset has no parts, occurrences, resources, or PMI."""
+        return not self.parts and self.occurrence_count == 0 and not self.materials and not self.images and not self.pmi
+
+    @property
+    def has_meshes(self) -> bool:
+        """Whether any base part mesh contains vertices."""
+        return any(part.mesh is not None and part.mesh.vertex_count > 0 for part in self.parts.values())
+
+    @property
+    def has_lods(self) -> bool:
+        """Whether any part has generated LOD meshes with vertices."""
+        return any(mesh.vertex_count > 0 for part in self.parts.values() for mesh in part.lod_meshes)
+
     def draw_call_breakdown(self) -> dict[str, int]:
         return self._draw_call_breakdown_from_nodes(self.root.walk())
 
@@ -400,6 +415,46 @@ class Asset:
             pmi=list(self.pmi),
             report=self.report.copy(),
         )
+
+    def to_trimesh(self, *, include_lods: bool = False) -> Any:
+        """Return mesh-bearing occurrences as a transform-preserving ``trimesh.Scene``."""
+        import trimesh
+
+        scene = trimesh.Scene()
+        scene.metadata.update(
+            {
+                "units": self.units,
+                "meters_per_unit": self.meters_per_unit,
+                "up_axis": self.up_axis,
+                "fascat": dict(self.metadata),
+            }
+        )
+        for node, world_transform in _node_world_transforms(self.root):
+            if node.part_id is None:
+                continue
+            part = self.parts.get(node.part_id)
+            if part is None:
+                continue
+            if part.mesh is not None and part.mesh.vertex_count > 0:
+                scene.add_geometry(
+                    part.mesh.to_trimesh(),
+                    node_name=node.id,
+                    geom_name=f"{node.id}:{part.id}",
+                    transform=world_transform.copy(),
+                    metadata=_trimesh_occurrence_metadata(node=node, part=part, lod_index=None),
+                )
+            if include_lods:
+                for lod_index, mesh in enumerate(part.lod_meshes):
+                    if mesh.vertex_count == 0:
+                        continue
+                    scene.add_geometry(
+                        mesh.to_trimesh(),
+                        node_name=f"{node.id}:lod{lod_index}",
+                        geom_name=f"{node.id}:{part.id}:lod{lod_index}",
+                        transform=world_transform.copy(),
+                        metadata=_trimesh_occurrence_metadata(node=node, part=part, lod_index=lod_index),
+                    )
+        return cast(Any, scene)
 
     def select(self, where: Any | None = None) -> Any:
         from fascat.filter import Filter
@@ -1278,6 +1333,29 @@ def _options_with_scope(options: dict[str, object], scope: _OperationScope) -> d
         "where": scope.selection.filter.to_dict(),
         "matched": scope.selection.stats(),
     }
+
+
+def _node_world_transforms(node: Node, parent_transform: Transform | None = None) -> list[tuple[Node, Transform]]:
+    current = node.transform.copy() if parent_transform is None else parent_transform @ node.transform
+    nodes = [(node, current)]
+    for child in node.children:
+        nodes.extend(_node_world_transforms(child, current))
+    return nodes
+
+
+def _trimesh_occurrence_metadata(*, node: Node, part: Part, lod_index: int | None) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "node_id": node.id,
+        "node_name": node.name,
+        "part_id": part.id,
+        "part_name": part.name,
+        "lod_index": lod_index,
+    }
+    if node.metadata:
+        metadata["node_metadata"] = dict(node.metadata)
+    if part.metadata:
+        metadata["part_metadata"] = dict(part.metadata)
+    return metadata
 
 
 def _add_export_merge_advisor(

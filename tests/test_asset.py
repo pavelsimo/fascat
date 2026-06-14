@@ -258,6 +258,80 @@ def test_asset_copy_does_not_reenter_defensive_constructors(monkeypatch: pytest.
     assert asset.report.steps[0].options == {"mode": "cad"}
 
 
+def test_asset_predicates_report_content_and_mesh_payloads() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    empty = Asset(root=Node(id="root", name="root"))
+    material_only = Asset(
+        root=Node(id="root", name="root"),
+        materials={"red": Material(id="red", name="Red", base_color=(1.0, 0.0, 0.0, 1.0))},
+    )
+    source_only = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", source_shape=object())},
+    )
+    with_mesh = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+    with_lods = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", lod_meshes=[mesh])},
+    )
+
+    assert empty.is_empty is True
+    assert empty.has_meshes is False
+    assert empty.has_lods is False
+    assert material_only.is_empty is False
+    assert source_only.is_empty is False
+    assert source_only.has_meshes is False
+    assert with_mesh.has_meshes is True
+    assert with_mesh.has_lods is False
+    assert with_lods.has_meshes is False
+    assert with_lods.has_lods is True
+
+
+def test_asset_to_trimesh_returns_scene_with_occurrence_transforms() -> None:
+    trimesh = pytest.importorskip("trimesh")
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+        metadata={"source": "mesh"},
+    )
+    transform = np.eye(4, dtype=float)
+    transform[0, 3] = 2.5
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[Node(id="node", name="Node", part_id="part", transform=transform)],
+        ),
+        parts={"part": Part(id="part", name="Part", mesh=mesh, metadata={"role": "test"}, lod_meshes=[mesh])},
+        units="metre",
+        meters_per_unit=1.0,
+        metadata={"asset": "metadata"},
+    )
+
+    scene = asset.to_trimesh(include_lods=True)
+
+    assert isinstance(scene, trimesh.Scene)
+    assert scene.metadata["units"] == "metre"
+    assert scene.metadata["fascat"] == {"asset": "metadata"}
+    assert sorted(scene.geometry) == ["node:part", "node:part:lod0"]
+    matrix, geometry_name = scene.graph.get("node")
+    np.testing.assert_allclose(matrix, transform)
+    assert geometry_name == "node:part"
+    base_mesh = scene.geometry["node:part"]
+    np.testing.assert_allclose(base_mesh.vertices, mesh.points)
+    np.testing.assert_array_equal(base_mesh.faces, mesh.faces)
+    assert base_mesh.metadata == {"source": "mesh"}
+    lod_matrix, lod_geometry_name = scene.graph.get("node:lod0")
+    np.testing.assert_allclose(lod_matrix, transform)
+    assert lod_geometry_name == "node:part:lod0"
+
+
 def _scoped_asset() -> Asset:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
