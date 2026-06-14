@@ -61,7 +61,7 @@ handling were each independently challenged and held up.
 - [x] **P2** Warn in `asset.report` when textures are silently downsampled by `max_resolution` (`fascat/ops/textures.py:79`)
 - [x] **P3** Document the 6-decimal PBR rounding in material dedup keys, or make precision configurable (`fascat/ops/stage.py:857`)
 - [x] **P3** Mean-based PBR averaging in baked materials: document, or use a weighted strategy (`fascat/ops/actions.py:882`)
-- [ ] **P3** Expose/adapt the fixed 6-direction AO sampling (`fascat/ops/actions.py:736`)
+- [x] **P3** Expose/adapt the fixed 6-direction AO sampling (`fascat/ops/actions.py:736`)
 - [ ] **P3** Record whether baked emissive came from the material or the (0,0,0) fallback (`fascat/ops/actions.py:704`)
 
 ### Exporters (glTF / USD / OBJ / STL / FBX)

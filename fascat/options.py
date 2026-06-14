@@ -768,6 +768,7 @@ class BakeMaterialOptions(OptionsRepr):
     padding: int = 4
     bake: tuple[BakeMaterialMap, ...] = ("base_color",)
     merge_output: bool = True
+    ambient_occlusion_strategy: OcclusionStrategy = "conservative"
 
     def __post_init__(self) -> None:
         maps = tuple(str(item).replace("-", "_") for item in self.bake)
@@ -784,6 +785,8 @@ class BakeMaterialOptions(OptionsRepr):
         if unknown:
             names = ", ".join(sorted(unknown))
             raise ValueError(f"unsupported bake maps: {names}")
+        if self.ambient_occlusion_strategy not in {"conservative", "exterior", "advanced"}:
+            raise ValueError("ambient_occlusion_strategy must be one of: conservative, exterior, advanced")
 
     def to_dict(self) -> dict[str, object]:
         return {**asdict(self), "bake": list(self.bake)}
@@ -831,6 +834,7 @@ class DecimateOptions(OptionsRepr):
     protect_topology: bool = True
     preserve_painted_areas: bool = False
     preserve_ambient_occlusion: bool = False
+    ambient_occlusion_strategy: OcclusionStrategy = "conservative"
     budget_scope: BudgetScope = "selection"
     uv_importance: DecimateUVImportance = "preserve_islands"
     cleanup_attributes: tuple[DecimateCleanupAttribute, ...] = ()
@@ -848,6 +852,8 @@ class DecimateOptions(OptionsRepr):
             raise ValueError("target_ratio must be greater than 0 and less than 1 when set")
         if self.iterative_threshold <= 0:
             raise ValueError("iterative_threshold must be greater than 0")
+        if self.ambient_occlusion_strategy not in {"conservative", "exterior", "advanced"}:
+            raise ValueError("ambient_occlusion_strategy must be one of: conservative, exterior, advanced")
         _validate_jobs(self.jobs)
         for name, value in {
             "surface_tolerance": self.surface_tolerance,
@@ -1615,6 +1621,7 @@ class BakeMaterialsKwargs(TypedDict, total=False):
     padding: int
     bake: tuple[BakeMaterialMap, ...]
     merge_output: bool
+    ambient_occlusion_strategy: OcclusionStrategy
 
 
 class ProcessTexturesKwargs(TypedDict, total=False):
@@ -1640,6 +1647,7 @@ class DecimateKwargs(TypedDict, total=False):
     protect_topology: bool
     preserve_painted_areas: bool
     preserve_ambient_occlusion: bool
+    ambient_occlusion_strategy: OcclusionStrategy
     budget_scope: BudgetScope
     uv_importance: DecimateUVImportance
     cleanup_attributes: tuple[DecimateCleanupAttribute, ...]
