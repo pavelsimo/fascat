@@ -58,17 +58,42 @@ throughout:
   disables pooling entirely. Worker processes start via spawn, so assemblies with
   only a handful of small parts can be faster with `jobs=1`.
 
-### Asset ownership
+## Mutability and ownership
 
-`Asset(...)`, `Node(...)`, and `Part(...)` defensively copy mutable inputs so
-callers can build models from ordinary Python containers without leaking later
-mutations into the asset. Pipeline methods still return new assets, but internal
-hot paths use private adoption helpers only after they have already built owned
-roots, parts, materials, images, metadata, PMI annotations, and reports. That
-contract avoids a second full deep copy of large assemblies while keeping the
-public constructor safe. External code should prefer the public constructors and
-`asset.copy()`; `_adopt` is private and assumes the caller owns every object it
-passes.
+`Asset`, `Part`, and `Mesh` are mutable Python objects, but Fascat owns the
+containers you pass to their constructors. Creating an `Asset` copies the root
+tree, parts, materials, images, metadata, PMI list, report, and every nested mesh
+array. Creating a `Mesh` copies `points`, `faces`, normals, tangents, UVs,
+material indices, and face groups. Later changes to the original input arrays or
+dicts do not alter the constructed object.
+
+Processing methods such as `tessellate()`, `repair()`, `stage()`, `optimize()`,
+and `lods()` follow copy-on-operation semantics: they return a new `Asset` and
+leave the receiver unchanged. Use `asset.copy()` when you want a manual fork of
+the current scene. `asset.copy(keep_source=False)` drops backend source handles
+but still copies the public scene graph and mesh arrays.
+
+Internal hot paths use private adoption helpers only after they have already
+built owned roots, parts, materials, images, metadata, PMI annotations, and
+reports. That avoids a second full deep copy of large assemblies while keeping
+the public constructors safe. `_adopt` is private and assumes the caller owns
+every object it passes.
+
+Direct mutation is available for low-level workflows:
+
+```python
+part = asset.parts["housing"]
+assert part.mesh is not None
+part.mesh.points[:, 2] += 2.0
+part.mesh.validate()
+part.fingerprint = part.mesh.fingerprint()
+```
+
+When you mutate `asset.root`, `asset.parts`, or mesh arrays directly, you are
+responsible for keeping node part ids, part dictionaries, mesh shapes, face
+indices, material slots, and `Part.fingerprint` consistent. Prefer the pipeline
+methods when you want report steps, warnings, scoped operation handling, and
+automatic fingerprint updates.
 
 Core pipeline calls:
 

@@ -159,6 +159,13 @@ class Node:
 
 @dataclass
 class Part:
+    """Mutable assembly part with owned mesh and metadata containers.
+
+    Construction copies the supplied mesh, LOD meshes, material id list, and
+    metadata. Direct mutation is allowed, but callers own the consistency of
+    edited fields such as `mesh`, `material_ids`, and `fingerprint`.
+    """
+
     id: str
     name: str
     source_shape: object | None = None
@@ -261,6 +268,16 @@ def _merge_vertices_part_worker(payload: _MeshOpPayload) -> _MeshPartResult:
 
 @dataclass
 class Asset:
+    """Mutable CAD scene graph with owned public containers.
+
+    Processing methods return new assets and leave the receiver unchanged.
+    Construction copies the supplied root, parts, materials, images, metadata,
+    PMI list, and report so caller-side mutations after construction do not leak
+    into the asset. Direct edits to `root`, `parts`, or nested meshes are
+    caller-owned mutations; call `copy()` first when preserving the original
+    matters.
+    """
+
     root: Node
     parts: dict[str, Part] = field(default_factory=dict)
     materials: dict[str, Material] = field(default_factory=dict)
@@ -413,6 +430,12 @@ class Asset:
         }
 
     def copy(self, *, keep_source: bool = True) -> Asset:
+        """Return an independent copy of the public asset graph.
+
+        `keep_source=False` drops backend source handles while still copying
+        nodes, parts, materials, images, mesh arrays, metadata, PMI entries, and
+        the report.
+        """
         return Asset._adopt(
             root=self.root.copy(),
             parts={part_id: part.copy(keep_source=keep_source) for part_id, part in self.parts.items()},
