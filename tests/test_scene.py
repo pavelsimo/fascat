@@ -51,6 +51,39 @@ def _asset() -> Asset:
     )
 
 
+def test_safe_flatten_uses_explicit_identity_tolerance() -> None:
+    inside_tolerance = np.eye(4, dtype=float)
+    inside_tolerance[0, 3] = scene_module._FLATTEN_SAFE_IDENTITY_ATOL * 0.5
+    outside_tolerance = np.eye(4, dtype=float)
+    outside_tolerance[0, 3] = scene_module._FLATTEN_SAFE_IDENTITY_ATOL * 2.0
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(
+                    id="near_group",
+                    name="Near Group",
+                    transform=inside_tolerance,
+                    children=[Node(id="near_child", name="Near Child", part_id="tri")],
+                ),
+                Node(
+                    id="moved_group",
+                    name="Moved Group",
+                    transform=outside_tolerance,
+                    children=[Node(id="moved_child", name="Moved Child", part_id="tri")],
+                ),
+            ],
+        ),
+        parts={"tri": Part(id="tri", name="Triangle", mesh=_triangle())},
+    )
+
+    optimized = asset.optimize_scene(SceneOptimizeOptions(flatten="safe", instance_policy="preserve"))
+
+    assert [child.id for child in optimized.root.children] == ["near_child", "moved_group"]
+    assert optimized.root.children[1].children[0].id == "moved_child"
+
+
 def test_optimize_scene_batches_by_material_and_annotates_index_buffers() -> None:
     source_breakdown = _asset().draw_call_breakdown()
 
