@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pytest
 from typer.testing import CliRunner
 
 from fascat.asset import Asset, Node, Part
@@ -10,6 +11,7 @@ from fascat.cli import app
 from fascat.filter import Filter
 from fascat.material import Material
 from fascat.mesh import Mesh
+from fascat.ops import hierarchy as hierarchy_module
 from fascat.options import ExplodeOptions, MergeOptions, ReplaceOptions
 
 runner = CliRunner()
@@ -160,6 +162,20 @@ def test_merge_respects_max_vertices_per_mesh() -> None:
 
     assert len(merged_parts) == 2
     assert all(part.mesh is not None and part.mesh.vertex_count == 3 for part in merged_parts)
+
+
+def test_merge_uses_default_vertex_cap_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hierarchy_module, "DEFAULT_MAX_VERTICES_PER_MERGED_MESH", 3)
+
+    merged = _asset().merge(
+        MergeOptions(mode="all", max_vertices_per_mesh=None),
+        where=Filter.path("root/Fasteners/*"),
+    )
+    merged_parts = [part for part in merged.parts.values() if part.id.startswith("merged_")]
+
+    assert len(merged_parts) == 2
+    assert all(part.mesh is not None and part.mesh.vertex_count == 3 for part in merged_parts)
+    assert any("max_vertices_per_mesh was unset" in warning for warning in merged.report.steps[-1].warnings)
 
 
 def test_explode_by_material_replaces_selected_occurrence_with_child_parts() -> None:
