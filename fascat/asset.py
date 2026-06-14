@@ -450,9 +450,19 @@ class Asset:
             report=self.report.copy(),
         )
 
+    def clone(self) -> Asset:
+        """Return a public copy of the asset graph, including source handles."""
+        return self.copy()
+
     def select(self, where: WhereFilter = None) -> Any:
+        from fascat.filter import Filter
+
         selector = Filter.from_value(where) or Filter()
         return selector.select(self)
+
+    def selection(self, where: WhereFilter = None) -> Any:
+        """Return a selection report for inspection without mutating the asset."""
+        return self.select(where)
 
     def stats(self, *, include_lods: bool = False) -> dict[str, int]:
         return self._stats_from_nodes(self._hierarchy_nodes(), include_lods=include_lods)
@@ -743,13 +753,18 @@ class Asset:
 
     def lods(
         self,
-        options: LODOptions | Sequence[float] | None = None,
+        options: LODOptions | LODGeneratorOptions | Sequence[float] | None = None,
         *,
         where: WhereFilter = None,
         **kwargs: Unpack[LodsKwargs],
     ) -> Asset:
         from fascat.ops.lod import build_lods
 
+        if isinstance(options, LODGeneratorOptions):
+            if kwargs:
+                names = ", ".join(sorted(kwargs))
+                raise TypeError(f"pass either LOD generator options or keyword arguments ({names}), not both")
+            return self.run_lod_generators(options, where=where)
         if options is not None and not isinstance(options, LODOptions):
             if "ratios" in kwargs:
                 raise TypeError("pass LOD ratios either positionally or as ratios=, not both")

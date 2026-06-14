@@ -47,6 +47,24 @@ def test_fluent_asset_operations_chain() -> None:
     assert part.mesh.triangle_count == 12
 
 
+def test_asset_clone_and_selection_aliases_keep_public_api_consistent() -> None:
+    mesh = fc.Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    asset = fc.Asset(
+        root=fc.Node(id="root", name="root", children=[fc.Node(id="node", name="node", part_id="part")]),
+        parts={"part": fc.Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    cloned = asset.clone()
+    selection = asset.selection(fc.Filter.part_name("Part"))
+
+    assert cloned is not asset
+    assert cloned.parts["part"] is not asset.parts["part"]
+    assert selection.stats() == asset.select(fc.Filter.part_name("Part")).stats()
+
+
 @pytest.mark.parametrize(
     "removed",
     [
