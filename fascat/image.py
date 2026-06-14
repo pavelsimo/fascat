@@ -30,6 +30,7 @@ class ImageResource:
         object.__setattr__(self, "metadata", dict(self.metadata))
 
     def copy(self) -> ImageResource:
+        """Return an independent copy of the image resource."""
         return ImageResource(
             id=self.id,
             name=self.name,
@@ -41,10 +42,12 @@ class ImageResource:
         )
 
     def data_uri(self) -> str:
+        """Return this image as a base64 data URI."""
         encoded = base64.b64encode(self.data).decode("ascii")
         return f"data:{self.mime_type};base64,{encoded}"
 
     def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable image resource."""
         return {
             "id": self.id,
             "name": self.name,

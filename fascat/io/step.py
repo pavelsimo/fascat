@@ -806,6 +806,7 @@ class _SpaceNormalization:
 
 
 def read_step(path: str | Path, *, options: StepReadOptions | None = None) -> Asset:
+    """Read a STEP file into an asset with hierarchy and metadata."""
     source = Path(path)
     opts = options or StepReadOptions()
     if opts.multi_file:
@@ -819,6 +820,7 @@ def read_step_many(
     options: StepReadOptions | None = None,
     continue_on_error: bool = False,
 ) -> Asset:
+    """Read multiple STEP roots into one namespaced asset."""
     return _read_step_many(paths, options=options, continue_on_error=continue_on_error, reference_graph=None)
 
 

@@ -292,10 +292,12 @@ class Mesh:
 
     @property
     def vertex_count(self) -> int:
+        """Return the number of vertices in the mesh."""
         return int(self.points.shape[0])
 
     @property
     def triangle_count(self) -> int:
+        """Return the number of triangular faces in the mesh."""
         return int(self.faces.shape[0])
 
     def copy(self) -> Mesh:
@@ -314,6 +316,7 @@ class Mesh:
         return mesh
 
     def validate(self) -> None:
+        """Validate mesh array shapes, indices, attributes, and metadata."""
         if self.points.ndim != 2 or self.points.shape[1] != 3:
             raise MeshValidationError("points must have shape (N, 3)")
         if self.faces.ndim != 2 or self.faces.shape[1] != 3:
@@ -354,9 +357,12 @@ class Mesh:
                 raise MeshValidationError(f"face group {name} must not contain out-of-range face indices")
 
     def stats(self) -> dict[str, int]:
+        """Return vertex and triangle counts for the mesh."""
         return {"vertices": self.vertex_count, "triangles": self.triangle_count}
 
     def fingerprint(self) -> str:
+        """Return a deterministic geometry fingerprint for deduplication."""
+
         def build() -> str:
             points = np.ascontiguousarray(np.round(self.points, 9))
             faces = np.ascontiguousarray(self.faces)
@@ -417,6 +423,7 @@ class Mesh:
         return f"<Mesh: {count_phrase(self.vertex_count, 'vertex')}, {count_phrase(self.triangle_count, 'triangle')}>"
 
     def bounds(self) -> tuple[FloatArray, FloatArray]:
+        """Return minimum and maximum XYZ bounds for the mesh."""
         if self.vertex_count == 0:
             zero = np.zeros(3, dtype=np.float64)
             return zero.copy(), zero.copy()
@@ -430,6 +437,7 @@ class Mesh:
         return self._default_area_epsilon() if area_epsilon is None else area_epsilon
 
     def repair(self, options: RepairOptions | None = None) -> Mesh:
+        """Return a repaired mesh using the supplied cleanup options."""
         opts = options or RepairOptions()
         input_normals = None if self.normals is None else self.normals.copy()
         mesh = self.copy()
@@ -596,6 +604,7 @@ class Mesh:
         return mesh
 
     def remove_unreferenced_vertices(self) -> Mesh:
+        """Return a mesh with vertices unused by any face removed."""
         if self.vertex_count == 0 or self.triangle_count == 0:
             return Mesh(
                 points=np.empty((0, 3), dtype=np.float64),
@@ -616,6 +625,7 @@ class Mesh:
         return mesh
 
     def merge_close_vertices(self, tolerance: float) -> Mesh:
+        """Return a mesh with vertices merged within a distance tolerance."""
         if tolerance <= 0.0 or self.vertex_count == 0:
             return self.copy()
         components = self._distance_connected_components(tolerance=tolerance)
@@ -634,6 +644,7 @@ class Mesh:
         return mesh.remove_degenerate_faces()
 
     def merge_vertices(self, options: MergeVerticesOptions | None = None) -> Mesh:
+        """Return a mesh with duplicate or tolerance-close vertices merged."""
         opts = options or MergeVerticesOptions()
         if self.vertex_count == 0:
             return self.copy()
@@ -990,6 +1001,7 @@ class Mesh:
         return tuple(tuple(sorted(signature)) for signature in signatures)
 
     def remove_duplicate_faces(self) -> Mesh:
+        """Return a mesh with duplicate triangular faces removed."""
         if self.triangle_count == 0:
             return self.copy()
         keys = np.sort(self.faces, axis=1)
@@ -998,6 +1010,7 @@ class Mesh:
         return self._filter_faces(keep)
 
     def remove_degenerate_faces(self, area_epsilon: float | None = None) -> Mesh:
+        """Return a mesh with repeated-vertex or near-zero-area faces removed."""
         if self.triangle_count == 0:
             return self.copy()
         epsilon = self._resolve_area_epsilon(area_epsilon)
@@ -1009,6 +1022,7 @@ class Mesh:
         return self._filter_faces(keep).remove_unreferenced_vertices()
 
     def delete_degenerate_polygons(self, options: DeleteDegeneratePolygonsOptions | None = None) -> Mesh:
+        """Return a mesh with invalid polygon faces removed and reported."""
         opts = options or DeleteDegeneratePolygonsOptions()
         area_epsilon = self._resolve_area_epsilon(opts.area_epsilon)
         before_vertex_count = self.vertex_count
@@ -1082,6 +1096,7 @@ class Mesh:
         skinny_aspect_ratio: float = 20.0,
         area_epsilon: float | None = None,
     ) -> dict[str, int | float]:
+        """Return topology and shape-quality metrics for the mesh."""
         area_epsilon = self._resolve_area_epsilon(area_epsilon)
         if self.triangle_count == 0:
             return {
@@ -1139,6 +1154,7 @@ class Mesh:
         }
 
     def t_junction_count(self, *, tolerance: float = 1e-9) -> int:
+        """Return the estimated number of T-junctions in the mesh."""
         if self.triangle_count == 0 or self.vertex_count < 3:
             return 0
         distance_tolerance = max(float(tolerance), 1e-12)
@@ -1285,6 +1301,7 @@ class Mesh:
         return cast(IntArray, np.concatenate(collected))
 
     def boundary_gap_count(self, *, tolerance: float = 1e-9) -> int:
+        """Return the estimated number of boundary gaps in the mesh."""
         if self.triangle_count == 0 or self.vertex_count < 2:
             return 0
         distance_tolerance = max(float(tolerance), 1e-12)
@@ -1318,6 +1335,7 @@ class Mesh:
         return len(gaps)
 
     def split_t_junctions(self, *, tolerance: float = 1e-9) -> Mesh:
+        """Return a mesh with detected T-junction edges split."""
         if self.triangle_count == 0 or self.vertex_count < 3:
             return self.copy()
         distance_tolerance = max(float(tolerance), 1e-12)
@@ -1394,6 +1412,7 @@ class Mesh:
         return mesh
 
     def stitch_boundary_gaps(self, tolerance: float) -> Mesh:
+        """Return a mesh with close boundary gaps stitched when possible."""
         if tolerance <= 0.0 or self.triangle_count == 0 or self.vertex_count < 2:
             return self.copy()
         all_edges, counts = self._undirected_edges_and_counts()
@@ -1483,6 +1502,7 @@ class Mesh:
         return len(conflicted)
 
     def crack_non_manifold_edges(self) -> Mesh:
+        """Return a mesh with non-manifold edge fans separated."""
         edge_faces = self._edge_faces_map()
         non_manifold_edges = [(edge, faces) for edge, faces in edge_faces.items() if len(faces) > 2]
         if not non_manifold_edges:
@@ -1532,6 +1552,7 @@ class Mesh:
         return mesh
 
     def remove_sliver_faces(self, *, max_aspect_ratio: float = 20.0, area_epsilon: float | None = None) -> Mesh:
+        """Return a mesh with high-aspect-ratio sliver faces removed."""
         if max_aspect_ratio <= 1.0:
             raise ValueError("max_aspect_ratio must be greater than 1")
         if area_epsilon is not None and area_epsilon < 0.0:
@@ -1563,6 +1584,7 @@ class Mesh:
         return mesh
 
     def orient_faces_toward_viewer(self, viewer_position: Sequence[float]) -> Mesh:
+        """Return a mesh with faces oriented toward a viewer position."""
         if self.triangle_count == 0:
             return self.copy()
         viewer = np.asarray(viewer_position, dtype=np.float64)
@@ -1584,6 +1606,7 @@ class Mesh:
         return mesh
 
     def orient_normals_toward_viewer(self, viewer_position: Sequence[float]) -> Mesh:
+        """Return a mesh with normals oriented toward a viewer position."""
         if self.normals is None:
             return self.compute_normals().orient_normals_toward_viewer(viewer_position)
         viewer = np.asarray(viewer_position, dtype=np.float64)
@@ -1603,11 +1626,13 @@ class Mesh:
         return mesh
 
     def cad_project_uvs(self, channel: int = 0) -> Mesh:
+        """Return a mesh with CAD-projected UV metadata applied."""
         mesh = self.box_uv(channel)
         mesh.metadata = {**mesh.metadata, f"uv{channel}": "cad_projected", f"uv{channel}_source": "cad_projection"}
         return mesh
 
     def orientability_metrics(self) -> dict[str, int]:
+        """Return edge-orientability metrics for mesh winding diagnostics."""
         return {
             name: value
             for name, value in zip(
@@ -1691,6 +1716,7 @@ class Mesh:
         return self._cached_value("orientability_metrics", self._geometry_cache_token(), build)
 
     def compute_normals(self, *, angle_weighted: bool = True) -> Mesh:
+        """Return per-vertex normals computed from mesh faces."""
         normals = np.zeros_like(self.points, dtype=np.float64)
         if self.triangle_count > 0 and self.vertex_count > 0:
             p0 = self.points[self.faces[:, 0]]
@@ -1725,6 +1751,7 @@ class Mesh:
         return mesh
 
     def compute_flat_normals(self) -> Mesh:
+        """Return flat face normals for the mesh."""
         if self.triangle_count == 0:
             return self.compute_normals()
         face_normals = self._face_unit_normals()
@@ -1749,6 +1776,7 @@ class Mesh:
         preserve_face_boundaries: bool = False,
         angle_weighted: bool = True,
     ) -> Mesh:
+        """Return normals split along hard-angle edges."""
         if self.triangle_count == 0:
             return self.compute_normals(angle_weighted=angle_weighted)
         hard_edges = self._hard_normal_edges(
@@ -1885,6 +1913,7 @@ class Mesh:
         return mesh
 
     def compute_tangents(self, channel: int = 0) -> Mesh:
+        """Return tangent vectors for the requested UV channel."""
         if channel < 0:
             raise ValueError("tangent UV channel must be greater than or equal to 0")
         if channel not in self.uvs or self.triangle_count == 0:
@@ -1939,6 +1968,7 @@ class Mesh:
         return result
 
     def validate_normals(self, *, require_tangents: bool = False) -> None:
+        """Return diagnostics for normal-vector validity and consistency."""
         self.validate()
         if self.normals is None:
             raise MeshValidationError("mesh has no normals")
@@ -1949,6 +1979,7 @@ class Mesh:
             raise MeshValidationError("mesh has no tangents")
 
     def subdivide_long_edges(self, max_edge_length: float) -> Mesh:
+        """Return a mesh with edges longer than the threshold subdivided."""
         if max_edge_length <= 0.0:
             raise ValueError("max_edge_length must be greater than 0")
         mesh = self.copy()
@@ -1992,6 +2023,7 @@ class Mesh:
         return result.compute_normals()
 
     def collapse_short_edges(self, min_edge_length: float, *, preserve_boundaries: bool = True) -> Mesh:
+        """Return a mesh with edges shorter than the threshold collapsed."""
         if min_edge_length <= 0.0:
             raise ValueError("min_edge_length must be greater than 0")
         if self.triangle_count == 0 or self.vertex_count == 0:
@@ -2064,6 +2096,7 @@ class Mesh:
         preserve_boundaries: bool = True,
         max_iterations: int = 4,
     ) -> Mesh:
+        """Return a mesh with skinny triangles improved by local cleanup."""
         if max_aspect_ratio <= 1.0:
             raise ValueError("max_aspect_ratio must be greater than 1")
         mesh = self.copy()
@@ -2111,6 +2144,7 @@ class Mesh:
         return result.remove_degenerate_faces().remove_unreferenced_vertices()
 
     def box_uv(self, channel: int = 0) -> Mesh:
+        """Return a mesh with box-projected UVs on the requested channel."""
         mesh = self.copy()
         if self.vertex_count == 0:
             mesh.uvs[channel] = np.empty((0, 2), dtype=np.float64)
@@ -2133,6 +2167,7 @@ class Mesh:
         tolerance: float = 1e-9,
         detect_overlaps: bool = True,
     ) -> dict[str, int]:
+        """Return UV domain, packing, and overlap statistics."""
         if tolerance < 0.0:
             raise ValueError("tolerance must be greater than or equal to 0")
         if channel not in self.uvs:
@@ -2209,6 +2244,7 @@ class Mesh:
         return dict(stats)
 
     def uv_seam_graph_stats(self, channel: int = 0, *, tolerance: float = 1e-9) -> dict[str, int | float]:
+        """Return seam graph statistics for a UV channel."""
         if tolerance < 0.0:
             raise ValueError("tolerance must be greater than or equal to 0")
         if channel not in self.uvs:
@@ -2309,6 +2345,7 @@ class Mesh:
         return dict(stats)
 
     def uv_distortion_metrics(self, channel: int = 0, *, tolerance: float = 1e-9) -> dict[str, int | float]:
+        """Return UV stretch and area-distortion metrics."""
         if tolerance < 0.0:
             raise ValueError("tolerance must be greater than or equal to 0")
         if channel not in self.uvs:
@@ -2379,6 +2416,7 @@ class Mesh:
         }
 
     def unwrap_uv(self, channel: int = 0, *, padding: int = 0, resolution: int = 0) -> Mesh:
+        """Return a mesh with UVs generated by the unwrap backend."""
         try:
             import xatlas
         except ImportError as exc:
@@ -2440,6 +2478,7 @@ class Mesh:
         preserve_silhouette: bool = False,
         protected_faces: IntArray | None = None,
     ) -> Mesh:
+        """Return a mesh simplified to a triangle target or error bound."""
         if self.triangle_count == 0:
             return self.copy()
         if target_triangles is None:
@@ -2552,6 +2591,7 @@ class Mesh:
                 return mesh
 
     def optimize_buffers(self) -> Mesh:
+        """Return a mesh with vertex and index buffers reordered for runtime use."""
         if self.triangle_count == 0:
             return self.copy()
         try:
@@ -2626,6 +2666,7 @@ class Mesh:
         preserve_uv_seams: bool = False,
         preserve_silhouette: bool = False,
     ) -> dict[str, int]:
+        """Return counts of protected topology and attribute features."""
         groups = self._feature_face_groups(
             preserve_hard_edges=preserve_hard_edges,
             hard_edge_angle=hard_edge_angle,
@@ -3005,6 +3046,7 @@ class Mesh:
         return cast(IntArray, np.asarray(self.material_indices[nearest], dtype=np.int64).copy())
 
     def fill_holes(self) -> Mesh:
+        """Return a mesh with boundary holes filled where possible."""
         loops = self._boundary_loops()
         if not loops or max(len(loop) for loop in loops) > 8:
             return self.copy()
@@ -3034,6 +3076,7 @@ class Mesh:
         return mesh
 
     def fix_winding(self) -> Mesh:
+        """Return a mesh with face winding corrected when possible."""
         try:
             import trimesh
 
@@ -3225,6 +3268,7 @@ class Mesh:
         )
 
     def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable mesh representation."""
         material_indices = None
         if self.material_indices is not None:
             material_indices = {

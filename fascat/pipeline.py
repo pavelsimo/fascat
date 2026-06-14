@@ -113,6 +113,7 @@ def convert(
     where: Filter | None = None,
     **profile_overrides: Unpack[profiles.ProfileOverrides],
 ) -> Asset:
+    """Convert CAD input to an output asset using profile defaults and overrides."""
     output_format = _export_format(output_path)
     output_suffix = Path(output_path).suffix.lower()
     if debug and (output_format != "usd" or (str(output_path) != "-" and output_suffix not in {".usd", ".usda"})):
@@ -1704,31 +1705,38 @@ def write_usd(
     debug: bool = False,
     options: UsdExportOptions | None = None,
 ) -> None:
+    """Write an asset to OpenUSD and append report metadata."""
     asset.write_usd(path, debug=debug, options=options)
 
 
 def write_gltf(asset: Asset, path: str | Path, *, options: GltfExportOptions | None = None) -> None:
+    """Write an asset to glTF or GLB and append report metadata."""
     asset.write_gltf(path, options=options)
 
 
 def write_obj(asset: Asset, path: str | Path, *, options: ObjExportOptions | None = None) -> None:
+    """Write an asset to OBJ and append report metadata."""
     asset.write_obj(path, options=options)
 
 
 def write_stl(asset: Asset, path: str | Path, *, options: StlExportOptions | None = None) -> None:
+    """Write an asset to STL and append report metadata."""
     asset.write_stl(path, options=options)
 
 
 def write_fbx(asset: Asset, path: str | Path, *, options: FbxExportOptions | None = None) -> None:
+    """Write an asset to FBX and append report metadata."""
     asset.write_fbx(path, options=options)
 
 
 def validate_output(path: str | Path) -> dict[str, int]:
+    """Validate an exported asset file and return format-specific statistics."""
     output_format = _export_format(path)
     return _validate_output(path, output_format)
 
 
 def analyze(asset: Asset, *, options: AnalyzeOptions | None = None, where: Filter | None = None) -> AnalysisReport:
+    """Analyze an asset or exported file and return an analysis report."""
     return asset.analyze(options or AnalyzeOptions(), where=where)
 
 

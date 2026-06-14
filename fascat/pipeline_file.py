@@ -375,6 +375,7 @@ class PipelineStep:
         object.__setattr__(self, "values", {_normalize_key(key): value for key, value in self.values.items()})
 
     def to_dict(self) -> dict[str, object]:
+        """Return this pipeline step as a serializable operation table."""
         return {"op": self.op, **dict(self.values)}
 
 
@@ -391,11 +392,13 @@ class PipelineSpec:
 
     @classmethod
     def from_file(cls, path: str | Path) -> PipelineSpec:
+        """Load and validate a pipeline specification from a TOML file."""
         values, location = _load_toml(path)
         return cls.from_dict(values, _location=location)
 
     @classmethod
     def from_dict(cls, values: dict[str, object], *, _location: _TomlLocation | None = None) -> PipelineSpec:
+        """Build and validate a pipeline specification from parsed values."""
         _validate_top_level_keys(values, _location)
         filters = _filters(values.get("filters", []), _location)
         steps = _steps(values.get("steps", []), _location)
@@ -412,6 +415,7 @@ class PipelineSpec:
         )
 
     def to_dict(self) -> dict[str, object]:
+        """Return this pipeline specification as serializable values."""
         return {
             "filters": sorted(self.filters),
             "steps": [step.to_dict() for step in self.steps],
@@ -420,6 +424,7 @@ class PipelineSpec:
         }
 
     def advisories(self) -> list[dict[str, object]]:
+        """Return ordering and configuration advisories for this pipeline."""
         return _pipeline_advisories(self.steps)
 
     def apply(
@@ -428,6 +433,7 @@ class PipelineSpec:
         *,
         progress: Callable[[str, dict[str, int]], None] | None = None,
     ) -> Asset:
+        """Apply all configured pipeline steps to an asset."""
         result = asset
         for step in self.steps:
             where = self._where(step)

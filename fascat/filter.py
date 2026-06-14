@@ -31,6 +31,7 @@ class SelectionMatch:
     bounds_max: tuple[float, float, float] | None = None
 
     def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable selection match."""
         payload: dict[str, object] = {
             "node_id": self.node_id,
             "node_path": self.node_path,
@@ -53,13 +54,16 @@ class SelectionResult:
 
     @property
     def part_ids(self) -> set[str]:
+        """Return the selected part identifiers."""
         return {match.part_id for match in self.matches if match.part_id is not None}
 
     @property
     def node_ids(self) -> set[str]:
+        """Return the selected node identifiers."""
         return {match.node_id for match in self.matches}
 
     def stats(self) -> dict[str, int]:
+        """Return counts for selected nodes, parts, and triangles."""
         part_ids = self.part_ids
         material_ids = {material_id for match in self.matches for material_id in match.material_ids}
         vertices_by_part: dict[str, int] = {}
@@ -79,6 +83,7 @@ class SelectionResult:
         }
 
     def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable selection result."""
         return {
             "filter": self.filter.to_dict(),
             "stats": self.stats(),
@@ -155,58 +160,72 @@ class Filter:
 
     @classmethod
     def path(cls, value: PatternValue) -> Filter:
+        """Return a filter matching assembly node paths with shell-style patterns."""
         return cls(path=value)
 
     @classmethod
     def name(cls, value: PatternValue) -> Filter:
+        """Return a filter matching assembly node names."""
         return cls(name=value)
 
     @classmethod
     def part(cls, value: PatternValue) -> Filter:
+        """Return a filter matching stable Fascat part identifiers."""
         return cls(part_id=value)
 
     @classmethod
     def part_name(cls, value: PatternValue) -> Filter:
+        """Return a filter matching source part names."""
         return cls(part_name=value)
 
     @classmethod
     def material(cls, value: PatternValue) -> Filter:
+        """Return a filter matching assigned material names or identifiers."""
         return cls(material=value)
 
     @classmethod
     def size(cls, *, min_diagonal: float | None = None, max_diagonal: float | None = None) -> Filter:
+        """Return a filter matching part bounding-box diagonal size."""
         return cls(min_diagonal=min_diagonal, max_diagonal=max_diagonal)
 
     @classmethod
     def triangle_count(cls, *, min: int | None = None, max: int | None = None) -> Filter:  # noqa: A002
+        """Return a filter matching mesh triangle-count bounds."""
         return cls(min_triangles=min, max_triangles=max)
 
     @classmethod
     def vertex_count(cls, *, min: int | None = None, max: int | None = None) -> Filter:  # noqa: A002
+        """Return a filter matching mesh vertex-count bounds."""
         return cls(min_vertices=min, max_vertices=max)
 
     @classmethod
     def bounds(cls, *, min: Sequence[float] | None = None, max: Sequence[float] | None = None) -> Filter:  # noqa: A002
+        """Return a filter matching parts inside coordinate bounds."""
         return cls(min_bounds=min, max_bounds=max)
 
     @classmethod
     def metadata_value(cls, key: str, value: object) -> Filter:
+        """Return a filter matching metadata key and value criteria."""
         return cls(metadata={key: value})
 
     @classmethod
     def all(cls, *filters: Filter) -> Filter:
+        """Return a filter that requires every child filter to match."""
         return cls(_mode="all", _children=filters)
 
     @classmethod
     def any(cls, *filters: Filter) -> Filter:
+        """Return a filter that accepts any matching child filter."""
         return cls(_mode="any", _children=filters)
 
     @classmethod
     def not_(cls, filter: Filter) -> Filter:
+        """Return a filter that inverts one child filter."""
         return cls(_mode="not", _children=(filter,))
 
     @classmethod
     def from_cli(cls, expressions: Sequence[str], *, exclude: Sequence[str] = ()) -> Filter | None:
+        """Parse a command-line filter expression into a filter."""
         include_filters = tuple(parse_filter_expression(expression) for expression in expressions)
         exclude_filters = tuple(parse_filter_expression(expression) for expression in exclude)
         if not include_filters and not exclude_filters:
@@ -222,6 +241,7 @@ class Filter:
 
     @classmethod
     def from_value(cls, value: Filter | str | dict[str, object] | None) -> Filter | None:
+        """Normalize a filter-like value into a filter instance."""
         if value is None:
             return None
         if isinstance(value, Filter):
@@ -233,6 +253,7 @@ class Filter:
         raise TypeError("where must be a fascat.Filter, filter expression string, criteria dict, or None")
 
     def select(self, asset: Any) -> SelectionResult:
+        """Return all asset nodes and parts matched by this filter."""
         matches: list[SelectionMatch] = []
         self._collect_matches(
             asset, asset.root, _node_name(asset.root), ancestor_path="", ancestor_selected=False, matches=matches
@@ -240,6 +261,7 @@ class Filter:
         return SelectionResult(filter=self, matches=tuple(matches))
 
     def matches(self, context: _FilterContext) -> bool:
+        """Return whether this filter matches a single selection context."""
         if self._requires_part_context() and context.part is None:
             return False
         if self._excluded(context):
@@ -255,6 +277,7 @@ class Filter:
         return self._criteria_matches(context)
 
     def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable filter expression."""
         payload: dict[str, object] = {"mode": self._mode}
         if self._children:
             payload["children"] = [child.to_dict() for child in self._children]

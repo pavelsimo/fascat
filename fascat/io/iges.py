@@ -15,6 +15,7 @@ IGES_SUFFIXES = {".igs", ".iges"}
 
 
 def read_iges(path: str | Path, *, options: IgesReadOptions | StepReadOptions | None = None) -> Asset:
+    """Read an IGES file into an asset."""
     source = Path(path)
     return _read_iges_path(source, source_identity=str(source.resolve()), options=_coerce_options(options))
 

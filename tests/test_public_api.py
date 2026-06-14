@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import numpy as np
@@ -91,6 +92,37 @@ def test_asset_clone_and_selection_aliases_keep_public_api_consistent() -> None:
 def test_module_level_operation_wrappers_are_removed(removed: str) -> None:
     assert not hasattr(fc, removed)
     assert removed not in fc.__all__
+
+
+def test_exported_public_api_has_docstrings() -> None:
+    missing: list[str] = []
+
+    for name in fc.__all__:
+        if name == "__version__":
+            continue
+        obj = getattr(fc, name)
+        if inspect.ismodule(obj):
+            continue
+        if not inspect.getdoc(obj):
+            missing.append(name)
+        if not inspect.isclass(obj) or not obj.__module__.startswith("fascat"):
+            continue
+
+        for member_name, member in inspect.getmembers(obj):
+            if member_name.startswith("_"):
+                continue
+            if isinstance(member, property):
+                target = member.fget
+            elif inspect.ismethod(member):
+                target = member.__func__
+            elif inspect.isfunction(member) or inspect.ismethoddescriptor(member):
+                target = member
+            else:
+                continue
+            if target is not None and not inspect.getdoc(target):
+                missing.append(f"{name}.{member_name}")
+
+    assert missing == []
 
 
 def test_public_api_exposes_quality_analysis() -> None:

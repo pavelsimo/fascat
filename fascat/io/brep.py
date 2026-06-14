@@ -18,6 +18,7 @@ _DEFAULT_MATERIAL_COLOR = (0.75, 0.75, 0.75, 1.0)
 
 
 def read_brep(path: str | Path, *, options: BrepReadOptions | StepReadOptions | None = None) -> Asset:
+    """Read a native BREP file into an asset."""
     source = Path(path)
     return _read_brep_path(source, source_identity=str(source.resolve()), options=_coerce_options(options))
 

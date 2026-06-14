@@ -24,6 +24,7 @@ class Tolerance:
     kind: str | None = None
 
     def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable tolerance record."""
         return {
             "upper": self.upper,
             "lower": self.lower,
@@ -51,6 +52,7 @@ class PmiAnnotation:
             object.__setattr__(self, "plane", [list(row) for row in self.plane])
 
     def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable PMI annotation."""
         payload: dict[str, object] = {
             "id": self.id,
             "kind": self.kind,
