@@ -1748,6 +1748,50 @@ def test_assign_materials_by_nearest_centroid_kd_tree_matches_brute_force(
     assert assigned.tolist() == expected
 
 
+def test_assign_materials_by_nearest_centroid_reuses_cached_kd_tree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mesh_module, "_NEAREST_CENTROID_PAIR_LIMIT", 0)
+    original_build = mesh_module._build_centroid_kd_tree
+    top_level_builds = 0
+
+    def count_kd_tree_build(
+        centroids: np.ndarray,
+        indices: np.ndarray,
+    ) -> mesh_module._CentroidKdNode | None:
+        nonlocal top_level_builds
+        if indices.size == centroids.shape[0]:
+            top_level_builds += 1
+        return original_build(centroids, indices)
+
+    monkeypatch.setattr(mesh_module, "_build_centroid_kd_tree", count_kd_tree_build)
+    rng = np.random.default_rng(5678)
+    source = Mesh(
+        points=rng.random((180, 3)),
+        faces=rng.integers(0, 180, size=(90, 3)),
+        material_indices=rng.integers(0, 7, size=90).astype(int),
+    )
+    first_points = rng.random((60, 3))
+    first_faces = rng.integers(0, 60, size=(40, 3))
+    second_points = rng.random((45, 3))
+    second_faces = rng.integers(0, 45, size=(35, 3))
+
+    first = source._assign_materials_by_nearest_centroid(first_points, first_faces)
+    second = source._assign_materials_by_nearest_centroid(second_points, second_faces)
+
+    assert first is not None
+    assert second is not None
+    assert first.tolist() == _brute_force_nearest_materials(source, first_points, first_faces)
+    assert second.tolist() == _brute_force_nearest_materials(source, second_points, second_faces)
+    assert top_level_builds == 1
+
+    source.points = source.points.copy()
+    source.points[0, 0] += 1.0
+    source._assign_materials_by_nearest_centroid(first_points, first_faces)
+
+    assert top_level_builds == 2
+
+
 def test_assign_materials_by_nearest_centroid_is_memory_bounded() -> None:
     # A large source mesh used to allocate a (target_chunk x n_source x 3) array,
     # which exhausted RAM and froze the terminal. The chunked implementation must

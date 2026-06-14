@@ -366,6 +366,21 @@ class Mesh:
     def _geometry_cache_token(self) -> tuple[object, ...]:
         return ("geometry", _array_cache_token(self.points), _array_cache_token(self.faces))
 
+    def _face_centroids(self) -> FloatArray:
+        def build() -> FloatArray:
+            return cast(FloatArray, self.points[self.faces].mean(axis=1))
+
+        return self._cached_value("face_centroids", self._geometry_cache_token(), build)
+
+    def _centroid_kd_tree(self, source_centroids: FloatArray) -> _CentroidKdNode | None:
+        def build() -> _CentroidKdNode | None:
+            return _build_centroid_kd_tree(
+                source_centroids,
+                np.arange(source_centroids.shape[0], dtype=np.int64),
+            )
+
+        return self._cached_value("nearest_centroid_kd_tree", self._geometry_cache_token(), build)
+
     def __getstate__(self) -> dict[str, Any]:
         state = self.__dict__.copy()
         state["_cache"] = {}
@@ -2910,9 +2925,12 @@ class Mesh:
     def _assign_materials_by_nearest_centroid(self, points: FloatArray, faces: IntArray) -> IntArray | None:
         if self.material_indices is None or self.triangle_count == 0 or faces.size == 0:
             return None
-        source_centroids = self.points[self.faces].mean(axis=1)
+        source_centroids = self._face_centroids()
         target_centroids = points[faces].mean(axis=1)
-        nearest = _nearest_centroid_indices(source_centroids, target_centroids)
+        kd_tree = None
+        if source_centroids.shape[0] * target_centroids.shape[0] > _NEAREST_CENTROID_PAIR_LIMIT:
+            kd_tree = self._centroid_kd_tree(source_centroids)
+        nearest = _nearest_centroid_indices(source_centroids, target_centroids, kd_tree=kd_tree)
         return cast(IntArray, np.asarray(self.material_indices[nearest], dtype=np.int64).copy())
 
     def fill_holes(self) -> Mesh:
@@ -3176,7 +3194,12 @@ def _dedupe_polygon_vertices(values: list[int]) -> list[int]:
     return deduped
 
 
-def _nearest_centroid_indices(source_centroids: FloatArray, target_centroids: FloatArray) -> IntArray:
+def _nearest_centroid_indices(
+    source_centroids: FloatArray,
+    target_centroids: FloatArray,
+    *,
+    kd_tree: _CentroidKdNode | None = None,
+) -> IntArray:
     n_target = target_centroids.shape[0]
     n_source = source_centroids.shape[0]
     if n_target == 0 or n_source == 0:
@@ -3184,7 +3207,7 @@ def _nearest_centroid_indices(source_centroids: FloatArray, target_centroids: Fl
     if n_target * n_source <= _NEAREST_CENTROID_PAIR_LIMIT:
         return _nearest_centroid_indices_chunked(source_centroids, target_centroids)
 
-    root = _build_centroid_kd_tree(source_centroids, np.arange(n_source, dtype=np.int64))
+    root = kd_tree or _build_centroid_kd_tree(source_centroids, np.arange(n_source, dtype=np.int64))
     if root is None:
         return np.empty((0,), dtype=np.int64)
     nearest = np.empty(n_target, dtype=np.int64)
