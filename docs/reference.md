@@ -715,6 +715,10 @@ Color is also disabled when `--no-color` is passed, `TERM=dumb`, or the relevant
 
 ## Exit codes
 
+Fascat keeps exit codes stable for scripts: `0` means the command completed, `1`
+means the command was valid but failed at runtime or validation, and `2` means
+the invocation or option values were invalid before the requested work could run.
+
 | Code | Meaning |
 |------|---------|
 | `0` | Success |
