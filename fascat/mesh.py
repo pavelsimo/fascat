@@ -34,11 +34,18 @@ _GLOBAL_MESH_CACHE_NAMES = {
     "edge_faces_map",
     "face_unit_normals",
     "fingerprint",
+    "orientability_metrics",
     "undirected_edges_and_counts",
 }
 _GLOBAL_MESH_CACHE: OrderedDict[tuple[str, tuple[object, ...]], object] = OrderedDict()
 _GLOBAL_MESH_CACHE_LOCK = Lock()
 _MISSING_CACHE_VALUE = object()
+_ORIENTABILITY_METRIC_KEYS = (
+    "orientation_components",
+    "non_orientable_edges",
+    "closed_orientation_components",
+    "flipped_orientation_components",
+)
 
 
 def _tolerance_decimals(tolerance: float) -> int:
@@ -1568,76 +1575,84 @@ class Mesh:
         return mesh
 
     def orientability_metrics(self) -> dict[str, int]:
-        if self.triangle_count == 0:
-            return {
-                "orientation_components": 0,
-                "non_orientable_edges": 0,
-                "closed_orientation_components": 0,
-                "flipped_orientation_components": 0,
-            }
-
-        edge_incidents: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
-        face_edges: list[list[tuple[int, int]]] = []
-        for face_index, face in enumerate(self.faces.astype(int).tolist()):
-            edges: list[tuple[int, int]] = []
-            for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
-                key = (min(start, end), max(start, end))
-                direction = 1 if (start, end) == key else -1
-                edge_incidents[key].append((face_index, direction))
-                edges.append(key)
-            face_edges.append(edges)
-
-        adjacency: dict[int, list[tuple[int, int, tuple[int, int]]]] = defaultdict(list)
-        for edge, incidents in edge_incidents.items():
-            if len(incidents) != 2:
-                continue
-            (left_face, left_direction), (right_face, right_direction) = incidents
-            required_relation = -left_direction * right_direction
-            adjacency[left_face].append((right_face, required_relation, edge))
-            adjacency[right_face].append((left_face, required_relation, edge))
-
-        face_signs: dict[int, int] = {}
-        conflict_edges: set[tuple[int, int]] = set()
-        component_faces: list[set[int]] = []
-        components = 0
-        for face_index in range(self.triangle_count):
-            if face_index in face_signs:
-                continue
-            components += 1
-            faces = {face_index}
-            face_signs[face_index] = 1
-            queue: deque[int] = deque([face_index])
-            while queue:
-                current = queue.popleft()
-                for neighbor, required_relation, edge in adjacency[current]:
-                    expected_sign = face_signs[current] * required_relation
-                    if neighbor not in face_signs:
-                        face_signs[neighbor] = expected_sign
-                        faces.add(neighbor)
-                        queue.append(neighbor)
-                    elif face_signs[neighbor] != expected_sign:
-                        conflict_edges.add(edge)
-            component_faces.append(faces)
-
-        closed_components = 0
-        flipped_components = 0
-        volume_epsilon = self._orientation_volume_epsilon()
-        for faces in component_faces:
-            component_edges = {edge for face_index in faces for edge in face_edges[face_index]}
-            if any(edge in conflict_edges or len(edge_incidents[edge]) != 2 for edge in component_edges):
-                continue
-            closed_components += 1
-            if any(face_signs[face_index] != 1 for face_index in faces):
-                continue
-            if self._signed_volume_for_faces(faces) < -volume_epsilon:
-                flipped_components += 1
-
         return {
-            "orientation_components": components,
-            "non_orientable_edges": len(conflict_edges),
-            "closed_orientation_components": closed_components,
-            "flipped_orientation_components": flipped_components,
+            name: value
+            for name, value in zip(
+                _ORIENTABILITY_METRIC_KEYS,
+                self._orientability_metric_values(),
+                strict=True,
+            )
         }
+
+    def _orientability_metric_values(self) -> tuple[int, int, int, int]:
+        def build() -> tuple[int, int, int, int]:
+            if self.triangle_count == 0:
+                return (0, 0, 0, 0)
+
+            edge_incidents: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
+            face_edges: list[list[tuple[int, int]]] = []
+            for face_index, face in enumerate(self.faces.astype(int).tolist()):
+                edges: list[tuple[int, int]] = []
+                for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
+                    key = (min(start, end), max(start, end))
+                    direction = 1 if (start, end) == key else -1
+                    edge_incidents[key].append((face_index, direction))
+                    edges.append(key)
+                face_edges.append(edges)
+
+            adjacency: dict[int, list[tuple[int, int, tuple[int, int]]]] = defaultdict(list)
+            for edge, incidents in edge_incidents.items():
+                if len(incidents) != 2:
+                    continue
+                (left_face, left_direction), (right_face, right_direction) = incidents
+                required_relation = -left_direction * right_direction
+                adjacency[left_face].append((right_face, required_relation, edge))
+                adjacency[right_face].append((left_face, required_relation, edge))
+
+            face_signs: dict[int, int] = {}
+            conflict_edges: set[tuple[int, int]] = set()
+            component_faces: list[set[int]] = []
+            components = 0
+            for face_index in range(self.triangle_count):
+                if face_index in face_signs:
+                    continue
+                components += 1
+                faces = {face_index}
+                face_signs[face_index] = 1
+                queue: deque[int] = deque([face_index])
+                while queue:
+                    current = queue.popleft()
+                    for neighbor, required_relation, edge in adjacency[current]:
+                        expected_sign = face_signs[current] * required_relation
+                        if neighbor not in face_signs:
+                            face_signs[neighbor] = expected_sign
+                            faces.add(neighbor)
+                            queue.append(neighbor)
+                        elif face_signs[neighbor] != expected_sign:
+                            conflict_edges.add(edge)
+                component_faces.append(faces)
+
+            closed_components = 0
+            flipped_components = 0
+            volume_epsilon = self._orientation_volume_epsilon()
+            for faces in component_faces:
+                component_edges = {edge for face_index in faces for edge in face_edges[face_index]}
+                if any(edge in conflict_edges or len(edge_incidents[edge]) != 2 for edge in component_edges):
+                    continue
+                closed_components += 1
+                if any(face_signs[face_index] != 1 for face_index in faces):
+                    continue
+                if self._signed_volume_for_faces(faces) < -volume_epsilon:
+                    flipped_components += 1
+
+            return (
+                components,
+                len(conflict_edges),
+                closed_components,
+                flipped_components,
+            )
+
+        return self._cached_value("orientability_metrics", self._geometry_cache_token(), build)
 
     def compute_normals(self, *, angle_weighted: bool = True) -> Mesh:
         normals = np.zeros_like(self.points, dtype=np.float64)
