@@ -397,6 +397,9 @@ Metadata and PMI parameters:
 | `StepReadOptions` | `source_up_axis`, `source_handedness` | Declare the source coordinate basis before normalization. Defaults are STEP-style `Z` up and `right` handed. |
 | `StepReadOptions` | `target_units`, `target_meters_per_unit` | Normalize the imported asset to a target unit by applying a root transform and updating the asset's declared units. |
 | `StepReadOptions` | `target_up_axis`, `target_handedness` | Normalize the imported asset to a target up-axis or handedness. Import reports include the exact normalization transform and whether it changed the asset space. |
+
+STEP imports preserve negative-determinant transforms instead of silently rewriting geometry. When local or composed world transforms are mirrored, affected nodes get `local_transform_mirrored` / `world_transform_mirrored` metadata, the import report records `mirrored_transforms` counts, and a warning calls out that downstream normal or winding compensation may be required.
+
 | `PmiAnnotation` | `id` | Stable annotation id used for references from parts or mesh groups. |
 | `PmiAnnotation` | `kind` | Annotation type such as `dimension`, `datum`, `tolerance`, `note`, or backend-specific kinds. |
 | `PmiAnnotation` | `text` | Human-readable annotation text. |

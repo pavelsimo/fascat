@@ -13,6 +13,7 @@ from PIL import Image
 import fascat as fc
 import fascat.io.step as step_io
 from fascat.io.step import (
+    _annotate_mirrored_transforms,
     _apply_material_libraries_to_materials,
     _apply_material_library_mapping,
     _apply_step_design_variant_selection,
@@ -33,6 +34,7 @@ from fascat.io.step import (
     _loaded_representation,
     _loaded_representation_report,
     _material_binding_plan,
+    _mirrored_transform_warnings,
     _mixed_construction_curve_metadata,
     _mixed_construction_curve_shape,
     _resolve_step_external_reference_graph,
@@ -5232,6 +5234,54 @@ def test_step_space_normalization_builds_reported_root_transform() -> None:
         ),
     )
     assert space.metadata()["changed"] is True
+    assert space.metadata()["mirrored"] is False
+
+
+def test_step_space_normalization_reports_handedness_mirror() -> None:
+    space = _space_normalization("millimetre", 0.001, StepReadOptions(target_handedness="left"))
+
+    assert space.determinant < 0.0
+    assert space.mirrored is True
+    assert space.metadata()["mirrored"] is True
+
+
+def test_step_mirrored_transform_summary_annotates_negative_determinants() -> None:
+    mirrored = np.eye(4, dtype=np.float64)
+    mirrored[0, 0] = -1.0
+    root = fc.Node(
+        id="root",
+        name="Root",
+        children=[fc.Node(id="occurrence", name="Occurrence", part_id="part", transform=mirrored)],
+    )
+
+    summary = _annotate_mirrored_transforms(root)
+    child = root.children[0]
+
+    assert summary == {"local_mirrored_nodes": 1, "world_mirrored_nodes": 1, "mirrored_part_occurrences": 1}
+    assert child.metadata["local_transform_mirrored"] == "true"
+    assert child.metadata["world_transform_mirrored"] == "true"
+    assert child.metadata["local_transform_determinant"] == pytest.approx(-1.0)
+    assert child.metadata["world_transform_determinant"] == pytest.approx(-1.0)
+
+
+def test_step_mirrored_transform_decision_and_warning_report_risk() -> None:
+    summary = {"local_mirrored_nodes": 1, "world_mirrored_nodes": 1, "mirrored_part_occurrences": 1}
+    decisions = _import_decisions(
+        StepReadOptions(),
+        _StepHeaderInfo(schema=None, pmi_present=False),
+        pmi_count=0,
+        unsupported_pmi_count=0,
+        cleanup=_ImportCleanupStats(),
+        space=_space_normalization("millimetre", 0.001, StepReadOptions()),
+        mirrored_transform_summary=summary,
+    )
+    warnings = _mirrored_transform_warnings(summary)
+
+    assert decisions["mirrored_transforms"]["state"] == "detected"
+    assert decisions["mirrored_transforms"]["effective"] is True
+    assert decisions["mirrored_transforms"]["counts"] == summary
+    assert "negative determinants" in warnings[0]
+    assert "normal/winding compensation" in warnings[0]
 
 
 @pytest.mark.requires_ocp
