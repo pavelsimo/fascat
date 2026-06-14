@@ -1190,6 +1190,11 @@ def test_pipeline_rejects_unknown_filter_keys() -> None:
         PipelineSpec.from_dict({"filters": [{"name": "fasteners", "namess": "Bolt*"}], "steps": [{"op": "repair"}]})
 
 
+def test_pipeline_rejects_non_string_filter_patterns() -> None:
+    with pytest.raises(ValueError, match="filter name patterns must be a string or sequence of strings"):
+        PipelineSpec.from_dict({"filters": [{"name": "fasteners", "names": [123]}], "steps": [{"op": "repair"}]})
+
+
 def test_pipeline_rejects_where_and_where_not_during_parse() -> None:
     with pytest.raises(ValueError, match="pipeline step cannot set both where and where_not"):
         PipelineSpec.from_dict(

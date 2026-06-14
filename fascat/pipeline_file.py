@@ -567,7 +567,7 @@ def _filters(value: object, location: _TomlLocation | None = None) -> dict[str, 
             )
         try:
             result[filter_id] = _filter_from_values(item, result)
-        except ValueError as exc:
+        except (TypeError, ValueError) as exc:
             message = str(exc)
             raise ValueError(_with_line(message, _message_line(filter_location, message, item))) from exc
     return result

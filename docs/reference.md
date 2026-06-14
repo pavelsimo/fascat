@@ -475,7 +475,7 @@ keeping the native source shape for tessellation and healing.
 | `--filter` | unset | Report matched assembly nodes and parts |
 | `--exclude-filter` | unset | Exclude selector matches from `--filter` results |
 
-Supported filter expressions:
+Supported filter expressions use case-sensitive shell-style `fnmatchcase` patterns for string fields (`*`, `?`, and character classes), not regular expressions:
 
 | Expression | Meaning |
 |------------|---------|
