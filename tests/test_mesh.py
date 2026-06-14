@@ -1173,6 +1173,61 @@ def test_equivalent_new_mesh_reuses_shared_fingerprint_cache(monkeypatch: pytest
         mesh_module._GLOBAL_MESH_CACHE.clear()
 
 
+def test_mesh_copy_reuses_cached_orientability_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
+    mesh = flipped_tetrahedron_mesh()
+    expected = mesh.orientability_metrics()
+    expected["orientation_components"] = 99
+    copied = mesh.copy()
+
+    def fail_defaultdict(*_args: object, **_kwargs: object) -> object:
+        pytest.fail("copied mesh should reuse cached orientability metrics")
+
+    monkeypatch.setattr(mesh_module, "defaultdict", fail_defaultdict)
+
+    assert mesh.orientability_metrics()["orientation_components"] == 1
+    assert copied.orientability_metrics()["flipped_orientation_components"] == 1
+
+
+def test_equivalent_new_mesh_reuses_shared_orientability_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
+    mesh_module._GLOBAL_MESH_CACHE.clear()
+    try:
+        mesh = flipped_tetrahedron_mesh()
+        expected = mesh.orientability_metrics()
+        recreated = Mesh(points=mesh.points.copy(), faces=mesh.faces.copy())
+
+        def fail_defaultdict(*_args: object, **_kwargs: object) -> object:
+            pytest.fail("equivalent rebuilt mesh should reuse the shared orientability cache")
+
+        monkeypatch.setattr(mesh_module, "defaultdict", fail_defaultdict)
+
+        assert recreated.orientability_metrics() == expected
+    finally:
+        mesh_module._GLOBAL_MESH_CACHE.clear()
+
+
+def test_mesh_orientability_cache_rebuilds_after_in_place_face_mutation() -> None:
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [1, 1, 0],
+                [2, 1, 0],
+                [1, 2, 0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=int),
+    )
+
+    assert mesh.orientability_metrics()["orientation_components"] == 2
+
+    mesh.faces[1] = np.array([2, 1, 3], dtype=np.int64)
+
+    assert mesh.orientability_metrics()["orientation_components"] == 1
+
+
 def test_subdivide_long_edges_enforces_limit_and_preserves_materials() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [4, 0, 0], [0, 3, 0]], dtype=float),
