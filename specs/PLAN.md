@@ -58,7 +58,7 @@ glTF/OBJ/STL/FBX writers, trimesh + numpy (mesh ops).
 Audit verdict: healthy. xatlas vertex-split bookkeeping, opacity math, and bake color-space
 handling were each independently challenged and held up.
 
-- [ ] **P2** Warn in `asset.report` when textures are silently downsampled by `max_resolution` (`fascat/ops/textures.py:79`)
+- [x] **P2** Warn in `asset.report` when textures are silently downsampled by `max_resolution` (`fascat/ops/textures.py:79`)
 - [ ] **P3** Document the 6-decimal PBR rounding in material dedup keys, or make precision configurable (`fascat/ops/stage.py:857`)
 - [ ] **P3** Mean-based PBR averaging in baked materials: document, or use a weighted strategy (`fascat/ops/actions.py:882`)
 - [ ] **P3** Expose/adapt the fixed 6-direction AO sampling (`fascat/ops/actions.py:736`)

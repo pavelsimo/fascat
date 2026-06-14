@@ -62,6 +62,7 @@ def test_process_textures_resizes_converts_dedupes_and_rewrites_material_refs() 
     assert processed.metadata["texture_process_resized_images"] == "2"
     assert processed.metadata["texture_process_deduped_images"] == "1"
     assert processed.report.steps[-1].name == "process_textures"
+    assert processed.report.steps[-1].warnings == ["texture processing downsampled 2 image(s) to max_resolution=2"]
 
 
 def test_process_textures_auto_keeps_alpha_safe_png() -> None:
