@@ -18,6 +18,7 @@ from fascat.io.gltf import (
     _apply_meshopt_compression,
     _BufferBuilder,
     validate_gltf,
+    validate_gltf_document,
     write_gltf,
     write_gltf_with_validation,
 )
@@ -377,6 +378,28 @@ def test_glb_export_preserves_normals_and_tangent_handedness(tmp_path: Path) -> 
     assert np.allclose(normals, np.array([[0.0, 0.0, 1.0]] * 3, dtype=np.float32))
     assert np.allclose(np.linalg.norm(tangents[:, :3], axis=1), 1.0)
     assert np.all(tangents[:, 3] == -1.0)
+
+
+def test_snorm8_normal_validation_requires_mesh_quantization(tmp_path: Path) -> None:
+    output = tmp_path / "normals.glb"
+    write_gltf(_asset_with_materials_and_lods(), output)
+    document, binary = _read_glb(output)
+    attributes = document["meshes"][0]["primitives"][0]["attributes"]
+    normal_accessor = document["accessors"][attributes["NORMAL"]]
+    normal_accessor["componentType"] = 5120
+    normal_accessor["normalized"] = True
+
+    with pytest.raises(RuntimeError, match="NORMAL accessor"):
+        validate_gltf_document(document, binary)
+
+    document["extensionsUsed"] = ["KHR_mesh_quantization"]
+    document["extensionsRequired"] = ["KHR_mesh_quantization"]
+    normal_accessor["normalized"] = False
+    with pytest.raises(RuntimeError, match="NORMAL accessor"):
+        validate_gltf_document(document, binary)
+
+    normal_accessor["normalized"] = True
+    assert validate_gltf_document(document, binary)["triangles"] == 2
 
 
 def test_gltf_export_embeds_buffer_data_uri_and_validates(tmp_path: Path) -> None:
