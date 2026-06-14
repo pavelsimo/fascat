@@ -2849,6 +2849,7 @@ def _design_variant_selector_terms(
     conditional_dependency_refs = _conditional_dependency_references(records, records_by_reference)
     matched: list[str] = []
     terms: list[str] = list(requested)
+    selector_term_cache: dict[tuple[str, tuple[str, ...]], tuple[str, ...]] = {}
     condition_blocked = False
     for record in records:
         direct_id_match = _design_variant_record_id_matches(record, normalized_requested)
@@ -2949,7 +2950,14 @@ def _design_variant_selector_terms(
         if not direct_id_match and not direct_match and not condition_applies:
             continue
         matched.append(record.id)
-        terms.extend(_design_variant_geometry_selector_terms(record, records_by_reference, visited=set()))
+        terms.extend(
+            _design_variant_geometry_selector_terms(
+                record,
+                records_by_reference,
+                visited=set(),
+                selector_term_cache=selector_term_cache,
+            )
+        )
     selector_terms = tuple(
         item for item in dict.fromkeys(term.strip() for term in terms if term.strip()) if _normalize_variant_term(item)
     )
@@ -2963,13 +2971,20 @@ def _design_variant_geometry_selector_terms(
     records_by_reference: dict[str, _StepDesignVariantRecord],
     *,
     visited: set[str],
+    selector_term_cache: dict[tuple[str, tuple[str, ...]], tuple[str, ...]] | None = None,
 ) -> tuple[str, ...]:
     record_reference = _design_variant_record_step_reference(record)
     if record_reference in visited or record.condition_operator in _STEP_CONDITION_OPERAND_OPERATORS:
         return ()
+    cache_key = (record_reference, tuple(sorted(visited)))
+    if selector_term_cache is not None and cache_key in selector_term_cache:
+        return selector_term_cache[cache_key]
     visited.add(record_reference)
     if record.condition_operator is None:
-        return _design_variant_record_selector_terms(record)
+        selector_terms = _design_variant_record_selector_terms(record)
+        if selector_term_cache is not None:
+            selector_term_cache[cache_key] = selector_terms
+        return selector_terms
 
     terms: list[str] = []
     for reference in record.references:
@@ -2981,6 +2996,7 @@ def _design_variant_geometry_selector_terms(
                 child_record,
                 records_by_reference,
                 visited=set(visited),
+                selector_term_cache=selector_term_cache,
             )
         )
     if record.condition_operator in {
@@ -2993,7 +3009,10 @@ def _design_variant_geometry_selector_terms(
         terms.extend(_design_variant_record_selector_terms(record))
     if record.condition_operator == "conditional" and record.kind == "conditional_concept_feature":
         terms.extend(_design_variant_record_selector_terms(record))
-    return tuple(dict.fromkeys(terms))
+    selector_terms = tuple(dict.fromkeys(terms))
+    if selector_term_cache is not None:
+        selector_term_cache[cache_key] = selector_terms
+    return selector_terms
 
 
 def _design_variant_record_selector_terms(record: _StepDesignVariantRecord) -> tuple[str, ...]:
