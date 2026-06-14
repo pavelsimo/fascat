@@ -78,6 +78,15 @@ def _should_repair_winding(options: RepairOptions) -> bool:
     }
 
 
+def _empty_orientability_metrics() -> dict[str, int]:
+    return {
+        "orientation_components": 0,
+        "non_orientable_edges": 0,
+        "closed_orientation_components": 0,
+        "flipped_orientation_components": 0,
+    }
+
+
 def _repair_face_orientation_status(options: RepairOptions) -> str:
     if not options.fix_winding:
         return "disabled"
@@ -1611,7 +1620,10 @@ class Mesh:
                 for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
                     key = (min(start, end), max(start, end))
                     direction = 1 if (start, end) == key else -1
-                    edge_incidents[key].append((face_index, direction))
+                    incidents = edge_incidents[key]
+                    incidents.append((face_index, direction))
+                    if len(incidents) > 2:
+                        return (0, 0, 0, 0)
                     edges.append(key)
                 face_edges.append(edges)
 
