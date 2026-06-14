@@ -18,6 +18,7 @@ _CLOSE_VIEW_LOD1_MIN_RATIO = 0.4
 _CLOSE_VIEW_LOD2_MIN_RATIO = 0.2
 _FAR_LOD_RATIO_THRESHOLD = 0.15
 _FAR_LOD_SCREEN_COVERAGE_THRESHOLD = 0.1
+_MIN_RECOMMENDED_LOD_RATIO = 0.01
 
 
 @dataclass(frozen=True)
@@ -546,6 +547,31 @@ def _lod_chain_advisories(options: LODOptions, screen_coverage: tuple[float, ...
                 "message": (
                     f"LOD chain has {len(options.ratios)} generated levels; "
                     "3-4 levels are usually enough, and extra meshes increase memory and export size"
+                ),
+            }
+        )
+
+    minimum_ratio_warnings = [
+        {
+            "level": index + 1,
+            "ratio": ratio,
+            "minimum_recommended_ratio": _MIN_RECOMMENDED_LOD_RATIO,
+            "screen_coverage": screen_coverage[index],
+        }
+        for index, ratio in enumerate(options.ratios)
+        if ratio <= _MIN_RECOMMENDED_LOD_RATIO
+    ]
+    if minimum_ratio_warnings:
+        levels = ",".join(f"LOD{item['level']}" for item in minimum_ratio_warnings)
+        advisories.append(
+            {
+                "code": "destructive_lod_ratio_floor",
+                "severity": "warning",
+                "levels": minimum_ratio_warnings,
+                "message": (
+                    f"{levels} use ratios at or below {_MIN_RECOMMENDED_LOD_RATIO:g}; "
+                    "ratios this small commonly collapse to a one-triangle LOD, so prefer far_lod_bake, "
+                    "scene_far_proxy, or drop_tiny_parts for distant runtime levels"
                 ),
             }
         )
