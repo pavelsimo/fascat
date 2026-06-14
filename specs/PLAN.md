@@ -89,7 +89,7 @@ handling were each independently challenged and held up.
 
 - [x] **P0** Subprocess timeouts don't kill process groups — orphaned Chromium/engine children on Unix (`fascat/runtime.py:289`, `fascat/runtime.py:383`, `fascat/runtime.py:451`, `fascat/runtime.py:556`); launch with a new session/process group and kill the group on timeout
 - [x] **P0** `TemporaryDirectory` is deleted while a timed-out subprocess may still read from it (`fascat/runtime.py:322-480`, `fascat/runtime.py:537-600`); extend the directory lifetime past subprocess teardown
-- [ ] **P2** glTF-Transform invocations lack preflight `shutil.which` checks and contextual errors (`fascat/runtime.py:1058`, `fascat/runtime.py:1131`)
+- [x] **P2** glTF-Transform invocations lack preflight `shutil.which` checks and contextual errors (`fascat/runtime.py:1058`, `fascat/runtime.py:1131`)
 - [ ] **P2** Default visual-diff thresholds are too permissive for regression gating (pixel tolerance 8/255, 35% changed-pixel ratio) (`fascat/runtime_fixtures.py:245`)
 - [ ] **P3** Pillow-based preview rendering is platform-dependent — soften the "deterministic" claim or pin/render differently (`fascat/visual.py:382`)
 - [ ] **P3** Cap browser screenshot data-URI payload size (`fascat/runtime.py:2226`)

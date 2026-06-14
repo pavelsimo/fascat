@@ -197,6 +197,34 @@ def test_browser_render_preview_writes_screenshot_data_from_payload(
     assert Image.open(preview).getpixel((0, 0)) == (230, 20, 30, 255)
 
 
+@pytest.mark.parametrize(
+    ("helper_name", "operation"),
+    [
+        ("_run_gltf_transform_copy", "copy"),
+        ("_run_gltf_transform_ktxdecompress", "ktxdecompress"),
+    ],
+)
+def test_gltf_transform_runtime_helpers_report_missing_cli_before_subprocess(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    helper_name: str,
+    operation: str,
+) -> None:
+    import fascat.runtime as runtime
+
+    monkeypatch.delenv("FASCAT_GLTF_TRANSFORM", raising=False)
+    monkeypatch.setattr("fascat.io.gltf.shutil.which", lambda _name: None)
+
+    def fail_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("subprocess should not run when glTF Transform is missing")
+
+    monkeypatch.setattr("fascat._subprocess.run_guarded", fail_run)
+    helper = getattr(runtime, helper_name)
+
+    with pytest.raises(RuntimeError, match=f"glTF Transform {operation} requires the glTF Transform CLI"):
+        helper(tmp_path / "input.gltf", tmp_path / "output.gltf")
+
+
 def test_browser_render_preview_reports_unsupported_draco_decode_failure_without_running_browser(
     monkeypatch,  # type: ignore[no-untyped-def]
     tmp_path: Path,
