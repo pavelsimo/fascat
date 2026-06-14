@@ -16,6 +16,7 @@ from fascat.material import Material
 from fascat.metadata import pmi_ids_by_part
 from fascat.options import MetadataExportOptions, UsdExportOptions
 from fascat.pmi_visuals import build_pmi_visual_markers
+from fascat.report import Report
 
 _PMI_VISUAL_MODES = {"metadata_and_visuals", "full"}
 _BAKED_TEXTURE_BINDINGS = (
@@ -155,7 +156,9 @@ def _write_usd_stage(
 
     material_paths = _write_materials(stage, referenced_materials(asset), asset.images, opts.metadata)
     pmi_by_part = _pmi_by_part(asset) if opts.metadata.pmi != "none" else {}
-    prototype_paths = _write_prototypes(stage, asset.parts, asset.materials, material_paths, pmi_by_part, opts.metadata)
+    prototype_paths = _write_prototypes(
+        stage, asset.parts, asset.materials, material_paths, pmi_by_part, opts.metadata, asset.report
+    )
     occurrence_counts = _part_occurrence_counts(asset.root)
     _write_node(stage, asset.root, scene_path, asset.parts, prototype_paths, occurrence_counts, opts.metadata)
     if opts.metadata.pmi != "none":
@@ -396,6 +399,7 @@ def _write_prototypes(
     material_paths: dict[str, str],
     pmi_by_part: dict[str, list[str]],
     metadata_options: MetadataExportOptions,
+    report: Report,
 ) -> dict[tuple[str, int], str]:
     from pxr import UsdGeom, Vt
 
@@ -415,7 +419,7 @@ def _write_prototypes(
             pmi_ids = pmi_by_part.get(part.id, [])
             if pmi_ids:
                 prototype.GetPrim().SetCustomDataByKey("fascat:pmiIds", Vt.StringArray(pmi_ids))
-            _write_mesh(stage, f"{part_path}/Mesh", part, mesh, materials, material_paths, metadata_options)
+            _write_mesh(stage, f"{part_path}/Mesh", part, mesh, materials, material_paths, metadata_options, report)
             prototype_paths[(part.id, lod_index)] = part_path
     return prototype_paths
 
@@ -473,6 +477,7 @@ def _write_mesh(
     materials: dict[str, Material],
     material_paths: dict[str, str],
     metadata_options: MetadataExportOptions,
+    report: Report,
 ) -> None:
     from pxr import Sdf, UsdGeom, Vt
 
@@ -494,7 +499,7 @@ def _write_mesh(
             UsdGeom.Tokens.vertex,
         )
         primvar.Set(_vt_vec2f_array(mesh.uvs[0], Vt))
-    _write_display_color(usd_mesh, part, materials)
+    _write_display_color(usd_mesh, part, materials, report)
     if part.material_ids:
         _bind_materials(stage, usd_mesh, part, mesh, materials, material_paths)
     usd_mesh.GetPrim().SetCustomDataByKey("fascat:partId", part.id)
@@ -514,18 +519,31 @@ def _vt_int_array(values: np.ndarray, Vt: Any) -> Any:
     return Vt.IntArray.FromNumpy(np.ascontiguousarray(values, dtype=np.int32))
 
 
-def _write_display_color(usd_mesh: Any, part: Part, materials: dict[str, Material]) -> None:
+def _write_display_color(usd_mesh: Any, part: Part, materials: dict[str, Material], report: Report) -> None:
     from pxr import Vt
 
     base_color = (0.75, 0.75, 0.75, 1.0)
-    if "display_color" in part.metadata:
-        values = [float(value) for value in str(part.metadata["display_color"]).split(",")]
-        if len(values) == 4:
-            base_color = (values[0], values[1], values[2], values[3])
-    elif part.material_ids:
+    if part.material_ids:
         material = materials.get(part.material_ids[0])
         if material is not None:
             base_color = (*material.base_color[:3], material.effective_opacity)
+    if "display_color" in part.metadata:
+        raw_display_color = part.metadata["display_color"]
+        try:
+            values = [float(value) for value in str(raw_display_color).split(",")]
+        except ValueError:
+            report.add_warning(
+                f"USD display_color metadata for part {part.id} was ignored: "
+                "expected 4 comma-separated numeric components"
+            )
+        else:
+            if len(values) == 4:
+                base_color = (values[0], values[1], values[2], values[3])
+            else:
+                report.add_warning(
+                    f"USD display_color metadata for part {part.id} was ignored: "
+                    f"expected 4 components, got {len(values)}"
+                )
     usd_mesh.CreateDisplayColorAttr(_vt_vec3f_array(np.asarray([base_color[:3]], dtype=np.float32), Vt))
     usd_mesh.CreateDisplayOpacityAttr([float(base_color[3])])
 
