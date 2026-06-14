@@ -20,6 +20,7 @@ from fascat.validation import (
     RuntimeParityGolden,
     RuntimeParityGoldenCoverageReport,
     RuntimeParitySuiteReport,
+    VisualDiffOptions,
 )
 
 
@@ -33,7 +34,11 @@ def test_runtime_parity_suite_writes_assets_baselines_and_manifest(tmp_path: Pat
     assert len(report.fixtures) == 6
     assert Path(report.manifest_path).is_file()
     assert Path(report.directory) == suite_dir
-    assert report.to_dict()["recommended_diff"]["pixel_tolerance"] == 8
+    assert report.to_dict()["recommended_diff"] == {
+        "pixel_tolerance": 2,
+        "max_mean_absolute_error": 4.0,
+        "max_changed_pixel_ratio": 0.02,
+    }
 
     manifest = json.loads(Path(report.manifest_path).read_text(encoding="utf-8"))
     assert manifest["schema"] == "fascat.runtime-parity-suite.v1"
@@ -69,6 +74,26 @@ def test_runtime_parity_suite_writes_assets_baselines_and_manifest(tmp_path: Pat
     assert "--runtime-engine unity" in texture_manifest["commands"]["unity"]
     assert "--runtime-engine-baseline baselines/texture-map-grid.png" in texture_manifest["commands"]["unity"]
     assert "--runtime-engine unreal" in texture_manifest["commands"]["unreal"]
+    assert "--visual-diff-pixel-tolerance 2" in texture_manifest["commands"]["unity"]
+    assert "--visual-diff-mean-threshold 4" in texture_manifest["commands"]["unity"]
+    assert "--visual-diff-changed-pixel-ratio 0.02" in texture_manifest["commands"]["unreal"]
+
+
+def test_runtime_parity_suite_preserves_explicit_diff_options(tmp_path: Path) -> None:
+    diff_options = VisualDiffOptions(
+        pixel_tolerance=6,
+        max_mean_absolute_error=12.5,
+        max_changed_pixel_ratio=0.1,
+    )
+
+    report = write_runtime_parity_suite(tmp_path / "runtime-parity", diff_options=diff_options)
+    manifest = json.loads(Path(report.manifest_path).read_text(encoding="utf-8"))
+
+    assert report.recommended_diff == diff_options
+    assert manifest["recommended_diff"] == diff_options.to_dict()
+    assert "--visual-diff-pixel-tolerance 6" in manifest["fixtures"][0]["commands"]["unity"]
+    assert "--visual-diff-mean-threshold 12.5" in manifest["fixtures"][0]["commands"]["unity"]
+    assert "--visual-diff-changed-pixel-ratio 0.1" in manifest["fixtures"][0]["commands"]["unreal"]
 
 
 def test_runtime_parity_lod_profile_fixtures_exercise_engine_exports(tmp_path: Path) -> None:

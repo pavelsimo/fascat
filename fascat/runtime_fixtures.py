@@ -32,6 +32,11 @@ _SUITE_SCHEMA = "fascat.runtime-parity-suite.v1"
 _CAPTURE_SCHEMA = "fascat.runtime-parity-captures.v1"
 _GOLDEN_COVERAGE_SCHEMA = "fascat.runtime-parity-golden-coverage.v1"
 _DEFAULT_TARGETS: tuple[RuntimeParityTarget, ...] = ("browser", "unity", "unreal")
+_DEFAULT_RUNTIME_PARITY_DIFF = VisualDiffOptions(
+    pixel_tolerance=2,
+    max_mean_absolute_error=4.0,
+    max_changed_pixel_ratio=0.02,
+)
 _KHR_TEXTURE_BASISU = "KHR_texture_basisu"
 _GLB_JSON_CHUNK = 0x4E4F534A
 _GLB_BIN_CHUNK = 0x004E4942
@@ -243,11 +248,7 @@ def write_runtime_parity_suite(
     baselines_dir.mkdir(parents=True, exist_ok=True)
 
     preview_opts = preview_options or VisualPreviewOptions(width=512, height=512, padding=40)
-    diff_opts = diff_options or VisualDiffOptions(
-        pixel_tolerance=8,
-        max_mean_absolute_error=18.0,
-        max_changed_pixel_ratio=0.35,
-    )
+    diff_opts = diff_options or _DEFAULT_RUNTIME_PARITY_DIFF
 
     fixtures: list[RuntimeParityFixture] = []
     manifest_fixtures: list[dict[str, object]] = []
@@ -1026,11 +1027,19 @@ def _load_runtime_parity_manifest(manifest_path: Path) -> dict[str, Any]:
 def _manifest_diff_options(manifest: dict[str, Any]) -> VisualDiffOptions:
     value = manifest.get("recommended_diff")
     if not isinstance(value, dict):
-        return VisualDiffOptions(pixel_tolerance=8, max_mean_absolute_error=18.0, max_changed_pixel_ratio=0.35)
+        return _DEFAULT_RUNTIME_PARITY_DIFF
     return VisualDiffOptions(
-        pixel_tolerance=_manifest_int(value, "pixel_tolerance", 8),
-        max_mean_absolute_error=_manifest_float(value, "max_mean_absolute_error", 18.0),
-        max_changed_pixel_ratio=_manifest_float(value, "max_changed_pixel_ratio", 0.35),
+        pixel_tolerance=_manifest_int(value, "pixel_tolerance", _DEFAULT_RUNTIME_PARITY_DIFF.pixel_tolerance),
+        max_mean_absolute_error=_manifest_float(
+            value,
+            "max_mean_absolute_error",
+            _DEFAULT_RUNTIME_PARITY_DIFF.max_mean_absolute_error,
+        ),
+        max_changed_pixel_ratio=_manifest_float(
+            value,
+            "max_changed_pixel_ratio",
+            _DEFAULT_RUNTIME_PARITY_DIFF.max_changed_pixel_ratio,
+        ),
     )
 
 
