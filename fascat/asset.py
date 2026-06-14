@@ -270,6 +270,12 @@ class Asset:
     metadata: Metadata = field(default_factory=dict)
     pmi: list[PmiAnnotation] = field(default_factory=list)
     report: Report = field(default_factory=Report)
+    _hierarchy_nodes_cache: tuple[Node, list[Node]] | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         self.root = self.root.copy()
@@ -308,6 +314,7 @@ class Asset:
         asset.metadata = metadata
         asset.pmi = pmi
         asset.report = report
+        asset._hierarchy_nodes_cache = None
         return asset
 
     def __repr__(self) -> str:
@@ -333,16 +340,24 @@ class Asset:
     def vertex_count(self) -> int:
         return sum(part.mesh.vertex_count for part in self.parts.values() if part.mesh is not None)
 
+    def _hierarchy_nodes(self) -> list[Node]:
+        cached = self._hierarchy_nodes_cache
+        if cached is not None and cached[0] is self.root:
+            return list(cached[1])
+        nodes = self.root.walk()
+        self._hierarchy_nodes_cache = (self.root, nodes)
+        return list(nodes)
+
     @property
     def occurrence_count(self) -> int:
-        return sum(1 for node in self.root.walk() if node.part_id is not None)
+        return sum(1 for node in self._hierarchy_nodes() if node.part_id is not None)
 
     @property
     def draw_call_count(self) -> int:
         return self.draw_call_breakdown()["draw_calls"]
 
     def draw_call_breakdown(self) -> dict[str, int]:
-        return self._draw_call_breakdown_from_nodes(self.root.walk())
+        return self._draw_call_breakdown_from_nodes(self._hierarchy_nodes())
 
     def _draw_call_breakdown_from_nodes(self, nodes: list[Node]) -> dict[str, int]:
         occurrence_counts: dict[str, int] = {}
@@ -408,7 +423,7 @@ class Asset:
         return selector.select(self)
 
     def stats(self, *, include_lods: bool = False) -> dict[str, int]:
-        return self._stats_from_nodes(self.root.walk(), include_lods=include_lods)
+        return self._stats_from_nodes(self._hierarchy_nodes(), include_lods=include_lods)
 
     def _stats_from_nodes(self, nodes: list[Node], *, include_lods: bool = False) -> dict[str, int]:
         mesh_parts = [part for part in self.parts.values() if part.mesh is not None]
@@ -739,7 +754,7 @@ class Asset:
         selected_node_ids = (
             scope.selection.node_ids
             if scope.selection is not None
-            else {node.id for node in scope.asset.root.walk() if node.part_id is not None}
+            else {node.id for node in scope.asset._hierarchy_nodes() if node.part_id is not None}
         )
         before = _hierarchy_report_stats(self)
         warning_count = len(self.report.warnings)
@@ -773,7 +788,7 @@ class Asset:
         selected_node_ids = (
             scope.selection.node_ids
             if scope.selection is not None
-            else {node.id for node in scope.asset.root.walk() if node.part_id is not None}
+            else {node.id for node in scope.asset._hierarchy_nodes() if node.part_id is not None}
         )
         before = _hierarchy_report_stats(self)
         warning_count = len(self.report.warnings)
@@ -804,7 +819,7 @@ class Asset:
         selected_node_ids = (
             scope.selection.node_ids
             if scope.selection is not None
-            else {node.id for node in scope.asset.root.walk() if node.part_id is not None}
+            else {node.id for node in scope.asset._hierarchy_nodes() if node.part_id is not None}
         )
         before = _hierarchy_report_stats(self)
         warning_count = len(self.report.warnings)
@@ -835,7 +850,7 @@ class Asset:
         selected_node_ids = (
             scope.selection.node_ids
             if scope.selection is not None
-            else {node.id for node in scope.asset.root.walk() if node.part_id is not None}
+            else {node.id for node in scope.asset._hierarchy_nodes() if node.part_id is not None}
         )
         before = _hierarchy_report_stats(self)
         warning_count = len(self.report.warnings)
@@ -972,7 +987,7 @@ class Asset:
         selected_node_ids = (
             scope.selection.node_ids
             if scope.selection is not None
-            else {node.id for node in scope.asset.root.walk() if node.part_id is not None}
+            else {node.id for node in scope.asset._hierarchy_nodes() if node.part_id is not None}
         )
         before = _hierarchy_report_stats(self)
         warning_count = len(self.report.warnings)
@@ -1237,7 +1252,7 @@ class Asset:
         scoped_asset = self._isolate_selected_occurrences(selection.node_ids)
         selected_part_ids = {
             node.part_id
-            for node in scoped_asset.root.walk()
+            for node in scoped_asset._hierarchy_nodes()
             if node.id in selection.node_ids and node.part_id is not None
         }
         return _OperationScope(asset=scoped_asset, selected_part_ids=selected_part_ids, selection=selection)
@@ -1504,7 +1519,7 @@ def _part_is_merged_batch(part: Part) -> bool:
 
 
 def _hierarchy_report_stats(asset: Asset) -> dict[str, int]:
-    nodes = asset.root.walk()
+    nodes = asset._hierarchy_nodes()
     return {
         **asset._stats_from_nodes(nodes, include_lods=True),
         **asset._draw_call_breakdown_from_nodes(nodes),
@@ -1807,7 +1822,7 @@ def _unique_part_id(parts: dict[str, Part], base: str) -> str:
 
 def _occurrences_by_part(asset: Asset) -> dict[str, list[Node]]:
     occurrences: dict[str, list[Node]] = {}
-    for node in asset.root.walk():
+    for node in asset._hierarchy_nodes():
         if node.part_id is not None and node.part_id in asset.parts:
             occurrences.setdefault(node.part_id, []).append(node)
     return occurrences
