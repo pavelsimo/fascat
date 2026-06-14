@@ -608,6 +608,34 @@ def test_repair_records_boundary_gap_counts() -> None:
     assert repaired.metadata["repair_boundary_gaps_after"] == "1"
 
 
+def test_orientability_metrics_early_exits_for_non_manifold_edges(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [0, -1, 0],
+                [0, 0, 1],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [1, 0, 3], [0, 1, 4]], dtype=int),
+    )
+
+    def fail_deque(*_: object, **__: object) -> None:
+        raise AssertionError("orientability bfs should not run for non-manifold meshes")
+
+    monkeypatch.setattr(mesh_module, "deque", fail_deque)
+
+    assert mesh.orientability_metrics() == {
+        "orientation_components": 0,
+        "non_orientable_edges": 0,
+        "closed_orientation_components": 0,
+        "flipped_orientation_components": 0,
+    }
+
+
 def test_orientability_metrics_detect_mobius_like_strip() -> None:
     mesh = mobius_strip_mesh()
 
