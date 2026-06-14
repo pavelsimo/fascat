@@ -58,6 +58,18 @@ throughout:
   disables pooling entirely. Worker processes start via spawn, so assemblies with
   only a handful of small parts can be faster with `jobs=1`.
 
+### Asset ownership
+
+`Asset(...)`, `Node(...)`, and `Part(...)` defensively copy mutable inputs so
+callers can build models from ordinary Python containers without leaking later
+mutations into the asset. Pipeline methods still return new assets, but internal
+hot paths use private adoption helpers only after they have already built owned
+roots, parts, materials, images, metadata, PMI annotations, and reports. That
+contract avoids a second full deep copy of large assemblies while keeping the
+public constructor safe. External code should prefer the public constructors and
+`asset.copy()`; `_adopt` is private and assumes the caller owns every object it
+passes.
+
 Core pipeline calls:
 
 | API | Parameters | Purpose |

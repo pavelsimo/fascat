@@ -302,6 +302,15 @@ class Asset:
         pmi: list[PmiAnnotation],
         report: Report,
     ) -> Asset:
+        """Create an asset from already-owned objects without defensive copies.
+
+        Use this only after the caller has made every copy needed for isolation.
+        Public construction crosses ownership boundaries and should continue
+        through ``Asset(...)`` so mutable inputs are defensively copied. Hot
+        pipeline paths may use ``_adopt`` to avoid re-entering ``__post_init__``
+        once they have already assembled owned roots, parts, materials, images,
+        metadata, PMI, and reports.
+        """
         asset = object.__new__(cls)
         asset.root = root
         asset.parts = parts
