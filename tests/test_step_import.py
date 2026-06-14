@@ -4980,6 +4980,7 @@ def test_read_step_multi_file_resolves_master_external_reference_graph(
         "resolved": 1,
         "missing": 0,
         "unsupported": 0,
+        "cycles": 0,
         "sources": 2,
         "resolved_sources": 1,
         "member_sources": 2,
@@ -5024,6 +5025,28 @@ def test_read_step_multi_file_reports_missing_master_external_references(
     assert "missing.step" in asset.report.warnings[0]
 
 
+def test_external_step_reference_graph_reports_reference_cycles(tmp_path: Path) -> None:
+    master = tmp_path / "master.step"
+    child = tmp_path / "child.step"
+    master.write_text(
+        "ISO-10303-21;\nDATA;\n#1=DOCUMENT_FILE('child.step');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    child.write_text(
+        "ISO-10303-21;\nDATA;\n#1=DOCUMENT_FILE('master.step');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    graph = _resolve_step_external_reference_graph(master)
+
+    cycle = next(record for record in graph.records if record.status == "cycle")
+    assert cycle.source == child.resolve()
+    assert cycle.resolved == master.resolve()
+    assert graph.summary()["cycles"] == 1
+    assert graph.summary()["resolved"] == 1
+    assert any("cycle detected" in warning for warning in graph.warnings)
+
+
 def test_external_step_reference_graph_resolves_nested_references_once(tmp_path: Path) -> None:
     master = tmp_path / "master.step"
     child = tmp_path / "child.step"
@@ -5049,15 +5072,17 @@ def test_external_step_reference_graph_resolves_nested_references_once(tmp_path:
     assert graph.sources == [master, child.resolve(), leaf.resolve()]
     assert graph.summary() == {
         "references": 4,
-        "resolved": 3,
+        "resolved": 2,
         "missing": 1,
         "unsupported": 0,
+        "cycles": 1,
         "sources": 3,
         "resolved_sources": 2,
         "member_sources": 3,
         "resolved_occurrences": 2,
     }
     assert any("missing.step" in warning for warning in graph.warnings)
+    assert any("cycle detected" in warning for warning in graph.warnings)
 
 
 def test_external_step_reference_graph_preserves_duplicate_occurrences(tmp_path: Path) -> None:
@@ -5116,6 +5141,41 @@ def test_external_step_reference_import_preserves_duplicate_occurrences(
     assert len(asset.root.children) == 3
     assert asset.metadata["external_reference_graph"]["summary"]["resolved_sources"] == 1
     assert asset.metadata["external_reference_graph"]["summary"]["resolved_occurrences"] == 2
+
+
+def test_read_step_multi_file_reports_external_reference_cycles(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    master = tmp_path / "master.step"
+    child = tmp_path / "child.step"
+    master.write_text(
+        "ISO-10303-21;\nDATA;\n#1=DOCUMENT_FILE('child.step');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    child.write_text(
+        "ISO-10303-21;\nDATA;\n#1=DOCUMENT_FILE('master.step');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    def fake_read_step_path(source: Path, *, source_identity: str, options: StepReadOptions) -> fc.Asset:
+        _ = source_identity
+        assert options.multi_file is False
+        report = Report(source_path=str(source))
+        report.add_step("import", options={"read_options": options.to_dict(), "import_decisions": {}})
+        return fc.Asset(
+            root=fc.Node(id="root", name=source.stem),
+            metadata={"import_decisions": {}},
+            report=report,
+        )
+
+    monkeypatch.setattr(step_io, "_read_step_path", fake_read_step_path)
+
+    asset = fc.read_step(master, options=StepReadOptions(multi_file=True))
+
+    assert asset.metadata["external_reference_graph"]["summary"]["cycles"] == 1
+    assert asset.metadata["import_decisions"]["multi_file"]["state"] == "approximated"
+    assert any("cycle detected" in warning for warning in asset.report.warnings)
 
 
 def test_material_library_mapping_applies_known_cad_material_rules() -> None:

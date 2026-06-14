@@ -102,7 +102,7 @@ handling were each independently challenged and held up.
 - [ ] **P2** ZIP material libraries: entry-count/size caps before extraction (`fascat/io/step.py:5424`)
 - [ ] **P2** JSON material library recursion depth cap (`fascat/io/step.py:5537`)
 - [ ] **P2** KTX2 dimension parsing must handle truncated files (`fascat/io/step.py:6291`)
-- [ ] **P2** Report broken external-reference cycles instead of silently dropping them (`fascat/io/step.py:873`)
+- [x] **P2** Report broken external-reference cycles instead of silently dropping them (`fascat/io/step.py:873`)
 - [ ] **P3** PMI semantic graph cycle detection (`fascat/io/step.py:1897`); domain checks for SQRT/LOG condition operands (`fascat/io/step.py:2797`)
 
 ## 3. Performance
