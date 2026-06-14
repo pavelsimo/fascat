@@ -268,6 +268,7 @@ def test_functional_write_usd_records_report_step(monkeypatch, tmp_path: Path) -
     assert step.options == {
         "format": "OpenUSD",
         "debug": True,
+        "dry_run": False,
         "package": "default",
         "file_size_budget_mb": None,
         "metadata": {"mode": "full", "pmi": "metadata"},
@@ -330,6 +331,7 @@ def test_functional_write_gltf_records_report_step(monkeypatch, tmp_path: Path) 
     runtime_dependencies = options.pop("runtime_dependencies")
     assert options == {
         "format": "glTF",
+        "dry_run": False,
         "preset": None,
         "quantize": False,
         "meshopt": False,
