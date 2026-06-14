@@ -70,7 +70,7 @@ handling were each independently challenged and held up.
 - [x] **P1** A mesh whose face groups are all empty can emit invalid empty-primitive glTF (`fascat/io/gltf.py:1261-1284`)
 - [x] **P1** Out-of-bounds material index silently drops the material binding (`fascat/io/gltf.py:1577-1586`); add a report warning
 - [x] **P1** KTX2 encoder subprocess has no timeout — export can hang forever (`fascat/io/gltf.py:1353-1375`)
-- [ ] **P2** Empty accessors get dummy `[0,0,0]` min/max — skip empty meshes or omit the accessor (`fascat/io/gltf.py:1175`, `fascat/io/gltf.py:1185`)
+- [x] **P2** Empty accessors get dummy `[0,0,0]` min/max — skip empty meshes or omit the accessor (`fascat/io/gltf.py:1175`, `fascat/io/gltf.py:1185`)
 - [ ] **P2** Draco-compressed output is not re-validated before success is reported (`fascat/io/gltf.py:1316-1338`)
 - [ ] **P2** Quantized SNORM8 NORMAL accessors are not covered by the KHR_mesh_quantization validation pass (`fascat/io/gltf.py:1200`, validator `fascat/io/gltf.py:2089`)
 - [x] **P2** USD `display_color` metadata parse failures fall back silently (`fascat/io/usd.py:512-525`)

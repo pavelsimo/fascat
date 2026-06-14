@@ -570,8 +570,11 @@ class _BufferBuilder:
         normalized: bool = False,
         byte_stride: int | None = None,
     ) -> int:
-        self._align()
         contiguous = np.ascontiguousarray(values)
+        count = int(contiguous.shape[0])
+        if count <= 0:
+            raise ValueError("glTF accessors must not be empty")
+        self._align()
         byte_offset = len(self.data)
         payload = _accessor_payload(contiguous, accessor_type, component_type, byte_stride)
         self.data.extend(payload)
@@ -588,7 +591,7 @@ class _BufferBuilder:
             "bufferView": len(self.buffer_views) - 1,
             "byteOffset": 0,
             "componentType": component_type,
-            "count": int(contiguous.shape[0]),
+            "count": count,
             "type": accessor_type,
         }
         if minimum is not None:
@@ -840,6 +843,8 @@ def _append_pmi_visuals(
     children: list[int] = []
     for marker in markers:
         mesh_index = _append_pmi_visual_mesh(builder, meshes, marker, material_index)
+        if mesh_index is None:
+            continue
         node: dict[str, Any] = {
             "name": f"PMI_{marker.annotation_id}",
             "mesh": mesh_index,
@@ -860,9 +865,13 @@ def _append_pmi_visuals(
         }
         nodes.append(node)
         children.append(len(nodes) - 1)
+    if not children:
+        nodes.pop()
+        return 0
+    group_node["extras"]["fascat"]["pmiVisualCount"] = len(children)
     group_node["children"] = children
     scene_nodes.append(group_index)
-    return len(markers)
+    return len(children)
 
 
 def _append_pmi_visual_mesh(
@@ -870,15 +879,17 @@ def _append_pmi_visual_mesh(
     meshes: list[dict[str, Any]],
     marker: PmiVisualMarker,
     material_index: int,
-) -> int:
+) -> int | None:
+    if marker.points.shape[0] == 0 or marker.faces.size == 0:
+        return None
     points = marker.points.astype(np.float32)
     position_accessor = builder.add_accessor(
         points,
         component_type=_FLOAT,
         accessor_type="VEC3",
         target=_ARRAY_BUFFER,
-        minimum=points.min(axis=0).astype(float).tolist() if len(points) else [0.0, 0.0, 0.0],
-        maximum=points.max(axis=0).astype(float).tolist() if len(points) else [0.0, 0.0, 0.0],
+        minimum=points.min(axis=0).astype(float).tolist(),
+        maximum=points.max(axis=0).astype(float).tolist(),
     )
     indices = marker.faces.reshape(-1)
     if points.shape[0] <= np.iinfo(np.uint16).max:
@@ -1195,8 +1206,8 @@ def _append_mesh(
             component_type=_FLOAT,
             accessor_type="VEC3",
             target=_ARRAY_BUFFER,
-            minimum=float_points.min(axis=0).astype(float).tolist() if len(float_points) else [0.0, 0.0, 0.0],
-            maximum=float_points.max(axis=0).astype(float).tolist() if len(float_points) else [0.0, 0.0, 0.0],
+            minimum=float_points.min(axis=0).astype(float).tolist(),
+            maximum=float_points.max(axis=0).astype(float).tolist(),
         )
     else:
         quantized_points = _quantize_positions(points, quantization)
@@ -1205,8 +1216,8 @@ def _append_mesh(
             component_type=_UNSIGNED_SHORT,
             accessor_type="VEC3",
             target=_ARRAY_BUFFER,
-            minimum=quantized_points.min(axis=0).astype(int).tolist() if len(quantized_points) else [0, 0, 0],
-            maximum=quantized_points.max(axis=0).astype(int).tolist() if len(quantized_points) else [0, 0, 0],
+            minimum=quantized_points.min(axis=0).astype(int).tolist(),
+            maximum=quantized_points.max(axis=0).astype(int).tolist(),
             byte_stride=8,
         )
     attributes: dict[str, int] = {"POSITION": position_accessor}

@@ -14,7 +14,13 @@ import pytest
 
 from fascat.asset import Asset, Node, Part
 from fascat.image import ImageResource
-from fascat.io.gltf import _apply_meshopt_compression, validate_gltf, write_gltf, write_gltf_with_validation
+from fascat.io.gltf import (
+    _apply_meshopt_compression,
+    _BufferBuilder,
+    validate_gltf,
+    write_gltf,
+    write_gltf_with_validation,
+)
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.options import BakeMaterialOptions, GltfExportOptions, LODOptions
@@ -124,6 +130,18 @@ def _accessor_array(document: dict[str, Any], binary: bytes, accessor_index: int
     offset = buffer_view.get("byteOffset", 0) + accessor.get("byteOffset", 0)
     count = accessor["count"] * width
     return np.frombuffer(binary, dtype=dtype, count=count, offset=offset).reshape((accessor["count"], width)).copy()
+
+
+def test_buffer_builder_rejects_empty_accessors() -> None:
+    builder = _BufferBuilder()
+
+    with pytest.raises(ValueError, match="accessors must not be empty"):
+        builder.add_accessor(
+            np.empty((0, 3), dtype=np.float32),
+            component_type=5126,
+            accessor_type="VEC3",
+            target=34962,
+        )
 
 
 def test_glb_export_writes_valid_scene_materials_uvs_and_lod_metadata(tmp_path: Path) -> None:
@@ -502,6 +520,7 @@ def test_zero_triangle_mesh_is_skipped_not_emitted_as_empty_primitives(tmp_path:
     document = json.loads(output.read_text(encoding="utf-8"))
     assert len(document["meshes"]) == 1
     assert all(mesh["primitives"] for mesh in document["meshes"])
+    assert all(accessor["count"] > 0 for accessor in document.get("accessors", []))
     empty_nodes = [node for node in document["nodes"] if node.get("name") == "Other"]
     assert empty_nodes and "mesh" not in empty_nodes[0]
     assert any("no renderable faces" in warning for warning in asset.report.warnings)
