@@ -44,6 +44,17 @@ def _asset() -> Asset:
     )
 
 
+def _asset_with_triangle_count(triangle_count: int) -> Asset:
+    asset = _asset()
+    mesh = asset.parts["tri"].mesh
+    assert mesh is not None
+    asset.parts["tri"].mesh = Mesh(
+        points=mesh.points,
+        faces=np.tile(np.asarray([[0, 1, 2]], dtype=int), (triangle_count, 1)),
+    )
+    return asset
+
+
 def test_gltf_size_ladder_measures_baseline_and_requested_variants(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -513,6 +524,23 @@ def test_stl_export_writes_ascii_mesh(tmp_path) -> None:  # type: ignore[no-unty
     assert "vertex 1 0 0" in text
     assert text.endswith("endsolid fascat\n")
     assert validate_stl(output) == {"meshes": 1, "points": 3, "triangles": 1}
+
+
+def test_stl_ascii_large_mesh_adds_report_warning(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    asset = _asset_with_triangle_count(10_001)
+
+    asset.write_stl(tmp_path / "large_ascii.stl", options=StlExportOptions(binary=False))
+
+    assert "ASCII STL export selected for 10,001 triangles" in asset.report.warnings[-1]
+    assert "binary STL is recommended above 10,000 triangles" in asset.report.warnings[-1]
+
+
+def test_stl_binary_large_mesh_does_not_warn_about_ascii_size(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    asset = _asset_with_triangle_count(10_001)
+
+    asset.write_stl(tmp_path / "large_binary.stl", options=StlExportOptions(binary=True))
+
+    assert not any("ASCII STL export selected" in warning for warning in asset.report.warnings)
 
 
 def test_fbx_export_writes_ascii_scene_graph_and_layers(tmp_path) -> None:  # type: ignore[no-untyped-def]
