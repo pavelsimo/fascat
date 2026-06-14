@@ -1179,6 +1179,9 @@ counts, and budget warnings.
 USDZ is built by writing a temporary USD stage and packaging it. glTF, USD, and OBJ
 exports write only referenced materials (the in-memory asset is unchanged); glTF also
 drops images used only by unused materials and reuses repeated embedded texture URIs.
+USD prim names are sanitized for identifier safety; when two sanitized names collide,
+the exporter assigns deterministic `_2`, `_3`, ... suffixes and keeps original node,
+part, and material identifiers in Fascat `customData`.
 
 OBJ export writes vertex positions, normals, `f v//vn` face references, material assignments, and smoothing directives. Staged smooth normals export with smoothing enabled; flat, hard-edge, or generated face normals export with smoothing disabled.
 
