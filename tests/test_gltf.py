@@ -395,13 +395,42 @@ def test_gltf_write_validation_reopens_final_compressed_output(monkeypatch: pyte
         output_path.write_bytes(b"not a glb")
 
     monkeypatch.setattr(gltf, "_run_gltf_transform", fake_draco_transform)
+    output = tmp_path / "compressed.glb"
 
     with pytest.raises(RuntimeError, match="invalid GLB header"):
         write_gltf_with_validation(
             _asset_with_materials_and_lods(),
-            tmp_path / "compressed.glb",
+            output,
             options=GltfExportOptions(draco=True),
         )
+
+    assert not output.exists()
+
+
+def test_draco_export_validation_uses_transformed_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import fascat.io.gltf as gltf
+
+    validated_paths: list[str] = []
+    real_validate_gltf = gltf.validate_gltf
+
+    def fake_draco_transform(arguments: tuple[str, ...]) -> None:
+        Path(arguments[2]).write_bytes(Path(arguments[1]).read_bytes())
+
+    def record_validated_path(path: str | Path) -> dict[str, int]:
+        validated_paths.append(Path(path).name)
+        return real_validate_gltf(path)
+
+    monkeypatch.setattr(gltf, "_run_gltf_transform", fake_draco_transform)
+    monkeypatch.setattr(gltf, "validate_gltf", record_validated_path)
+
+    stats = write_gltf_with_validation(
+        _asset_with_materials_and_lods(),
+        tmp_path / "compressed.glb",
+        options=GltfExportOptions(draco=True),
+    )
+
+    assert stats["triangles"] == 2
+    assert validated_paths == ["draco.glb"]
 
 
 def test_gltf_export_rejects_unknown_extension(tmp_path: Path) -> None:
