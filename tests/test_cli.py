@@ -196,6 +196,25 @@ def test_quiet_suppresses_nonessential_dry_run_output(capsys) -> None:  # type: 
     assert result.stderr == ""
 
 
+def test_verbose_dry_run_prints_operation_diagnostics(capsys) -> None:  # type: ignore[no-untyped-def]
+    result = invoke_run(["--verbose", "--dry-run", "convert", "input.step", "output.usdc"], capsys)
+
+    assert result.exit_code == 0
+    assert "Would convert input.step to output.usdc" in result.stdout
+    assert "operation diagnostics:" in result.stderr
+    assert "import [exact]" in result.stderr
+    assert "tessellate [exact]" in result.stderr
+    assert "export [exact]" in result.stderr
+
+
+def test_verbose_dry_run_preserves_json_stdout(capsys) -> None:  # type: ignore[no-untyped-def]
+    result = invoke_run(["--json", "--verbose", "--dry-run", "convert", "input.step", "output.usdc"], capsys)
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["dry_run"] is True
+    assert result.stderr == ""
+
+
 def test_quiet_does_not_suppress_errors(capsys) -> None:  # type: ignore[no-untyped-def]
     result = invoke_run(["--quiet", "validate", "missing.usdc"], capsys)
 

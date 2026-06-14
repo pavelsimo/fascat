@@ -16,7 +16,7 @@ fascat inspect input.step --json
 |------|-------|---------|-------------|
 | `--help` | `-h` | — | Show help for the current command |
 | `--version` | `-V` | — | Show version and exit |
-| `--verbose` | `-v` | `false` | Enable verbose diagnostics; conversion warnings are not truncated |
+| `--verbose` | `-v` | `false` | Print extra diagnostics to stderr; conversion warnings are not truncated |
 | `--quiet` | `-q` | `false` | Suppress non-essential output |
 | `--json` | — | `false` | Output results as JSON |
 | `--no-color` | — | `false` | Disable ANSI color output |
@@ -33,6 +33,8 @@ A `convert --dry-run` emits JSON with `operation_diagnostics` — planned operat
 each tagged `exact`, `approximate`, or `metadata_only`. With `--pipeline` it also adds
 `pipeline_advisories` warning about ordering issues (decimation before repair, tangents
 without UV0, AO baking without UV1, LOD generation before LOD0 optimization).
+In non-JSON mode, add `--verbose` to print those planned operation diagnostics to
+stderr; `--quiet` suppresses them.
 
 ## Exit codes
 

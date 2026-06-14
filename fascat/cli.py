@@ -1908,6 +1908,7 @@ def cmd_convert(
     if state.dry_run:
         input_label = ", ".join(str(path) for path in input_paths)
         _emit(ctx, payload, f"Would convert {input_label} to {output_path} with profile {profile_options.name}.")
+        _print_verbose_operation_diagnostics(ctx, payload)
         return
 
     for path in input_paths:
@@ -3417,6 +3418,24 @@ def _print_report_warnings(ctx: typer.Context, report: Report, *, limit: int = _
             style="yellow",
             markup=False,
         )
+
+
+def _print_verbose_operation_diagnostics(ctx: typer.Context, payload: dict[str, Any]) -> None:
+    state = _state(ctx)
+    if not state.verbose or state.quiet or state.json_output:
+        return
+    diagnostics = payload.get("operation_diagnostics")
+    if not isinstance(diagnostics, list) or not diagnostics:
+        return
+    err.print("operation diagnostics:", style="cyan", markup=False)
+    for item in diagnostics:
+        if not isinstance(item, dict):
+            continue
+        operation = str(item.get("operation", "unknown"))
+        level = str(item.get("level", "unknown"))
+        message = str(item.get("message", ""))
+        suffix = f" — {message}" if message else ""
+        err.print(f"  {operation} [{level}]{suffix}", markup=False, soft_wrap=True)
 
 
 _INTERRUPT_EXIT_CODE = 130  # 128 + SIGINT
