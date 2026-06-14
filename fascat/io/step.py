@@ -54,6 +54,8 @@ _UNIT_NAMES = {
 }
 _SOURCE_TEXTURE_SUFFIXES = {".png", ".jpg", ".jpeg", ".ktx2"}
 _SOURCE_TEXTURE_REF_RE = re.compile(r"'([^']+\.(?:png|jpe?g|ktx2)(?:[#?][^']*)?)'", re.IGNORECASE)
+_KTX2_IDENTIFIER = b"\xabKTX 20\xbb\r\n\x1a\n"
+_KTX2_HEADER_BYTES = 80
 _MATERIAL_RECORD_SUFFIXES = {".json", ".mtl"}
 _MATERIAL_LIBRARY_CONTAINER_SUFFIXES = {".zip"}
 _MATERIAL_LIBRARY_SUFFIXES = _MATERIAL_RECORD_SUFFIXES | _MATERIAL_LIBRARY_CONTAINER_SUFFIXES
@@ -6482,7 +6484,7 @@ def _load_source_texture_data(
 
 
 def _ktx2_dimensions(data: bytes) -> tuple[int, int] | None:
-    if len(data) < 28 or data[:12] != b"\xabKTX 20\xbb\r\n\x1a\n":
+    if len(data) < _KTX2_HEADER_BYTES or data[: len(_KTX2_IDENTIFIER)] != _KTX2_IDENTIFIER:
         return None
     width = int.from_bytes(data[20:24], "little")
     height = int.from_bytes(data[24:28], "little")

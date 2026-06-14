@@ -4410,6 +4410,47 @@ def test_step_source_texture_extraction_reports_missing_references(tmp_path: Pat
     assert extraction.warnings == ["source texture reference could not be resolved: missing_normal.jpg"]
 
 
+def test_step_source_texture_extraction_loads_ktx2_dimensions(tmp_path: Path) -> None:
+    texture = tmp_path / "panel_baseColor.ktx2"
+    data = bytearray(b"\xabKTX 20\xbb\r\n\x1a\n" + b"\0" * 68)
+    data[20:24] = (4).to_bytes(4, "little")
+    data[24:28] = (2).to_bytes(4, "little")
+    data[36:40] = (1).to_bytes(4, "little")
+    data[40:44] = (1).to_bytes(4, "little")
+    texture.write_bytes(bytes(data))
+    source = tmp_path / "panel.step"
+    source.write_text(
+        "ISO-10303-21;\nDATA;\n#1=EXTERNAL_REFERENCE('panel_baseColor.ktx2');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    extraction = _extract_source_textures(source, "panel.step", StepReadOptions())
+
+    image = next(iter(extraction.images.values()))
+    assert extraction.summary == {"references": 1, "resolved": 1, "missing": 0, "unsupported": 0, "unreadable": 0}
+    assert image.mime_type == "image/ktx2"
+    assert (image.width, image.height) == (4, 2)
+
+
+def test_truncated_ktx2_source_texture_is_reported_unreadable(tmp_path: Path) -> None:
+    texture = tmp_path / "panel_baseColor.ktx2"
+    data = bytearray(b"\xabKTX 20\xbb\r\n\x1a\n" + b"\0" * 16)
+    data[20:24] = (4).to_bytes(4, "little")
+    data[24:28] = (2).to_bytes(4, "little")
+    texture.write_bytes(bytes(data))
+    source = tmp_path / "panel.step"
+    source.write_text(
+        "ISO-10303-21;\nDATA;\n#1=EXTERNAL_REFERENCE('panel_baseColor.ktx2');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    extraction = _extract_source_textures(source, "panel.step", StepReadOptions())
+
+    assert extraction.images == {}
+    assert extraction.summary == {"references": 1, "resolved": 0, "missing": 0, "unsupported": 0, "unreadable": 1}
+    assert any("could not be read as KTX2" in warning for warning in extraction.warnings)
+
+
 def test_resolve_source_texture_rejects_parent_directory_traversal(tmp_path: Path) -> None:
     from fascat.io.step import _resolve_source_texture
 
