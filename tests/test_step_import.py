@@ -4717,6 +4717,39 @@ def test_step_material_library_json_maps_pbr_factors_and_textures(tmp_path: Path
     assert material.metadata["source_texture_base_color_image"] in extraction.images
 
 
+@pytest.mark.parametrize(
+    ("color_space", "color", "expected"),
+    (
+        ("auto", [128, 64, 32], (128 / 255, 64 / 255, 32 / 255, 1.0)),
+        ("srgb255", [128, 64, 32, 128], (128 / 255, 64 / 255, 32 / 255, 128 / 255)),
+        ("linear", [1.5, 0.5, 0.25, 1.0], (1.0, 0.5, 0.25, 1.0)),
+    ),
+)
+def test_step_material_library_color_space_is_explicit(
+    tmp_path: Path, color_space: str, color: list[float], expected: tuple[float, float, float, float]
+) -> None:
+    library = tmp_path / "vendor-materials.json"
+    library.write_text(
+        json.dumps({"materials": [{"materialName": "Paint", "baseColorFactor": color}]}),
+        encoding="utf-8",
+    )
+    source = tmp_path / "panel.step"
+    source.write_text(
+        "ISO-10303-21;\nDATA;\n#1=EXTERNAL_REFERENCE('vendor-materials.json');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    materials = {"paint": fc.Material(id="paint", name="Paint", base_color=(0.75, 0.75, 0.75, 1.0))}
+
+    extraction = _extract_material_libraries(
+        source, "panel.step", StepReadOptions(material_library_color_space=color_space)
+    )
+    _apply_material_libraries_to_materials(materials, extraction)
+    material = materials["paint"]
+
+    assert material.base_color == pytest.approx(expected)
+    assert material.metadata["material_library_color_space"] == color_space
+
+
 def test_step_material_library_mtl_can_be_supplied_explicitly(tmp_path: Path) -> None:
     texture = tmp_path / "aluminum.png"
     Image.new("RGB", (1, 1), (160, 170, 180)).save(texture)

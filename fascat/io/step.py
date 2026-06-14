@@ -5428,6 +5428,7 @@ def _extract_material_libraries(
                 images=images,
                 seen_texture_paths=seen_texture_paths,
                 search_roots=[library_path.parent, *search_roots],
+                color_space=options.material_library_color_space,
             )
         except ValueError as exc:
             unreadable += 1
@@ -5535,6 +5536,7 @@ def _load_material_library(
     images: dict[str, ImageResource],
     seen_texture_paths: set[str],
     search_roots: list[Path],
+    color_space: str,
 ) -> tuple[list[_MaterialLibrarySpec], dict[str, int]]:
     if path.suffix.lower() == ".json":
         return _load_json_material_library(
@@ -5544,6 +5546,7 @@ def _load_material_library(
             images=images,
             seen_texture_paths=seen_texture_paths,
             search_roots=search_roots,
+            color_space=color_space,
         )
     if path.suffix.lower() == ".mtl":
         return _load_mtl_material_library(
@@ -5553,6 +5556,7 @@ def _load_material_library(
             images=images,
             seen_texture_paths=seen_texture_paths,
             search_roots=search_roots,
+            color_space=color_space,
         )
     if path.suffix.lower() == ".zip":
         return _load_zipped_material_library(
@@ -5562,6 +5566,7 @@ def _load_material_library(
             images=images,
             seen_texture_paths=seen_texture_paths,
             search_roots=search_roots,
+            color_space=color_space,
         )
     raise ValueError(f"material library format is unsupported: {path}")
 
@@ -5574,6 +5579,7 @@ def _load_json_material_library(
     images: dict[str, ImageResource],
     seen_texture_paths: set[str],
     search_roots: list[Path],
+    color_space: str,
 ) -> tuple[list[_MaterialLibrarySpec], dict[str, int]]:
     _ensure_loadable_file_size(path, _MAX_MATERIAL_LIBRARY_BYTES, "material library")
     try:
@@ -5595,6 +5601,7 @@ def _load_json_material_library(
             seen_texture_paths=seen_texture_paths,
             search_roots=search_roots,
             library_label=str(path),
+            color_space=color_space,
         )
         texture_stats["missing"] += stats["missing"]
         texture_stats["unreadable"] += stats["unreadable"]
@@ -5613,6 +5620,7 @@ def _load_zipped_material_library(
     images: dict[str, ImageResource],
     seen_texture_paths: set[str],
     search_roots: list[Path],
+    color_space: str,
 ) -> tuple[list[_MaterialLibrarySpec], dict[str, int]]:
     _ = search_roots
     _ensure_loadable_file_size(path, _MAX_MATERIAL_LIBRARY_BYTES, "material library archive")
@@ -5658,6 +5666,7 @@ def _load_zipped_material_library(
                         library_label=library_label,
                         archive_textures=archive_textures,
                         archive_container=path,
+                        color_space=color_space,
                     )
                 except ValueError as exc:
                     member_errors.append(str(exc))
@@ -5752,21 +5761,22 @@ def _json_material_spec(
     library_label: str,
     archive_textures: _ArchiveTextureMap | None = None,
     archive_container: Path | None = None,
+    color_space: str = "auto",
 ) -> tuple[_MaterialLibrarySpec | None, dict[str, int]]:
     name = _json_material_name(entry)
     if not name:
         return None, {"missing": 0, "unreadable": 0}
     pbr = _json_mapping(entry.get("pbrMetallicRoughness")) or _json_mapping(entry.get("pbr_metallic_roughness")) or {}
     base_color = (
-        _json_color(entry.get("base_color"))
-        or _json_color(entry.get("baseColor"))
-        or _json_color(entry.get("baseColorFactor"))
-        or _json_color(entry.get("base_color_factor"))
-        or _json_color(entry.get("diffuseColor"))
-        or _json_color(entry.get("diffuse"))
-        or _json_color(entry.get("albedo"))
-        or _json_color(entry.get("color"))
-        or _json_color(pbr.get("baseColorFactor"))
+        _json_color(entry.get("base_color"), color_space)
+        or _json_color(entry.get("baseColor"), color_space)
+        or _json_color(entry.get("baseColorFactor"), color_space)
+        or _json_color(entry.get("base_color_factor"), color_space)
+        or _json_color(entry.get("diffuseColor"), color_space)
+        or _json_color(entry.get("diffuse"), color_space)
+        or _json_color(entry.get("albedo"), color_space)
+        or _json_color(entry.get("color"), color_space)
+        or _json_color(pbr.get("baseColorFactor"), color_space)
     )
     metallic = _optional_material_float(
         entry.get("metallic"),
@@ -5778,7 +5788,7 @@ def _json_material_spec(
     roughness = _optional_material_float(
         entry.get("roughness"), entry.get("roughnessFactor"), pbr.get("roughnessFactor")
     )
-    opacity = _json_opacity(entry)
+    opacity = _json_opacity(entry, color_space)
     texture_images, texture_stats = _json_material_texture_images(
         entry,
         pbr,
@@ -5798,6 +5808,7 @@ def _json_material_spec(
         "material_library_reference": reference,
         "material_library_path": library_label,
         "pbr_mapping_status": "material_library",
+        "material_library_color_space": color_space,
     }
     if archive_container is not None:
         metadata["material_library_container"] = str(archive_container)
@@ -5827,7 +5838,7 @@ def _json_mapping(value: object) -> dict[str, object] | None:
     return cast(dict[str, object], value) if isinstance(value, dict) else None
 
 
-def _json_color(value: object) -> tuple[float, float, float, float] | None:
+def _json_color(value: object, color_space: str = "auto") -> tuple[float, float, float, float] | None:
     if isinstance(value, str):
         stripped = value.strip()
         if not stripped:
@@ -5836,19 +5847,18 @@ def _json_color(value: object) -> tuple[float, float, float, float] | None:
             return _hex_color(stripped)
         parts = [part for part in re.split(r"[\s,]+", stripped) if part]
         if len(parts) in {3, 4}:
-            return _numeric_color(parts)
+            return _numeric_color(parts, color_space)
         return None
     if isinstance(value, dict):
-        red = _optional_material_float(value.get("r"), value.get("red"))
-        green = _optional_material_float(value.get("g"), value.get("green"))
-        blue = _optional_material_float(value.get("b"), value.get("blue"))
-        alpha = _optional_material_float(value.get("a"), value.get("alpha"))
+        red = _optional_material_number(value.get("r"), value.get("red"))
+        green = _optional_material_number(value.get("g"), value.get("green"))
+        blue = _optional_material_number(value.get("b"), value.get("blue"))
+        alpha = _optional_material_number(value.get("a"), value.get("alpha"))
         if red is None or green is None or blue is None:
             return None
-        color = (red, green, blue, 1.0 if alpha is None else alpha)
-        return _normalize_color_range(color)
+        return _numeric_color_components(red, green, blue, alpha, color_space)
     if isinstance(value, list | tuple) and len(value) in {3, 4}:
-        return _numeric_color(list(value))
+        return _numeric_color(list(value), color_space)
     return None
 
 
@@ -5866,18 +5876,28 @@ def _hex_color(value: str) -> tuple[float, float, float, float] | None:
     return (_clamp01(red), _clamp01(green), _clamp01(blue), _clamp01(alpha))
 
 
-def _numeric_color(values: list[object]) -> tuple[float, float, float, float] | None:
-    parsed = [_optional_material_float(value) for value in values]
+def _numeric_color(values: list[object], color_space: str = "auto") -> tuple[float, float, float, float] | None:
+    parsed = [_optional_material_number(value) for value in values]
     if any(value is None for value in parsed):
         return None
     numbers = [cast(float, value) for value in parsed]
     red, green, blue = numbers[:3]
-    alpha = numbers[3] if len(numbers) == 4 else 1.0
-    return _normalize_color_range((red, green, blue, alpha))
+    alpha = numbers[3] if len(numbers) == 4 else None
+    return _numeric_color_components(red, green, blue, alpha, color_space)
 
 
-def _normalize_color_range(color: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
-    if any(component > 1.0 for component in color):
+def _numeric_color_components(
+    red: float, green: float, blue: float, alpha: float | None, color_space: str
+) -> tuple[float, float, float, float]:
+    scale_255 = color_space == "srgb255" or (color_space == "auto" and max(red, green, blue) > 1.0)
+    alpha_value = 255.0 if alpha is None and scale_255 else 1.0 if alpha is None else alpha
+    return _normalize_color_range((red, green, blue, alpha_value), color_space)
+
+
+def _normalize_color_range(
+    color: tuple[float, float, float, float], color_space: str = "auto"
+) -> tuple[float, float, float, float]:
+    if color_space == "srgb255" or (color_space == "auto" and any(component > 1.0 for component in color)):
         return (
             _clamp01(color[0] / 255.0),
             _clamp01(color[1] / 255.0),
@@ -5885,6 +5905,19 @@ def _normalize_color_range(color: tuple[float, float, float, float]) -> tuple[fl
             _clamp01(color[3] / 255.0),
         )
     return _clamp_color(color)
+
+
+def _optional_material_number(*values: object) -> float | None:
+    for value in values:
+        if value is None or isinstance(value, bool):
+            continue
+        if not isinstance(value, str | int | float):
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 def _optional_material_float(*values: object) -> float | None:
@@ -5900,14 +5933,16 @@ def _optional_material_float(*values: object) -> float | None:
     return None
 
 
-def _json_opacity(entry: dict[str, object]) -> float | None:
+def _json_opacity(entry: dict[str, object], color_space: str = "auto") -> float | None:
     opacity = _optional_material_float(entry.get("opacity"), entry.get("alpha"))
     if opacity is not None:
         return opacity
     transparency = _optional_material_float(entry.get("transparency"))
     if transparency is not None:
         return 1.0 - transparency
-    base_color = _json_color(entry.get("baseColorFactor")) or _json_color(entry.get("base_color"))
+    base_color = _json_color(entry.get("baseColorFactor"), color_space) or _json_color(
+        entry.get("base_color"), color_space
+    )
     if base_color is not None:
         return base_color[3]
     return None
@@ -5993,6 +6028,7 @@ def _load_mtl_material_library(
     images: dict[str, ImageResource],
     seen_texture_paths: set[str],
     search_roots: list[Path],
+    color_space: str,
 ) -> tuple[list[_MaterialLibrarySpec], dict[str, int]]:
     _ensure_loadable_file_size(path, _MAX_MATERIAL_LIBRARY_BYTES, "material library")
     try:
@@ -6009,6 +6045,7 @@ def _load_mtl_material_library(
         seen_texture_paths=seen_texture_paths,
         search_roots=search_roots,
         library_label=str(path),
+        color_space=color_space,
     )
     return specs, texture_stats
 
@@ -6073,6 +6110,7 @@ def _material_specs_from_entries(
     library_label: str,
     archive_textures: _ArchiveTextureMap | None = None,
     archive_container: Path | None = None,
+    color_space: str = "auto",
 ) -> tuple[list[_MaterialLibrarySpec], dict[str, int]]:
     specs: list[_MaterialLibrarySpec] = []
     texture_stats = {"missing": 0, "unreadable": 0}
@@ -6088,6 +6126,7 @@ def _material_specs_from_entries(
             library_label=library_label,
             archive_textures=archive_textures,
             archive_container=archive_container,
+            color_space=color_space,
         )
         texture_stats["missing"] += stats["missing"]
         texture_stats["unreadable"] += stats["unreadable"]

@@ -389,6 +389,7 @@ Metadata and PMI parameters:
 | `StepReadOptions` | `source_texture_search_paths` | Extra directories used to resolve relative source texture references in addition to the CAD file directory. |
 | `StepReadOptions` | `material_library_mapping` | Apply deterministic CAD material-name mapping rules to PBR metallic, roughness, opacity, and default color values when source visual material names are available. |
 | `StepReadOptions` | `material_library_paths` | Explicit vendor material-library JSON/MTL/ZIP files or folders to load during STEP/IGES import. Referenced library files are resolved relative to the CAD source and texture search paths. |
+| `StepReadOptions` | `material_library_color_space` | Numeric material-library color interpretation: `auto` preserves 0-1 or 0-255 detection, `linear` clamps direct factors, and `srgb255` treats numeric colors as 0-255 values. |
 | `StepReadOptions` | `delete_free_vertices` | Drop construction-only point shapes during import and record deletion counts in the import report. |
 | `StepReadOptions` | `delete_lines` | Legacy alias for deleting construction-only line shapes during import. Free construction edges split from mixed face+curve shapes follow the same delete policy. |
 | `StepReadOptions` | `construction_curve_policy` | Construction line policy for construction-only shapes and free construction edges split from mixed face+curve shapes: `preserve_metadata`, `delete`, or `tessellate_tubes`. Tube tessellation happens when the asset is tessellated. |

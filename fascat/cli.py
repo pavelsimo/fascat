@@ -170,6 +170,12 @@ class ConstructionCurvePolicyMode(str, Enum):
     TESSELLATE_TUBES = "tessellate-tubes"
 
 
+class MaterialLibraryColorSpaceMode(str, Enum):
+    AUTO = "auto"
+    LINEAR = "linear"
+    SRGB255 = "srgb255"
+
+
 class UV0Mode(str, Enum):
     NONE = "none"
     BOX = "box"
@@ -453,6 +459,13 @@ def cmd_inspect(
             "--material-library", help="Vendor material-library JSON/MTL/ZIP file or folder to apply on import."
         ),
     ] = None,
+    material_library_color_space: Annotated[
+        MaterialLibraryColorSpaceMode,
+        typer.Option(
+            "--material-library-color-space",
+            help="Numeric material-library color interpretation: auto, linear, or srgb255.",
+        ),
+    ] = MaterialLibraryColorSpaceMode.AUTO,
     delete_free_vertices: Annotated[
         bool,
         typer.Option(
@@ -560,6 +573,7 @@ def cmd_inspect(
         "import_existing_meshes": import_existing_meshes,
         "multi_file_import": multi_file_import,
         "material_libraries": [str(path) for path in material_libraries or []],
+        "material_library_color_space": material_library_color_space.value,
         "delete_free_vertices": delete_free_vertices,
         "delete_lines": delete_lines,
         "construction_curve_policy": construction_curve_policy.value,
@@ -609,6 +623,7 @@ def cmd_inspect(
         existing_meshes=import_existing_meshes,
         multi_file=multi_file_import,
         material_library_paths=material_libraries,
+        material_library_color_space=material_library_color_space.value,
         delete_free_vertices=delete_free_vertices,
         delete_lines=delete_lines,
         construction_curve_policy=construction_curve_policy.value,
@@ -1038,6 +1053,13 @@ def cmd_convert(
             "--material-library", help="Vendor material-library JSON/MTL/ZIP file or folder to apply on import."
         ),
     ] = None,
+    material_library_color_space: Annotated[
+        MaterialLibraryColorSpaceMode,
+        typer.Option(
+            "--material-library-color-space",
+            help="Numeric material-library color interpretation: auto, linear, or srgb255.",
+        ),
+    ] = MaterialLibraryColorSpaceMode.AUTO,
     delete_free_vertices: Annotated[
         bool,
         typer.Option(
@@ -1577,6 +1599,7 @@ def cmd_convert(
         "import_existing_meshes": import_existing_meshes,
         "multi_file_import": multi_file_import,
         "material_libraries": [str(path) for path in material_libraries or []],
+        "material_library_color_space": material_library_color_space.value,
         "delete_free_vertices": delete_free_vertices,
         "delete_lines": delete_lines,
         "construction_curve_policy": construction_curve_policy.value,
@@ -2003,6 +2026,7 @@ def cmd_convert(
                 existing_meshes=import_existing_meshes,
                 multi_file=multi_file_import,
                 material_library_paths=material_libraries,
+                material_library_color_space=material_library_color_space.value,
                 delete_free_vertices=delete_free_vertices,
                 delete_lines=delete_lines,
                 construction_curve_policy=construction_curve_policy.value,
@@ -3168,6 +3192,7 @@ def _step_read_options(
     existing_meshes: bool = True,
     multi_file: bool = False,
     material_library_paths: list[Path] | tuple[str, ...] | None = None,
+    material_library_color_space: str = "auto",
     delete_free_vertices: bool = False,
     delete_lines: bool = False,
     construction_curve_policy: str = "preserve_metadata",
@@ -3195,6 +3220,7 @@ def _step_read_options(
         existing_meshes=existing_meshes,
         multi_file=multi_file,
         material_library_paths=tuple(str(path) for path in material_library_paths or ()),
+        material_library_color_space=cast(Any, material_library_color_space),
         delete_free_vertices=delete_free_vertices,
         delete_lines=delete_lines,
         construction_curve_policy=cast(Any, construction_curve_policy.replace("-", "_")),

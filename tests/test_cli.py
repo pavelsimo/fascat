@@ -896,13 +896,22 @@ def test_convert_passes_material_library_paths_to_import_options(
 
     result = runner.invoke(
         app,
-        ["convert", str(input_file), str(output_file), "--material-library", str(library)],
+        [
+            "convert",
+            str(input_file),
+            str(output_file),
+            "--material-library",
+            str(library),
+            "--material-library-color-space",
+            "linear",
+        ],
     )
 
     assert result.exit_code == 0, result.output
     import_options = captured["import_options"]
     assert isinstance(import_options, StepReadOptions)
     assert import_options.material_library_paths == (str(library),)
+    assert import_options.material_library_color_space == "linear"
 
 
 def test_convert_dry_run_reports_pipeline_advisories(tmp_path: Path) -> None:
