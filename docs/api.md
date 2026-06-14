@@ -77,6 +77,42 @@ Core pipeline calls:
 | `asset.write_gltf(path, options=None)` | `path` ends in `.gltf` or `.glb`. `options` is `GltfExportOptions`. | Write glTF 2.0 output and append a write step to the report. |
 | `asset.write_fbx(path, options=None)` | `path` ends in `.fbx`. `options` is `FbxExportOptions`. | Write ASCII FBX output and append a write step to the report. |
 
+## Asset tree model
+
+An `Asset` stores assembly structure separately from geometry. `asset.root` is a `Node` tree. A `Node` with `part_id` is an occurrence: it places one reusable `Part` in the hierarchy with that node's transform and metadata. `asset.parts[part_id]` owns the source shape, mesh, material slots, per-part metadata, and generated LOD meshes. Multiple occurrence nodes may reference the same part, which is how instancing survives import and optimization.
+
+```python
+for node in asset.root.walk():
+    if node.part_id is None:
+        continue
+    part = asset.parts[node.part_id]
+    print(node.name, part.name, part.mesh.triangle_count if part.mesh else 0)
+```
+
+Most asset operations return a new `Asset` and leave the input asset unchanged. When `where=` selects only one occurrence of a shared part, Fascat isolates the selected occurrence before mutating it so unselected occurrences keep referencing the original part.
+
+## Error handling
+
+Input and option problems raise standard exceptions such as `FileNotFoundError` or `ValueError`. Backend, validation, and write failures raise `RuntimeError`; when a pipeline or write step has already built a report, the exception carries it on `exc.report`.
+
+```python
+import fascat as fc
+
+try:
+    asset = fc.convert("motor.step", "motor.glb", profile="realtime-web")
+except FileNotFoundError as exc:
+    print(f"missing input: {exc}")
+except ValueError as exc:
+    print(f"bad option or unsupported format: {exc}")
+except RuntimeError as exc:
+    report = getattr(exc, "report", None)
+    if report is not None:
+        report.write_json("failed-convert-report.json")
+    raise
+```
+
+Use `read_step_many(..., continue_on_error=True)` when importing several independent STEP roots and you want successful members preserved while failed members are recorded as report warnings.
+
 ## Assembly filters
 
 Use `Filter` selectors to inspect or process one branch of an assembly while leaving the rest unchanged.

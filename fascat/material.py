@@ -38,6 +38,7 @@ class Material:
             raise ValueError("opacity must be between 0 and 1")
 
     def copy(self) -> Material:
+        """Return an independent copy of the material."""
         return Material(
             id=self.id,
             name=self.name,
@@ -50,9 +51,11 @@ class Material:
 
     @property
     def effective_opacity(self) -> float:
+        """Return the opacity implied by material alpha and opacity fields."""
         return min(self.base_color[3], self.opacity)
 
     def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable material definition."""
         return {
             "id": self.id,
             "name": self.name,

@@ -47,6 +47,7 @@ class AnalysisReport:
         self.warnings = list(self.warnings)
 
     def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable analysis report."""
         return {
             "source_path": self.source_path,
             "options": dict(self.options),
@@ -57,6 +58,7 @@ class AnalysisReport:
         }
 
     def write_json(self, path: str | Path) -> None:
+        """Write this analysis report to a formatted JSON file."""
         output_path = Path(path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(self.to_dict(), indent=2, sort_keys=True), encoding="utf-8")

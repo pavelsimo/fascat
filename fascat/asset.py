@@ -123,6 +123,7 @@ class Node:
         return node
 
     def copy(self) -> Node:
+        """Return an independent copy of this assembly node and its children."""
         return Node._adopt(
             id=self.id,
             name=self.name,
@@ -139,12 +140,14 @@ class Node:
         return f"<Node {self.id} {self.name!r}{part}{children}>"
 
     def walk(self) -> list[Node]:
+        """Return this node and all descendant nodes in depth-first order."""
         nodes = [self]
         for child in self.children:
             nodes.extend(child.walk())
         return nodes
 
     def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable assembly-node representation."""
         return {
             "id": self.id,
             "name": self.name,
@@ -198,6 +201,7 @@ class Part:
         return part
 
     def copy(self, *, keep_source: bool = True) -> Part:
+        """Return an independent copy of this part, optionally keeping its source shape."""
         return Part._adopt(
             id=self.id,
             name=self.name,
@@ -218,6 +222,7 @@ class Part:
         return f"<Part {self.id} {self.name!r}: {detail}>"
 
     def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable part representation."""
         return {
             "id": self.id,
             "name": self.name,
@@ -319,29 +324,36 @@ class Asset:
 
     @property
     def part_count(self) -> int:
+        """Return the number of parts in the asset."""
         return len(self.parts)
 
     @property
     def material_count(self) -> int:
+        """Return the number of materials in the asset."""
         return len(self.materials)
 
     @property
     def triangle_count(self) -> int:
+        """Return the total triangle count across mesh-bearing parts."""
         return sum(part.mesh.triangle_count for part in self.parts.values() if part.mesh is not None)
 
     @property
     def vertex_count(self) -> int:
+        """Return the total vertex count across mesh-bearing parts."""
         return sum(part.mesh.vertex_count for part in self.parts.values() if part.mesh is not None)
 
     @property
     def occurrence_count(self) -> int:
+        """Return the number of hierarchy nodes that reference a part occurrence."""
         return sum(1 for node in self.root.walk() if node.part_id is not None)
 
     @property
     def draw_call_count(self) -> int:
+        """Return the estimated draw-call count for the current hierarchy."""
         return self.draw_call_breakdown()["draw_calls"]
 
     def draw_call_breakdown(self) -> dict[str, int]:
+        """Return draw-call estimate components for the current hierarchy."""
         return self._draw_call_breakdown_from_nodes(self.root.walk())
 
     def _draw_call_breakdown_from_nodes(self, nodes: list[Node]) -> dict[str, int]:
@@ -387,6 +399,7 @@ class Asset:
         }
 
     def copy(self, *, keep_source: bool = True) -> Asset:
+        """Return a copy of the asset graph, optionally dropping source geometry handles."""
         return Asset._adopt(
             root=self.root.copy(),
             parts={part_id: part.copy(keep_source=keep_source) for part_id, part in self.parts.items()},
@@ -402,12 +415,14 @@ class Asset:
         )
 
     def select(self, where: Any | None = None) -> Any:
+        """Return a selection report for parts and occurrences matching a filter."""
         from fascat.filter import Filter
 
         selector = Filter.from_value(where) or Filter()
         return selector.select(self)
 
     def stats(self, *, include_lods: bool = False) -> dict[str, int]:
+        """Return aggregate asset counts, optionally including generated LOD meshes."""
         return self._stats_from_nodes(self.root.walk(), include_lods=include_lods)
 
     def _stats_from_nodes(self, nodes: list[Node], *, include_lods: bool = False) -> dict[str, int]:
@@ -429,6 +444,7 @@ class Asset:
         return stats
 
     def tessellation_quality_report(self) -> dict[str, object]:
+        """Return tessellation quality metrics for the asset."""
         from fascat.ops.tessellate import build_tessellation_quality_report
 
         return build_tessellation_quality_report(self)
@@ -440,6 +456,7 @@ class Asset:
         where: Any | None = None,
         **kwargs: Unpack[AnalyzeKwargs],
     ) -> AnalysisReport:
+        """Return a geometry and runtime-readiness analysis report for the asset."""
         from fascat.analysis import analyze_asset
 
         opts = _make_options(AnalyzeOptions, options, kwargs)
@@ -456,6 +473,7 @@ class Asset:
         where: Any | None = None,
         **kwargs: Unpack[TessellateKwargs],
     ) -> Asset:
+        """Return a new asset with source BREP geometry converted to meshes."""
         from fascat.ops.tessellate import tessellate_asset, tessellation_tolerance_policy
 
         opts = _make_options(TessellationOptions, options, kwargs)
@@ -483,6 +501,7 @@ class Asset:
         where: Any | None = None,
         **kwargs: Unpack[RepairKwargs],
     ) -> Asset:
+        """Return a new asset with selected mesh cleanup operations applied."""
         opts = _make_options(RepairOptions, options, kwargs)
         scope = self._operation_scope(where)
         before = self.stats()
@@ -542,6 +561,7 @@ class Asset:
         where: Any | None = None,
         **kwargs: Unpack[MergeVerticesKwargs],
     ) -> Asset:
+        """Return a new asset with selected mesh vertices merged."""
         opts = _make_options(MergeVerticesOptions, options, kwargs)
         scope = self._operation_scope(where)
         before = self.stats()
@@ -597,6 +617,7 @@ class Asset:
         where: Any | None = None,
         **kwargs: Unpack[DeleteDegeneratePolygonsKwargs],
     ) -> Asset:
+        """Return a new asset with selected degenerate mesh faces removed."""
         opts = _make_options(DeleteDegeneratePolygonsOptions, options, kwargs)
         scope = self._operation_scope(where)
         before = self.stats()
@@ -635,6 +656,7 @@ class Asset:
         where: Any | None = None,
         **kwargs: Unpack[StageKwargs],
     ) -> Asset:
+        """Return a new asset prepared with runtime normals, UVs, and material data."""
         from fascat.ops.stage import stage_asset
 
         opts = _make_options(StageOptions, options, kwargs)
@@ -675,6 +697,7 @@ class Asset:
         where: Any | None = None,
         **kwargs: Unpack[OptimizeKwargs],
     ) -> Asset:
+        """Return a new asset with selected meshes simplified for the target budget."""
         from fascat.ops.optimize import optimize_asset
 
         opts = _make_options(OptimizeOptions, options, kwargs)
@@ -701,6 +724,7 @@ class Asset:
         where: Any | None = None,
         **kwargs: Unpack[LodsKwargs],
     ) -> Asset:
+        """Return a new asset with ratio-based LOD meshes generated."""
         from fascat.ops.lod import build_lods
 
         if options is not None and not isinstance(options, LODOptions):
@@ -732,6 +756,7 @@ class Asset:
         where: Any | None = None,
         **kwargs: Unpack[MergeKwargs],
     ) -> Asset:
+        """Return a new asset with selected hierarchy branches merged."""
         from fascat.ops.hierarchy import merge_asset
 
         opts = _make_options(MergeOptions, options, kwargs)
@@ -766,6 +791,7 @@ class Asset:
         where: Any | None = None,
         **kwargs: Unpack[ExplodeKwargs],
     ) -> Asset:
+        """Return a new asset with selected meshes split by material or connectivity."""
         from fascat.ops.hierarchy import explode_asset
 
         opts = _make_options(ExplodeOptions, options, kwargs)
@@ -797,6 +823,7 @@ class Asset:
         where: Any | None = None,
         **kwargs: Unpack[ReplaceKwargs],
     ) -> Asset:
+        """Return a new asset with selected parts replaced by proxy geometry."""
         from fascat.ops.hierarchy import replace_asset
 
         opts = _make_options(ReplaceOptions, options, kwargs)
@@ -828,6 +855,7 @@ class Asset:
         where: Any | None = None,
         **kwargs: Unpack[OptimizeSceneKwargs],
     ) -> Asset:
+        """Return a new asset with scene-level hierarchy and instance optimizations applied."""
         from fascat.ops.scene import optimize_scene_asset
 
         opts = _make_options(SceneOptimizeOptions, options, kwargs)
@@ -863,6 +891,7 @@ class Asset:
         where: Any | None = None,
         **kwargs: Unpack[BakeMaterialsKwargs],
     ) -> Asset:
+        """Return a new asset with selected material properties baked to atlas resources."""
         from fascat.ops.actions import bake_materials_asset
 
         opts = _make_options(BakeMaterialOptions, options, kwargs)
@@ -887,6 +916,7 @@ class Asset:
         options: TextureProcessOptions | None = None,
         **kwargs: Unpack[ProcessTexturesKwargs],
     ) -> Asset:
+        """Return a new asset with texture processing options applied."""
         from fascat.ops.textures import process_textures_asset
 
         opts = _make_options(TextureProcessOptions, options, kwargs)
@@ -912,6 +942,7 @@ class Asset:
         where: Any | None = None,
         **kwargs: Unpack[DecimateKwargs],
     ) -> Asset:
+        """Return a new asset with selected meshes decimated by target or quality budget."""
         from fascat.ops.actions import decimate_asset, decimation_target_strategy
 
         opts = _make_options(DecimateOptions, options, kwargs)
@@ -939,6 +970,7 @@ class Asset:
         where: Any | None = None,
         **kwargs: Unpack[RemoveHolesKwargs],
     ) -> Asset:
+        """Return a new asset with selected mesh holes filled or removed."""
         from fascat.ops.actions import remove_holes_asset
 
         opts = _make_options(RemoveHolesOptions, options, kwargs)
@@ -965,6 +997,7 @@ class Asset:
         where: Any | None = None,
         **kwargs: Unpack[RemoveOccludedKwargs],
     ) -> Asset:
+        """Return a new asset with selected occluded geometry removed."""
         from fascat.ops.actions import remove_occluded_asset
 
         opts = _make_options(RemoveOccludedOptions, options, kwargs)
@@ -996,6 +1029,7 @@ class Asset:
         where: Any | None = None,
         **kwargs: Unpack[RunLodGeneratorsKwargs],
     ) -> Asset:
+        """Return a new asset with screen-coverage LOD generator output."""
         from fascat.ops.actions import run_lod_generators_asset
 
         opts = _make_options(LODGeneratorOptions, options, kwargs)
@@ -1022,6 +1056,7 @@ class Asset:
         where: Any | None = None,
         **kwargs: Unpack[HealBrepKwargs],
     ) -> Asset:
+        """Return a new asset with BREP healing applied before tessellation."""
         from fascat.ops.heal import heal_brep_asset
 
         opts = _make_options(BrepHealOptions, options, kwargs)
@@ -1071,6 +1106,7 @@ class Asset:
         debug: bool = False,
         options: UsdExportOptions | None = None,
     ) -> None:
+        """Write OpenUSD output and append a write step to the report."""
         from fascat.io.usd import write_usd
 
         if Path(path).suffix.lower() == ".usdz" and (options is None or options.package != "usdz"):
@@ -1109,6 +1145,7 @@ class Asset:
         self.report.finish(self._report_stats())
 
     def write_gltf(self, path: str | Path, *, options: GltfExportOptions | None = None) -> None:
+        """Write glTF or GLB output and append a write step to the report."""
         from fascat.io.gltf import runtime_dependency_report, write_gltf
         from fascat.options import resolve_gltf_export_options
         from fascat.size_ladder import measure_gltf_size_ladder
@@ -1157,6 +1194,7 @@ class Asset:
         self.report.finish(self._report_stats())
 
     def write_obj(self, path: str | Path, *, options: ObjExportOptions | None = None) -> None:
+        """Write OBJ output and append a write step to the report."""
         from fascat.io.obj import write_obj
 
         opts = options or ObjExportOptions()
@@ -1175,6 +1213,7 @@ class Asset:
         self.report.finish(self._report_stats())
 
     def write_stl(self, path: str | Path, *, options: StlExportOptions | None = None) -> None:
+        """Write STL output and append a write step to the report."""
         from fascat.io.stl import write_stl
 
         opts = options or StlExportOptions()
@@ -1193,6 +1232,7 @@ class Asset:
         self.report.finish(self._report_stats())
 
     def write_fbx(self, path: str | Path, *, options: FbxExportOptions | None = None) -> None:
+        """Write FBX output and append a write step to the report."""
         from fascat.io.fbx import write_fbx
 
         opts = options or FbxExportOptions()
@@ -1211,6 +1251,7 @@ class Asset:
         self.report.finish(self._report_stats())
 
     def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable asset tree, resource, and report summary."""
         return {
             "source_path": str(self.source_path) if self.source_path else None,
             "units": self.units,

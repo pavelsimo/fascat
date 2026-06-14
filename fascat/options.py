@@ -223,6 +223,7 @@ class TessellationOptions(OptionsRepr):
         _validate_part_settings(self.part_settings)
 
     def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable dictionary representation."""
         return asdict(self)
 
 
@@ -277,6 +278,7 @@ class RepairOptions(OptionsRepr):
             raise ValueError("viewer_position must be set when a viewer_standpoint orientation strategy is requested")
 
     def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable dictionary representation."""
         data = asdict(self)
         if self.viewer_position is not None:
             data["viewer_position"] = list(self.viewer_position)
@@ -554,6 +556,7 @@ class StageOptions(OptionsRepr):
         _validate_jobs(self.jobs)
 
     def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable dictionary representation."""
         return {**asdict(self), "normalize_uvs": list(self.normalize_uvs)}
 
 
@@ -586,6 +589,7 @@ class OptimizeOptions(OptionsRepr):
         _validate_jobs(self.jobs)
 
     def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable dictionary representation."""
         return asdict(self)
 
 
@@ -630,6 +634,7 @@ class LODOptions(OptionsRepr):
         _validate_jobs(self.jobs)
 
     def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable dictionary representation."""
         return {
             "ratios": list(self.ratios),
             "mode": self.mode,
@@ -683,6 +688,7 @@ class MergeOptions(OptionsRepr):
             raise ValueError("region_size must be greater than 0 when set")
 
     def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable dictionary representation."""
         return asdict(self)
 
 
@@ -868,6 +874,7 @@ class DecimateOptions(OptionsRepr):
             raise ValueError(f"unsupported cleanup_attributes values: {names}")
 
     def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable dictionary representation."""
         return {**asdict(self), "cleanup_attributes": list(self.cleanup_attributes)}
 
 
@@ -1097,6 +1104,7 @@ class GltfExportOptions(OptionsRepr):
             raise ValueError("ktx2_effort must be an integer between 0 and 6")
 
     def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable dictionary representation."""
         return {**asdict(self), "metadata": self.metadata.to_dict()}
 
 
@@ -1206,6 +1214,7 @@ class UsdExportOptions(OptionsRepr):
             raise ValueError("file_size_budget_mb must be greater than 0 when set")
 
     def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable dictionary representation."""
         return {**asdict(self), "metadata": self.metadata.to_dict()}
 
 
@@ -1314,6 +1323,7 @@ class PlatformBudget(OptionsRepr):
             raise ValueError("unity_reference_draw_calls must be greater than 0 when set")
 
     def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable dictionary representation."""
         data = asdict(self)
         data["supported_compression"] = list(self.supported_compression)
         data["supported_runtime_extensions"] = list(self.supported_runtime_extensions)
