@@ -3461,7 +3461,7 @@ def _convert_for_cli(
     input_path: Path | list[Path],
     output_path: Path,
     *,
-    profile: str | ConversionProfile,
+    profile: ConversionProfile,
     pipeline: PipelineSpec | None,
     tessellation: TessellationOptions,
     stage: StageOptions,
@@ -3564,7 +3564,7 @@ def _convert_for_cli(
 def _convert_output(
     input_path: Path | list[Path],
     output_path: Path,
-    profile: str | ConversionProfile,
+    profile: ConversionProfile,
     pipeline: PipelineSpec | None,
     tessellation: TessellationOptions,
     stage: StageOptions,

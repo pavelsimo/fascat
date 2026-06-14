@@ -145,7 +145,7 @@ asset                                                # <Asset: 412 parts, 1.2M t
 - [x] **P1** `__repr__` for `Asset`/`Node`/`Part`/`Mesh` and options (showing non-default fields only) (`fascat/asset.py:54`, `fascat/asset.py:117`, `fascat/asset.py:191`, `fascat/mesh.py:210`)
 - [x] **P2** `where: Filter | str | dict | None` instead of `Any` across all ops (`fascat/asset.py:370` et al.)
 - [x] **P2** Mutability contract: document copy-on-operation semantics; guard or document direct mutation of `asset.parts` / mesh arrays (`fascat/asset.py:191`, `fascat/mesh.py:210`)
-- [ ] **P2** `convert()` becomes profile-first: `convert(src, dst, profile="realtime-web", **overrides)`; `Literal` profile names for IDE/typo safety (`fascat/pipeline.py:86`)
+- [x] **P2** `convert()` becomes profile-first: `convert(src, dst, profile="realtime-web", **overrides)`; `Literal` profile names for IDE/typo safety (`fascat/pipeline.py:86`)
 - [ ] **P2** Consistency pass: properties vs methods (`stats()`, `draw_call_breakdown()` vs `triangle_count`); reconcile `select()`-for-inspection vs `where=`-for-scoping; rename/fold `run_lod_generators` into `lods`; hide `copy(keep_source=…)`
 - [ ] **P2** Docstrings on all public classes/methods (document the asset tree model: nodes/parts/occurrences); error-handling examples in docs
 - [ ] **P2** Fail fast on unwritable output paths in `write_*`; add `dry_run` to `write_*` for parity with `convert`
