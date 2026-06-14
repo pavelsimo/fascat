@@ -42,7 +42,9 @@ asset.write_usd("motor.usdc")
 
 Keyword arguments mirror the matching `*Options` dataclass field-for-field. For a
 prebuilt configuration, pass `options=` (or the options object positionally)
-instead — never both: `asset.repair(fc.RepairOptions(tolerance=0.05))`.
+instead — never both: `asset.repair(fc.RepairOptions(tolerance=0.05))`. Write
+methods accept `dry_run=True` to validate the destination and record the write
+report step without creating or replacing the output file.
 
 The rest of this page documents each step and every option. Two things apply
 throughout:
@@ -73,9 +75,9 @@ Core pipeline calls:
 | `asset.stage(options=None, *, where=None, **kwargs)` | Keyword args mirror `StageOptions`. `where` optionally scopes selected parts. | Prepare materials, normals, tangents, and UV metadata for runtime export. |
 | `asset.optimize(options=None, *, where=None, **kwargs)` | Keyword args mirror `OptimizeOptions`. `where` optionally scopes selected parts. | Reduce mesh complexity while preserving selected mechanical features. |
 | `asset.lods(options=None, *, where=None, **kwargs)` | `options` may also be a bare ratio sequence; keyword args mirror `LODOptions`. `where` optionally scopes selected parts. | Generate lower-detail runtime meshes. |
-| `asset.write_usd(path, options=None)` | `path` ends in `.usd`, `.usda`, `.usdc`, or `.usdz`. `options` is `UsdExportOptions`. | Write OpenUSD output and append a write step to the report. |
-| `asset.write_gltf(path, options=None)` | `path` ends in `.gltf` or `.glb`. `options` is `GltfExportOptions`. | Write glTF 2.0 output and append a write step to the report. |
-| `asset.write_fbx(path, options=None)` | `path` ends in `.fbx`. `options` is `FbxExportOptions`. | Write ASCII FBX output and append a write step to the report. |
+| `asset.write_usd(path, options=None, dry_run=False)` | `path` ends in `.usd`, `.usda`, `.usdc`, or `.usdz`. `options` is `UsdExportOptions`. | Write OpenUSD output and append a write step to the report. |
+| `asset.write_gltf(path, options=None, dry_run=False)` | `path` ends in `.gltf` or `.glb`. `options` is `GltfExportOptions`. | Write glTF 2.0 output and append a write step to the report. |
+| `asset.write_fbx(path, options=None, dry_run=False)` | `path` ends in `.fbx`. `options` is `FbxExportOptions`. | Write ASCII FBX output and append a write step to the report. |
 
 ## Assembly filters
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 from pathlib import Path
 from typing import Any
@@ -409,6 +410,7 @@ def test_asset_write_usd_records_report_step(monkeypatch: pytest.MonkeyPatch, tm
     assert step.options == {
         "format": "OpenUSD",
         "debug": True,
+        "dry_run": False,
         "package": "default",
         "file_size_budget_mb": None,
         "metadata": {"mode": "full", "pmi": "metadata"},
@@ -418,6 +420,56 @@ def test_asset_write_usd_records_report_step(monkeypatch: pytest.MonkeyPatch, tm
     assert step.duration >= 0.0
     assert asset.report.finished_at is not None
     assert asset.report.output_stats == asset.stats()
+
+
+@pytest.mark.parametrize(
+    ("method_name", "module_name", "writer_name", "filename"),
+    [
+        ("write_usd", "fascat.io.usd", "write_usd", "output.usda"),
+        ("write_gltf", "fascat.io.gltf", "write_gltf", "output.glb"),
+        ("write_obj", "fascat.io.obj", "write_obj", "output.obj"),
+        ("write_stl", "fascat.io.stl", "write_stl", "output.stl"),
+        ("write_fbx", "fascat.io.fbx", "write_fbx", "output.fbx"),
+    ],
+)
+def test_asset_write_methods_dry_run_skip_exporters(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    method_name: str,
+    module_name: str,
+    writer_name: str,
+    filename: str,
+) -> None:
+    module = importlib.import_module(module_name)
+    asset = Asset(root=Node(id="root", name="root"))
+    output = tmp_path / filename
+
+    def fail_writer(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("dry-run write called exporter")
+
+    monkeypatch.setattr(module, writer_name, fail_writer)
+
+    getattr(asset, method_name)(output, dry_run=True)
+
+    assert not output.exists()
+    step = asset.report.steps[-1]
+    assert step.name == "write"
+    assert step.options["dry_run"] is True
+    assert step.after == asset.stats()
+    assert asset.report.finished_at is not None
+
+
+def test_asset_write_preflights_missing_output_parent(tmp_path: Path) -> None:
+    asset = Asset(root=Node(id="root", name="root"))
+    output = tmp_path / "missing" / "output.usda"
+
+    with pytest.raises(FileNotFoundError, match="output directory does not exist") as error:
+        asset.write_usd(output)
+
+    assert error.value.report is asset.report
+    assert asset.report.errors == [f"output directory does not exist: {output.parent}"]
+    assert asset.report.steps[-1].name == "write"
+    assert asset.report.finished_at is not None
 
 
 def test_asset_write_usd_records_failure_report(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -466,6 +518,7 @@ def test_asset_write_gltf_records_report_step(monkeypatch: pytest.MonkeyPatch, t
     runtime_dependencies = options.pop("runtime_dependencies")
     assert options == {
         "format": "glTF",
+        "dry_run": False,
         "preset": None,
         "quantize": False,
         "meshopt": False,

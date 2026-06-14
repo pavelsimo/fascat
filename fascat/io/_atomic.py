@@ -27,10 +27,29 @@ def _unlink_quietly(path: Path) -> None:
         path.unlink()
 
 
+def preflight_output_path(path: str | Path) -> None:
+    """Raise early when an output path cannot be published."""
+    if str(path) == "-":
+        return
+    target = Path(path)
+    parent = target.parent if str(target.parent) else Path(".")
+    if not parent.exists():
+        raise FileNotFoundError(f"output directory does not exist: {parent}")
+    if not parent.is_dir():
+        raise NotADirectoryError(f"output parent is not a directory: {parent}")
+    if target.exists() and target.is_dir():
+        raise IsADirectoryError(f"output path is a directory: {target}")
+    if not os.access(parent, os.W_OK):
+        raise PermissionError(f"output directory is not writable: {parent}")
+    if target.exists() and not os.access(target, os.W_OK):
+        raise PermissionError(f"output file is not writable: {target}")
+
+
 @contextmanager
 def atomic_output(path: str | Path) -> Iterator[Path]:
     """Yield a temp path that replaces ``path`` atomically when the block succeeds."""
     target = Path(path)
+    preflight_output_path(target)
     temp = _temp_path_for(target)
     try:
         yield temp
@@ -51,6 +70,8 @@ def atomic_outputs(paths: Sequence[str | Path]) -> Iterator[tuple[Path, ...]]:
     chose not to write are skipped.
     """
     targets = [Path(path) for path in paths]
+    for target in targets:
+        preflight_output_path(target)
     temps = tuple(_temp_path_for(target) for target in targets)
     try:
         yield temps
@@ -73,6 +94,7 @@ def publish_staged(staged: Sequence[Path], targets: Sequence[Path]) -> None:
     temps: list[Path] = []
     try:
         for source, target in zip(staged, targets, strict=True):
+            preflight_output_path(target)
             temp = _temp_path_for(target)
             shutil.copyfile(source, temp)
             temps.append(temp)

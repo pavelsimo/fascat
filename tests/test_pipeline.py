@@ -675,6 +675,16 @@ def test_asset_operation_reports_include_options_and_before_after_counts() -> No
         assert step.duration >= 0.0
 
 
+def test_convert_preflights_output_path_before_reading_input(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_read_input(*_args: object, **_kwargs: object) -> Asset:
+        raise AssertionError("convert read input before output preflight")
+
+    monkeypatch.setattr(pipeline, "_read_input", fail_read_input)
+
+    with pytest.raises(FileNotFoundError, match="output directory does not exist"):
+        pipeline.convert(tmp_path / "input.step", tmp_path / "missing" / "output.glb")
+
+
 def test_convert_report_includes_timed_write_and_validate_steps(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     import fascat.pipeline as pipeline
 

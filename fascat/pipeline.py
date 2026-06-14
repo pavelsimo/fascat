@@ -9,6 +9,7 @@ from fascat.asset import Asset
 from fascat.export_report import referenced_materials
 from fascat.export_report import stats_with_file_size as _stats_with_file_size
 from fascat.filter import Filter
+from fascat.io._atomic import preflight_output_path
 from fascat.io.brep import BREP_SUFFIXES, read_brep
 from fascat.io.fbx import FBX_SUFFIXES, validate_fbx
 from fascat.io.fbx import write_fbx_with_validation_stats as _write_fbx
@@ -111,6 +112,7 @@ def convert(
     where: Filter | None = None,
 ) -> Asset:
     output_format = _export_format(output_path)
+    preflight_output_path(output_path)
     output_suffix = Path(output_path).suffix.lower()
     if debug and (output_format != "usd" or (str(output_path) != "-" and output_suffix not in {".usd", ".usda"})):
         raise ValueError("--debug is only supported for .usd or .usda exports")
@@ -1688,24 +1690,33 @@ def write_usd(
     *,
     debug: bool = False,
     options: UsdExportOptions | None = None,
+    dry_run: bool = False,
 ) -> None:
-    asset.write_usd(path, debug=debug, options=options)
+    asset.write_usd(path, debug=debug, options=options, dry_run=dry_run)
 
 
-def write_gltf(asset: Asset, path: str | Path, *, options: GltfExportOptions | None = None) -> None:
-    asset.write_gltf(path, options=options)
+def write_gltf(
+    asset: Asset, path: str | Path, *, options: GltfExportOptions | None = None, dry_run: bool = False
+) -> None:
+    asset.write_gltf(path, options=options, dry_run=dry_run)
 
 
-def write_obj(asset: Asset, path: str | Path, *, options: ObjExportOptions | None = None) -> None:
-    asset.write_obj(path, options=options)
+def write_obj(
+    asset: Asset, path: str | Path, *, options: ObjExportOptions | None = None, dry_run: bool = False
+) -> None:
+    asset.write_obj(path, options=options, dry_run=dry_run)
 
 
-def write_stl(asset: Asset, path: str | Path, *, options: StlExportOptions | None = None) -> None:
-    asset.write_stl(path, options=options)
+def write_stl(
+    asset: Asset, path: str | Path, *, options: StlExportOptions | None = None, dry_run: bool = False
+) -> None:
+    asset.write_stl(path, options=options, dry_run=dry_run)
 
 
-def write_fbx(asset: Asset, path: str | Path, *, options: FbxExportOptions | None = None) -> None:
-    asset.write_fbx(path, options=options)
+def write_fbx(
+    asset: Asset, path: str | Path, *, options: FbxExportOptions | None = None, dry_run: bool = False
+) -> None:
+    asset.write_fbx(path, options=options, dry_run=dry_run)
 
 
 def validate_output(path: str | Path) -> dict[str, int]:

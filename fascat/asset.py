@@ -82,6 +82,28 @@ def _make_options(
     return factory(**kwargs)
 
 
+def _record_write_failure(
+    asset: Asset,
+    *,
+    path: str | Path,
+    budget_mb: float | None,
+    step_options: dict[str, object],
+    before: dict[str, int],
+    timer: timed_step,
+    exc: BaseException,
+) -> None:
+    asset.report.add_error(str(exc) or exc.__class__.__name__)
+    asset.report.add_step(
+        "write",
+        options=step_options,
+        before=before,
+        after=_stats_with_file_size(asset._report_stats(), path, budget_mb, asset),
+        duration=timer.duration,
+    )
+    asset.report.finish(asset._report_stats())
+    cast(Any, exc).report = asset.report
+
+
 def identity_transform() -> Transform:
     return np.eye(4, dtype=np.float64)
 
@@ -1070,8 +1092,9 @@ class Asset:
         *,
         debug: bool = False,
         options: UsdExportOptions | None = None,
+        dry_run: bool = False,
     ) -> None:
-        from fascat.io.usd import write_usd
+        from fascat.io._atomic import preflight_output_path
 
         if Path(path).suffix.lower() == ".usdz" and (options is None or options.package != "usdz"):
             opts = UsdExportOptions(
@@ -1082,22 +1105,25 @@ class Asset:
         else:
             opts = options or UsdExportOptions()
         before = self._report_stats()
-        step_options: dict[str, object] = {"format": "OpenUSD", "debug": debug, **opts.to_dict()}
+        step_options: dict[str, object] = {"format": "OpenUSD", "debug": debug, "dry_run": dry_run, **opts.to_dict()}
         timer = timed_step()
         try:
             with timer:
-                write_usd(self, path, debug=debug, options=opts)
+                preflight_output_path(path)
+                if not dry_run:
+                    from fascat.io.usd import write_usd
+
+                    write_usd(self, path, debug=debug, options=opts)
         except Exception as exc:
-            self.report.add_error(str(exc) or exc.__class__.__name__)
-            self.report.add_step(
-                "write",
-                options=step_options,
+            _record_write_failure(
+                self,
+                path=path,
+                budget_mb=opts.file_size_budget_mb,
+                step_options=step_options,
                 before=before,
-                after=_stats_with_file_size(self._report_stats(), path, opts.file_size_budget_mb, self),
-                duration=timer.duration,
+                timer=timer,
+                exc=exc,
             )
-            self.report.finish(self._report_stats())
-            cast(Any, exc).report = self.report
             raise
         self.report.add_step(
             "write",
@@ -1108,8 +1134,9 @@ class Asset:
         )
         self.report.finish(self._report_stats())
 
-    def write_gltf(self, path: str | Path, *, options: GltfExportOptions | None = None) -> None:
-        from fascat.io.gltf import runtime_dependency_report, write_gltf
+    def write_gltf(self, path: str | Path, *, options: GltfExportOptions | None = None, dry_run: bool = False) -> None:
+        from fascat.io._atomic import preflight_output_path
+        from fascat.io.gltf import runtime_dependency_report
         from fascat.options import resolve_gltf_export_options
         from fascat.size_ladder import measure_gltf_size_ladder
 
@@ -1117,24 +1144,28 @@ class Asset:
         before = self._report_stats()
         step_options: dict[str, object] = {
             "format": "glTF",
+            "dry_run": dry_run,
             **opts.to_dict(),
             "runtime_dependencies": runtime_dependency_report(self, opts),
         }
         timer = timed_step()
         try:
             with timer:
-                write_gltf(self, path, options=opts)
+                preflight_output_path(path)
+                if not dry_run:
+                    from fascat.io.gltf import write_gltf
+
+                    write_gltf(self, path, options=opts)
         except Exception as exc:
-            self.report.add_error(str(exc) or exc.__class__.__name__)
-            self.report.add_step(
-                "write",
-                options=step_options,
+            _record_write_failure(
+                self,
+                path=path,
+                budget_mb=opts.file_size_budget_mb,
+                step_options=step_options,
                 before=before,
-                after=_stats_with_file_size(self._report_stats(), path, opts.file_size_budget_mb, self),
-                duration=timer.duration,
+                timer=timer,
+                exc=exc,
             )
-            self.report.finish(self._report_stats())
-            cast(Any, exc).report = self.report
             raise
         self.report.add_step(
             "write",
@@ -1143,7 +1174,7 @@ class Asset:
             after=_stats_with_file_size(self._report_stats(), path, opts.file_size_budget_mb, self),
             duration=timer.duration,
         )
-        if opts.size_ladder:
+        if opts.size_ladder and not dry_run:
             size_ladder = measure_gltf_size_ladder(self, options=opts)
             for warning in size_ladder.warnings:
                 self.report.add_warning(warning)
@@ -1156,15 +1187,31 @@ class Asset:
             )
         self.report.finish(self._report_stats())
 
-    def write_obj(self, path: str | Path, *, options: ObjExportOptions | None = None) -> None:
-        from fascat.io.obj import write_obj
+    def write_obj(self, path: str | Path, *, options: ObjExportOptions | None = None, dry_run: bool = False) -> None:
+        from fascat.io._atomic import preflight_output_path
 
         opts = options or ObjExportOptions()
         before = self._report_stats()
-        step_options: dict[str, object] = {"format": "OBJ", **opts.to_dict()}
+        step_options: dict[str, object] = {"format": "OBJ", "dry_run": dry_run, **opts.to_dict()}
         timer = timed_step()
-        with timer:
-            write_obj(self, path, options=opts)
+        try:
+            with timer:
+                preflight_output_path(path)
+                if not dry_run:
+                    from fascat.io.obj import write_obj
+
+                    write_obj(self, path, options=opts)
+        except Exception as exc:
+            _record_write_failure(
+                self,
+                path=path,
+                budget_mb=opts.file_size_budget_mb,
+                step_options=step_options,
+                before=before,
+                timer=timer,
+                exc=exc,
+            )
+            raise
         self.report.add_step(
             "write",
             options=step_options,
@@ -1174,15 +1221,31 @@ class Asset:
         )
         self.report.finish(self._report_stats())
 
-    def write_stl(self, path: str | Path, *, options: StlExportOptions | None = None) -> None:
-        from fascat.io.stl import write_stl
+    def write_stl(self, path: str | Path, *, options: StlExportOptions | None = None, dry_run: bool = False) -> None:
+        from fascat.io._atomic import preflight_output_path
 
         opts = options or StlExportOptions()
         before = self._report_stats()
-        step_options: dict[str, object] = {"format": "STL", **opts.to_dict()}
+        step_options: dict[str, object] = {"format": "STL", "dry_run": dry_run, **opts.to_dict()}
         timer = timed_step()
-        with timer:
-            write_stl(self, path, options=opts)
+        try:
+            with timer:
+                preflight_output_path(path)
+                if not dry_run:
+                    from fascat.io.stl import write_stl
+
+                    write_stl(self, path, options=opts)
+        except Exception as exc:
+            _record_write_failure(
+                self,
+                path=path,
+                budget_mb=opts.file_size_budget_mb,
+                step_options=step_options,
+                before=before,
+                timer=timer,
+                exc=exc,
+            )
+            raise
         self.report.add_step(
             "write",
             options=step_options,
@@ -1192,15 +1255,31 @@ class Asset:
         )
         self.report.finish(self._report_stats())
 
-    def write_fbx(self, path: str | Path, *, options: FbxExportOptions | None = None) -> None:
-        from fascat.io.fbx import write_fbx
+    def write_fbx(self, path: str | Path, *, options: FbxExportOptions | None = None, dry_run: bool = False) -> None:
+        from fascat.io._atomic import preflight_output_path
 
         opts = options or FbxExportOptions()
         before = self._report_stats()
-        step_options: dict[str, object] = {"format": "FBX", **opts.to_dict()}
+        step_options: dict[str, object] = {"format": "FBX", "dry_run": dry_run, **opts.to_dict()}
         timer = timed_step()
-        with timer:
-            write_fbx(self, path, options=opts)
+        try:
+            with timer:
+                preflight_output_path(path)
+                if not dry_run:
+                    from fascat.io.fbx import write_fbx
+
+                    write_fbx(self, path, options=opts)
+        except Exception as exc:
+            _record_write_failure(
+                self,
+                path=path,
+                budget_mb=opts.file_size_budget_mb,
+                step_options=step_options,
+                before=before,
+                timer=timer,
+                exc=exc,
+            )
+            raise
         self.report.add_step(
             "write",
             options=step_options,
