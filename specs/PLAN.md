@@ -41,7 +41,7 @@ glTF/OBJ/STL/FBX writers, trimesh + numpy (mesh ops).
 - [x] **P0** Path traversal in texture/material-library resolution — `_resolve_material_library_reference` / `_resolve_source_texture` don't confine resolved paths to the search roots (`fascat/io/step.py:5315`, `fascat/io/step.py:6215`); validate with `Path.is_relative_to()` after resolving
 - [x] **P1** ISO-10303-21 string escape directives (`\X2\`, `\X4\`, `\S\`) are not decoded → garbled part names and PMI text on standards-conformant files (`fascat/io/step.py:3984`)
 - [ ] **P2** Color range heuristic (any component > 1.0 ⇒ assume 0–255) misreads HDR-ish inputs; make the color space explicit (`fascat/io/step.py:5694`)
-- [ ] **P2** Texture slot matching can bind the same slot twice — dedupe by slot (`fascat/io/step.py:5753`)
+- [x] **P2** Texture slot matching can bind the same slot twice — dedupe by slot (`fascat/io/step.py:5753`)
 - [ ] **P2** Mirrored transforms (negative determinant) are neither detected nor documented; risk of inverted normals on mirrored instances (`fascat/io/step.py:1476`, `fascat/io/step.py:4551`)
 - [ ] **P3** Stale "multi-file import not implemented" warning contradicts the shipped external-reference graph (`fascat/io/step.py:4087`)
 

@@ -4717,6 +4717,49 @@ def test_step_material_library_json_maps_pbr_factors_and_textures(tmp_path: Path
     assert material.metadata["source_texture_base_color_image"] in extraction.images
 
 
+def test_step_material_library_json_dedupes_duplicate_texture_slots(tmp_path: Path) -> None:
+    first_base = tmp_path / "first_base.png"
+    second_base = tmp_path / "second_base.png"
+    normal = tmp_path / "normal.png"
+    Image.new("RGBA", (1, 1), (200, 10, 10, 255)).save(first_base)
+    Image.new("RGBA", (1, 1), (10, 200, 10, 255)).save(second_base)
+    Image.new("RGBA", (1, 1), (128, 128, 255, 255)).save(normal)
+    library = tmp_path / "vendor-materials.json"
+    library.write_text(
+        json.dumps(
+            {
+                "materials": [
+                    {
+                        "materialName": "Paint",
+                        "textures": {"baseColor": first_base.name},
+                        "baseColorTexture": second_base.name,
+                        "normalTexture": normal.name,
+                        "pbrMetallicRoughness": {"baseColorTexture": second_base.name},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    source = tmp_path / "panel.step"
+    source.write_text(
+        "ISO-10303-21;\nDATA;\n#1=EXTERNAL_REFERENCE('vendor-materials.json');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+    materials = {"paint": fc.Material(id="paint", name="Paint", base_color=(0.75, 0.75, 0.75, 1.0))}
+
+    extraction = _extract_material_libraries(source, "panel.step", StepReadOptions())
+    summary = _apply_material_libraries_to_materials(materials, extraction)
+    material = materials["paint"]
+    base_image = extraction.images[str(material.metadata["source_texture_base_color_image"])]
+
+    assert extraction.summary["textures"] == 2
+    assert summary["bound_textures"] == 2
+    assert base_image.metadata["source_texture_path"].endswith("first_base.png")
+    assert material.metadata["source_texture_normal_image"] in extraction.images
+    assert material.metadata["source_texture_slots"] == "base_color,normal"
+
+
 def test_step_material_library_mtl_can_be_supplied_explicitly(tmp_path: Path) -> None:
     texture = tmp_path / "aluminum.png"
     Image.new("RGB", (1, 1), (160, 170, 180)).save(texture)
