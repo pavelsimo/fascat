@@ -986,8 +986,9 @@ def _decimation_target_strategy(source_meshes: dict[str, Mesh], options: Decimat
         "target_triangles": options.target_triangles,
         "target_ratio": options.target_ratio,
         "effective_keep_ratio": effective_ratio,
-        "quality_bound_enforced": kind == "quality_error",
-        "quality_bound_status": "enforced" if kind == "quality_error" else "not_applicable",
+        "quality_bound_policy": "hint" if kind == "quality_error" else "not_applicable",
+        "quality_bound_enforced": False,
+        "quality_bound_status": "hint" if kind == "quality_error" else "not_applicable",
     }
     if kind == "quality_error":
         strategy.update(
@@ -1007,7 +1008,7 @@ def _decimation_target_strategy_kind(options: DecimateOptions) -> tuple[str, str
     if options.target_ratio is not None:
         return "target_ratio", "explicit_target_ratio", "unity_target_ratio"
     if options.criterion == "quality":
-        return "quality_error", "meshoptimizer_target_error", "meshoptimizer_error_bounded_simplification"
+        return "quality_error", "meshoptimizer_target_error", "meshoptimizer_target_error_hint"
     return "target_ratio", "default_target_ratio", "unity_target_ratio"
 
 
@@ -1017,6 +1018,7 @@ def _decimation_target_strategy_metadata(strategy: dict[str, object]) -> dict[st
         "decimate_target_strategy_source": str(strategy["source"]),
         "decimate_target_strategy_workflow": str(strategy["workflow"]),
         "decimate_target_strategy_backend": str(strategy["backend_mode"]),
+        "decimate_quality_bound_policy": str(strategy["quality_bound_policy"]),
         "decimate_quality_bound_status": str(strategy["quality_bound_status"]),
         "decimate_quality_bound_enforced": str(strategy["quality_bound_enforced"]).lower(),
     }
@@ -1351,7 +1353,7 @@ def _mesh_without_texture_coordinates(mesh: Mesh) -> Mesh:
 
 def _quality_decimation_warning() -> str:
     return (
-        "decimate quality criterion maps tolerances to a target ratio and records measured vertex error; "
+        "decimate quality criterion passes tolerances as a target-error hint and records measured vertex error; "
         "tolerance-bounded simplification is not enforced"
     )
 

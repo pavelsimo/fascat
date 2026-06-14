@@ -51,7 +51,7 @@ glTF/OBJ/STL/FBX writers, trimesh + numpy (mesh ops).
 - [x] **P0** `stitch_boundary_gaps` wipes normals, tangents, and ALL UV channels (`fascat/mesh.py:1384-1386`); normals regenerate downstream but UVs are unrecoverable — interpolate attributes across stitched vertices instead
 - [x] **P1** Silent `return` when post-edit attribute remapping is incomplete leaves stale `material_indices` (`fascat/mesh.py:3047`); warn or invalidate the channel
 - [x] **P1** Fixed `area_epsilon=1e-12` in degenerate-face removal is scale-dependent — wrong for meter- or micron-scale models (`fascat/mesh.py:939`); derive from bbox diagonal
-- [ ] **P2** `simplify` with `target_error`: bound violations are recorded as `exceeded` in metadata but never enforced; document target_error as a hint or add a retry fallback (`fascat/mesh.py:2354-2412`)
+- [x] **P2** `simplify` with `target_error`: bound violations are recorded as `exceeded` in metadata but never enforced; document target_error as a hint or add a retry fallback (`fascat/mesh.py:2354-2412`)
 
 ### Stage / materials / textures
 

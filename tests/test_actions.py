@@ -505,27 +505,30 @@ def test_quality_decimate_records_measured_error_metrics() -> None:
     target_strategy = decimated.report.steps[-1].options["target_strategy"]
     assert target_strategy["kind"] == "quality_error"
     assert target_strategy["source"] == "meshoptimizer_target_error"
-    assert target_strategy["workflow"] == "meshoptimizer_error_bounded_simplification"
+    assert target_strategy["workflow"] == "meshoptimizer_target_error_hint"
     assert target_strategy["surface_tolerance"] == 0.25
     assert target_strategy["line_tolerance"] == 0.1
     assert target_strategy["uv_tolerance"] == 0.05
     assert target_strategy["quality_error_bound"] == 0.25
-    assert target_strategy["quality_bound_status"] == "enforced"
-    assert target_strategy["quality_bound_enforced"] is True
+    assert target_strategy["quality_bound_status"] == "hint"
+    assert target_strategy["quality_bound_enforced"] is False
+    assert target_strategy["quality_bound_policy"] == "hint"
     assert part.metadata["decimate_criterion"] == "quality"
     assert part.metadata["decimate_target_strategy"] == "quality_error"
     assert part.metadata["decimate_target_strategy_source"] == "meshoptimizer_target_error"
-    assert part.metadata["decimate_target_strategy_workflow"] == "meshoptimizer_error_bounded_simplification"
-    assert part.metadata["decimate_quality_bound_status"] == "enforced"
-    assert part.metadata["decimate_quality_bound_enforced"] == "true"
+    assert part.metadata["decimate_target_strategy_workflow"] == "meshoptimizer_target_error_hint"
+    assert part.metadata["decimate_quality_bound_policy"] == "hint"
+    assert part.metadata["decimate_quality_bound_status"] == "hint"
+    assert part.metadata["decimate_quality_bound_enforced"] == "false"
     assert part.metadata["decimate_quality_error_bound"] == "0.25"
     assert part.metadata["decimate_source_triangles"] == "8"
     assert int(part.metadata["decimate_output_triangles"]) <= 8
     assert float(part.metadata["decimate_triangle_reduction"]) >= 0.0
     assert decimated.metadata["decimate_budget_allocation"] == "per_part"
     assert decimated.metadata["decimate_target_strategy"] == "quality_error"
-    assert decimated.metadata["decimate_quality_bound_status"] == "enforced"
-    assert decimated.metadata["decimate_quality_bound_enforced"] == "true"
+    assert decimated.metadata["decimate_quality_bound_policy"] == "hint"
+    assert decimated.metadata["decimate_quality_bound_status"] == "hint"
+    assert decimated.metadata["decimate_quality_bound_enforced"] == "false"
     assert decimated.metadata["decimate_quality_error_bound"] == "0.25"
     assert decimated.report.steps[-1].warnings == []
 
