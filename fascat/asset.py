@@ -11,6 +11,7 @@ from typing_extensions import Unpack
 
 from fascat._format import count_phrase
 from fascat.export_report import stats_with_file_size as _stats_with_file_size
+from fascat.filter import Filter
 from fascat.image import ImageResource
 from fascat.material import Material
 from fascat.mesh import Mesh
@@ -67,6 +68,7 @@ if TYPE_CHECKING:
     from fascat.analysis import AnalysisReport
 
 Transform = NDArray[np.float64]
+WhereFilter = Filter | str | dict[str, object] | None
 
 _OptionsT = TypeVar("_OptionsT")
 
@@ -401,9 +403,7 @@ class Asset:
             report=self.report.copy(),
         )
 
-    def select(self, where: Any | None = None) -> Any:
-        from fascat.filter import Filter
-
+    def select(self, where: WhereFilter = None) -> Any:
         selector = Filter.from_value(where) or Filter()
         return selector.select(self)
 
@@ -437,7 +437,7 @@ class Asset:
         self,
         options: AnalyzeOptions | None = None,
         *,
-        where: Any | None = None,
+        where: WhereFilter = None,
         **kwargs: Unpack[AnalyzeKwargs],
     ) -> AnalysisReport:
         from fascat.analysis import analyze_asset
@@ -453,7 +453,7 @@ class Asset:
         self,
         options: TessellationOptions | None = None,
         *,
-        where: Any | None = None,
+        where: WhereFilter = None,
         **kwargs: Unpack[TessellateKwargs],
     ) -> Asset:
         from fascat.ops.tessellate import tessellate_asset, tessellation_tolerance_policy
@@ -480,7 +480,7 @@ class Asset:
         self,
         options: RepairOptions | None = None,
         *,
-        where: Any | None = None,
+        where: WhereFilter = None,
         **kwargs: Unpack[RepairKwargs],
     ) -> Asset:
         opts = _make_options(RepairOptions, options, kwargs)
@@ -539,7 +539,7 @@ class Asset:
         self,
         options: MergeVerticesOptions | None = None,
         *,
-        where: Any | None = None,
+        where: WhereFilter = None,
         **kwargs: Unpack[MergeVerticesKwargs],
     ) -> Asset:
         opts = _make_options(MergeVerticesOptions, options, kwargs)
@@ -594,7 +594,7 @@ class Asset:
         self,
         options: DeleteDegeneratePolygonsOptions | None = None,
         *,
-        where: Any | None = None,
+        where: WhereFilter = None,
         **kwargs: Unpack[DeleteDegeneratePolygonsKwargs],
     ) -> Asset:
         opts = _make_options(DeleteDegeneratePolygonsOptions, options, kwargs)
@@ -632,7 +632,7 @@ class Asset:
         self,
         options: StageOptions | None = None,
         *,
-        where: Any | None = None,
+        where: WhereFilter = None,
         **kwargs: Unpack[StageKwargs],
     ) -> Asset:
         from fascat.ops.stage import stage_asset
@@ -672,7 +672,7 @@ class Asset:
         self,
         options: OptimizeOptions | None = None,
         *,
-        where: Any | None = None,
+        where: WhereFilter = None,
         **kwargs: Unpack[OptimizeKwargs],
     ) -> Asset:
         from fascat.ops.optimize import optimize_asset
@@ -698,7 +698,7 @@ class Asset:
         self,
         options: LODOptions | Sequence[float] | None = None,
         *,
-        where: Any | None = None,
+        where: WhereFilter = None,
         **kwargs: Unpack[LodsKwargs],
     ) -> Asset:
         from fascat.ops.lod import build_lods
@@ -729,7 +729,7 @@ class Asset:
         self,
         options: MergeOptions | None = None,
         *,
-        where: Any | None = None,
+        where: WhereFilter = None,
         **kwargs: Unpack[MergeKwargs],
     ) -> Asset:
         from fascat.ops.hierarchy import merge_asset
@@ -763,7 +763,7 @@ class Asset:
         self,
         options: ExplodeOptions | None = None,
         *,
-        where: Any | None = None,
+        where: WhereFilter = None,
         **kwargs: Unpack[ExplodeKwargs],
     ) -> Asset:
         from fascat.ops.hierarchy import explode_asset
@@ -794,7 +794,7 @@ class Asset:
         self,
         options: ReplaceOptions | None = None,
         *,
-        where: Any | None = None,
+        where: WhereFilter = None,
         **kwargs: Unpack[ReplaceKwargs],
     ) -> Asset:
         from fascat.ops.hierarchy import replace_asset
@@ -825,7 +825,7 @@ class Asset:
         self,
         options: SceneOptimizeOptions | None = None,
         *,
-        where: Any | None = None,
+        where: WhereFilter = None,
         **kwargs: Unpack[OptimizeSceneKwargs],
     ) -> Asset:
         from fascat.ops.scene import optimize_scene_asset
@@ -860,7 +860,7 @@ class Asset:
         self,
         options: BakeMaterialOptions | None = None,
         *,
-        where: Any | None = None,
+        where: WhereFilter = None,
         **kwargs: Unpack[BakeMaterialsKwargs],
     ) -> Asset:
         from fascat.ops.actions import bake_materials_asset
@@ -909,7 +909,7 @@ class Asset:
         self,
         options: DecimateOptions | None = None,
         *,
-        where: Any | None = None,
+        where: WhereFilter = None,
         **kwargs: Unpack[DecimateKwargs],
     ) -> Asset:
         from fascat.ops.actions import decimate_asset, decimation_target_strategy
@@ -936,7 +936,7 @@ class Asset:
         self,
         options: RemoveHolesOptions | None = None,
         *,
-        where: Any | None = None,
+        where: WhereFilter = None,
         **kwargs: Unpack[RemoveHolesKwargs],
     ) -> Asset:
         from fascat.ops.actions import remove_holes_asset
@@ -962,7 +962,7 @@ class Asset:
         self,
         options: RemoveOccludedOptions | None = None,
         *,
-        where: Any | None = None,
+        where: WhereFilter = None,
         **kwargs: Unpack[RemoveOccludedKwargs],
     ) -> Asset:
         from fascat.ops.actions import remove_occluded_asset
@@ -993,7 +993,7 @@ class Asset:
         self,
         options: LODGeneratorOptions | None = None,
         *,
-        where: Any | None = None,
+        where: WhereFilter = None,
         **kwargs: Unpack[RunLodGeneratorsKwargs],
     ) -> Asset:
         from fascat.ops.actions import run_lod_generators_asset
@@ -1019,7 +1019,7 @@ class Asset:
         self,
         options: BrepHealOptions | None = None,
         *,
-        where: Any | None = None,
+        where: WhereFilter = None,
         **kwargs: Unpack[HealBrepKwargs],
     ) -> Asset:
         from fascat.ops.heal import heal_brep_asset
@@ -1226,9 +1226,7 @@ class Asset:
             "report": self.report.to_dict(),
         }
 
-    def _operation_scope(self, where: Any | None) -> _OperationScope:
-        from fascat.filter import Filter
-
+    def _operation_scope(self, where: WhereFilter) -> _OperationScope:
         selector = Filter.from_value(where)
         if selector is None:
             return _OperationScope(asset=self, selected_part_ids=None, selection=None)

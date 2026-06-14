@@ -109,7 +109,7 @@ asset = asset.stage(
 )
 ```
 
-Filters support node path, node name, part id, part name, material, metadata, bounding box, size, triangle count, vertex count, and logical `all`, `any`, and `not_` composition. If a selected occurrence shares a part with an unmatched occurrence, Fascat duplicates the selected occurrence's part before applying the operation so the unmatched branch stays intact. The scope planner skips that isolation copy when the selection already maps cleanly to whole unique parts. Report steps include `where` and `matched` fields when an operation is scoped.
+Filters support node path, node name, part id, part name, material, metadata, bounding box, size, triangle count, vertex count, and logical `all`, `any`, and `not_` composition. Most `where` parameters accept a `Filter`, an explicit expression string such as `part=bolt` or `path=*/Fasteners/*`, or a criteria dict such as `{"part": "bolt"}`. Bare strings are not guessed; use a key/value expression so the matching field is explicit. If a selected occurrence shares a part with an unmatched occurrence, Fascat duplicates the selected occurrence's part before applying the operation so the unmatched branch stays intact. The scope planner skips that isolation copy when the selection already maps cleanly to whole unique parts. Report steps include `where` and `matched` fields when an operation is scoped.
 
 Filter parameters:
 
@@ -130,7 +130,7 @@ Filter parameters:
 | `Filter.all(...)` | Require every child filter to match. |
 | `Filter.any(...)` | Require at least one child filter to match. |
 | `Filter.not_(...)` | Invert one child filter. |
-| `where` | Most pipeline methods accept `where=Filter(...)` to scope an operation without destroying unmatched hierarchy. |
+| `where` | Most pipeline methods accept `where=Filter(...)`, `where="part=..."`, or `where={"part": ...}` to scope an operation without destroying unmatched hierarchy. |
 
 ## Hierarchy merge
 
