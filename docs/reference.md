@@ -141,7 +141,7 @@ settings), and `workflow_summary` (preparation stages mapped to run/skipped stat
 | `fascat validate output.glb --runtime-engine unity` | Measure optional Unity or Unreal harness load/parse metrics for glTF/GLB output |
 | `fascat validate output.glb --runtime-engine unity --runtime-engine-preview preview.png` | Request a Unity or Unreal harness-rendered preview PNG and report render status |
 | `fascat validate output.glb --runtime-engine unity --runtime-engine-preview preview.png --runtime-engine-baseline baseline.png` | Fail validation when an engine preview drifts beyond configured image-diff thresholds |
-| `fascat validate output.glb --visual-preview preview.png` | Write a deterministic software-rendered PNG preview for visual review |
+| `fascat validate output.glb --visual-preview preview.png` | Write a stable software-rendered PNG preview for visual review |
 | `fascat runtime-fixtures runtime-parity/` | Write bundled browser/Unity/Unreal material, lighting, KTX2/Basis fallback, and LOD-profile parity GLBs, software baselines, and a manifest |
 | `fascat runtime-fixtures runtime-parity/ --capture unity --promote-goldens` | Capture runtime parity previews and optionally promote rendered outputs into target golden directories |
 | `fascat runtime-fixtures runtime-parity/ --capture unity --require-goldens` | Compare captures against existing `goldens/<target>/<fixture>.png` files and fail when required target goldens are missing |
@@ -598,7 +598,7 @@ above and on the [Python API page](api.html) document each field.
 | `--tiny-parts` | `false` | Report tiny part stats |
 | `--draw-call-estimate` | `false` | Report material count, draw-call estimate, mesh/submesh slots, instances, and merged batch counts |
 | `--visual-risk` | `false` | Report before/after visual risk warnings |
-| `--visual-preview` | unset | Write a deterministic software-rendered PNG preview of the validated output mesh |
+| `--visual-preview` | unset | Write a stable software-rendered PNG preview of the validated output mesh |
 | `--runtime-browser-preview` | unset | Write a browser/WebGL-rendered PNG preview for supported glTF/GLB primitives |
 | `--visual-baseline` | unset | Compare `--visual-preview` against a baseline PNG and fail validation when thresholds are exceeded |
 | `--visual-diff-pixel-tolerance` | `0` | Per-channel byte tolerance ignored when counting changed visual diff pixels |

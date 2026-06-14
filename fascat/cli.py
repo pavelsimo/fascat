@@ -2365,7 +2365,7 @@ def cmd_validate(
     ] = 120.0,
     visual_preview: Annotated[
         Path | None,
-        typer.Option("--visual-preview", help="Write a deterministic software preview PNG during validation."),
+        typer.Option("--visual-preview", help="Write a stable software preview PNG during validation."),
     ] = None,
     runtime_browser_preview: Annotated[
         Path | None,
