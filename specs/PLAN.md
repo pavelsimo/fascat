@@ -100,7 +100,7 @@ handling were each independently challenged and held up.
 - [x] **P1** Unterminated STEP string ⇒ unbounded forward scan per record lookup (`fascat/io/step.py:3956`); bound the scan distance
 - [x] **P1** Malformed-input behavior pass: truncated/garbage STEP, empty assemblies, zero-vertex parts must produce clean errors, never tracebacks (tests in §7)
 - [ ] **P2** ZIP material libraries: entry-count/size caps before extraction (`fascat/io/step.py:5424`)
-- [ ] **P2** JSON material library recursion depth cap (`fascat/io/step.py:5537`)
+- [x] **P2** JSON material library recursion depth cap (`fascat/io/step.py:5537`)
 - [ ] **P2** KTX2 dimension parsing must handle truncated files (`fascat/io/step.py:6291`)
 - [ ] **P2** Report broken external-reference cycles instead of silently dropping them (`fascat/io/step.py:873`)
 - [ ] **P3** PMI semantic graph cycle detection (`fascat/io/step.py:1897`); domain checks for SQRT/LOG condition operands (`fascat/io/step.py:2797`)
