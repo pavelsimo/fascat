@@ -221,12 +221,16 @@ class Filter:
         return cls(include=(base,), exclude=exclude_filters)
 
     @classmethod
-    def from_value(cls, value: Filter | None) -> Filter | None:
+    def from_value(cls, value: Filter | str | dict[str, object] | None) -> Filter | None:
         if value is None:
             return None
         if isinstance(value, Filter):
             return value
-        raise TypeError("where must be a fascat.Filter or None")
+        if isinstance(value, str):
+            return parse_filter_expression(value)
+        if isinstance(value, dict):
+            return _filter_from_mapping(value)
+        raise TypeError("where must be a fascat.Filter, filter expression string, criteria dict, or None")
 
     def select(self, asset: Any) -> SelectionResult:
         matches: list[SelectionMatch] = []
@@ -426,6 +430,75 @@ def _filter_from_key_value(key: str, operator: str, value: str) -> Filter:
             else Filter.size(min_diagonal=diagonal, max_diagonal=diagonal)
         )
     raise FilterExpressionError(f"unsupported filter expression: {key}{operator}{value}")
+
+
+_FILTER_MAPPING_ALIASES = {
+    "node_name": "name",
+    "part": "part_id",
+    "triangles": "triangle_count",
+    "vertices": "vertex_count",
+    "size": "diagonal",
+}
+_FILTER_MAPPING_KEYS = frozenset(
+    {
+        "path",
+        "name",
+        "part_name",
+        "part_id",
+        "material",
+        "metadata",
+        "min_bounds",
+        "max_bounds",
+        "min_diagonal",
+        "max_diagonal",
+        "min_triangles",
+        "max_triangles",
+        "min_vertices",
+        "max_vertices",
+        "include",
+        "exclude",
+    }
+)
+
+
+def _filter_from_mapping(value: dict[str, object]) -> Filter:
+    kwargs: dict[str, object] = {}
+    for raw_key, raw_value in value.items():
+        if not isinstance(raw_key, str):
+            raise TypeError("where criteria dict keys must be strings")
+        key = raw_key.strip().replace("-", "_").lower()
+        key = _FILTER_MAPPING_ALIASES.get(key, key)
+        if key == "triangle_count":
+            kwargs["min_triangles"] = raw_value
+            kwargs["max_triangles"] = raw_value
+            continue
+        if key == "vertex_count":
+            kwargs["min_vertices"] = raw_value
+            kwargs["max_vertices"] = raw_value
+            continue
+        if key == "diagonal":
+            kwargs["min_diagonal"] = raw_value
+            kwargs["max_diagonal"] = raw_value
+            continue
+        if key in {"include", "exclude"}:
+            kwargs[key] = _filter_sequence_from_mapping(raw_key, raw_value)
+            continue
+        if key not in _FILTER_MAPPING_KEYS:
+            raise TypeError(f"unsupported where criteria key: {raw_key}")
+        kwargs[key] = raw_value
+    return Filter(**cast(Any, kwargs))
+
+
+def _filter_sequence_from_mapping(raw_key: str, raw_value: object) -> tuple[Filter, ...]:
+    if not isinstance(raw_value, Sequence) or isinstance(raw_value, (str, bytes)):
+        raise TypeError(f"{raw_key} must be a sequence of filter values")
+    children: list[Filter] = []
+    for child_value in raw_value:
+        child = Filter.from_value(cast(Filter | str | dict[str, object] | None, child_value))
+        if child is None:
+            raise TypeError(f"{raw_key} entries must not be None")
+        children.append(child)
+    return tuple(children)
 
 
 def _context_for(asset: Any, node: Any, node_path: str) -> _FilterContext:

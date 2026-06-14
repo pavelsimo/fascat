@@ -116,6 +116,54 @@ def test_filter_logical_composition_and_cli_parser() -> None:
     assert {match.node_name for match in selection.matches if match.part_id is not None} == {"Bolt A", "Nut A"}
 
 
+def test_where_accepts_filter_expression_string() -> None:
+    selection = _asset().select("part=bolt")
+
+    assert selection.stats()["occurrences"] == 2
+    assert {match.node_name for match in selection.matches if match.part_id is not None} == {"Bolt A", "Nut A"}
+
+
+def test_where_accepts_criteria_dict_aliases(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    calls: list[int] = []
+
+    def fake_simplify(self: Mesh, *, target_triangles: int | None = None, ratio: float | None = None) -> Mesh:
+        calls.append(self.triangle_count)
+        assert target_triangles == 1
+        assert ratio is None
+        return _mesh(1.0, 1)
+
+    monkeypatch.setattr(Mesh, "simplify", fake_simplify)
+
+    optimized = _asset().optimize(
+        OptimizeOptions(target_triangles=1, optimize_buffers=False),
+        where={"part": "housing"},
+    )
+
+    assert optimized.report.steps[-1].options["where"]["criteria"]["part_id"] == ["housing"]
+    assert optimized.report.steps[-1].options["matched"]["parts"] == 1
+    assert calls == [2]
+
+
+def test_where_accepts_nested_include_exclude_dicts() -> None:
+    selection = _asset().select(
+        {
+            "include": [{"part": "bolt"}],
+            "exclude": [{"name": "Nut*"}],
+        }
+    )
+
+    assert {match.node_name for match in selection.matches if match.part_id is not None} == {"Bolt A"}
+
+
+def test_where_rejects_unsupported_criteria_key() -> None:
+    try:
+        _asset().select({"unsupported": "value"})
+    except TypeError as exc:
+        assert str(exc) == "unsupported where criteria key: unsupported"
+    else:
+        raise AssertionError("unsupported where criteria key should fail")
+
+
 def test_scoped_stage_isolates_selected_occurrences_and_preserves_unmatched_parts() -> None:
     asset = _asset()
 
