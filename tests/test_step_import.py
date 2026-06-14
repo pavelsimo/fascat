@@ -558,6 +558,46 @@ def test_step_design_variant_selection_filters_matching_geometry(tmp_path: Path)
     assert parts["left"].metadata["design_variant_selected"] == "true"
 
 
+def test_step_design_variant_selector_terms_memoizes_duplicate_geometry_references(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = step_io._StepDesignVariantRecord(
+        id="step_variant_11",
+        kind="product_concept_feature",
+        entity="PRODUCT_CONCEPT_FEATURE",
+        label="left housing",
+        references=(),
+    )
+    conditional = step_io._StepDesignVariantRecord(
+        id="step_variant_20",
+        kind="conditional_concept_feature",
+        entity="CONDITIONAL_CONCEPT_FEATURE",
+        label="left package",
+        references=("#11", "#11"),
+        condition_operator="conditional",
+    )
+    original_selector_terms = step_io._design_variant_record_selector_terms
+    target_selector_calls = 0
+
+    def count_target_selector_terms(record: step_io._StepDesignVariantRecord) -> tuple[str, ...]:
+        nonlocal target_selector_calls
+        if record.id == target.id:
+            target_selector_calls += 1
+        return original_selector_terms(record)
+
+    monkeypatch.setattr(step_io, "_design_variant_record_selector_terms", count_target_selector_terms)
+
+    matched_records, selector_terms, condition_blocked = step_io._design_variant_selector_terms(
+        (target, conditional),
+        ("left housing",),
+    )
+
+    assert matched_records == ("step_variant_20",)
+    assert "left housing" in [term.lower() for term in selector_terms]
+    assert condition_blocked is True
+    assert target_selector_calls == 1
+
+
 def test_step_design_variant_selection_resolves_serial_effectivity_range(tmp_path: Path) -> None:
     source = tmp_path / "variants.step"
     source.write_text(
