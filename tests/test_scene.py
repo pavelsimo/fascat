@@ -197,6 +197,60 @@ def test_optimize_scene_can_expand_instances() -> None:
     assert optimized.metadata["scene_instanced_part_count"] == "0"
 
 
+def test_instance_reconstruction_remaps_replaced_parts_without_second_tree_walk(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    mesh = _triangle()
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="node_a", name="Bolt A", part_id="bolt_a"),
+                Node(
+                    id="nested",
+                    name="Nested",
+                    children=[
+                        Node(id="node_b", name="Bolt B", part_id="bolt_b"),
+                        Node(id="node_b_unselected", name="Bolt B Unselected", part_id="bolt_b"),
+                    ],
+                ),
+                Node(id="unrelated", name="Unrelated", part_id="unrelated"),
+            ],
+        ),
+        parts={
+            "bolt_a": Part(id="bolt_a", name="Bolt A", mesh=mesh.copy(), material_ids=["steel"]),
+            "bolt_b": Part(id="bolt_b", name="Bolt B", mesh=mesh.copy(), material_ids=["steel"]),
+            "unrelated": Part(id="unrelated", name="Unrelated", mesh=mesh.copy(), material_ids=["steel"]),
+        },
+        materials={"steel": Material(id="steel", name="Steel", base_color=(0.7, 0.7, 0.7, 1.0))},
+    )
+    walk_calls = 0
+    original_walk = asset.root.walk
+
+    def counting_walk() -> list[Node]:
+        nonlocal walk_calls
+        walk_calls += 1
+        return original_walk()
+
+    monkeypatch.setattr(asset.root, "walk", counting_walk)
+
+    scene_module._reconstruct_instances(
+        asset,
+        {"node_a", "node_b"},
+        similarity_tolerance=0.0,
+    )
+
+    part_ids = {node.id: node.part_id for node in original_walk() if node.part_id is not None}
+    assert walk_calls == 1
+    assert part_ids == {
+        "node_a": "bolt_a",
+        "node_b": "bolt_a",
+        "node_b_unselected": "bolt_a",
+        "unrelated": "unrelated",
+    }
+    assert set(asset.parts) == {"bolt_a", "unrelated"}
+    assert asset.metadata["scene_reconstructed_occurrence_count"] == "2"
+
+
 def test_optimize_scene_reconstructs_matching_separate_parts() -> None:
     mesh = _triangle()
     asset = Asset(

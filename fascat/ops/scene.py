@@ -85,7 +85,7 @@ def _apply_instance_policy(asset: Asset, options: SceneOptimizeOptions, selected
 
 
 def _reconstruct_instances(asset: Asset, selected_node_ids: set[str], *, similarity_tolerance: float) -> None:
-    selected_part_ids = _selected_part_ids(asset, selected_node_ids)
+    selected_part_ids, nodes_by_part_id = _selected_part_ids_and_nodes_by_part(asset, selected_node_ids)
     part_ids_by_fingerprint: dict[str, list[str]] = {}
     for part_id in sorted(selected_part_ids):
         part = asset.parts.get(part_id)
@@ -154,11 +154,7 @@ def _reconstruct_instances(asset: Asset, selected_node_ids: set[str], *, similar
         triangle_savings += mesh.triangle_count
         mesh_payload_savings += _mesh_payload_bytes(mesh)
 
-    remapped_occurrences = 0
-    for node in asset.root.walk():
-        if node.part_id in replacements:
-            node.part_id = replacements[node.part_id]
-            remapped_occurrences += 1
+    remapped_occurrences = _remap_replaced_part_nodes(nodes_by_part_id, replacements)
     if replacements:
         asset.parts = {part_id: part for part_id, part in asset.parts.items() if part_id not in replacements}
 
@@ -231,6 +227,15 @@ def _similar_instance_replacements(
             else:
                 similar_replacements[part_id] = canonical_id
     return similar_replacements, candidate_groups
+
+
+def _remap_replaced_part_nodes(nodes_by_part_id: dict[str, list[Node]], replacements: dict[str, str]) -> int:
+    remapped_occurrences = 0
+    for source_part_id, replacement_part_id in replacements.items():
+        for node in nodes_by_part_id.get(source_part_id, []):
+            node.part_id = replacement_part_id
+            remapped_occurrences += 1
+    return remapped_occurrences
 
 
 def _part_similarity_key(part: Part) -> tuple[object, ...] | None:
@@ -505,12 +510,26 @@ def _part_occurrence_counts(asset: Asset) -> dict[str, int]:
 
 
 def _selected_part_ids(asset: Asset, selected_node_ids: set[str]) -> set[str]:
-    part_ids = {node.part_id for node in asset.root.walk() if node.id in selected_node_ids and node.part_id is not None}
+    selected_part_ids, _ = _selected_part_ids_and_nodes_by_part(asset, selected_node_ids)
+    return selected_part_ids
+
+
+def _selected_part_ids_and_nodes_by_part(
+    asset: Asset, selected_node_ids: set[str]
+) -> tuple[set[str], dict[str, list[Node]]]:
+    part_ids: set[str] = set()
+    nodes_by_part_id: dict[str, list[Node]] = {}
+    for node in asset.root.walk():
+        if node.part_id is None:
+            continue
+        nodes_by_part_id.setdefault(node.part_id, []).append(node)
+        if node.id in selected_node_ids:
+            part_ids.add(node.part_id)
     for part_id, part in asset.parts.items():
         source_node_ids = set(str(part.metadata.get("source_node_ids", "")).split(","))
         if source_node_ids & selected_node_ids:
             part_ids.add(part_id)
-    return {part_id for part_id in part_ids if part_id is not None}
+    return part_ids, nodes_by_part_id
 
 
 def _drop_unreferenced_parts(asset: Asset) -> None:
