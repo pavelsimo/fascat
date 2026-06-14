@@ -4756,6 +4756,43 @@ map_Kd aluminum.png
     assert material.metadata["source_texture_base_color_image"] in extraction.images
 
 
+def test_material_library_zip_entry_cap_is_reported_unreadable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(step_io, "_MAX_MATERIAL_LIBRARY_ARCHIVE_ENTRIES", 1)
+    library = tmp_path / "vendor-materials.zip"
+    with zipfile.ZipFile(library, "w") as archive:
+        archive.writestr("materials/a.json", '{"materials":[{"name":"a"}]}')
+        archive.writestr("materials/b.json", '{"materials":[{"name":"b"}]}')
+    source = tmp_path / "panel.step"
+    source.write_text(
+        "ISO-10303-21;\nDATA;\n#1=EXTERNAL_REFERENCE('vendor-materials.zip');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    extraction = _extract_material_libraries(source, "panel.step", StepReadOptions())
+
+    assert extraction.summary["unreadable"] == 1
+    assert any("too many entries" in warning for warning in extraction.warnings)
+
+
+def test_material_library_zip_uncompressed_size_cap_is_reported_unreadable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(step_io, "_MAX_MATERIAL_LIBRARY_ARCHIVE_UNCOMPRESSED_BYTES", 8)
+    library = tmp_path / "vendor-materials.zip"
+    with zipfile.ZipFile(library, "w") as archive:
+        archive.writestr("materials/vendor.json", '{"materials":[{"name":"steel"}]}')
+    source = tmp_path / "panel.step"
+    source.write_text(
+        "ISO-10303-21;\nDATA;\n#1=EXTERNAL_REFERENCE('vendor-materials.zip');\nENDSEC;\nEND-ISO-10303-21;\n",
+        encoding="utf-8",
+    )
+
+    extraction = _extract_material_libraries(source, "panel.step", StepReadOptions())
+
+    assert extraction.summary["unreadable"] == 1
+    assert any("uncompressed payload is too large" in warning for warning in extraction.warnings)
+
+
 def test_step_material_library_zip_container_maps_pbr_and_textures(tmp_path: Path) -> None:
     image_buffer = BytesIO()
     Image.new("RGBA", (2, 1), (180, 90, 40, 255)).save(image_buffer, format="PNG")

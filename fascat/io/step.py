@@ -66,6 +66,8 @@ _STEP_EXTERNAL_REF_RE = re.compile(r"'([^']+\.(?:step|stp)(?:[#?][^']*)?)'", re.
 # oversized sidecar files are reported unreadable instead of being loaded.
 _MAX_STEP_SCAN_BYTES = 64 * 1024 * 1024
 _MAX_MATERIAL_LIBRARY_BYTES = 16 * 1024 * 1024
+_MAX_MATERIAL_LIBRARY_ARCHIVE_ENTRIES = 512
+_MAX_MATERIAL_LIBRARY_ARCHIVE_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
 _MAX_SOURCE_TEXTURE_BYTES = 64 * 1024 * 1024
 _STEP_RECORD_START_RE = re.compile(r"#(\d+)\s*=\s*([A-Z0-9_]+)\s*\(", re.IGNORECASE)
 _STEP_REFERENCE_RE = re.compile(r"#(\d+)")
@@ -5618,6 +5620,7 @@ def _load_zipped_material_library(
     _ensure_loadable_file_size(path, _MAX_MATERIAL_LIBRARY_BYTES, "material library archive")
     try:
         with zipfile.ZipFile(path) as archive:
+            _validate_material_library_archive_limits(path, archive)
             material_members = _archive_material_members(archive)
             if not material_members:
                 raise ValueError(f"material library archive did not contain JSON or MTL records: {path}")
@@ -5673,6 +5676,29 @@ def _load_zipped_material_library(
         raise ValueError(f"material library archive could not be read: {path}") from exc
     except OSError as exc:
         raise ValueError(f"material library archive could not be read: {path}") from exc
+
+
+def _validate_material_library_archive_limits(path: Path, archive: zipfile.ZipFile) -> None:
+    entries = [info for info in archive.infolist() if not info.is_dir()]
+    if len(entries) > _MAX_MATERIAL_LIBRARY_ARCHIVE_ENTRIES:
+        raise ValueError(
+            f"material library archive has too many entries "
+            f"({len(entries)} > {_MAX_MATERIAL_LIBRARY_ARCHIVE_ENTRIES}): {path}"
+        )
+    total_uncompressed = 0
+    for info in entries:
+        total_uncompressed += int(info.file_size)
+        suffix = PurePosixPath(info.filename.replace("\\", "/")).suffix.lower()
+        label = f"{path}!/{_archive_member_name(info.filename)}"
+        if suffix in _MATERIAL_RECORD_SUFFIXES and info.file_size > _MAX_MATERIAL_LIBRARY_BYTES:
+            raise ValueError(f"material library archive member is too large: {label}")
+        if suffix in _SOURCE_TEXTURE_SUFFIXES and info.file_size > _MAX_SOURCE_TEXTURE_BYTES:
+            raise ValueError(f"material library archive texture is too large: {label}")
+    if total_uncompressed > _MAX_MATERIAL_LIBRARY_ARCHIVE_UNCOMPRESSED_BYTES:
+        raise ValueError(
+            f"material library archive uncompressed payload is too large "
+            f"({total_uncompressed} > {_MAX_MATERIAL_LIBRARY_ARCHIVE_UNCOMPRESSED_BYTES} bytes): {path}"
+        )
 
 
 def _archive_material_members(archive: zipfile.ZipFile) -> list[str]:
