@@ -7,6 +7,7 @@ import pytest
 
 import fascat as fc
 from fascat.asset import Asset, Node, Part
+from fascat.errors import FascatIOError
 from fascat.io.usd import _usd_custom_data, validate_usd, write_usd, write_usd_with_validation_stats
 from fascat.material import Material
 from fascat.mesh import Mesh
@@ -768,9 +769,10 @@ def test_usd_export_rejects_invalid_uv0_shape(tmp_path: Path) -> None:
     )
     output = tmp_path / "invalid-uv.usda"
 
-    with pytest.raises(ValueError, match=r"uv channel 0 must have shape \(N, 2\)"):
+    with pytest.raises(fc.MeshValidationError, match=r"uv channel 0 must have shape \(N, 2\)") as error:
         write_usd(asset, output)
 
+    assert error.value.__cause__ is None
     assert not output.exists()
 
 
@@ -787,7 +789,7 @@ def test_failed_usd_validation_leaves_no_output_file(monkeypatch: pytest.MonkeyP
     )
     output = tmp_path / "scene.usda"
 
-    with pytest.raises(RuntimeError, match="forced validation failure"):
+    with pytest.raises(FascatIOError, match="forced validation failure"):
         write_usd(asset, output)
 
     assert not output.exists()

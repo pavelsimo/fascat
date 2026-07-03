@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from fascat.errors import FascatIOError
 from fascat.io.iges import read_iges
 from fascat.options import IgesReadOptions
 
@@ -41,5 +42,7 @@ def test_read_iges_rejects_non_iges_extension(tmp_path: Path) -> None:
     source = tmp_path / "box.step"
     source.write_text("", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="unsupported IGES extension"):
+    with pytest.raises(FascatIOError, match="unsupported IGES extension") as error:
         read_iges(source)
+
+    assert isinstance(error.value.__cause__, ValueError)

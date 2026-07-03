@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 from fascat.asset import Asset, Node, Part
+from fascat.errors import FascatIOError
 from fascat.image import ImageResource
 from fascat.io.gltf import (
     _apply_meshopt_compression,
@@ -438,7 +439,7 @@ def test_gltf_write_validation_reopens_final_compressed_output(monkeypatch: pyte
     monkeypatch.setattr(gltf, "_run_gltf_transform", fake_draco_transform)
     output = tmp_path / "compressed.glb"
 
-    with pytest.raises(RuntimeError, match="invalid GLB header"):
+    with pytest.raises(FascatIOError, match="invalid GLB header"):
         write_gltf_with_validation(
             _asset_with_materials_and_lods(),
             output,
@@ -475,8 +476,10 @@ def test_draco_export_validation_uses_transformed_output(monkeypatch: pytest.Mon
 
 
 def test_gltf_export_rejects_unknown_extension(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="unsupported glTF extension"):
+    with pytest.raises(FascatIOError, match="unsupported glTF extension") as error:
         write_gltf(_asset_with_materials_and_lods(), tmp_path / "panel.txt")
+
+    assert isinstance(error.value.__cause__, ValueError)
 
 
 def test_gltf_validation_rejects_assets_without_scene_meshes(tmp_path: Path) -> None:
@@ -510,7 +513,7 @@ def test_failed_gltf_validation_leaves_no_output_file(monkeypatch: pytest.Monkey
     monkeypatch.setattr(gltf, "validate_gltf", boom)
     output = tmp_path / "model.glb"
 
-    with pytest.raises(RuntimeError, match="forced validation failure"):
+    with pytest.raises(FascatIOError, match="forced validation failure"):
         write_gltf_with_validation(_asset_with_materials_and_lods(), output)
 
     assert not output.exists()
@@ -530,7 +533,7 @@ def test_draco_export_validation_failure_leaves_no_output(monkeypatch: pytest.Mo
     monkeypatch.setattr(gltf, "validate_gltf", boom)
     output = tmp_path / "model.glb"
 
-    with pytest.raises(RuntimeError, match="forced validation failure"):
+    with pytest.raises(FascatIOError, match="forced validation failure"):
         write_gltf_with_validation(_asset_with_materials_and_lods(), output, options=GltfExportOptions(draco=True))
 
     assert not output.exists()

@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from fascat.asset import Asset, Node, Part
+from fascat.errors import FascatIOError
 from fascat.io.step import read_step
 from fascat.io.usd import validate_usd, write_usd
 from fascat.mesh import Mesh
@@ -42,8 +43,10 @@ def test_step_import_reports_missing_ocp_backend(monkeypatch: pytest.MonkeyPatch
     step_file = tmp_path / "input.step"
     step_file.write_text("ISO-10303-21;", encoding="utf-8")
 
-    with pytest.raises(RuntimeError, match="STEP import requires cadquery-ocp"):
+    with pytest.raises(FascatIOError, match="STEP import requires cadquery-ocp") as error:
         read_step(step_file)
+
+    assert isinstance(error.value.__cause__, RuntimeError)
 
 
 def test_step_tessellation_reports_missing_ocp_backend(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -58,8 +61,10 @@ def test_step_tessellation_reports_missing_ocp_backend(monkeypatch: pytest.Monke
 def test_usd_export_reports_missing_usd_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _block_imports(monkeypatch, "pxr")
 
-    with pytest.raises(RuntimeError, match="USD export requires usd-core"):
+    with pytest.raises(FascatIOError, match="USD export requires usd-core") as error:
         write_usd(_asset_with_triangle(), tmp_path / "output.usda")
+
+    assert isinstance(error.value.__cause__, RuntimeError)
 
 
 def test_usd_validation_reports_missing_usd_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

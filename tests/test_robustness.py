@@ -43,32 +43,40 @@ def _write_empty_compound_step(path: Path) -> None:
 
 
 def test_read_step_missing_file_raises_file_not_found(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError, match="missing STEP file"):
+    with pytest.raises(fc.FascatIOError, match="missing STEP file") as error:
         fc.read_step(tmp_path / "absent.step")
+
+    assert isinstance(error.value.__cause__, FileNotFoundError)
 
 
 def test_read_step_unsupported_extension_raises_value_error(tmp_path: Path) -> None:
     bogus = tmp_path / "model.xyz"
     bogus.write_text("not cad", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="unsupported STEP extension"):
+    with pytest.raises(fc.FascatIOError, match="unsupported STEP extension") as error:
         fc.read_step(bogus)
+
+    assert isinstance(error.value.__cause__, ValueError)
 
 
 def test_read_step_garbage_bytes_raises_clean_runtime_error(tmp_path: Path) -> None:
     garbage = tmp_path / "garbage.step"
     garbage.write_bytes(os.urandom(4096))
 
-    with pytest.raises(RuntimeError, match="failed to read STEP file"):
+    with pytest.raises(fc.FascatIOError, match="failed to read STEP file") as error:
         fc.read_step(garbage)
+
+    assert isinstance(error.value.__cause__, RuntimeError)
 
 
 def test_read_step_empty_file_raises_clean_runtime_error(tmp_path: Path) -> None:
     empty = tmp_path / "empty.step"
     empty.write_bytes(b"")
 
-    with pytest.raises(RuntimeError, match="failed to read STEP file"):
+    with pytest.raises(fc.FascatIOError, match="failed to read STEP file") as error:
         fc.read_step(empty)
+
+    assert isinstance(error.value.__cause__, RuntimeError)
 
 
 def test_read_step_truncated_fixture_fails_cleanly(tmp_path: Path) -> None:
@@ -76,7 +84,7 @@ def test_read_step_truncated_fixture_fails_cleanly(tmp_path: Path) -> None:
     truncated = tmp_path / "truncated.step"
     truncated.write_bytes(payload[: len(payload) * 2 // 5])
 
-    with pytest.raises((RuntimeError, ValueError)):
+    with pytest.raises(fc.FascatIOError):
         fc.read_step(truncated)
 
 
@@ -97,7 +105,7 @@ def test_read_step_header_only_data_section_fails_cleanly_or_yields_empty_asset(
 
     try:
         asset = fc.read_step(source)
-    except RuntimeError as exc:
+    except fc.FascatIOError as exc:
         assert "STEP" in str(exc)
     else:
         assert asset.part_count == 0

@@ -9,6 +9,7 @@ from typing import Any, cast
 from fascat._ocp import shape_fingerprint as _shape_fingerprint
 from fascat.asset import Asset, Node, Part
 from fascat.io import step as _step
+from fascat.io._errors import wrap_io_errors
 from fascat.material import Material
 from fascat.options import BrepReadOptions, StepReadOptions
 from fascat.report import Report, timed_step
@@ -17,12 +18,14 @@ BREP_SUFFIXES = {".brep"}
 _DEFAULT_MATERIAL_COLOR = (0.75, 0.75, 0.75, 1.0)
 
 
+@wrap_io_errors("read BREP")
 def read_brep(path: str | Path, *, options: BrepReadOptions | StepReadOptions | None = None) -> Asset:
     """Read a native BREP file into an asset."""
     source = Path(path)
     return _read_brep_path(source, source_identity=str(source.resolve()), options=_coerce_options(options))
 
 
+@wrap_io_errors("read BREP bytes")
 def read_brep_bytes(
     data: bytes,
     *,

@@ -21,6 +21,7 @@ from fascat.asset import Asset, Node, Part
 from fascat.export_report import referenced_materials
 from fascat.image import ImageResource
 from fascat.io._atomic import atomic_output, publish_staged
+from fascat.io._errors import wrap_io_errors
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.metadata import pmi_ids_by_part
@@ -155,10 +156,12 @@ _RUNTIME_TARGETS = {
 }
 
 
+@wrap_io_errors("write glTF")
 def write_gltf(asset: Asset, path: str | Path, *, options: GltfExportOptions | None = None) -> None:
     _write_gltf(asset, path, options=options, validate=False)
 
 
+@wrap_io_errors("write glTF with validation")
 def write_gltf_with_validation(
     asset: Asset,
     path: str | Path,
@@ -1683,7 +1686,7 @@ def _face_groups(part: Part, mesh: Mesh) -> _FaceGroupResult:
         return _FaceGroupResult(groups=[(material_id, all_faces)], out_of_bounds=[])
     groups: list[tuple[str | None, NDArray[np.int64]]] = []
     out_of_bounds: list[int] = []
-    for material_index in sorted(set(mesh.material_indices.astype(int).tolist())):
+    for material_index in np.unique(mesh.material_indices.astype(np.int64, copy=False)).tolist():
         # An explicit bounds check: negative indices must not wrap around via
         # Python indexing and silently bind the wrong material.
         if 0 <= material_index < len(part.material_ids):

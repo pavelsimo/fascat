@@ -18,6 +18,7 @@ import numpy as np
 from fascat._ocp import shape_fingerprint as _shape_fingerprint
 from fascat.asset import Asset, Node, Part
 from fascat.image import ImageMimeType, ImageResource
+from fascat.io._errors import wrap_io_errors
 from fascat.material import Material
 from fascat.metadata import Metadata, PmiAnnotation, PmiKind, Tolerance
 from fascat.options import StepReadOptions
@@ -805,6 +806,7 @@ class _SpaceNormalization:
         }
 
 
+@wrap_io_errors("read STEP")
 def read_step(path: str | Path, *, options: StepReadOptions | None = None) -> Asset:
     """Read a STEP file into an asset with hierarchy and metadata."""
     source = Path(path)
@@ -814,6 +816,7 @@ def read_step(path: str | Path, *, options: StepReadOptions | None = None) -> As
     return _read_step_path(source, source_identity=str(source.resolve()), options=opts)
 
 
+@wrap_io_errors("read STEP files")
 def read_step_many(
     paths: Iterable[str | Path],
     *,
@@ -1218,6 +1221,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
     return asset
 
 
+@wrap_io_errors("read STEP bytes")
 def read_step_bytes(data: bytes, *, name: str = "stdin.step", options: StepReadOptions | None = None) -> Asset:
     temp_path: Path | None = None
     try:

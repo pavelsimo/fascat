@@ -8,12 +8,14 @@ from typing import Any, Literal, cast
 import numpy as np
 from numpy.typing import NDArray
 
+from fascat.errors import FascatError
+
 PatternValue = str | Sequence[str]
 FilterMode = Literal["criteria", "all", "any", "not"]
 FloatArray = NDArray[np.float64]
 
 
-class FilterExpressionError(ValueError):
+class FilterExpressionError(ValueError, FascatError):
     """Raised when a CLI filter expression cannot be parsed."""
 
 

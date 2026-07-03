@@ -394,6 +394,9 @@ _TOP_LEVEL_API = [
     "AnalysisReport",
     "Asset",
     "DecimateOptions",
+    "Error",
+    "FascatError",
+    "FascatIOError",
     "Filter",
     "FilterExpressionError",
     "GltfExportOptions",
@@ -443,6 +446,16 @@ def test_top_level_namespace_is_locked() -> None:
 def test_top_level_names_resolve() -> None:
     for name in fc.__all__:
         assert getattr(fc, name) is not None
+
+
+@pytest.mark.parametrize(
+    "exception_type",
+    [fc.FascatIOError, fc.FilterExpressionError, fc.MeshValidationError, fc.UVOverlapError],
+)
+def test_public_exceptions_share_fascat_error_base(exception_type: type[Exception]) -> None:
+    with pytest.raises(fc.FascatError):
+        raise exception_type("boom")
+    assert fc.Error is fc.FascatError
 
 
 def test_validation_module_exposes_harness_surface() -> None:

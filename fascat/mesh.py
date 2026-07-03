@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 from collections import OrderedDict, defaultdict, deque
 from collections.abc import Callable, Sequence
@@ -11,6 +12,7 @@ from typing import Any, TypeVar, cast
 import numpy as np
 from numpy.typing import NDArray
 
+from fascat.errors import FascatError
 from fascat.metadata import Metadata
 from fascat.options import DeleteDegeneratePolygonsOptions, MergeVerticesOptions, RepairOptions
 
@@ -46,6 +48,7 @@ _ORIENTABILITY_METRIC_KEYS = (
     "closed_orientation_components",
     "flipped_orientation_components",
 )
+logger = logging.getLogger("fascat")
 
 
 def _tolerance_decimals(tolerance: float) -> int:
@@ -66,7 +69,7 @@ class _CentroidKdNode:
     right: _CentroidKdNode | None = None
 
 
-class MeshValidationError(ValueError):
+class MeshValidationError(ValueError, FascatError):
     """Raised when mesh arrays are not usable by the pipeline."""
 
 

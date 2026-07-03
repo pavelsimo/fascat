@@ -5,14 +5,17 @@ from dataclasses import dataclass
 import numpy as np
 
 from fascat.asset import Asset, Node
+from fascat.errors import FascatError
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.ops.parallel import parallel_map
 from fascat.options import StageOptions
 from fascat.report import Report
 
+_MIN_BAKE_DOMAIN_PADDING = 2
 
-class UVOverlapError(RuntimeError):
+
+class UVOverlapError(RuntimeError, FascatError):
     """Raised when ``forbid_overlapping=True`` but staged UVs still overlap."""
 
 

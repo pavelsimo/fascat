@@ -7,6 +7,7 @@ from typing import Any, cast
 
 from fascat.asset import Asset, Node, Part
 from fascat.io import step as _step
+from fascat.io._errors import wrap_io_errors
 from fascat.material import Material
 from fascat.options import IgesReadOptions, StepReadOptions
 from fascat.report import Report, timed_step
@@ -14,12 +15,14 @@ from fascat.report import Report, timed_step
 IGES_SUFFIXES = {".igs", ".iges"}
 
 
+@wrap_io_errors("read IGES")
 def read_iges(path: str | Path, *, options: IgesReadOptions | StepReadOptions | None = None) -> Asset:
     """Read an IGES file into an asset."""
     source = Path(path)
     return _read_iges_path(source, source_identity=str(source.resolve()), options=_coerce_options(options))
 
 
+@wrap_io_errors("read IGES bytes")
 def read_iges_bytes(
     data: bytes,
     *,

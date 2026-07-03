@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 
 from fascat.asset import Asset, Node
 from fascat.io._atomic import atomic_output
+from fascat.io._errors import wrap_io_errors
 from fascat.options import StlExportOptions
 
 STL_SUFFIXES = {".stl"}
@@ -16,10 +17,12 @@ ASCII_STL_TRIANGLE_WARNING_THRESHOLD = 10_000
 FloatArray = NDArray[np.float64]
 
 
+@wrap_io_errors("write STL")
 def write_stl(asset: Asset, path: str | Path, *, options: StlExportOptions | None = None) -> None:
     _write_stl(asset, path, options=options, validate=False)
 
 
+@wrap_io_errors("write STL with validation")
 def write_stl_with_validation_stats(
     asset: Asset,
     path: str | Path,

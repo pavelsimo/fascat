@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 from fascat.asset import Asset, Node, Part
 from fascat.export_report import referenced_materials
 from fascat.io._atomic import atomic_output
+from fascat.io._errors import wrap_io_errors
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.options import FbxExportOptions
@@ -27,10 +28,12 @@ class _FbxObjectIds:
     material_by_id: dict[str, int]
 
 
+@wrap_io_errors("write FBX")
 def write_fbx(asset: Asset, path: str | Path, *, options: FbxExportOptions | None = None) -> None:
     _write_fbx(asset, path, options=options, collect_stats=False)
 
 
+@wrap_io_errors("write FBX with validation")
 def write_fbx_with_validation_stats(
     asset: Asset,
     path: str | Path,

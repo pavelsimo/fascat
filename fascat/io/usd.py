@@ -12,6 +12,7 @@ from fascat.asset import Asset, Node, Part
 from fascat.export_report import referenced_materials
 from fascat.image import ImageResource
 from fascat.io._atomic import atomic_output
+from fascat.io._errors import wrap_io_errors
 from fascat.material import Material
 from fascat.metadata import pmi_ids_by_part
 from fascat.options import MetadataExportOptions, UsdExportOptions
@@ -68,10 +69,12 @@ _BAKED_TEXTURE_BINDINGS = (
 )
 
 
+@wrap_io_errors("write USD")
 def write_usd(asset: Asset, path: str | Path, *, debug: bool = False, options: UsdExportOptions | None = None) -> None:
     write_usd_with_validation_stats(asset, path, debug=debug, options=options)
 
 
+@wrap_io_errors("write USD with validation")
 def write_usd_with_validation_stats(
     asset: Asset,
     path: str | Path,

@@ -13,6 +13,7 @@ from typer.testing import CliRunner
 from fascat.analysis import analyze_output
 from fascat.asset import Asset, Node, Part
 from fascat.cli import app
+from fascat.errors import FascatIOError
 from fascat.image import ImageResource
 from fascat.io.fbx import validate_fbx
 from fascat.io.gltf import validate_gltf
@@ -701,7 +702,7 @@ def test_failed_stl_validation_leaves_no_output(monkeypatch, tmp_path) -> None: 
     monkeypatch.setattr(stl, "validate_stl", boom)
     output = tmp_path / "model.stl"
 
-    with pytest.raises(RuntimeError, match="forced validation failure"):
+    with pytest.raises(FascatIOError, match="forced validation failure"):
         stl.write_stl_with_validation_stats(_asset(), output)
 
     assert not output.exists()
@@ -717,7 +718,7 @@ def test_failed_fbx_validation_leaves_no_output(monkeypatch, tmp_path) -> None: 
     monkeypatch.setattr(fbx, "validate_fbx", boom)
     output = tmp_path / "model.fbx"
 
-    with pytest.raises(RuntimeError, match="forced validation failure"):
+    with pytest.raises(FascatIOError, match="forced validation failure"):
         fbx.write_fbx_with_validation_stats(_asset(), output)
 
     assert not output.exists()
@@ -733,7 +734,7 @@ def test_failed_obj_validation_leaves_no_obj_or_mtl(monkeypatch, tmp_path) -> No
     monkeypatch.setattr(obj, "validate_obj", boom)
     output = tmp_path / "model.obj"
 
-    with pytest.raises(RuntimeError, match="forced validation failure"):
+    with pytest.raises(FascatIOError, match="forced validation failure"):
         obj.write_obj_with_validation_stats(_asset(), output)
 
     assert not output.exists()

@@ -5323,8 +5323,10 @@ def test_read_step_many_can_continue_after_member_failure(
     assert "bad.step" in asset.report.warnings[0]
     assert "boom" in asset.report.warnings[0]
 
-    with pytest.raises(RuntimeError, match="boom"):
+    with pytest.raises(fc.FascatIOError, match="boom") as error:
         read_step_many([tmp_path / "good.step", tmp_path / "bad.step"])
+
+    assert isinstance(error.value.__cause__, RuntimeError)
 
 
 def test_read_step_multi_file_resolves_master_external_reference_graph(

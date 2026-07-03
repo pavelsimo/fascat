@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from fascat.errors import FascatIOError
 from fascat.io.brep import read_brep
 from fascat.options import BrepReadOptions
 
@@ -41,5 +42,7 @@ def test_read_brep_rejects_non_brep_extension(tmp_path: Path) -> None:
     source = tmp_path / "box.step"
     source.write_text("", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="unsupported BREP extension"):
+    with pytest.raises(FascatIOError, match="unsupported BREP extension") as error:
         read_brep(source)
+
+    assert isinstance(error.value.__cause__, ValueError)

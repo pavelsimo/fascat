@@ -12,6 +12,7 @@ if TYPE_CHECKING:  # static names for type checkers and IDEs; never executed at 
     from fascat import options, profiles, validation  # noqa: F401
     from fascat.analysis import AnalysisReport  # noqa: F401
     from fascat.asset import Asset, Node, Part  # noqa: F401
+    from fascat.errors import Error, FascatError, FascatIOError  # noqa: F401
     from fascat.filter import Filter, FilterExpressionError, SelectionMatch, SelectionResult  # noqa: F401
     from fascat.image import ImageResource  # noqa: F401
     from fascat.io.brep import read_brep  # noqa: F401
@@ -51,6 +52,9 @@ _EXPORTS: dict[str, str] = {
     "Asset": "fascat.asset",
     "Node": "fascat.asset",
     "Part": "fascat.asset",
+    "Error": "fascat.errors",
+    "FascatError": "fascat.errors",
+    "FascatIOError": "fascat.errors",
     "Filter": "fascat.filter",
     "FilterExpressionError": "fascat.filter",
     "SelectionMatch": "fascat.filter",
@@ -93,6 +97,9 @@ __all__ = [
     "AnalysisReport",
     "Asset",
     "DecimateOptions",
+    "Error",
+    "FascatError",
+    "FascatIOError",
     "Filter",
     "FilterExpressionError",
     "GltfExportOptions",
