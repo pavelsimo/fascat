@@ -264,7 +264,38 @@ def test_repair_report_includes_unit_aware_tolerance_policy() -> None:
     assert mesh.metadata["repair_target_units"] == "metre"
     assert mesh.metadata["repair_vertex_merge_tolerance_meters"] == "0.002"
     assert mesh.metadata["repair_degenerate_area_epsilon_square_meters"] == "3e-06"
+
+
+def test_repair_default_tolerance_is_bbox_derived() -> None:
+    asset = _triangle_asset()
+
+    repaired = asset.repair(RepairOptions())
+
+    step = repaired.report.steps[-1]
+    policy = step.options["tolerance_policy"]
+    expected = np.sqrt(2.0) * 1e-5
+    assert step.options["tolerance"] == pytest.approx(expected)
+    assert policy["vertex_merge_tolerance"] == pytest.approx(expected)
+    assert policy["vertex_merge_tolerance_resolution"] == "bbox_derived"
+    mesh = repaired.parts["part"].mesh
+    assert mesh is not None
     assert mesh.metadata["repair_t_junction_sewing"] == "disabled"
+
+
+def test_repair_warns_when_auto_tolerance_has_no_mesh_geometry() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="construction")]),
+        parts={"construction": Part(id="construction", name="Construction curve", source_shape=object())},
+    )
+
+    repaired = asset.repair(RepairOptions())
+
+    assert repaired.report.warnings == [
+        "repair tolerance auto-derivation found no mesh geometry in the selection; "
+        "vertex merge is disabled (tolerance=0) - run tessellate first or pass an "
+        "explicit tolerance"
+    ]
+    assert repaired.report.steps[-1].warnings == repaired.report.warnings
 
 
 def test_repair_reports_non_orientable_topology_before_winding_fix() -> None:
@@ -1848,12 +1879,13 @@ def test_convert_report_records_workflow_recipe(monkeypatch, tmp_path: Path) -> 
     assert recipe_step.options["profile"] == "realtime-web"
     assert recipe_step.options["recipe"]["name"] == "web-glb"
     assert recipe_step.options["recipe"]["target"] == "web GLB"
-    assert recipe_step.after["workflow_recipe_choices_total"] == 14
-    assert recipe_step.after["workflow_recipe_choices_honored"] == 8
+    assert recipe_step.after["workflow_recipe_choices_total"] == 15
+    assert recipe_step.after["workflow_recipe_choices_honored"] == 9
     assert recipe_step.after["workflow_recipe_choices_disabled"] == 4
     assert recipe_step.after["workflow_recipe_choices_metadata_only"] == 2
     assert recipe_step.after["workflow_recipe_choices_unsupported"] == 0
     choices = {choice["setting"]: choice for choice in recipe_step.options["recipe"]["choices"]}
+    assert choices["material_atlas"]["status"] == "honored"
     assert choices["texture_compression"]["status"] == "metadata_only"
     assert choices["gltf_geometry_compression"]["status"] == "metadata_only"
 

@@ -296,7 +296,12 @@ def test_bake_materials_merges_selected_material_slots() -> None:
     )
 
     baked = asset.bake_materials(
-        BakeMaterialOptions(maps_resolution=64, force_uv_generation=True, bake=("base_color", "opacity"))
+        BakeMaterialOptions(
+            maps_resolution=64,
+            lightmap_resolution=32,
+            force_uv_generation=True,
+            bake=("base_color", "opacity"),
+        )
     )
     part = baked.parts["panel"]
 
@@ -311,6 +316,8 @@ def test_bake_materials_merges_selected_material_slots() -> None:
     assert baked.materials["baked_material"].metadata["baked_texture_base_color_image"] == "baked_base_color"
     assert baked.materials["baked_material"].metadata["baked_texture_kind"] == "raster_atlas"
     assert baked.materials["baked_material"].metadata["baked_texture_resolution"] == "64"
+    assert baked.materials["baked_material"].metadata["baked_lightmap_resolution"] == "32"
+    assert part.mesh.metadata["uv0_lightmap_resolution"] == "32"
     assert baked.images["baked_base_color"].width == 64
     assert baked.images["baked_base_color"].height == 64
     assert baked.metadata["baked_image_count"] == "1"
@@ -465,6 +472,23 @@ def test_decimate_reports_selection_target_allocation_by_part() -> None:
     assert step.after["decimate_allocated_target_triangles"] == 8
     assert step.after["decimate_allocation_preserved_parts"] == 1
     assert step.after["decimate_allocation_reduced_parts"] == 1
+
+
+def test_sample_mesh_faces_tops_up_duplicate_samples_and_remaps_groups(monkeypatch: pytest.MonkeyPatch) -> None:
+    mesh = _triangle_strip(5)
+    mesh.face_groups["marked"] = np.asarray([0, 2, 4], dtype=int)
+    mesh.face_groups["missing"] = np.asarray([4], dtype=int)
+
+    def duplicate_linspace(_start: float, _stop: float, _num: int, *, dtype: object | None = None) -> np.ndarray:
+        return np.asarray([0, 0, 2], dtype=dtype)
+
+    monkeypatch.setattr(actions.np, "linspace", duplicate_linspace)
+
+    sampled = actions._sample_mesh_faces(mesh, 3)
+
+    assert sampled.triangle_count == 3
+    assert sampled.face_groups["marked"].tolist() == [0, 2]
+    assert sampled.face_groups["missing"].tolist() == []
 
 
 def test_decimate_iterative_threshold_controls_runtime_passes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -993,6 +1017,23 @@ def test_run_lod_generators_records_screen_coverage_metadata() -> None:
     assert with_lods.parts["cube"].lod_meshes[0].metadata["lod_screen_coverage"] == "0.5"
     assert with_lods.parts["cube"].lod_meshes[1].metadata["lod_screen_coverage"] == "0.2"
     assert with_lods.report.steps[-1].name == "run_lod_generators"
+
+
+def test_run_lod_generators_propagates_switch_distance_override() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="cube", name="Cube", part_id="cube")]),
+        parts={"cube": Part(id="cube", name="Cube", mesh=_cube_mesh())},
+    )
+
+    with_lods = asset.run_lod_generators(
+        LODGeneratorOptions(levels=(LODLevel(screen_coverage=0.5, target_ratio=0.5, switch_distance_override=30.0),))
+    )
+    lod = with_lods.parts["cube"].lod_meshes[0]
+
+    assert lod.metadata["lod_switch_distance"] == "30"
+    assert lod.metadata["lod_switch_distance_source"] == "override"
+    assert with_lods.parts["cube"].metadata["lod_level_switch_distance_sources"] == "override"
+    assert with_lods.report.steps[-1].options["levels"][0]["switch_distance_override"] == 30.0
 
 
 def test_lods_accepts_generator_options_as_primary_entry_point() -> None:

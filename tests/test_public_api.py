@@ -227,6 +227,7 @@ def test_tessellate_records_full_options_in_report() -> None:
         "create_normals": False,
         "keep_brep": True,
         "reuse_existing_meshes": False,
+        "max_triangles_per_part": None,
         "part_settings": {"Part": {"sag": 0.3}},
     }
     assert tolerance_policy["coordinate_space"] == "asset"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -11,6 +11,7 @@ import tomli
 from typing_extensions import TypedDict, Unpack
 
 from fascat.options import (
+    AtlasOptions,
     ConversionProfile,
     LODOptions,
     OptimizeOptions,
@@ -53,7 +54,7 @@ ProfileName = Literal[
 
 
 class ProfileOverrides(TypedDict, total=False):
-    tessellation_sag: float
+    tessellation_sag: float | None
     angle: float
     max_triangles: int
     lod_ratios: list[float] | tuple[float, ...]
@@ -126,9 +127,11 @@ def _realtime_recipe(
     name: str,
     target: str,
     description: str,
-    tessellation_sag: float,
+    tessellation_sag: float | None,
+    tessellation_sag_ratio: float,
     angle: float,
     lod_ratios: tuple[float, ...],
+    atlas_size: int,
     xr: bool = False,
 ) -> WorkflowRecipe:
     lod_value: object = lod_ratios if lod_ratios else "none"
@@ -147,11 +150,24 @@ def _realtime_recipe(
             _choice(
                 "tessellation",
                 "sag_and_angle",
-                {"sag": tessellation_sag, "angle": angle},
+                {
+                    **(
+                        {"sag": tessellation_sag}
+                        if tessellation_sag is not None
+                        else {"sag_ratio": tessellation_sag_ratio}
+                    ),
+                    "angle": angle,
+                },
                 note="profile tessellation defaults",
             ),
             _choice("repair", "mesh_repair", True, note="run duplicate, degenerate, and orientation cleanup"),
             _choice("stage", "uv0", "aabb_box", note="generate tileable inspection/runtime UVs"),
+            _choice(
+                "stage",
+                "material_atlas",
+                {"enabled": True, "max_size": atlas_size},
+                note="record atlas consolidation intent within the profile texture budget",
+            ),
             _choice("stage", "uv1_bake_domain", False, "disabled", "AO/lightmap packing remains explicit"),
             _choice("stage", "ambient_occlusion_bake", False, "disabled", "real AO baking is still future work"),
             _choice("optimization", "lod0_target_triangles", "profile budget", note="budget drives optimize target"),
@@ -231,6 +247,9 @@ def from_mapping(
     if "max_triangles" in budget_values and "max_vertices" not in budget_values:
         merged_budget["max_vertices"] = int(cast(Any, budget_values["max_triangles"])) * 3
     budget = PlatformBudget(**cast(Any, merged_budget))
+    stage = base_profile.stage
+    if stage.atlas.enabled and budget.max_texture_resolution is not None:
+        stage = replace(stage, atlas=AtlasOptions(enabled=True, max_size=budget.max_texture_resolution))
     optimize = base_profile.optimize
     if optimize is not None and budget.max_triangles is not None:
         optimize = OptimizeOptions(
@@ -246,7 +265,7 @@ def from_mapping(
         name=name,
         tessellation=base_profile.tessellation,
         repair=base_profile.repair,
-        stage=base_profile.stage,
+        stage=stage,
         optimize=optimize,
         lods=base_profile.lods,
         budget=budget,
@@ -277,9 +296,13 @@ def inspect_only() -> ConversionProfile:
     )
 
 
+def _realtime_stage(*, atlas_size: int) -> StageOptions:
+    return StageOptions(uv0="box", uv1=None, atlas=AtlasOptions(enabled=True, max_size=atlas_size))
+
+
 def realtime_desktop(
     *,
-    tessellation_sag: float = 0.1,
+    tessellation_sag: float | None = None,
     angle: float = 15.0,
     max_triangles: int = 1_000_000,
     lod_ratios: list[float] | tuple[float, ...] = (0.5, 0.25, 0.1),
@@ -289,7 +312,7 @@ def realtime_desktop(
         name="realtime-desktop",
         tessellation=TessellationOptions(sag=tessellation_sag, angle=angle),
         repair=RepairOptions(tolerance=1e-7),
-        stage=StageOptions(uv0="box", uv1=None),
+        stage=_realtime_stage(atlas_size=4_096),
         optimize=OptimizeOptions(target_triangles=max_triangles, simplify=True, optimize_buffers=True),
         lods=LODOptions(ratios=lod_tuple) if lod_tuple else None,
         budget=PlatformBudget(
@@ -310,15 +333,17 @@ def realtime_desktop(
             target="high-fidelity desktop",
             description="Balance CAD fidelity with runtime LOD and budget reporting for desktop OpenUSD or glTF.",
             tessellation_sag=tessellation_sag,
+            tessellation_sag_ratio=0.0002,
             angle=angle,
             lod_ratios=lod_tuple,
+            atlas_size=4_096,
         ),
     )
 
 
 def realtime_web(
     *,
-    tessellation_sag: float = 0.2,
+    tessellation_sag: float | None = None,
     angle: float = 20.0,
     max_triangles: int = 250_000,
     lod_ratios: list[float] | tuple[float, ...] = (0.5, 0.25),
@@ -328,7 +353,7 @@ def realtime_web(
         name="realtime-web",
         tessellation=TessellationOptions(sag=tessellation_sag, angle=angle),
         repair=RepairOptions(tolerance=1e-7),
-        stage=StageOptions(uv0="box", uv1=None),
+        stage=_realtime_stage(atlas_size=2_048),
         optimize=OptimizeOptions(target_triangles=max_triangles, simplify=True, optimize_buffers=True),
         lods=LODOptions(ratios=lod_tuple) if lod_tuple else None,
         budget=PlatformBudget(
@@ -349,15 +374,17 @@ def realtime_web(
             target="web GLB",
             description="Prepare lower-triangle GLB output for browser delivery with conservative runtime budgets.",
             tessellation_sag=tessellation_sag,
+            tessellation_sag_ratio=0.0002,
             angle=angle,
             lod_ratios=lod_tuple,
+            atlas_size=2_048,
         ),
     )
 
 
 def realtime_mobile(
     *,
-    tessellation_sag: float = 0.25,
+    tessellation_sag: float | None = None,
     angle: float = 20.0,
     max_triangles: int = 150_000,
     lod_ratios: list[float] | tuple[float, ...] = (0.5, 0.25),
@@ -367,7 +394,7 @@ def realtime_mobile(
         name="realtime-mobile",
         tessellation=TessellationOptions(sag=tessellation_sag, angle=angle),
         repair=RepairOptions(tolerance=1e-7),
-        stage=StageOptions(uv0="box", uv1=None),
+        stage=_realtime_stage(atlas_size=2_048),
         optimize=OptimizeOptions(target_triangles=max_triangles, simplify=True, optimize_buffers=True),
         lods=LODOptions(ratios=lod_tuple) if lod_tuple else None,
         budget=PlatformBudget(
@@ -388,15 +415,17 @@ def realtime_mobile(
             target="mobile GLB",
             description="Prepare app-store friendly GLB output with stricter triangle, texture, and draw-call budgets.",
             tessellation_sag=tessellation_sag,
+            tessellation_sag_ratio=0.0002,
             angle=angle,
             lod_ratios=lod_tuple,
+            atlas_size=2_048,
         ),
     )
 
 
 def virtual_reality(
     *,
-    tessellation_sag: float = 0.15,
+    tessellation_sag: float | None = None,
     angle: float = 15.0,
     max_triangles: int = 500_000,
     lod_ratios: list[float] | tuple[float, ...] = (0.5, 0.25, 0.125),
@@ -406,7 +435,7 @@ def virtual_reality(
         name="virtual-reality",
         tessellation=TessellationOptions(sag=tessellation_sag, angle=angle),
         repair=RepairOptions(tolerance=1e-7),
-        stage=StageOptions(uv0="box", uv1=None),
+        stage=_realtime_stage(atlas_size=2_048),
         optimize=OptimizeOptions(target_triangles=max_triangles, simplify=True, optimize_buffers=True),
         lods=LODOptions(ratios=lod_tuple) if lod_tuple else None,
         budget=PlatformBudget(
@@ -427,8 +456,10 @@ def virtual_reality(
             target="VR GLB",
             description="Prepare VR assets with high frame-rate budgets and predictable LOD chains.",
             tessellation_sag=tessellation_sag,
+            tessellation_sag_ratio=0.0002,
             angle=angle,
             lod_ratios=lod_tuple,
+            atlas_size=2_048,
             xr=True,
         ),
     )
@@ -436,7 +467,7 @@ def virtual_reality(
 
 def augmented_reality(
     *,
-    tessellation_sag: float = 0.3,
+    tessellation_sag: float | None = None,
     angle: float = 22.5,
     max_triangles: int = 100_000,
     lod_ratios: list[float] | tuple[float, ...] = (0.5, 0.25),
@@ -446,7 +477,7 @@ def augmented_reality(
         name="augmented-reality",
         tessellation=TessellationOptions(sag=tessellation_sag, angle=angle),
         repair=RepairOptions(tolerance=1e-7),
-        stage=StageOptions(uv0="box", uv1=None),
+        stage=_realtime_stage(atlas_size=1_024),
         optimize=OptimizeOptions(target_triangles=max_triangles, simplify=True, optimize_buffers=True),
         lods=LODOptions(ratios=lod_tuple) if lod_tuple else None,
         budget=PlatformBudget(
@@ -467,8 +498,10 @@ def augmented_reality(
             target="AR GLB",
             description="Prepare phone and tablet AR assets with compact geometry and texture budgets.",
             tessellation_sag=tessellation_sag,
+            tessellation_sag_ratio=0.0002,
             angle=angle,
             lod_ratios=lod_tuple,
+            atlas_size=1_024,
             xr=True,
         ),
     )
@@ -476,7 +509,7 @@ def augmented_reality(
 
 def mixed_reality(
     *,
-    tessellation_sag: float = 0.35,
+    tessellation_sag: float | None = None,
     angle: float = 25.0,
     max_triangles: int = 75_000,
     lod_ratios: list[float] | tuple[float, ...] = (0.5, 0.25),
@@ -486,7 +519,7 @@ def mixed_reality(
         name="mixed-reality",
         tessellation=TessellationOptions(sag=tessellation_sag, angle=angle),
         repair=RepairOptions(tolerance=1e-7),
-        stage=StageOptions(uv0="box", uv1=None),
+        stage=_realtime_stage(atlas_size=1_024),
         optimize=OptimizeOptions(target_triangles=max_triangles, simplify=True, optimize_buffers=True),
         lods=LODOptions(ratios=lod_tuple) if lod_tuple else None,
         budget=PlatformBudget(
@@ -507,8 +540,10 @@ def mixed_reality(
             target="mixed-reality GLB",
             description="Prepare headset-oriented GLB output with the strictest default budget profile.",
             tessellation_sag=tessellation_sag,
+            tessellation_sag_ratio=0.0002,
             angle=angle,
             lod_ratios=lod_tuple,
+            atlas_size=1_024,
             xr=True,
         ),
     )

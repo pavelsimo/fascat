@@ -18,6 +18,13 @@ def _options_repr(options: object) -> str:
             continue
         if field_info.default_factory is not MISSING and value == field_info.default_factory():
             continue
+        if (
+            type(options).__name__ == "TessellationOptions"
+            and field_info.name == "sag_ratio"
+            and getattr(options, "sag", None) is not None
+            and value is None
+        ):
+            continue
         rendered.append(f"{field_info.name}={value!r}")
     return f"{type(options).__name__}({', '.join(rendered)})"
 
@@ -127,6 +134,7 @@ _TESSELLATION_PART_SETTING_KEYS = {
     "create_normals",
     "keep_brep",
     "reuse_existing_meshes",
+    "max_triangles_per_part",
 }
 
 
@@ -181,8 +189,8 @@ def _validate_jobs(jobs: int) -> None:
 
 @dataclass(frozen=True, repr=False)
 class TessellationOptions(OptionsRepr):
-    sag: float = 0.1
-    sag_ratio: float | None = None
+    sag: float | None = None
+    sag_ratio: float | None = 0.0002
     angle: float = 15.0
     relative: bool = True
     min_edge_length: float | None = None
@@ -200,11 +208,16 @@ class TessellationOptions(OptionsRepr):
     create_normals: bool = True
     keep_brep: bool = False
     reuse_existing_meshes: bool = True
+    max_triangles_per_part: int | None = None
     part_settings: dict[str, dict[str, object]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.sag <= 0.0:
-            raise ValueError("tessellation sag must be greater than 0")
+        if self.sag is None and self.sag_ratio is None:
+            object.__setattr__(self, "sag_ratio", 0.0002)
+        elif self.sag is not None and self.sag_ratio == 0.0002:
+            object.__setattr__(self, "sag_ratio", None)
+        if self.sag is not None and self.sag <= 0.0:
+            raise ValueError("tessellation sag must be greater than 0 when set")
         if self.sag_ratio is not None and self.sag_ratio <= 0.0:
             raise ValueError("tessellation sag_ratio must be greater than 0 when set")
         if self.angle <= 0.0 or self.angle > 180.0:
@@ -215,6 +228,8 @@ class TessellationOptions(OptionsRepr):
             raise ValueError("max_edge_length must be greater than 0 when set")
         if self.max_polygon_length is not None and self.max_polygon_length <= 0.0:
             raise ValueError("max_polygon_length must be greater than 0 when set")
+        if self.max_triangles_per_part is not None and self.max_triangles_per_part <= 0:
+            raise ValueError("max_triangles_per_part must be greater than 0 when set")
         if (
             self.min_edge_length is not None
             and self.max_edge_length is not None
@@ -284,6 +299,12 @@ class RepairOptions(OptionsRepr):
         if self.viewer_position is not None:
             data["viewer_position"] = list(self.viewer_position)
         return data
+
+    def resolved_tolerance(self, bbox_diagonal: float) -> float:
+        """Return the effective vertex-merge tolerance for a mesh or selection scale."""
+        if self.tolerance > 0.0:
+            return self.tolerance
+        return max(0.0, float(bbox_diagonal)) * 1e-5
 
 
 @dataclass(frozen=True, repr=False)
@@ -514,8 +535,8 @@ class StageOptions(OptionsRepr):
     merge_equivalent_materials: bool = False
     normals: bool = True
     normal_mode: NormalMode = "smooth"
-    normal_weighting: NormalWeighting = "angle"
-    hard_edge_angle: float = 30.0
+    normal_weighting: NormalWeighting = "area"
+    hard_edge_angle: float = 45.0
     preserve_face_boundaries: bool = False
     override_normals: bool = True
     tangents: bool = False
@@ -602,6 +623,7 @@ class LODOptions(OptionsRepr):
     ratios: list[float] | tuple[float, ...] = (0.5, 0.25, 0.1)
     mode: LODMode = "variants"
     screen_coverage: list[float] | tuple[float, ...] | None = None
+    switch_distance_overrides: list[float | None] | tuple[float | None, ...] | None = None
     per_part_budget: bool = False
     drop_tiny_parts: bool = False
     tiny_part_screen_size: float = 2.0
@@ -633,6 +655,15 @@ class LODOptions(OptionsRepr):
                 raise ValueError("screen_coverage values must be greater than 0 and no more than 1")
             if screen_coverage != tuple(sorted(screen_coverage, reverse=True)):
                 raise ValueError("screen_coverage values must be sorted from highest to lowest")
+        if self.switch_distance_overrides is not None:
+            switch_distance_overrides = tuple(
+                None if value is None else float(value) for value in self.switch_distance_overrides
+            )
+            object.__setattr__(self, "switch_distance_overrides", switch_distance_overrides)
+            if len(switch_distance_overrides) != len(ratios):
+                raise ValueError("switch_distance_overrides must contain one value per LOD ratio")
+            if any(value is not None and value < 0.0 for value in switch_distance_overrides):
+                raise ValueError("switch_distance_overrides values must be greater than or equal to 0")
         if self.tiny_part_screen_size < 0.0:
             raise ValueError("tiny_part_screen_size must be greater than or equal to 0")
         _validate_jobs(self.jobs)
@@ -643,6 +674,9 @@ class LODOptions(OptionsRepr):
             "ratios": list(self.ratios),
             "mode": self.mode,
             "screen_coverage": None if self.screen_coverage is None else list(self.screen_coverage),
+            "switch_distance_overrides": None
+            if self.switch_distance_overrides is None
+            else list(self.switch_distance_overrides),
             "per_part_budget": self.per_part_budget,
             "drop_tiny_parts": self.drop_tiny_parts,
             "tiny_part_screen_size": self.tiny_part_screen_size,
@@ -773,6 +807,7 @@ class SceneOptimizeOptions(OptionsRepr):
 @dataclass(frozen=True, repr=False)
 class BakeMaterialOptions(OptionsRepr):
     maps_resolution: int = 2048
+    lightmap_resolution: int = 1024
     force_uv_generation: bool = False
     uv_channel: int = 0
     padding: int = 4
@@ -785,6 +820,8 @@ class BakeMaterialOptions(OptionsRepr):
         object.__setattr__(self, "bake", maps)
         if self.maps_resolution <= 0:
             raise ValueError("maps_resolution must be greater than 0")
+        if self.lightmap_resolution <= 0:
+            raise ValueError("lightmap_resolution must be greater than 0")
         if self.uv_channel < 0:
             raise ValueError("uv_channel must be greater than or equal to 0")
         if self.padding < 0:
@@ -937,12 +974,15 @@ class RemoveOccludedOptions(OptionsRepr):
 class LODLevel(OptionsRepr):
     screen_coverage: float
     target_ratio: float
+    switch_distance_override: float | None = None
 
     def __post_init__(self) -> None:
         if self.screen_coverage <= 0.0 or self.screen_coverage > 1.0:
             raise ValueError("screen_coverage must be greater than 0 and no more than 1")
         if self.target_ratio <= 0.0 or self.target_ratio >= 1.0:
             raise ValueError("target_ratio must be greater than 0 and less than 1")
+        if self.switch_distance_override is not None and self.switch_distance_override < 0.0:
+            raise ValueError("switch_distance_override must be greater than or equal to 0")
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -1440,7 +1480,7 @@ def _recipe_value(value: object) -> object:
 class TessellateKwargs(TypedDict, total=False):
     """Keyword arguments for :meth:`fascat.Asset.tessellate`; mirrors :class:`TessellationOptions`."""
 
-    sag: float
+    sag: float | None
     sag_ratio: float | None
     angle: float
     relative: bool
@@ -1459,6 +1499,7 @@ class TessellateKwargs(TypedDict, total=False):
     create_normals: bool
     keep_brep: bool
     reuse_existing_meshes: bool
+    max_triangles_per_part: int | None
     part_settings: dict[str, dict[str, object]]
 
 
@@ -1570,6 +1611,7 @@ class LodsKwargs(TypedDict, total=False):
     ratios: list[float] | tuple[float, ...]
     mode: LODMode
     screen_coverage: list[float] | tuple[float, ...] | None
+    switch_distance_overrides: list[float | None] | tuple[float | None, ...] | None
     per_part_budget: bool
     drop_tiny_parts: bool
     tiny_part_screen_size: float
@@ -1630,6 +1672,7 @@ class BakeMaterialsKwargs(TypedDict, total=False):
     """Keyword arguments for :meth:`fascat.Asset.bake_materials`; mirrors :class:`BakeMaterialOptions`."""
 
     maps_resolution: int
+    lightmap_resolution: int
     force_uv_generation: bool
     uv_channel: int
     padding: int

@@ -214,8 +214,9 @@ def _stage_part(
         if edited:
             edited_uv_channels.add(0)
     elif options.uv0 in {"unwrap", "lightmap"}:
-        mesh = _unwrap_uv(mesh, 0, options)
-        _tag_uv_metadata(mesh, 0, options.uv0, options)
+        padding = _effective_uv_padding(local_asset, part_id, 0, options.uv0, options)
+        mesh = _unwrap_uv(mesh, 0, options, padding=padding)
+        _tag_uv_metadata(mesh, 0, options.uv0, options, effective_padding=padding)
         uv_modes[0] = options.uv0
         edited_uv_channels.add(0)
     if options.uv1 == "box":
@@ -232,8 +233,9 @@ def _stage_part(
         if edited:
             edited_uv_channels.add(1)
     elif options.uv1 in {"unwrap", "lightmap"}:
-        mesh = _unwrap_uv(mesh, 1, options)
-        _tag_uv_metadata(mesh, 1, options.uv1, options)
+        padding = _effective_uv_padding(local_asset, part_id, 1, options.uv1, options)
+        mesh = _unwrap_uv(mesh, 1, options, padding=padding)
+        _tag_uv_metadata(mesh, 1, options.uv1, options, effective_padding=padding)
         uv_modes[1] = options.uv1
         edited_uv_channels.add(1)
     elif options.uv1 == "copy_uv0":
@@ -400,14 +402,22 @@ def _tag_material_atlas(asset: Asset, options: StageOptions) -> None:
             part.metadata["atlas_material_ids"] = ",".join(part.material_ids)
 
 
-def _tag_uv_metadata(mesh: Mesh, channel: int, mode: str, options: StageOptions) -> None:
+def _tag_uv_metadata(
+    mesh: Mesh,
+    channel: int,
+    mode: str,
+    options: StageOptions,
+    *,
+    effective_padding: int | None = None,
+) -> None:
     prefix = f"uv{channel}"
+    padding = options.unwrap.padding if effective_padding is None else effective_padding
     mesh.metadata.setdefault(prefix, mode)
     mesh.metadata[f"{prefix}_mode"] = mode
     if mode.startswith("copy_uv"):
         mesh.metadata[f"{prefix}_source_channel"] = mode.removeprefix("copy_uv")
         mesh.metadata[f"{prefix}_copy_status"] = "copied"
-    mesh.metadata[f"{prefix}_padding"] = str(options.unwrap.padding)
+    mesh.metadata[f"{prefix}_padding"] = str(padding)
     if options.unwrap.texel_density is not None:
         mesh.metadata[f"{prefix}_texel_density"] = str(options.unwrap.texel_density)
     if options.unwrap.max_stretch is not None:
@@ -479,16 +489,22 @@ def _apply_aabb_projection(
     result.metadata[f"{prefix}_projection_override_existing"] = str(projection.override_existing).lower()
     result.metadata[f"{prefix}_projection_units"] = asset.units
     result.metadata[f"{prefix}_projection_meters_per_unit"] = _format_uv_metric(asset.meters_per_unit)
+    uv3d_size, uv3d_size_source = _resolve_aabb_uv3d_size(options)
     result.metadata[f"{prefix}_projection_uv3d_size"] = (
-        _format_uv_metric(projection.uv3d_size) if projection.uv3d_size is not None else "normalized_to_aabb"
+        _format_uv_metric(uv3d_size) if uv3d_size is not None else "normalized_to_aabb"
     )
+    result.metadata[f"{prefix}_projection_uv3d_size_source"] = uv3d_size_source
+    if options.unwrap.texel_density is not None:
+        result.metadata[f"{prefix}_projection_texel_density"] = str(options.unwrap.texel_density)
+        result.metadata[f"{prefix}_projection_texel_density_texture_size"] = str(options.atlas.max_size)
     if channel in result.uvs and not projection.override_existing:
         result.metadata.setdefault(prefix, "existing")
         result.metadata[f"{prefix}_mode"] = "existing"
         result.metadata[f"{prefix}_projection_status"] = "preserved_existing"
         uv_summary["aabb_preserved_existing"] += 1
         return result, False
-    _tag_uv_metadata(result, channel, "box", options)
+    padding = _effective_uv_padding(asset, part_id, channel, "box", options)
+    _tag_uv_metadata(result, channel, "box", options, effective_padding=padding)
     if result.vertex_count == 0:
         result.uvs[channel] = np.empty((0, 2), dtype=np.float64)
         result.tangents = None
@@ -501,11 +517,11 @@ def _apply_aabb_projection(
     mins, maxs = bounds
     size = maxs - mins
     axes = np.argsort(size)[-2:]
-    if projection.uv3d_size is None:
+    if uv3d_size is None:
         denom = size[axes].copy()
         denom[denom == 0.0] = 1.0
     else:
-        denom = np.asarray([projection.uv3d_size, projection.uv3d_size], dtype=np.float64)
+        denom = np.asarray([uv3d_size, uv3d_size], dtype=np.float64)
     uv = (result.points[:, axes] - mins[axes]) / denom
     result.uvs[channel] = uv.astype(np.float64)
     result.tangents = None
@@ -515,6 +531,15 @@ def _apply_aabb_projection(
     result.metadata[f"{prefix}_projection_bounds_scope"] = "shared" if bounds is shared_bounds else "local"
     uv_summary["aabb_projection"] += 1
     return result, True
+
+
+def _resolve_aabb_uv3d_size(options: StageOptions) -> tuple[float | None, str]:
+    projection = options.aabb_projection
+    if projection.uv3d_size is not None:
+        return projection.uv3d_size, "explicit"
+    if options.unwrap.texel_density is not None:
+        return options.atlas.max_size / options.unwrap.texel_density, "texel_density"
+    return None, "normalized_to_aabb"
 
 
 def _axis_name(axis: int) -> str:
@@ -882,6 +907,17 @@ def _uv_domain(channel: int, mode: str) -> str:
     return "tileable"
 
 
+def _effective_uv_padding(asset: Asset, part_id: str, channel: int, mode: str, options: StageOptions) -> int:
+    padding = options.unwrap.padding
+    if _uv_domain(channel, mode) == "bake" and padding < _MIN_BAKE_DOMAIN_PADDING:
+        asset.report.add_warning(
+            f"part {part_id} uv{channel}: padding {padding}px is below the 2px bake-domain minimum; "
+            "clamping to 2px to prevent chart bleed in AO/lightmap bakes"
+        )
+        return _MIN_BAKE_DOMAIN_PADDING
+    return padding
+
+
 def _uv_bounds(uv: np.ndarray) -> str:
     if uv.shape[0] == 0:
         return "empty"
@@ -936,6 +972,8 @@ def _require_xatlas() -> None:
         raise RuntimeError("UV unwrap requires the optional xatlas dependency") from exc
 
 
-def _unwrap_uv(mesh: Mesh, channel: int, options: StageOptions) -> Mesh:
+def _unwrap_uv(mesh: Mesh, channel: int, options: StageOptions, *, padding: int | None = None) -> Mesh:
     resolution = options.atlas.max_size if options.atlas.enabled else 0
-    return mesh.unwrap_uv(channel, padding=options.unwrap.padding, resolution=resolution)
+    return mesh.unwrap_uv(
+        channel, padding=options.unwrap.padding if padding is None else padding, resolution=resolution
+    )

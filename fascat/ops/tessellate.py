@@ -9,8 +9,10 @@ import numpy as np
 
 from fascat._ocp import shape_fingerprint
 from fascat.asset import Asset, Part
+from fascat.errors import FascatError
 from fascat.mesh import Mesh
 from fascat.metadata import Metadata
+from fascat.ops._arrays import array_digest_required
 from fascat.options import TessellationOptions
 
 _FACE_GROUP_RISK_THRESHOLD = 64
@@ -67,6 +69,7 @@ def tessellate_asset(asset: Asset, options: TessellationOptions, *, selected_par
             continue
         part_options = _options_for_part(options, part, result)
         if part.mesh is not None and part_options.reuse_existing_meshes:
+            _guard_tessellation_output(part, part_options)
             _record_detail_adaptive_selection(result, part, options, part_options)
             _record_tessellation_attribute_sources(result, part, part_options, geometry_source="imported_mesh")
             _record_tessellation_diagnostics(result, part, part_options)
@@ -111,6 +114,7 @@ def tessellate_asset(asset: Asset, options: TessellationOptions, *, selected_par
                 mesh_by_source[construction_cache_key] = part.mesh.copy()
             else:
                 part.mesh = cached_mesh.copy()
+            _guard_tessellation_output(part, part_options)
             if part.mesh.triangle_count == 0:
                 result.report.add_warning(f"construction curve part did not produce tube mesh geometry: {part.name}")
             part.fingerprint = part.mesh.fingerprint()
@@ -144,6 +148,7 @@ def tessellate_asset(asset: Asset, options: TessellationOptions, *, selected_par
             mesh_by_source[cache_key] = part.mesh.copy()
         else:
             part.mesh = cached_mesh.copy()
+        _guard_tessellation_output(part, part_options)
         part.fingerprint = part.mesh.fingerprint()
         _record_detail_adaptive_selection(result, part, options, part_options)
         _record_tessellation_attribute_sources(result, part, part_options, geometry_source="tessellation")
@@ -154,6 +159,16 @@ def tessellate_asset(asset: Asset, options: TessellationOptions, *, selected_par
     if selected_part_ids is not None:
         return result
     return _deduplicate_parts_by_fingerprint(result)
+
+
+def _guard_tessellation_output(part: Part, options: TessellationOptions) -> None:
+    limit = options.max_triangles_per_part
+    if limit is None or part.mesh is None or part.mesh.triangle_count <= limit:
+        return
+    raise FascatError(
+        f"part {part.name!r} tessellated to {part.mesh.triangle_count} triangles "
+        f"(limit {limit}); increase sag or raise max_triangles_per_part"
+    )
 
 
 def tessellate_shape(
@@ -547,6 +562,8 @@ def _occt_mesh_parameters(options: TessellationOptions, parameters_factory: Any)
 def _deflection_settings(options: TessellationOptions) -> tuple[float, bool]:
     if options.sag_ratio is not None:
         return float(options.sag_ratio), True
+    if options.sag is None:
+        raise ValueError("tessellation sag or sag_ratio must be set")
     return float(options.sag), bool(options.relative)
 
 
@@ -635,13 +652,13 @@ def tessellation_tolerance_policy(asset: Asset, options: TessellationOptions) ->
         "active_deflection_relative": active_relative,
         "active_deflection_kind": active_kind,
         "relative": bool(options.relative),
-        "sag": float(options.sag),
+        "sag": options.sag,
         "sag_ratio": options.sag_ratio,
         "curvature_adaptive": bool(options.curvature_adaptive),
         "detail_adaptive": bool(options.detail_adaptive),
         "preserve_boundaries": bool(options.preserve_boundaries),
     }
-    if active_kind == "absolute_sag":
+    if active_kind == "absolute_sag" and options.sag is not None:
         _add_length_policy_fields(policy, "sag", float(options.sag), source_meters_per_unit, target_meters_per_unit)
     for key, value in (
         ("min_edge_length", options.min_edge_length),
@@ -957,7 +974,7 @@ def _tessellation_quality_advisories(asset: Asset, part: Part, options: Tessella
             }
         )
 
-    if options.sag_ratio is None and not options.relative:
+    if options.sag is not None and options.sag_ratio is None and not options.relative:
         sag_ratio = float(options.sag) / diagonal
         if sag_ratio >= _COARSE_ABSOLUTE_SAG_RATIO:
             advisories.append(
@@ -1216,7 +1233,7 @@ def _estimated_part_draw_calls(part: Part) -> int:
         return 0
     if mesh.material_indices is None:
         return 1
-    return len(set(mesh.material_indices.astype(int).tolist()))
+    return int(np.unique(mesh.material_indices.astype(np.int64, copy=False)).shape[0])
 
 
 def _source_patch_count(part: Part) -> int:
@@ -1309,6 +1326,7 @@ def _tessellation_settings_key(options: TessellationOptions) -> tuple[object, ..
         options.create_normals,
         options.free_edge_report,
         options.reuse_existing_meshes,
+        options.max_triangles_per_part,
     )
 
 
@@ -1356,14 +1374,14 @@ def _stored_quality_payload(part: Part) -> dict[str, object] | None:
 
 
 def _deduplicate_parts_by_fingerprint(asset: Asset) -> Asset:
-    canonical_by_key: dict[tuple[str, tuple[str, ...], tuple[int, ...] | None, str], str] = {}
+    canonical_by_key: dict[tuple[str, tuple[str, ...], str | None, str], str] = {}
     replacements: dict[str, str] = {}
     for part_id, part in asset.parts.items():
         if part.fingerprint is None or part.mesh is None:
             continue
         material_indices = None
         if part.mesh.material_indices is not None:
-            material_indices = tuple(int(value) for value in part.mesh.material_indices.tolist())
+            material_indices = array_digest_required(part.mesh.material_indices.astype(np.int64, copy=False))
         key = (part.fingerprint, tuple(part.material_ids), material_indices, _metadata_key(part.metadata))
         canonical_id = canonical_by_key.get(key)
         if canonical_id is None:

@@ -44,7 +44,7 @@ def _sized_mesh(size: float) -> Mesh:
     (
         "profile",
         "name",
-        "sag",
+        "sag_ratio",
         "angle",
         "target_triangles",
         "uv0",
@@ -81,7 +81,7 @@ def _sized_mesh(size: float) -> Mesh:
         (
             profiles.realtime_desktop(),
             "realtime-desktop",
-            0.1,
+            0.0002,
             15.0,
             1_000_000,
             "box",
@@ -99,7 +99,7 @@ def _sized_mesh(size: float) -> Mesh:
         (
             profiles.realtime_web(),
             "realtime-web",
-            0.2,
+            0.0002,
             20.0,
             250_000,
             "box",
@@ -117,7 +117,7 @@ def _sized_mesh(size: float) -> Mesh:
         (
             profiles.realtime_mobile(),
             "realtime-mobile",
-            0.25,
+            0.0002,
             20.0,
             150_000,
             "box",
@@ -135,7 +135,7 @@ def _sized_mesh(size: float) -> Mesh:
         (
             profiles.virtual_reality(),
             "virtual-reality",
-            0.15,
+            0.0002,
             15.0,
             500_000,
             "box",
@@ -153,7 +153,7 @@ def _sized_mesh(size: float) -> Mesh:
         (
             profiles.augmented_reality(),
             "augmented-reality",
-            0.3,
+            0.0002,
             22.5,
             100_000,
             "box",
@@ -171,7 +171,7 @@ def _sized_mesh(size: float) -> Mesh:
         (
             profiles.mixed_reality(),
             "mixed-reality",
-            0.35,
+            0.0002,
             25.0,
             75_000,
             "box",
@@ -191,7 +191,7 @@ def _sized_mesh(size: float) -> Mesh:
 def test_profiles_match_documented_default_table(
     profile: ConversionProfile,
     name: str,
-    sag: float | None,
+    sag_ratio: float | None,
     angle: float | None,
     target_triangles: int | None,
     uv0: str,
@@ -210,12 +210,18 @@ def test_profiles_match_documented_default_table(
     assert profiles.by_name(name).to_dict() == profile.to_dict()
     assert profile.stage.uv0 == uv0
     assert profile.stage.uv1 is None
+    if max_texture_resolution is None:
+        assert not profile.stage.atlas.enabled
+    else:
+        assert profile.stage.atlas.enabled
+        assert profile.stage.atlas.max_size == max_texture_resolution
 
-    if sag is None:
+    if sag_ratio is None:
         assert profile.tessellation is None
     else:
         assert profile.tessellation is not None
-        assert profile.tessellation.sag == sag
+        assert profile.tessellation.sag is None
+        assert profile.tessellation.sag_ratio == sag_ratio
         assert profile.tessellation.angle == angle
 
     if target_triangles is None:
@@ -302,7 +308,8 @@ def test_builtin_profiles_expose_unity_workflow_recipes() -> None:
     web_recipe = profiles.realtime_web().recipe
     assert web_recipe is not None
     choices = {choice.setting: choice for choice in web_recipe.choices}
-    assert choices["sag_and_angle"].value == {"sag": 0.2, "angle": 20.0}
+    assert choices["sag_and_angle"].value == {"sag_ratio": 0.0002, "angle": 20.0}
+    assert choices["material_atlas"].value == {"enabled": True, "max_size": 2048}
     assert choices["texture_compression"].status == "metadata_only"
     assert choices["gltf_geometry_compression"].status == "metadata_only"
 
@@ -335,6 +342,8 @@ unity_reference_triangles = [30000, 60000]
     assert profile.budget.max_triangles == 42_000
     assert profile.budget.max_vertices == 126_000
     assert profile.budget.max_texture_resolution == 512
+    assert profile.stage.atlas.enabled
+    assert profile.stage.atlas.max_size == 512
     assert profile.budget.max_draw_calls == 250
     assert profile.budget.supported_compression == ("meshopt",)
     assert profile.budget.supported_runtime_extensions == ("KHR_mesh_quantization", "EXT_meshopt_compression")
@@ -529,12 +538,18 @@ def test_size_adaptive_tessellation_requires_bands() -> None:
         (lambda: RemoveHolesOptions(through=False, blind=False, surface=False), "hole type"),
         (lambda: RemoveOccludedOptions(precision=0), "precision"),
         (lambda: LODLevel(screen_coverage=0.0, target_ratio=0.5), "screen_coverage"),
+        (
+            lambda: LODLevel(screen_coverage=0.5, target_ratio=0.5, switch_distance_override=-1.0),
+            "switch_distance_override",
+        ),
         (lambda: LODGeneratorOptions(preset="bad"), "preset"),
         (lambda: fc.LODOptions(()), "at least one"),
         (lambda: fc.LODOptions((1.0,)), "greater than 0"),
         (lambda: fc.LODOptions((0.25, 0.5)), "sorted"),
         (lambda: fc.LODOptions((0.5,), mode="payloads"), "LOD mode"),
         (lambda: fc.LODOptions((0.5,), screen_coverage=(0.5, 0.25)), "one value per LOD"),
+        (lambda: fc.LODOptions((0.5,), switch_distance_overrides=(1.0, 2.0)), "one value per LOD"),
+        (lambda: fc.LODOptions((0.5,), switch_distance_overrides=(-1.0,)), "switch_distance_overrides"),
         (lambda: fc.LODOptions((0.5,), tiny_part_screen_size=-1.0), "tiny_part_screen_size"),
         (lambda: fc.GltfExportOptions(texture_compression="zip"), "texture_compression"),
         (lambda: fc.GltfExportOptions(texture_fallback_format="webp"), "texture_fallback_format"),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from dataclasses import replace as dataclass_replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 
@@ -639,47 +640,59 @@ class Asset:
         scope = self._operation_scope(where)
         before = self.stats()
         warning_count = len(self.report.warnings)
+        part_ids = _mesh_part_ids(scope.asset, scope.selected_part_ids)
+        diagonal = _mesh_selection_bbox_diagonal(scope.asset, part_ids)
+        resolved_tolerance = opts.resolved_tolerance(diagonal)
+        effective_opts = dataclass_replace(opts, tolerance=resolved_tolerance)
         tolerance_policy = _tolerance_policy(
             scope.asset,
-            length_tolerance=opts.tolerance,
-            area_tolerance=opts.area_epsilon,
+            length_tolerance=effective_opts.tolerance,
+            area_tolerance=effective_opts.area_epsilon,
             length_key="vertex_merge_tolerance",
             area_key="degenerate_area_epsilon",
             operations={
-                "vertex_merge": "enabled" if opts.merge_vertices else "disabled",
-                "degenerate_polygon_cleanup": "enabled" if opts.delete_degenerate else "disabled",
-                "face_orientation": _repair_face_orientation_operation(opts),
-                "normal_orientation": _repair_normal_orientation_operation(opts),
-                "quality_diagnostics": "enabled" if opts.quality_report else "disabled",
-                "t_junction_sewing": "enabled" if opts.fix_t_junctions else "disabled",
-                "boundary_gap_stitching": "enabled" if opts.stitch_boundary_gaps else "disabled",
-                "non_manifold_edge_cracking": "enabled" if opts.crack_non_manifold_edges else "disabled",
-                "sliver_face_removal": "enabled" if opts.remove_sliver_faces else "disabled",
+                "vertex_merge": "enabled" if effective_opts.merge_vertices else "disabled",
+                "degenerate_polygon_cleanup": "enabled" if effective_opts.delete_degenerate else "disabled",
+                "face_orientation": _repair_face_orientation_operation(effective_opts),
+                "normal_orientation": _repair_normal_orientation_operation(effective_opts),
+                "quality_diagnostics": "enabled" if effective_opts.quality_report else "disabled",
+                "t_junction_sewing": "enabled" if effective_opts.fix_t_junctions else "disabled",
+                "boundary_gap_stitching": "enabled" if effective_opts.stitch_boundary_gaps else "disabled",
+                "non_manifold_edge_cracking": "enabled" if effective_opts.crack_non_manifold_edges else "disabled",
+                "sliver_face_removal": "enabled" if effective_opts.remove_sliver_faces else "disabled",
             },
         )
+        tolerance_policy["vertex_merge_tolerance_resolution"] = "explicit" if opts.tolerance > 0.0 else "bbox_derived"
         repair_unit_metadata = _tolerance_policy_metadata("repair", tolerance_policy)
         with timed_step() as timer:
             asset = scope.asset.copy(keep_source=True)
-            part_ids = _mesh_part_ids(asset, scope.selected_part_ids)
+            if opts.tolerance == 0.0 and resolved_tolerance == 0.0:
+                asset.report.add_warning(
+                    "repair tolerance auto-derivation found no mesh geometry in the selection; "
+                    "vertex merge is disabled (tolerance=0) - run tessellate first or pass an "
+                    "explicit tolerance"
+                )
             payloads: list[_MeshOpPayload] = []
             for part_id in part_ids:
                 part = asset.parts[part_id]
                 if part.mesh is None:
                     raise AssertionError("selected repair part must have a mesh")
                 payloads.append(
-                    _MeshOpPayload(part_id=part.id, mesh=part.mesh, options=opts, unit_metadata=repair_unit_metadata)
+                    _MeshOpPayload(
+                        part_id=part.id, mesh=part.mesh, options=effective_opts, unit_metadata=repair_unit_metadata
+                    )
                 )
 
-            for repaired in parallel_map(payloads, _repair_part_worker, jobs=opts.jobs, executor="process"):
+            for repaired in parallel_map(payloads, _repair_part_worker, jobs=effective_opts.jobs, executor="process"):
                 part = asset.parts[repaired.part_id]
                 part.mesh = repaired.mesh
                 part.fingerprint = repaired.fingerprint
-                for warning in _repair_warnings(part, opts):
+                for warning in _repair_warnings(part, effective_opts):
                     asset.report.add_warning(warning)
         step_warnings = asset.report.warnings[warning_count:]
         asset.report.add_step(
             "repair",
-            options=_options_with_scope({**opts.to_dict(), "tolerance_policy": tolerance_policy}, scope),
+            options=_options_with_scope({**effective_opts.to_dict(), "tolerance_policy": tolerance_policy}, scope),
             before=before,
             after=_repair_report_stats(asset),
             duration=timer.duration,
@@ -1670,6 +1683,20 @@ def _mesh_part_ids(asset: Asset, selected_part_ids: set[str] | None) -> list[str
     ]
 
 
+def _mesh_selection_bbox_diagonal(asset: Asset, part_ids: Sequence[str]) -> float:
+    bounds: list[tuple[np.ndarray, np.ndarray]] = []
+    for part_id in part_ids:
+        part = asset.parts[part_id]
+        if part.mesh is None or part.mesh.vertex_count == 0:
+            continue
+        bounds.append(part.mesh.bounds())
+    if not bounds:
+        return 0.0
+    mins = np.vstack([item[0] for item in bounds]).min(axis=0)
+    maxs = np.vstack([item[1] for item in bounds]).max(axis=0)
+    return float(np.linalg.norm(maxs - mins))
+
+
 def _repair_warnings(part: Part, options: RepairOptions) -> list[str]:
     if part.mesh is None:
         return []
@@ -1734,7 +1761,7 @@ def _part_draw_call_slots(part: Part) -> int:
         return 0
     if mesh.material_indices is None or mesh.material_indices.size == 0:
         return 1
-    return max(1, len(set(mesh.material_indices.astype(int).tolist())))
+    return max(1, int(np.unique(mesh.material_indices.astype(np.int64, copy=False)).shape[0]))
 
 
 def _part_material_slot_count(part: Part, draw_call_slots: int) -> int:
@@ -1749,7 +1776,7 @@ def _part_used_material_ids(part: Part) -> set[str]:
     if part.mesh.material_indices is None or part.mesh.material_indices.size == 0:
         return set(part.material_ids)
     used: set[str] = set()
-    for index in set(part.mesh.material_indices.astype(int).tolist()):
+    for index in np.unique(part.mesh.material_indices.astype(np.int64, copy=False)).tolist():
         if 0 <= index < len(part.material_ids):
             used.add(part.material_ids[index])
     return used

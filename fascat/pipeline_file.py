@@ -138,6 +138,7 @@ _TESSELLATION_KEYS = frozenset(
         "create_normals",
         "keep_brep",
         "reuse_existing_meshes",
+        "max_triangles_per_part",
         "part_settings",
     }
 )
@@ -252,7 +253,7 @@ _SCENE_KEYS = frozenset(
     }
 )
 _BAKE_MATERIAL_KEYS = frozenset(
-    {"maps_resolution", "force_uv_generation", "uv_channel", "padding", "bake", "merge_output"}
+    {"maps_resolution", "lightmap_resolution", "force_uv_generation", "uv_channel", "padding", "bake", "merge_output"}
 )
 _TEXTURE_PROCESS_KEYS = frozenset({"max_resolution", "dedupe", "fallback_format", "png_compression", "jpeg_quality"})
 _DECIMATE_KEYS = frozenset(
@@ -310,6 +311,7 @@ _LOD_KEYS = frozenset(
         "ratios",
         "mode",
         "screen_coverage",
+        "switch_distance_overrides",
         "per_part_budget",
         "drop_tiny_parts",
         "tiny_part_screen_size",
@@ -860,7 +862,7 @@ def _apply_step(asset: Asset, step: PipelineStep, where: Filter | None) -> Asset
 
 def _tessellation(values: dict[str, object]) -> TessellationOptions:
     return TessellationOptions(
-        sag=_as_float(values.get("sag", 0.1)),
+        sag=_as_optional_float(values.get("sag")),
         sag_ratio=_as_optional_float(values.get("sag_ratio")),
         angle=_as_float(values.get("angle", 15.0)),
         relative=bool(values.get("relative", True)),
@@ -879,6 +881,7 @@ def _tessellation(values: dict[str, object]) -> TessellationOptions:
         create_normals=bool(values.get("create_normals", True)),
         keep_brep=bool(values.get("keep_brep", False)),
         reuse_existing_meshes=bool(values.get("reuse_existing_meshes", True)),
+        max_triangles_per_part=_as_optional_int(values.get("max_triangles_per_part")),
         part_settings=cast(dict[str, dict[str, object]], values.get("part_settings", {})),
     )
 
@@ -948,8 +951,8 @@ def _stage_options(values: dict[str, object]) -> StageOptions:
         merge_equivalent_materials=bool(values.get("merge_equivalent_materials", False)),
         normals=bool(values.get("normals", True)),
         normal_mode=cast(Any, _literal(values.get("normal_mode", "smooth"))),
-        normal_weighting=cast(Any, _literal(values.get("normal_weighting", "angle"))),
-        hard_edge_angle=_as_float(values.get("hard_edge_angle", 30.0)),
+        normal_weighting=cast(Any, _literal(values.get("normal_weighting", "area"))),
+        hard_edge_angle=_as_float(values.get("hard_edge_angle", 45.0)),
         preserve_face_boundaries=bool(values.get("preserve_face_boundaries", False)),
         override_normals=bool(values.get("override_normals", True)),
         tangents=bool(values.get("tangents", False)),
@@ -1030,6 +1033,7 @@ def _scene_options(values: dict[str, object]) -> SceneOptimizeOptions:
 def _bake_material_options(values: dict[str, object]) -> BakeMaterialOptions:
     return BakeMaterialOptions(
         maps_resolution=_as_int(values.get("maps_resolution", 2048)),
+        lightmap_resolution=_as_int(values.get("lightmap_resolution", 1024)),
         force_uv_generation=bool(values.get("force_uv_generation", False)),
         uv_channel=_as_int(values.get("uv_channel", 0)),
         padding=_as_int(values.get("padding", 4)),
@@ -1112,6 +1116,7 @@ def _lod_options(values: dict[str, object]) -> LODOptions:
         ratios=cast(Any, ratios),
         mode=cast(Any, values.get("mode", "variants")),
         screen_coverage=cast(Any, values.get("screen_coverage")),
+        switch_distance_overrides=cast(Any, values.get("switch_distance_overrides")),
         per_part_budget=bool(values.get("per_part_budget", False)),
         drop_tiny_parts=bool(values.get("drop_tiny_parts", False)),
         tiny_part_screen_size=_as_float(values.get("tiny_part_screen_size", 2.0)),
@@ -1155,6 +1160,7 @@ def _lod_levels(value: object) -> tuple[LODLevel, ...]:
             LODLevel(
                 screen_coverage=_as_float(item.get("screen_coverage")),
                 target_ratio=_as_float(item.get("target_ratio")),
+                switch_distance_override=_as_optional_float(item.get("switch_distance_override")),
             )
         )
     return tuple(levels)

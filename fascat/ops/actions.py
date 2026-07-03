@@ -18,6 +18,7 @@ from fascat.asset import Asset, Node, Part
 from fascat.image import ImageResource
 from fascat.material import Material
 from fascat.mesh import Mesh
+from fascat.ops._arrays import remap_sliced_face_group, sliced_face_lookup
 from fascat.ops.parallel import parallel_map
 from fascat.options import (
     BakeMaterialOptions,
@@ -94,6 +95,7 @@ def bake_materials_asset(
             "baked_material": baked.id,
             "baked_maps": ",".join(options.bake),
             "baked_maps_resolution": str(options.maps_resolution),
+            "baked_lightmap_resolution": str(options.lightmap_resolution),
             "baked_uv_channel": str(options.uv_channel),
             "baked_padding": str(options.padding),
         }
@@ -315,9 +317,15 @@ def run_lod_generators_asset(
 
     ratios = tuple(level.target_ratio for level in options.levels)
     screen_coverage = tuple(level.screen_coverage for level in options.levels)
+    switch_distance_overrides = tuple(level.switch_distance_override for level in options.levels)
     result = build_lods(
         asset,
-        LODOptions(ratios=ratios, screen_coverage=screen_coverage, jobs=options.jobs),
+        LODOptions(
+            ratios=ratios,
+            screen_coverage=screen_coverage,
+            switch_distance_overrides=switch_distance_overrides,
+            jobs=options.jobs,
+        ),
         selected_part_ids=selected_part_ids,
     )
     coverage = ",".join(f"{level.screen_coverage:.9g}" for level in options.levels)
@@ -547,7 +555,7 @@ def _prepare_bake_atlas(asset: Asset, part_ids: list[str], options: BakeMaterial
                 mesh = mesh.unwrap_uv(
                     options.uv_channel,
                     padding=options.padding,
-                    resolution=options.maps_resolution,
+                    resolution=options.lightmap_resolution,
                 )
             except RuntimeError:
                 asset.report.add_warning(
@@ -567,7 +575,7 @@ def _atlas_rects(part_ids: list[str], options: BakeMaterialOptions) -> dict[str,
     rows = int(math.ceil(count / columns))
     cell_width = 1.0 / columns
     cell_height = 1.0 / rows
-    margin = min(0.45 * min(cell_width, cell_height), options.padding / max(1.0, float(options.maps_resolution)))
+    margin = min(0.45 * min(cell_width, cell_height), options.padding / max(1.0, float(options.lightmap_resolution)))
     rects: dict[str, tuple[float, float, float, float]] = {}
     for index, part_id in enumerate(part_ids):
         column = index % columns
@@ -614,6 +622,7 @@ def _pack_mesh_uvs_into_rect(
     result.metadata[f"{prefix}_atlas_rect"] = ",".join(f"{value:.9g}" for value in rect)
     result.metadata[f"{prefix}_atlas_padding_pixels"] = str(options.padding)
     result.metadata[f"{prefix}_atlas_resolution"] = str(options.maps_resolution)
+    result.metadata[f"{prefix}_lightmap_resolution"] = str(options.lightmap_resolution)
     result.metadata[f"{prefix}_padding_status"] = "applied" if options.padding else "not_requested"
     result.tangents = None
     return result
@@ -953,10 +962,12 @@ def _baked_material(
         "baked": "true",
         "baked_maps": ",".join(options.bake),
         "maps_resolution": str(options.maps_resolution),
+        "lightmap_resolution": str(options.lightmap_resolution),
         "padding": str(options.padding),
         "source_material_ids": ",".join(source_material_ids),
         "baked_texture_kind": "raster_atlas",
         "baked_texture_resolution": str(options.maps_resolution),
+        "baked_lightmap_resolution": str(options.lightmap_resolution),
     }
     metadata.update(_baked_texture_metadata(asset, image_ids))
     return Material(
@@ -1797,13 +1808,17 @@ def _sample_mesh_faces(mesh: Mesh, target_triangles: int) -> Mesh:
         return mesh.copy()
     face_indices = np.unique(np.linspace(0, mesh.triangle_count - 1, target, dtype=np.int64))
     while face_indices.shape[0] < target:
-        missing = [index for index in range(mesh.triangle_count) if index not in set(face_indices.astype(int).tolist())]
-        face_indices = np.sort(np.concatenate([face_indices, np.asarray(missing[: target - face_indices.shape[0]])]))
+        missing = np.setdiff1d(
+            np.arange(mesh.triangle_count, dtype=np.int64),
+            face_indices,
+            assume_unique=True,
+        )
+        face_indices = np.sort(np.concatenate([face_indices, missing[: target - face_indices.shape[0]]]))
     return _slice_faces(mesh, face_indices).remove_unreferenced_vertices()
 
 
 def _slice_faces(mesh: Mesh, face_indices: IntArray) -> Mesh:
-    face_lookup = {int(face_index): local_index for local_index, face_index in enumerate(face_indices.tolist())}
+    face_lookup = sliced_face_lookup(face_indices, mesh.triangle_count)
     return Mesh(
         points=mesh.points.copy(),
         faces=mesh.faces[face_indices].copy(),
@@ -1811,13 +1826,7 @@ def _slice_faces(mesh: Mesh, face_indices: IntArray) -> Mesh:
         tangents=None if mesh.tangents is None else mesh.tangents.copy(),
         uvs={channel: values.copy() for channel, values in mesh.uvs.items()},
         material_indices=None if mesh.material_indices is None else mesh.material_indices[face_indices].copy(),
-        face_groups={
-            name: np.asarray(
-                [face_lookup[int(face_index)] for face_index in group.tolist() if int(face_index) in face_lookup],
-                dtype=np.int64,
-            )
-            for name, group in mesh.face_groups.items()
-        },
+        face_groups={name: remap_sliced_face_group(face_lookup, group) for name, group in mesh.face_groups.items()},
         metadata=dict(mesh.metadata),
     )
 
@@ -2672,7 +2681,7 @@ def _compact_material_slots(part: Part, mesh: Mesh) -> None:
     if mesh.material_indices is None:
         return
     material_ids = part.material_ids
-    used = sorted({int(index) for index in mesh.material_indices.astype(int).tolist()})
+    used = np.unique(mesh.material_indices.astype(np.int64, copy=False)).tolist()
     if not used or any(index < 0 or index >= len(material_ids) for index in used):
         return
     remap = {old: new for new, old in enumerate(used)}

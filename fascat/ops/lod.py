@@ -107,6 +107,7 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
         "created" if scene_proxy is not None else "no_meshes" if options.scene_far_proxy else "not_requested"
     )
     result.metadata["lod_screen_coverage"] = ",".join(f"{value:.9g}" for value in screen_coverage)
+    result.metadata["lod_level_switch_distance_sources"] = ",".join(_switch_distance_sources(options))
     result.metadata["lod_generated_parts"] = str(generated_parts)
     result.metadata["lod_skipped_no_mesh_parts"] = str(skipped_parts)
     result.metadata["lod_source_vertices"] = str(source_vertices)
@@ -200,13 +201,20 @@ def _build_part_lods(
     level_texture_bake: list[str] = []
     level_culling_granularity: list[str] = []
     level_switch_distances: list[float] = []
+    level_switch_distance_sources: list[str] = []
     level_policy_advisory_values: list[str] = []
     level_simplification_sources: list[str] = []
     for index, ratio in enumerate(options.ratios):
         coverage = screen_coverage[index]
         far_lod = _is_far_lod(ratio, coverage)
-        switch_distance = _switch_distance(diagonal, coverage, options.engine_profile)
+        switch_distance, switch_distance_source = _switch_distance_for_level(
+            diagonal,
+            coverage,
+            options.engine_profile,
+            _switch_distance_override(options, index),
+        )
         level_switch_distances.append(switch_distance)
+        level_switch_distance_sources.append(switch_distance_source)
         simplification_source = "source" if index == 0 else "previous"
         policy_metadata = _level_policy_metadata(
             part_occurrences=part_occurrences,
@@ -241,6 +249,7 @@ def _build_part_lods(
                 "lod_engine_profile": options.engine_profile,
                 "lod_export_mode": export_mode,
                 "lod_switch_distance": f"{switch_distance:.9g}",
+                "lod_switch_distance_source": switch_distance_source,
                 **policy_metadata,
             }
             lod_meshes.append(lod)
@@ -265,6 +274,7 @@ def _build_part_lods(
             "lod_export_mode": export_mode,
             "lod_engine_profile": options.engine_profile,
             "lod_switch_distance": f"{switch_distance:.9g}",
+            "lod_switch_distance_source": switch_distance_source,
             "lod_per_part_budget": str(options.per_part_budget).lower(),
             "lod_simplification_source": actual_simplification_source,
             **policy_metadata,
@@ -310,6 +320,7 @@ def _build_part_lods(
         "lod_level_texture_bake": ",".join(level_texture_bake),
         "lod_level_culling_granularity": ",".join(level_culling_granularity),
         "lod_level_switch_distances": ",".join(f"{value:.9g}" for value in level_switch_distances),
+        "lod_level_switch_distance_sources": ",".join(level_switch_distance_sources),
         "lod_switching_validation_status": _switching_validation_status(level_switch_distances),
         "lod_level_policy_advisory": ",".join(level_policy_advisory_values),
         "lod_level_simplification_source": ",".join(level_simplification_sources),
@@ -671,6 +682,30 @@ def _switch_distance(diagonal: float, screen_coverage: float, engine_profile: st
     if engine_profile == "unreal":
         return diagonal / math.sqrt(coverage)
     return diagonal / coverage
+
+
+def _switch_distance_override(options: LODOptions, index: int) -> float | None:
+    if options.switch_distance_overrides is None:
+        return None
+    return options.switch_distance_overrides[index]
+
+
+def _switch_distance_for_level(
+    diagonal: float,
+    screen_coverage: float,
+    engine_profile: str,
+    override: float | None,
+) -> tuple[float, str]:
+    if override is not None:
+        return override, "override"
+    return _switch_distance(diagonal, screen_coverage, engine_profile), "formula"
+
+
+def _switch_distance_sources(options: LODOptions) -> tuple[str, ...]:
+    return tuple(
+        "override" if _switch_distance_override(options, index) is not None else "formula"
+        for index in range(len(options.ratios))
+    )
 
 
 def _switching_validation_status(distances: list[float]) -> str:

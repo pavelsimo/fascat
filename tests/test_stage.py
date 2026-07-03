@@ -144,11 +144,41 @@ def test_stage_records_uv_and_atlas_workflow_metadata() -> None:
     assert staged_mesh.metadata["uv0_projection_status"] == "projected"
     assert staged_mesh.metadata["uv0_projection_scope"] == "local"
     assert staged_mesh.metadata["uv0_projection_destination_channel"] == "0"
+    assert staged_mesh.metadata["uv0_projection_uv3d_size"] == "8"
+    assert staged_mesh.metadata["uv0_projection_uv3d_size_source"] == "texel_density"
+    assert staged_mesh.metadata["uv0_projection_texel_density"] == "256.0"
+    assert staged_mesh.metadata["uv0_projection_texel_density_texture_size"] == "2048"
     assert staged_mesh.metadata["uv0_workflow_steps"] == "aabb_project,validate"
     assert staged.metadata["stage_aabb_projection_channels"] == "2"
     assert staged.report.steps[-1].after["stage_aabb_projection_channels"] == 2
     assert staged.materials["mat"].metadata["atlas"] == "atlas_0"
     assert staged.materials["mat"].metadata["texture_bake_hooks"] == "base_color,opacity"
+
+
+def test_stage_aabb_projection_scales_uvs_from_texel_density() -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [2, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]], dtype=int),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    staged = asset.stage(
+        StageOptions(
+            uv0="box",
+            uv1=None,
+            unwrap=UnwrapOptions(texel_density=500.0),
+            atlas=AtlasOptions(max_size=1000),
+        )
+    )
+    staged_mesh = staged.parts["part"].mesh
+
+    assert staged_mesh is not None
+    assert np.allclose(staged_mesh.uvs[0], np.array([[0.0, 0.0], [0.0, 1.0], [0.5, 0.0]]))
+    assert staged_mesh.metadata["uv0_projection_uv3d_size"] == "2"
+    assert staged_mesh.metadata["uv0_projection_uv3d_size_source"] == "texel_density"
 
 
 def test_stage_aabb_projection_records_shared_uv3d_size_policy() -> None:
@@ -195,6 +225,7 @@ def test_stage_aabb_projection_records_shared_uv3d_size_policy() -> None:
     assert staged_mesh.metadata["uv0_projection_units"] == "metre"
     assert staged_mesh.metadata["uv0_projection_meters_per_unit"] == "1"
     assert staged_mesh.metadata["uv0_projection_uv3d_size"] == "2"
+    assert staged_mesh.metadata["uv0_projection_uv3d_size_source"] == "explicit"
     assert staged_mesh.metadata["uv0_workflow_steps"] == "aabb_project,validate"
 
 
@@ -839,6 +870,52 @@ def test_stage_repacks_and_pads_unwrapped_bake_uvs() -> None:
     assert staged.metadata["stage_bake_uv_channels_repacked"] == "1"
     assert staged.report.steps[-1].after["stage_bake_uv_channels_repacked"] == 1
     assert warnings == []
+
+
+def test_stage_clamps_unwrapped_bake_uv_padding(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fascat.ops import stage as stage_ops
+
+    captured: dict[str, int] = {}
+
+    def fake_unwrap_uv(self: Mesh, channel: int = 0, *, padding: int = 0, resolution: int = 0) -> Mesh:
+        captured["padding"] = padding
+        mesh = self.copy()
+        mesh.uvs[channel] = np.array([[0.1, 0.1], [0.9, 0.1], [0.1, 0.9]], dtype=float)
+        mesh.tangents = None
+        mesh.metadata.update(
+            {
+                f"uv{channel}": "xatlas",
+                f"uv{channel}_pack_status": "packed",
+                f"uv{channel}_padding_status": "applied" if padding else "not_requested",
+                f"uv{channel}_pack_padding": str(padding),
+                f"uv{channel}_pack_resolution": str(resolution),
+                f"uv{channel}_pack_width": "1",
+                f"uv{channel}_pack_height": "1",
+                f"uv{channel}_pack_utilization": "1",
+            }
+        )
+        return mesh
+
+    monkeypatch.setattr(stage_ops, "_require_xatlas", lambda: None)
+    monkeypatch.setattr(Mesh, "unwrap_uv", fake_unwrap_uv)
+    asset = _single_part_asset(
+        Mesh(
+            points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+            faces=np.array([[0, 1, 2]], dtype=int),
+        )
+    )
+
+    staged = asset.stage(StageOptions(uv0="none", uv1="unwrap", unwrap=UnwrapOptions(padding=1)))
+    staged_mesh = staged.parts["part"].mesh
+
+    assert captured["padding"] == 2
+    assert staged_mesh is not None
+    assert staged_mesh.metadata["uv1_padding"] == "2"
+    assert staged_mesh.metadata["uv1_pack_padding"] == "2"
+    assert any(
+        "part part uv1: padding 1px is below the 2px bake-domain minimum" in warning
+        for warning in staged.report.warnings
+    )
 
 
 def _overlapping_uv_mesh(channel: int) -> Mesh:

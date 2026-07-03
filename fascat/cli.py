@@ -742,6 +742,10 @@ def cmd_convert(
         float | None,
         typer.Option("--max-polygon-length", help="Report tessellated polygon edges longer than this length."),
     ] = None,
+    max_triangles_per_part: Annotated[
+        int | None,
+        typer.Option("--max-triangles-per-part", help="Fail if tessellation produces more triangles for any part."),
+    ] = None,
     min_edge_length: Annotated[
         float | None,
         typer.Option("--min-edge-length", help="Collapse tessellated edges shorter than this length."),
@@ -846,7 +850,7 @@ def cmd_convert(
     normal_weighting: Annotated[
         NormalWeighting,
         typer.Option("--normal-weighting", help="Normal averaging weights for smooth or hard-edge normals."),
-    ] = NormalWeighting.ANGLE,
+    ] = NormalWeighting.AREA,
     preserve_face_boundaries: Annotated[
         bool,
         typer.Option("--preserve-face-boundaries", help="Treat CAD face-group boundaries as hard normal edges."),
@@ -1196,6 +1200,10 @@ def cmd_convert(
         int,
         typer.Option("--maps-resolution", help="Requested bake texture resolution metadata in pixels."),
     ] = 2048,
+    lightmap_resolution: Annotated[
+        int,
+        typer.Option("--lightmap-resolution", help="Resolution used for generated bake/lightmap UV packing."),
+    ] = 1024,
     force_uv_generation: Annotated[
         bool,
         typer.Option("--force-uv-generation", help="Generate UVs before recording baked material textures."),
@@ -1366,7 +1374,7 @@ def cmd_convert(
     hard_edge_angle: Annotated[
         float,
         typer.Option("--hard-edge-angle", help="Angle threshold for hard-edge preservation."),
-    ] = 30.0,
+    ] = 45.0,
     preserve_holes: Annotated[
         bool,
         typer.Option("--preserve-holes", help="Protect open boundary faces during simplification."),
@@ -1533,6 +1541,7 @@ def cmd_convert(
         "ratio": ratio,
         "max_edge_length": max_edge_length,
         "max_polygon_length": max_polygon_length,
+        "max_triangles_per_part": max_triangles_per_part,
         "min_edge_length": min_edge_length,
         "preserve_boundaries": preserve_boundaries,
         "curvature_adaptive": curvature_adaptive,
@@ -1632,6 +1641,7 @@ def cmd_convert(
         "instance_similarity_tolerance": instance_similarity_tolerance,
         "bake_materials": bake_materials,
         "maps_resolution": maps_resolution,
+        "lightmap_resolution": lightmap_resolution,
         "force_uv_generation": force_uv_generation,
         "bake": bake,
         "ambient_occlusion_strategy": ambient_occlusion_strategy.value,
@@ -1758,6 +1768,8 @@ def cmd_convert(
         _fail(ctx, payload, "--max-edge-length must be greater than 0.", code=2)
     if max_polygon_length is not None and max_polygon_length <= 0.0:
         _fail(ctx, payload, "--max-polygon-length must be greater than 0.", code=2)
+    if max_triangles_per_part is not None and max_triangles_per_part <= 0:
+        _fail(ctx, payload, "--max-triangles-per-part must be greater than 0.", code=2)
     if min_edge_length is not None and max_edge_length is not None and min_edge_length > max_edge_length:
         _fail(ctx, payload, "--min-edge-length must be less than or equal to --max-edge-length.", code=2)
     if heal_tolerance <= 0.0:
@@ -1806,6 +1818,8 @@ def cmd_convert(
         _fail(ctx, payload, "--atlas-size must be greater than 0.", code=2)
     if maps_resolution <= 0:
         _fail(ctx, payload, "--maps-resolution must be greater than 0.", code=2)
+    if lightmap_resolution <= 0:
+        _fail(ctx, payload, "--lightmap-resolution must be greater than 0.", code=2)
     for option_name, value in {
         "--surface-tolerance": surface_tolerance,
         "--line-tolerance": line_tolerance,
@@ -1923,7 +1937,9 @@ def cmd_convert(
         tessellation = dataclass_replace(
             base_tessellation,
             sag=sag if sag is not None else base_tessellation.sag,
-            sag_ratio=sag_ratio if sag_ratio is not None else base_tessellation.sag_ratio,
+            sag_ratio=sag_ratio
+            if sag_ratio is not None
+            else (None if sag is not None else base_tessellation.sag_ratio),
             angle=angle if angle is not None else base_tessellation.angle,
             min_edge_length=min_edge_length if min_edge_length is not None else base_tessellation.min_edge_length,
             max_edge_length=max_edge_length if max_edge_length is not None else base_tessellation.max_edge_length,
@@ -1937,6 +1953,9 @@ def cmd_convert(
             quality_report=quality_report is not None or base_tessellation.quality_report,
             free_edge_report=free_edge_report or base_tessellation.free_edge_report,
             reuse_existing_meshes=reuse_existing_meshes,
+            max_triangles_per_part=max_triangles_per_part
+            if max_triangles_per_part is not None
+            else base_tessellation.max_triangles_per_part,
         )
         optimize_options = profile_options.optimize
         if optimize_options is not None:
@@ -2113,6 +2132,7 @@ def cmd_convert(
         bake_options = (
             BakeMaterialOptions(
                 maps_resolution=maps_resolution,
+                lightmap_resolution=lightmap_resolution,
                 force_uv_generation=force_uv_generation,
                 uv_channel=0,
                 padding=uv_padding,

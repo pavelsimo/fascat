@@ -428,6 +428,33 @@ def test_lods_apply_engine_specific_export_modes() -> None:
     assert unreal.parts["part"].lod_meshes[0].metadata["lod_export_mode"] == "separate"
 
 
+def test_lods_allow_per_level_switch_distance_overrides() -> None:
+    mesh = _triangle_mesh()
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+    )
+
+    with_lods = asset.lods(
+        LODOptions(
+            ratios=(0.5, 0.25),
+            screen_coverage=(0.5, 0.25),
+            switch_distance_overrides=(12.0, None),
+        )
+    )
+    part = with_lods.parts["part"]
+    distances = [float(value) for value in part.metadata["lod_level_switch_distances"].split(",")]
+
+    assert distances[0] == pytest.approx(12.0)
+    assert distances[1] == pytest.approx(np.sqrt(2.0) / 0.25)
+    assert part.metadata["lod_level_switch_distance_sources"] == "override,formula"
+    assert with_lods.metadata["lod_level_switch_distance_sources"] == "override,formula"
+    assert part.lod_meshes[0].metadata["lod_switch_distance"] == "12"
+    assert part.lod_meshes[0].metadata["lod_switch_distance_source"] == "override"
+    assert part.lod_meshes[1].metadata["lod_switch_distance_source"] == "formula"
+    assert with_lods.report.steps[-1].options["switch_distance_overrides"] == [12.0, None]
+
+
 def test_lods_can_build_scene_level_far_proxy() -> None:
     translate = np.eye(4, dtype=float)
     translate[0, 3] = 2.0

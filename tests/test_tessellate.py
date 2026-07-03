@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from fascat.asset import Asset, Node, Part
+from fascat.errors import FascatError
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.ops.tessellate import (
@@ -23,6 +24,13 @@ def triangle_mesh() -> Mesh:
     return Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
         faces=np.array([[0, 1, 2]], dtype=int),
+    )
+
+
+def two_triangle_mesh() -> Mesh:
+    return Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [1, 3, 2]], dtype=int),
     )
 
 
@@ -50,6 +58,23 @@ def test_tessellate_deduplicates_parts_by_mesh_fingerprint() -> None:
 
     assert tessellated.part_count == 1
     assert part_ids == ["part_a", "part_a"]
+
+
+def test_default_tessellation_uses_relative_sag_ratio() -> None:
+    options = TessellationOptions()
+
+    assert options.sag is None
+    assert options.sag_ratio == 0.0002
+
+
+def test_tessellation_max_triangles_per_part_guard_rejects_large_output() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Bracket", part_id="part")]),
+        parts={"part": Part(id="part", name="Bracket", mesh=two_triangle_mesh())},
+    )
+
+    with pytest.raises(FascatError, match=r"part 'Bracket' tessellated to 2 triangles"):
+        asset.tessellate(TessellationOptions(max_triangles_per_part=1))
 
 
 def test_tessellate_keeps_distinct_per_face_material_assignments() -> None:
@@ -98,6 +123,48 @@ def test_tessellate_keeps_distinct_per_face_material_assignments() -> None:
 
     assert tessellated.part_count == 2
     assert part_ids == ["part_a", "part_b"]
+
+
+def test_tessellate_deduplicates_material_indices_across_integer_dtypes() -> None:
+    mesh = two_triangle_mesh()
+    fingerprint = mesh.fingerprint()
+    root = Node(
+        id="root",
+        name="root",
+        children=[
+            Node(id="node_a", name="A", part_id="part_a"),
+            Node(id="node_b", name="B", part_id="part_b"),
+        ],
+    )
+    left_mesh = mesh.copy()
+    left_mesh.material_indices = np.array([0, 1], dtype=np.int32)
+    right_mesh = mesh.copy()
+    right_mesh.material_indices = np.array([0, 1], dtype=np.int64)
+    asset = Asset(
+        root=root,
+        parts={
+            "part_a": Part(
+                id="part_a",
+                name="Part A",
+                mesh=left_mesh,
+                material_ids=["red", "blue"],
+                fingerprint=fingerprint,
+            ),
+            "part_b": Part(
+                id="part_b",
+                name="Part B",
+                mesh=right_mesh,
+                material_ids=["red", "blue"],
+                fingerprint=fingerprint,
+            ),
+        },
+    )
+
+    tessellated = asset.tessellate(TessellationOptions())
+    part_ids = [node.part_id for node in tessellated.root.walk() if node.part_id is not None]
+
+    assert tessellated.part_count == 1
+    assert part_ids == ["part_a", "part_a"]
 
 
 def test_tessellation_edge_controls_skip_second_pass_when_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -860,7 +927,7 @@ def test_tessellation_quality_advisor_flags_shiny_high_detail_parts() -> None:
         materials={material.id: material},
     )
 
-    tessellated = asset.tessellate(TessellationOptions(quality_report=True))
+    tessellated = asset.tessellate(TessellationOptions(sag=0.1, sag_ratio=None, quality_report=True))
     part = tessellated.parts["part"]
     advisories = json.loads(str(part.metadata["tessellation_quality_advisories"]))
     payload = json.loads(str(part.metadata["tessellation_quality"]))
@@ -950,7 +1017,9 @@ def test_detail_adaptive_tessellation_applies_material_metadata_settings(monkeyp
 
     monkeypatch.setattr(tessellate_module, "tessellate_shape", fake_tessellate_shape)
 
-    tessellated = asset.tessellate(TessellationOptions(detail_adaptive=True, quality_report=True))
+    tessellated = asset.tessellate(
+        TessellationOptions(sag=0.1, sag_ratio=None, detail_adaptive=True, quality_report=True)
+    )
     high = tessellated.parts["high"]
     plain = tessellated.parts["plain"]
 
@@ -1002,7 +1071,9 @@ def test_detail_adaptive_tessellation_applies_curved_brep_settings(monkeypatch) 
     monkeypatch.setattr(tessellate_module, "_curvature_sensitive_contexts", fake_curvature_contexts)
     monkeypatch.setattr(tessellate_module, "tessellate_shape", fake_tessellate_shape)
 
-    tessellated = asset.tessellate(TessellationOptions(detail_adaptive=True, quality_report=True))
+    tessellated = asset.tessellate(
+        TessellationOptions(sag=0.1, sag_ratio=None, detail_adaptive=True, quality_report=True)
+    )
     curved = tessellated.parts["curved"]
     plain = tessellated.parts["plain"]
 
