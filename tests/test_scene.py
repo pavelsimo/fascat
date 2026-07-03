@@ -126,6 +126,8 @@ def test_optimize_scene_batches_by_material_and_annotates_index_buffers() -> Non
 
 
 def test_instance_reconstruction_reuses_attribute_digests(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import fascat.ops._arrays as arrays_module
+
     mesh = _triangle().compute_normals()
     mesh.uvs[0] = np.array([[0, 0], [1, 0], [0, 1]], dtype=float)
     mesh.face_groups["source"] = np.array([0], dtype=int)
@@ -146,19 +148,20 @@ def test_instance_reconstruction_reuses_attribute_digests(monkeypatch) -> None: 
         materials={"steel": Material(id="steel", name="Steel", base_color=(0.7, 0.7, 0.7, 1.0))},
     )
     calls = 0
-    original_digest = scene_module._array_digest
+    original_digest = arrays_module.array_digest
 
     def counting_digest(values: np.ndarray | None) -> str | None:
         nonlocal calls
         calls += 1
         return original_digest(values)
 
-    monkeypatch.setattr(scene_module, "_array_digest", counting_digest)
+    monkeypatch.setattr(arrays_module, "array_digest", counting_digest)
+    monkeypatch.setattr(scene_module, "array_digest", counting_digest)
 
     optimized = asset.optimize_scene(SceneOptimizeOptions(instance_policy="preserve"))
 
     assert optimized.metadata["scene_reconstructed_part_count"] == "1"
-    assert calls == 8
+    assert calls == 10
 
 
 def test_optimize_scene_splits_large_merged_meshes() -> None:

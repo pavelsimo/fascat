@@ -7,6 +7,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from fascat.mesh import Mesh
 
 _TEXTURE_URI_METADATA_KEYS = (
@@ -106,7 +108,7 @@ def _mesh_material_ids(part: Any, mesh: Mesh) -> set[str]:
     if mesh.material_indices is None or mesh.material_indices.size == 0:
         return set(part.material_ids)
     used: set[str] = set()
-    for index in set(mesh.material_indices.astype(int).tolist()):
+    for index in np.unique(mesh.material_indices.astype(np.int64, copy=False)).tolist():
         if 0 <= index < len(part.material_ids):
             used.add(part.material_ids[index])
     return used

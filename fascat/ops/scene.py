@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-import hashlib
 import json
 
 import numpy as np
 
 from fascat.asset import Asset, Node, Part, identity_transform
 from fascat.mesh import Mesh
+from fascat.ops._arrays import (
+    array_digest,
+    array_digest_required,
+    remap_sliced_face_group,
+    sliced_face_lookup,
+)
 from fascat.options import MergeOptions, SceneOptimizeOptions
 
 _FLATTEN_SAFE_IDENTITY_RTOL = 1e-5
@@ -99,7 +104,7 @@ def _reconstruct_instances(asset: Asset, selected_node_ids: set[str], *, similar
     material_blocked_groups = 0
     attribute_blocked_groups = 0
     metadata_blocked_groups = 0
-    material_key_by_part: dict[str, tuple[tuple[str, ...], tuple[int, ...] | None]] = {}
+    material_key_by_part: dict[str, tuple[tuple[str, ...], str | None]] = {}
     attribute_key_by_part: dict[
         str,
         tuple[str | None, str | None, tuple[tuple[int, str], ...], tuple[tuple[str, str], ...]],
@@ -247,7 +252,7 @@ def _part_similarity_key(part: Part) -> tuple[object, ...] | None:
         _part_mesh_attribute_key(mesh),
         _part_metadata_key(part),
         mesh.points.shape,
-        _array_digest_required(mesh.faces),
+        array_digest_required(mesh.faces),
     )
 
 
@@ -271,10 +276,10 @@ def _mesh_payload_bytes(mesh: Mesh) -> int:
     return total
 
 
-def _part_material_key(part: Part) -> tuple[tuple[str, ...], tuple[int, ...] | None]:
+def _part_material_key(part: Part) -> tuple[tuple[str, ...], str | None]:
     material_indices = None
     if part.mesh is not None and part.mesh.material_indices is not None:
-        material_indices = tuple(int(value) for value in part.mesh.material_indices.tolist())
+        material_indices = array_digest_required(part.mesh.material_indices.astype(np.int64, copy=False))
     return (tuple(part.material_ids), material_indices)
 
 
@@ -288,26 +293,9 @@ def _part_mesh_attribute_key(
 ) -> tuple[str | None, str | None, tuple[tuple[int, str], ...], tuple[tuple[str, str], ...]]:
     if mesh is None:
         return (None, None, (), ())
-    uv_keys = tuple((channel, _array_digest_required(values)) for channel, values in sorted(mesh.uvs.items()))
-    face_group_keys = tuple((name, _array_digest_required(values)) for name, values in sorted(mesh.face_groups.items()))
-    return (_array_digest(mesh.normals), _array_digest(mesh.tangents), uv_keys, face_group_keys)
-
-
-def _array_digest_required(values: np.ndarray) -> str:
-    digest = _array_digest(values)
-    assert digest is not None
-    return digest
-
-
-def _array_digest(values: np.ndarray | None) -> str | None:
-    if values is None:
-        return None
-    array = np.ascontiguousarray(values)
-    digest = hashlib.sha1()
-    digest.update(str(array.dtype).encode("utf-8"))
-    digest.update(str(array.shape).encode("utf-8"))
-    digest.update(array.tobytes())
-    return digest.hexdigest()
+    uv_keys = tuple((channel, array_digest_required(values)) for channel, values in sorted(mesh.uvs.items()))
+    face_group_keys = tuple((name, array_digest_required(values)) for name, values in sorted(mesh.face_groups.items()))
+    return (array_digest(mesh.normals), array_digest(mesh.tangents), uv_keys, face_group_keys)
 
 
 def _metadata_key(metadata: dict[str, object]) -> str:
@@ -445,7 +433,8 @@ def _face_chunks(mesh: Mesh, *, max_vertices: int) -> list[np.ndarray]:
     current_vertices: set[int] = set()
     for face_index, face in enumerate(mesh.faces.astype(int).tolist()):
         face_vertices = set(face)
-        if current_faces and len(current_vertices | face_vertices) > max_vertices:
+        new_vertex_count = sum(vertex not in current_vertices for vertex in face_vertices)
+        if current_faces and len(current_vertices) + new_vertex_count > max_vertices:
             chunks.append(np.asarray(current_faces, dtype=np.int64))
             current_faces = []
             current_vertices = set()
@@ -460,7 +449,7 @@ def _slice_mesh(mesh: Mesh, face_indices: np.ndarray) -> Mesh:
     used = np.unique(mesh.faces[face_indices].reshape(-1))
     remap = np.full(mesh.vertex_count, -1, dtype=np.int64)
     remap[used] = np.arange(used.shape[0], dtype=np.int64)
-    face_lookup = {int(face_index): local_index for local_index, face_index in enumerate(face_indices.tolist())}
+    face_lookup = sliced_face_lookup(face_indices, mesh.triangle_count)
     sliced = Mesh(
         points=mesh.points[used],
         faces=remap[mesh.faces[face_indices]],
@@ -468,13 +457,7 @@ def _slice_mesh(mesh: Mesh, face_indices: np.ndarray) -> Mesh:
         tangents=None if mesh.tangents is None else mesh.tangents[used],
         uvs={channel: values[used] for channel, values in mesh.uvs.items()},
         material_indices=None if mesh.material_indices is None else mesh.material_indices[face_indices],
-        face_groups={
-            name: np.asarray(
-                [face_lookup[int(face_index)] for face_index in group.tolist() if int(face_index) in face_lookup],
-                dtype=np.int64,
-            )
-            for name, group in mesh.face_groups.items()
-        },
+        face_groups={name: remap_sliced_face_group(face_lookup, group) for name, group in mesh.face_groups.items()},
         metadata=dict(mesh.metadata),
     )
     sliced.validate()

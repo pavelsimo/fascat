@@ -2382,70 +2382,83 @@ class Mesh:
             raise ValueError("tolerance must be greater than or equal to 0")
         if channel not in self.uvs:
             raise ValueError(f"uv channel {channel} is not present")
+        cache_name = f"uv_distortion_metrics:{channel}:{tolerance:.12g}"
+        token = (
+            "uv_distortion_metrics",
+            int(channel),
+            float(tolerance),
+            _array_cache_token(self.points),
+            _array_cache_token(self.faces),
+            _array_cache_token(self.uvs[channel]),
+        )
 
-        uv = self.uvs[channel]
-        if self.triangle_count == 0:
+        def build() -> dict[str, int | float]:
+            uv = self.uvs[channel]
+            if self.triangle_count == 0:
+                return {
+                    "island_count": 0,
+                    "uv_area": 0.0,
+                    "uv_bounds_area": 0.0,
+                    "pack_efficiency": 0.0,
+                    "normalized_pack_efficiency": 0.0,
+                    "max_angle_distortion_degrees": 0.0,
+                    "mean_angle_distortion_degrees": 0.0,
+                    "max_edge_length_distortion": 0.0,
+                    "mean_edge_length_distortion": 0.0,
+                }
+
+            uv_triangles = uv[self.faces]
+            uv_edge_a = uv_triangles[:, 1] - uv_triangles[:, 0]
+            uv_edge_b = uv_triangles[:, 2] - uv_triangles[:, 0]
+            uv_signed_areas = 0.5 * (uv_edge_a[:, 0] * uv_edge_b[:, 1] - uv_edge_a[:, 1] * uv_edge_b[:, 0])
+            uv_abs_areas = np.abs(uv_signed_areas)
+            uv_area = float(uv_abs_areas.sum())
+            uv_bounds_area = self._uv_bounds_area(channel)
+            pack_efficiency = min(1.0, uv_area / uv_bounds_area) if uv_bounds_area > tolerance else 0.0
+            normalized_pack_efficiency = min(1.0, uv_area)
+
+            geometry_areas = self._triangle_areas()
+            valid_faces = (geometry_areas > tolerance) & (uv_abs_areas > tolerance)
+            max_angle_distortion = 0.0
+            mean_angle_distortion = 0.0
+            max_edge_distortion = 0.0
+            mean_edge_distortion = 0.0
+            if np.any(valid_faces):
+                geometry_angles = _triangle_corner_angles(self.points[self.faces][valid_faces])
+                uv_angles = _triangle_corner_angles(uv_triangles[valid_faces])
+                angle_distortion = np.degrees(np.abs(geometry_angles - uv_angles))
+                max_angle_distortion = float(angle_distortion.max()) if angle_distortion.size else 0.0
+                mean_angle_distortion = float(angle_distortion.mean()) if angle_distortion.size else 0.0
+
+                geometry_edges = self._triangle_edge_lengths()[valid_faces]
+                uv_edges = self._uv_triangle_edge_lengths(channel)[valid_faces]
+                geometry_perimeters = geometry_edges.sum(axis=1)
+                uv_perimeters = uv_edges.sum(axis=1)
+                valid_edges = (geometry_perimeters > tolerance) & (uv_perimeters > tolerance)
+                if np.any(valid_edges):
+                    scale = uv_perimeters[valid_edges] / geometry_perimeters[valid_edges]
+                    expected_uv_edges = geometry_edges[valid_edges] * scale[:, None]
+                    edge_distortion = np.abs(uv_edges[valid_edges] - expected_uv_edges) / np.maximum(
+                        expected_uv_edges,
+                        tolerance,
+                    )
+                    max_edge_distortion = float(edge_distortion.max()) if edge_distortion.size else 0.0
+                    mean_edge_distortion = float(edge_distortion.mean()) if edge_distortion.size else 0.0
+
             return {
-                "island_count": 0,
-                "uv_area": 0.0,
-                "uv_bounds_area": 0.0,
-                "pack_efficiency": 0.0,
-                "normalized_pack_efficiency": 0.0,
-                "max_angle_distortion_degrees": 0.0,
-                "mean_angle_distortion_degrees": 0.0,
-                "max_edge_length_distortion": 0.0,
-                "mean_edge_length_distortion": 0.0,
+                "island_count": self._uv_island_count(channel, tolerance=tolerance),
+                "uv_area": uv_area,
+                "uv_bounds_area": uv_bounds_area,
+                "pack_efficiency": pack_efficiency,
+                "normalized_pack_efficiency": normalized_pack_efficiency,
+                "max_angle_distortion_degrees": max_angle_distortion,
+                "mean_angle_distortion_degrees": mean_angle_distortion,
+                "max_edge_length_distortion": max_edge_distortion,
+                "mean_edge_length_distortion": mean_edge_distortion,
             }
 
-        uv_triangles = uv[self.faces]
-        uv_edge_a = uv_triangles[:, 1] - uv_triangles[:, 0]
-        uv_edge_b = uv_triangles[:, 2] - uv_triangles[:, 0]
-        uv_signed_areas = 0.5 * (uv_edge_a[:, 0] * uv_edge_b[:, 1] - uv_edge_a[:, 1] * uv_edge_b[:, 0])
-        uv_abs_areas = np.abs(uv_signed_areas)
-        uv_area = float(uv_abs_areas.sum())
-        uv_bounds_area = self._uv_bounds_area(channel)
-        pack_efficiency = min(1.0, uv_area / uv_bounds_area) if uv_bounds_area > tolerance else 0.0
-        normalized_pack_efficiency = min(1.0, uv_area)
-
-        geometry_areas = self._triangle_areas()
-        valid_faces = (geometry_areas > tolerance) & (uv_abs_areas > tolerance)
-        max_angle_distortion = 0.0
-        mean_angle_distortion = 0.0
-        max_edge_distortion = 0.0
-        mean_edge_distortion = 0.0
-        if np.any(valid_faces):
-            geometry_angles = _triangle_corner_angles(self.points[self.faces][valid_faces])
-            uv_angles = _triangle_corner_angles(uv_triangles[valid_faces])
-            angle_distortion = np.degrees(np.abs(geometry_angles - uv_angles))
-            max_angle_distortion = float(angle_distortion.max()) if angle_distortion.size else 0.0
-            mean_angle_distortion = float(angle_distortion.mean()) if angle_distortion.size else 0.0
-
-            geometry_edges = self._triangle_edge_lengths()[valid_faces]
-            uv_edges = self._uv_triangle_edge_lengths(channel)[valid_faces]
-            geometry_perimeters = geometry_edges.sum(axis=1)
-            uv_perimeters = uv_edges.sum(axis=1)
-            valid_edges = (geometry_perimeters > tolerance) & (uv_perimeters > tolerance)
-            if np.any(valid_edges):
-                scale = uv_perimeters[valid_edges] / geometry_perimeters[valid_edges]
-                expected_uv_edges = geometry_edges[valid_edges] * scale[:, None]
-                edge_distortion = np.abs(uv_edges[valid_edges] - expected_uv_edges) / np.maximum(
-                    expected_uv_edges,
-                    tolerance,
-                )
-                max_edge_distortion = float(edge_distortion.max()) if edge_distortion.size else 0.0
-                mean_edge_distortion = float(edge_distortion.mean()) if edge_distortion.size else 0.0
-
-        return {
-            "island_count": self._uv_island_count(channel, tolerance=tolerance),
-            "uv_area": uv_area,
-            "uv_bounds_area": uv_bounds_area,
-            "pack_efficiency": pack_efficiency,
-            "normalized_pack_efficiency": normalized_pack_efficiency,
-            "max_angle_distortion_degrees": max_angle_distortion,
-            "mean_angle_distortion_degrees": mean_angle_distortion,
-            "max_edge_length_distortion": max_edge_distortion,
-            "mean_edge_length_distortion": mean_edge_distortion,
-        }
+        metrics = self._cached_value(cache_name, token, build)
+        return dict(metrics)
 
     def unwrap_uv(self, channel: int = 0, *, padding: int = 0, resolution: int = 0) -> Mesh:
         """Return a mesh with UVs generated by the unwrap backend."""
@@ -2634,15 +2647,19 @@ class Mesh:
             meshoptimizer.optimize_vertex_cache(cache_optimized, indices, vertex_count=self.vertex_count)
             reordered_face_indices: np.ndarray | None = None
             if self.material_indices is not None or self.face_groups:
-                old_face_lookup = {
-                    tuple(sorted(face)): index for index, face in enumerate(self.faces.astype(int).tolist())
-                }
-                reordered_face_indices = np.asarray(
-                    [
-                        old_face_lookup.get(tuple(sorted(face)), index)
-                        for index, face in enumerate(cache_optimized.reshape((-1, 3)).astype(int).tolist())
-                    ],
-                    dtype=np.int64,
+                old_sorted = np.sort(self.faces.astype(np.int64, copy=False), axis=1)
+                new_sorted = np.sort(cache_optimized.reshape((-1, 3)).astype(np.int64), axis=1)
+                row_dtype = np.dtype((np.void, old_sorted.dtype.itemsize * 3))
+                old_view = np.ascontiguousarray(old_sorted).view(row_dtype).ravel()
+                new_view = np.ascontiguousarray(new_sorted).view(row_dtype).ravel()
+                order = np.argsort(old_view, kind="stable")
+                pos = np.searchsorted(old_view[order], new_view)
+                pos_clamped = np.minimum(pos, old_view.size - 1)
+                matched = old_view[order[pos_clamped]] == new_view
+                reordered_face_indices = np.where(
+                    matched,
+                    order[pos_clamped],
+                    np.arange(new_view.size, dtype=np.int64),
                 )
 
             vertex_attributes = [self.points.astype(np.float32)]
@@ -2661,10 +2678,10 @@ class Mesh:
             )
             remapped_indices = np.empty_like(cache_optimized)
             meshoptimizer.remap_index_buffer(remapped_indices, cache_optimized, remap=remap)
-            old_for_new = np.empty(int(unique_vertices), dtype=np.int64)
-            for old_index, new_index in enumerate(remap.astype(np.int64)):
-                if new_index < unique_vertices:
-                    old_for_new[new_index] = old_index
+            remap64 = remap.astype(np.int64)
+            valid = remap64 < int(unique_vertices)
+            old_for_new = np.zeros(int(unique_vertices), dtype=np.int64)
+            old_for_new[remap64[valid]] = np.flatnonzero(valid)
 
             mesh = self.copy()
             mesh.points = self.points[old_for_new].copy()
@@ -2677,15 +2694,20 @@ class Mesh:
             if self.material_indices is not None and reordered_face_indices is not None:
                 mesh.material_indices = self.material_indices[reordered_face_indices].copy()
             if self.face_groups and reordered_face_indices is not None:
-                inverse_face_order = np.empty_like(reordered_face_indices)
-                inverse_face_order[reordered_face_indices] = np.arange(reordered_face_indices.shape[0])
-                mesh.face_groups = {
-                    name: inverse_face_order[values]
-                    for name, values in self.face_groups.items()
-                    if np.isin(values, reordered_face_indices).all()
-                }
+                inverse_face_order = np.full(self.triangle_count, -1, dtype=np.int64)
+                inverse_face_order[reordered_face_indices] = np.arange(reordered_face_indices.shape[0], dtype=np.int64)
+                face_groups: dict[str, IntArray] = {}
+                for name, values in self.face_groups.items():
+                    values64 = values.astype(np.int64, copy=False)
+                    in_range = (values64 >= 0) & (values64 < self.triangle_count)
+                    if not in_range.all() or not np.isin(values64, reordered_face_indices).all():
+                        continue
+                    remapped = inverse_face_order[values64]
+                    face_groups[name] = remapped[remapped >= 0]
+                mesh.face_groups = face_groups
             return mesh
         except Exception:
+            logger.warning("optimize_buffers failed; returning unoptimized copy", exc_info=True)
             return self.copy()
 
     def feature_preservation_counts(
@@ -3119,9 +3141,56 @@ class Mesh:
             mesh.points = np.asarray(tri.vertices, dtype=np.float64)
             mesh.faces = np.asarray(tri.faces, dtype=np.int64)
             mesh._remap_face_attributes_from(self)
-            return mesh._flip_inward_closed_components()
+            return mesh._orient_shared_edges_consistently()._flip_inward_closed_components()
         except Exception:
-            return self._flip_inward_closed_components()
+            return self._orient_shared_edges_consistently()._flip_inward_closed_components()
+
+    def _orient_shared_edges_consistently(self) -> Mesh:
+        if self.triangle_count == 0:
+            return self.copy()
+
+        edge_incidents: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
+        for face_index, face in enumerate(self.faces.astype(int).tolist()):
+            for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
+                key = (min(start, end), max(start, end))
+                direction = 1 if (start, end) == key else -1
+                edge_incidents[key].append((face_index, direction))
+
+        adjacency: dict[int, list[tuple[int, int]]] = defaultdict(list)
+        for incidents in edge_incidents.values():
+            if len(incidents) != 2:
+                continue
+            (left_face, left_direction), (right_face, right_direction) = incidents
+            required_relation = -left_direction * right_direction
+            adjacency[left_face].append((right_face, required_relation))
+            adjacency[right_face].append((left_face, required_relation))
+
+        face_signs: dict[int, int] = {}
+        for face_index in range(self.triangle_count):
+            if face_index in face_signs:
+                continue
+            face_signs[face_index] = 1
+            queue: deque[int] = deque([face_index])
+            while queue:
+                current = queue.popleft()
+                for neighbor, required_relation in adjacency[current]:
+                    expected_sign = face_signs[current] * required_relation
+                    if neighbor in face_signs:
+                        continue
+                    face_signs[neighbor] = expected_sign
+                    queue.append(neighbor)
+
+        flip = np.asarray(
+            [face_signs.get(face_index, 1) < 0 for face_index in range(self.triangle_count)],
+            dtype=np.bool_,
+        )
+        if not bool(np.any(flip)):
+            return self.copy()
+        mesh = self.copy()
+        mesh.faces[flip] = mesh.faces[flip][:, [0, 2, 1]]
+        mesh.normals = None
+        mesh.tangents = None
+        return mesh
 
     def _boundary_loops(self) -> list[list[int]]:
         def build() -> list[list[int]]:

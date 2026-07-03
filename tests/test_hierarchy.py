@@ -62,6 +62,18 @@ def _box_mesh() -> Mesh:
     )
 
 
+def test_mesh_subset_remaps_face_groups_and_drops_empty_groups() -> None:
+    mesh = _box_mesh()
+    mesh.face_groups["kept"] = np.asarray([1, 3], dtype=int)
+    mesh.face_groups["dropped"] = np.asarray([0], dtype=int)
+
+    subset = hierarchy_module._mesh_subset(mesh, np.asarray([1, 3], dtype=np.int64))
+
+    assert subset is not None
+    assert subset.face_groups["kept"].tolist() == [0, 1]
+    assert "dropped" not in subset.face_groups
+
+
 def _asset() -> Asset:
     return Asset(
         root=Node(
@@ -136,6 +148,7 @@ def test_merge_selected_geometry_bakes_transforms_and_keeps_parent() -> None:
     assert advisor["lost_reused_instances"] == 1
     assert advisor["draw_call_savings"] == 1
     assert advisor["added_merged_batches"] == 1
+    assert any("merge flattens 2 instances of part Bolt" in warning for warning in merged.report.steps[-1].warnings)
     assert any("preserving or reconstructing instances" in warning for warning in merged.report.steps[-1].warnings)
 
 

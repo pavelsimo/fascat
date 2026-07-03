@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 from fascat.asset import Asset, Node, Part, identity_transform
 from fascat.mesh import Mesh
 from fascat.metadata import Metadata
+from fascat.ops._arrays import remap_sliced_face_group, sliced_face_lookup
 from fascat.options import ExplodeOptions, MergeOptions, ReplaceOptions
 
 FloatArray = NDArray[np.float64]
@@ -60,6 +61,7 @@ def merge_asset(asset: Asset, options: MergeOptions, *, selected_node_ids: set[s
         result.report.add_warning("merge matched no mesh-bearing part occurrences")
         return result
 
+    _warn_merge_instance_loss(result, occurrences)
     groups = _build_groups(result, occurrences, options)
     max_vertices_per_mesh = _resolve_max_vertices_per_mesh(result, options.max_vertices_per_mesh)
     merged_parts: dict[str, Part] = {}
@@ -83,6 +85,29 @@ def merge_asset(asset: Asset, options: MergeOptions, *, selected_node_ids: set[s
     result.parts.update(merged_parts)
     _drop_unreferenced_parts(result)
     return result
+
+
+def _warn_merge_instance_loss(asset: Asset, occurrences: list[_Occurrence]) -> None:
+    occurrence_counts = _part_occurrence_counts(asset)
+    selected_part_ids = {occurrence.part.id for occurrence in occurrences}
+    for part_id in sorted(selected_part_ids):
+        count = occurrence_counts.get(part_id, 0)
+        if count <= 1:
+            continue
+        part = asset.parts.get(part_id)
+        name = part.name if part is not None else part_id
+        asset.report.add_warning(
+            f"merge flattens {count} instances of part {name}; prefer instancing for runtime memory"
+        )
+
+
+def _part_occurrence_counts(asset: Asset) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for node in asset.root.walk():
+        if node.part_id is None:
+            continue
+        counts[node.part_id] = counts.get(node.part_id, 0) + 1
+    return counts
 
 
 def explode_asset(asset: Asset, options: ExplodeOptions, *, selected_node_ids: set[str]) -> Asset:
@@ -235,7 +260,7 @@ def _inputs_for_occurrence(occurrence: _Occurrence, *, split_by_material: bool) 
         material_id = occurrence.part.material_ids[0] if occurrence.part.material_ids else None
         return (_MergeInput(occurrence=occurrence, material_id=material_id, face_indices=all_faces),)
     inputs: list[_MergeInput] = []
-    for material_index in sorted(set(mesh.material_indices.astype(int).tolist())):
+    for material_index in np.unique(mesh.material_indices.astype(np.int64)).tolist():
         material_id = (
             occurrence.part.material_ids[material_index] if material_index < len(occurrence.part.material_ids) else None
         )
@@ -384,16 +409,12 @@ def _face_material_ids(merge_input: _MergeInput) -> list[str | None]:
         return []
     if mesh.material_indices is None:
         return [merge_input.material_id] * int(merge_input.face_indices.shape[0])
-    material_ids: list[str | None] = []
-    for face_index in merge_input.face_indices.astype(int).tolist():
-        material_index = int(mesh.material_indices[face_index])
-        material_id = (
-            merge_input.occurrence.part.material_ids[material_index]
-            if material_index < len(merge_input.occurrence.part.material_ids)
-            else None
-        )
-        material_ids.append(material_id)
-    return material_ids
+    material_indices = mesh.material_indices[merge_input.face_indices].astype(np.int64, copy=False)
+    part_material_ids = merge_input.occurrence.part.material_ids
+    return [
+        part_material_ids[material_index] if material_index < len(part_material_ids) else None
+        for material_index in material_indices.tolist()
+    ]
 
 
 def _material_indices(face_material_ids: list[str | None], material_index_by_id: dict[str, int]) -> IntArray | None:
@@ -491,7 +512,7 @@ def _explode_face_groups(part: Part, mesh: Mesh, mode: str) -> list[tuple[str, I
             material_id = part.material_ids[0] if part.material_ids else None
             return [("material_none", np.arange(mesh.triangle_count, dtype=np.int64), material_id)]
         groups: list[tuple[str, IntArray, str | None]] = []
-        for material_index in sorted(set(mesh.material_indices.astype(int).tolist())):
+        for material_index in np.unique(mesh.material_indices.astype(np.int64)).tolist():
             material_id = part.material_ids[material_index] if material_index < len(part.material_ids) else None
             groups.append(
                 (
@@ -508,8 +529,38 @@ def _explode_face_groups(part: Part, mesh: Mesh, mode: str) -> list[tuple[str, I
 
 
 def _connected_face_components(mesh: Mesh) -> list[IntArray]:
+    scipy_components = _connected_face_components_scipy(mesh)
+    if scipy_components is not None:
+        return scipy_components
+    return _connected_face_components_bfs(mesh)
+
+
+def _connected_face_components_scipy(mesh: Mesh) -> list[IntArray] | None:
+    if mesh.triangle_count == 0:
+        return []
+    try:
+        from scipy.sparse import coo_matrix
+        from scipy.sparse.csgraph import connected_components
+    except ImportError:
+        return None
+    try:
+        face_vertices = mesh.faces.astype(np.int64, copy=False).reshape(-1)
+        face_indices = np.repeat(np.arange(mesh.triangle_count, dtype=np.int64), mesh.faces.shape[1])
+        incidence = coo_matrix(
+            (np.ones(face_vertices.shape[0], dtype=np.int8), (face_indices, face_vertices)),
+            shape=(mesh.triangle_count, mesh.vertex_count),
+        ).tocsr()
+        adjacency = incidence @ incidence.T
+        component_count, labels = connected_components(adjacency, directed=False, return_labels=True)
+    except Exception:
+        return None
+    return [np.flatnonzero(labels == index).astype(np.int64) for index in range(int(component_count))]
+
+
+def _connected_face_components_bfs(mesh: Mesh) -> list[IntArray]:
     faces_by_vertex: dict[int, list[int]] = {}
-    for face_index, face in enumerate(mesh.faces.astype(int).tolist()):
+    face_rows = mesh.faces.astype(int).tolist()
+    for face_index, face in enumerate(face_rows):
         for vertex in face:
             faces_by_vertex.setdefault(vertex, []).append(face_index)
     components: list[IntArray] = []
@@ -520,7 +571,7 @@ def _connected_face_components(mesh: Mesh) -> list[IntArray]:
         stack = [start]
         while stack:
             face_index = stack.pop()
-            for vertex in mesh.faces[face_index].astype(int).tolist():
+            for vertex in face_rows[face_index]:
                 for neighbor in faces_by_vertex.get(vertex, []):
                     if neighbor not in remaining:
                         continue
@@ -569,6 +620,12 @@ def _mesh_subset(mesh: Mesh | None, face_indices: IntArray) -> Mesh | None:
     used = np.unique(mesh.faces[face_indices].reshape(-1))
     remap = np.full(mesh.vertex_count, -1, dtype=np.int64)
     remap[used] = np.arange(used.shape[0], dtype=np.int64)
+    face_lookup = sliced_face_lookup(face_indices, mesh.triangle_count)
+    face_groups: dict[str, IntArray] = {}
+    for name, values in mesh.face_groups.items():
+        remapped = remap_sliced_face_group(face_lookup, values)
+        if remapped.size:
+            face_groups[name] = remapped
     result = Mesh(
         points=mesh.points[used].copy(),
         faces=remap[mesh.faces[face_indices]],
@@ -576,21 +633,10 @@ def _mesh_subset(mesh: Mesh | None, face_indices: IntArray) -> Mesh | None:
         tangents=None if mesh.tangents is None else mesh.tangents[used].copy(),
         uvs={channel: values[used].copy() for channel, values in mesh.uvs.items()},
         material_indices=None if mesh.material_indices is None else mesh.material_indices[face_indices].copy(),
-        face_groups={
-            name: _remap_face_group(values, face_indices)
-            for name, values in mesh.face_groups.items()
-            if np.isin(values, face_indices).any()
-        },
+        face_groups=face_groups,
         metadata=dict(mesh.metadata),
     )
     return result
-
-
-def _remap_face_group(values: IntArray, face_indices: IntArray) -> IntArray:
-    face_position = {int(face_index): index for index, face_index in enumerate(face_indices.astype(int).tolist())}
-    return np.asarray(
-        [face_position[int(value)] for value in values.astype(int).tolist() if int(value) in face_position]
-    )
 
 
 def _exploded_metadata(occurrence: _Occurrence, label: str, policy: str) -> Metadata:

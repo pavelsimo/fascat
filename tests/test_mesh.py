@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import sys
 from types import SimpleNamespace
@@ -697,6 +698,53 @@ def test_repair_records_viewer_standpoint_orientation_intent() -> None:
     assert repaired.metadata["repair_face_orientation_status"] == "viewer_oriented"
     assert repaired.metadata["repair_normal_orientation_status"] == "oriented_to_viewer"
     assert repaired.metadata["repair_orientation_viewer_position"] == "0,0,10"
+
+
+def test_repair_single_sided_open_shell_orients_each_component_consistently() -> None:
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [1, 1, 0],
+                [2, 0, 0],
+                [3, 0, 0],
+                [2, 1, 0],
+                [3, 1, 0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array(
+            [
+                [0, 1, 2],
+                [0, 3, 2],
+                [4, 5, 6],
+                [4, 7, 6],
+            ],
+            dtype=int,
+        ),
+    )
+
+    def shared_edge_directions(candidate: Mesh) -> dict[tuple[int, int], list[int]]:
+        directions: dict[tuple[int, int], list[int]] = {}
+        for face in candidate.faces.astype(int).tolist():
+            for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
+                key = (min(start, end), max(start, end))
+                direction = 1 if (start, end) == key else -1
+                directions.setdefault(key, []).append(direction)
+        return {edge: values for edge, values in directions.items() if len(values) == 2}
+
+    before = shared_edge_directions(mesh)
+    repaired = mesh.repair(RepairOptions(face_orientation="single_sided_open_shell", quality_report=True))
+    after = shared_edge_directions(repaired)
+
+    assert before[(0, 2)] == [-1, -1]
+    assert before[(4, 6)] == [-1, -1]
+    assert after
+    assert all(sum(values) == 0 for values in after.values())
+    assert repaired.metadata["repair_face_orientation_status"] == "open_shell_component_consistent"
+    assert repaired.metadata["repair_orientation_components_before_orientation"] == "2"
 
 
 def test_repair_can_sew_t_junctions() -> None:
@@ -1535,6 +1583,72 @@ def test_optimize_buffers_preserves_uvs_and_material_indices() -> None:
     assert optimized.uvs[0].shape == (optimized.vertex_count, 2)
     assert optimized.material_indices is not None
     assert sorted(optimized.material_indices.tolist()) == [0, 1]
+
+
+def test_optimize_buffers_duplicate_face_groups_stay_in_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [2, 1, 0]], dtype=int),
+        material_indices=np.array([3, 7], dtype=int),
+        face_groups={
+            "canonical": np.array([0], dtype=int),
+            "duplicate": np.array([1], dtype=int),
+        },
+    )
+
+    def optimize_vertex_cache(destination: np.ndarray, indices: np.ndarray, *, vertex_count: int) -> None:
+        _ = vertex_count
+        destination[:] = indices
+
+    def generate_vertex_remap(remap: np.ndarray, _indices: np.ndarray, *, vertices: np.ndarray) -> int:
+        remap[:] = np.arange(vertices.shape[0], dtype=np.uint32)
+        return int(vertices.shape[0])
+
+    def remap_index_buffer(destination: np.ndarray, indices: np.ndarray, *, remap: np.ndarray) -> None:
+        destination[:] = remap[indices]
+
+    monkeypatch.setitem(
+        sys.modules,
+        "meshoptimizer",
+        SimpleNamespace(
+            optimize_vertex_cache=optimize_vertex_cache,
+            generate_vertex_remap=generate_vertex_remap,
+            remap_index_buffer=remap_index_buffer,
+        ),
+    )
+
+    optimized = mesh.optimize_buffers()
+
+    optimized.validate()
+    assert optimized.material_indices is not None
+    assert optimized.material_indices.tolist() == [3, 3]
+    assert "canonical" in optimized.face_groups
+    assert "duplicate" not in optimized.face_groups
+    for values in optimized.face_groups.values():
+        assert values.size > 0
+        assert np.all((values >= 0) & (values < optimized.triangle_count))
+
+
+def test_optimize_buffers_logs_fallback_warning(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_optimize_vertex_cache(_destination: np.ndarray, _indices: np.ndarray, *, vertex_count: int) -> None:
+        _ = vertex_count
+        raise RuntimeError("cache optimizer failed")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "meshoptimizer",
+        SimpleNamespace(optimize_vertex_cache=fail_optimize_vertex_cache),
+    )
+    mesh = valid_triangle()
+
+    with caplog.at_level(logging.WARNING, logger="fascat"):
+        optimized = mesh.optimize_buffers()
+
+    assert optimized.to_dict() == mesh.to_dict()
+    assert "optimize_buffers failed; returning unoptimized copy" in caplog.text
 
 
 def test_simplify_preserves_material_indices() -> None:
