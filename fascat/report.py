@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 from typing import Any
+
+logger = logging.getLogger("fascat")
+logger.addHandler(logging.NullHandler())
 
 
 def _now() -> str:
@@ -128,9 +132,11 @@ class Report:
 
     def add_warning(self, message: str) -> None:
         self.warnings.append(message)
+        logger.warning(message)
 
     def add_error(self, message: str) -> None:
         self.errors.append(message)
+        logger.error(message)
 
     def add_step(
         self,
