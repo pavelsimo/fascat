@@ -139,20 +139,16 @@ for node in asset.root.walk():
 
 Most asset operations return a new `Asset` and leave the input asset unchanged. When `where=` selects only one occurrence of a shared part, Fascat isolates the selected occurrence before mutating it so unselected occurrences keep referencing the original part.
 
-## Error handling
+## Catching Errors
 
-Input and option problems raise standard exceptions such as `FileNotFoundError` or `ValueError`. Backend, validation, and write failures raise `RuntimeError`; when a pipeline or write step has already built a report, the exception carries it on `exc.report`.
+`fc.FascatError` is the canonical base class for Fascat-owned failures. `fc.Error` is the same class, kept as a short alias for concise catches. Public readers and writers wrap `RuntimeError`, `ValueError`, and `OSError` as `fc.FascatIOError`, preserving the original exception on `exc.__cause__`. Validation helpers and non-I/O option constructors may still raise standard exceptions directly.
 
 ```python
 import fascat as fc
 
 try:
     asset = fc.convert("motor.step", "motor.glb", profile="realtime-web")
-except FileNotFoundError as exc:
-    print(f"missing input: {exc}")
-except ValueError as exc:
-    print(f"bad option or unsupported format: {exc}")
-except RuntimeError as exc:
+except fc.FascatError as exc:
     report = getattr(exc, "report", None)
     if report is not None:
         report.write_json("failed-convert-report.json")
@@ -629,8 +625,8 @@ Tessellation parameters:
 
 | Parameter | Meaning |
 |-----------|---------|
-| `sag` | Maximum chordal deviation between source surface and tessellated mesh. Lower values produce more triangles. |
-| `sag_ratio` | Relative chordal deviation ratio. When set, it becomes the backend deflection value and enables relative tessellation explicitly. |
+| `sag` | Absolute chordal deviation between source surface and tessellated mesh. Set this to override the default relative strategy. Lower values produce more triangles. |
+| `sag_ratio` | Relative chordal deviation ratio. Bare `TessellationOptions()` defaults to `0.0002` so tessellation scales with part size. |
 | `angle` | Angular deviation limit in degrees. Lower values preserve curved surfaces with more triangles. |
 | `relative` | Compatibility switch for interpreting `sag` as a relative backend deflection when `sag_ratio` is unset. Prefer `sag_ratio` for new relative-tolerance workflows. |
 | `min_edge_length` | Collapse or avoid edges shorter than this length during post-processing. |
@@ -645,19 +641,25 @@ Tessellation parameters:
 | `create_normals` | Generate normals during tessellation when the backend can provide them. Attribute provenance records `tessellation`, `disabled`, or `missing` for normals. |
 | `keep_brep` | Keep source BREP handles on parts after tessellation for later BREP-aware operations. When `False`, source BREP handles are dropped even when an imported mesh is reused instead of retessellated. Tessellated parts record `brep_patch_cleanup=retained` or `deleted` and warn when many retained patches could increase runtime/export risk. |
 | `reuse_existing_meshes` | Reuse meshes already present on imported parts. Set to `False` to retessellate from source BREP where available. |
+| `max_triangles_per_part` | Optional guard that raises `FascatError` when any tessellated part exceeds the limit. |
 | `part_settings` | Per-part overrides keyed by part id or part name. Supports the same tessellation option names. |
+
+`sag` and `sag_ratio` are mutually exclusive in the effective options. If you
+construct `TessellationOptions(sag=0.1)` and leave `sag_ratio` at its default,
+Fascat clears `sag_ratio` and uses the absolute tolerance. Pass `sag_ratio=...`
+without `sag` for relative tessellation.
 
 Repair parameters:
 
 | Parameter | Meaning |
 |-----------|---------|
-| `tolerance` | Merge tolerance for nearby vertices. `0.0` disables distance-based merging beyond exact duplicates. |
+| `tolerance` | Merge tolerance for nearby vertices. `0.0` resolves to `1e-5` of the selected mesh bounding-box diagonal. |
 | `merge_vertices` | Deduplicate vertices after tessellation. |
 | `delete_degenerate` | Remove triangles with repeated vertices or near-zero area. |
 | `fix_winding` | Normalize triangle winding where a consistent orientation can be inferred, including inward closed components detected by signed volume. |
 | `quality_report` | Run heavier before/after repair diagnostics for duplicate polygons, degenerate triangles, boundary and non-manifold edges, T-junctions, boundary gaps, and orientability. Defaults to `False` so conversion repair does geometric cleanup without paying for report-only topology scans. |
-| `face_orientation` | Face-orientation policy: `exterior` runs the current closed-component outward winding path; `source_trusted` and `preserve` keep source winding; `viewer_standpoint`, `single_sided_open_shell`, and `unstitched_groups` are recorded as intent until those strategies have a backend. |
-| `normal_orientation` | Normal-orientation policy: `from_faces` regenerates normals from repaired faces; `source_trusted` and `preserve` keep compatible source normals when possible; `viewer_standpoint` is recorded as intent until implemented. |
+| `face_orientation` | Face-orientation policy: `exterior` makes shared-edge winding consistent and flips inward closed components outward; `single_sided_open_shell` makes each orientable open-shell component shared-edge consistent; `viewer_standpoint` orients faces toward `viewer_position`; `source_trusted` and `preserve` keep source winding. |
+| `normal_orientation` | Normal-orientation policy: `from_faces` regenerates normals from repaired faces; `viewer_standpoint` orients generated normals toward `viewer_position`; `source_trusted` and `preserve` keep compatible source normals when possible. |
 | `viewer_position` | Three-number viewer position required when either orientation policy is `viewer_standpoint`. Recorded in metadata and reports. |
 | `fill_small_holes` | Fill small mesh boundary loops as a fallback mesh repair step. Fill faces inherit the material of the nearest neighboring face. |
 | `area_epsilon` | Area threshold used to classify degenerate triangles. Defaults to a scale-invariant value derived from the mesh bounding box (1e-12 × squared diagonal); pass a value to override. |
@@ -758,8 +760,8 @@ asset = asset.stage(
         materials="cad",
         normals=True,
         normal_mode="hard_edges",
-        normal_weighting="angle",
-        hard_edge_angle=30.0,
+        normal_weighting="area",
+        hard_edge_angle=45.0,
         preserve_face_boundaries=True,
         override_normals=True,
         tangents=True,
@@ -786,14 +788,19 @@ Normal and tangent parameters:
 |-----------|---------|
 | `normals` | Generate or preserve vertex normals. Automatically disabled when `normal_mode="none"`. |
 | `normal_mode` | `smooth` averages face normals, `flat` keeps face normals, `hard_edges` splits vertices along hard edges, and `none` omits normals. |
-| `normal_weighting` | `angle` weights smooth or hard-edge normals by corner angle; `area` weights by triangle area. |
-| `hard_edge_angle` | Edge angle threshold in degrees for `normal_mode="hard_edges"`. |
+| `normal_weighting` | `angle` weights smooth or hard-edge normals by corner angle; `area` weights by triangle area and is the default. |
+| `hard_edge_angle` | Edge angle threshold in degrees for `normal_mode="hard_edges"`. Defaults to `45.0`. |
 | `preserve_face_boundaries` | Treat CAD face-group boundaries as hard normal boundaries. |
 | `override_normals` | Regenerate existing normals. Set `False` to preserve existing normals and only generate normals when missing. |
 | `tangents` | Ensure glTF-ready tangent vectors exist. Existing valid tangents are preserved by default. |
 | `tangent_uv_channel` | UV channel used when tangents need to be generated or regenerated. Defaults to `0`. |
 | `override_tangents` | Regenerate existing tangents instead of preserving them when `tangents=True`. |
 | `validate_normals` | Check for missing, zero-length, or invalid normals after staging. |
+
+Migration note: current staging defaults use `normal_weighting="area"` and
+`hard_edge_angle=45.0`. Assets re-converted from older defaults that used
+angle weighting and a 30 degree hard-edge threshold can shade or split vertices
+differently; pass the older values explicitly when visual parity matters.
 
 ## UV And Material Pipeline
 
@@ -837,8 +844,8 @@ Staging records detailed per-channel UV metadata (fields are prefixed `uvN_`, wh
 - **Layout quality** — every channel records `uvN_domain`, `uvN_bounds`, `uvN_validation_status`, `uvN_out_of_unit_vertices`, `uvN_degenerate_faces`, and `uvN_overlap_check`. Expensive overlap checks run only for bake-domain UVs or when `forbid_overlapping=True`; skipped channels record `uvN_overlap_pairs="not_evaluated"`.
 - **Seam graph** — duplicated-position UV discontinuities are reported per channel (`uvN_seam_edges`, `uvN_seam_components`, `uvN_seam_length`, …) and summarized on the asset as `stage_uv_seam_graph_channels` / `stage_uv_seam_graph_edges`.
 - **Distortion** — bake-domain channels, or any channel staged with `max_stretch`, record `uvN_island_count`, `uvN_pack_efficiency`, and angle/edge distortion fields; other channels record `uvN_distortion_check="skipped"`.
-- **Packing** — `unwrap`/`lightmap` bake channels are packed by xatlas with the configured padding/resolution and record `uvN_pack_status`, dimensions, and utilization.
-- **Box projection** — `box` channels run an AABB projection and record `uvN_projection_*` fields for local/shared bounds, axes, destination, override policy, units, and `uv3d_size`.
+- **Packing** — `unwrap`/`lightmap` bake channels are packed by xatlas with the configured padding/resolution and record `uvN_pack_status`, dimensions, and utilization. Bake-domain packing enforces a 2 px minimum; smaller requested padding values are clamped and reported as warnings.
+- **Box projection** — `box` channels run an AABB projection and record `uvN_projection_*` fields for local/shared bounds, axes, destination, override policy, units, and resolved `uv3d_size`.
 
 Two convenience modes: `uv1="copy_uv0"` reuses the UV0 layout for the secondary
 channel (warns if UV0 is missing), and `normalize_uvs=(1,)` rescales selected
@@ -876,9 +883,9 @@ Staging, UV, and material parameters:
 | `StageOptions` | `aabb_projection` | `AabbProjectionOptions` used when a UV channel uses `box` projection. |
 | `StageOptions` | `jobs` | Worker count for independent mesh-bearing parts. `1` keeps serial behavior. |
 | `AabbProjectionOptions` | `scope` | `local` projects each part against its own AABB; `shared` projects selected parts against one shared AABB. |
-| `AabbProjectionOptions` | `uv3d_size` | Optional real-world size per UV tile. When unset, coordinates are normalized to the chosen AABB axes. |
+| `AabbProjectionOptions` | `uv3d_size` | Optional real-world size per UV tile. When unset, `UnwrapOptions.texel_density` can derive the tile size; otherwise coordinates are normalized to the chosen AABB axes. |
 | `AabbProjectionOptions` | `override_existing` | Replace existing destination-channel UVs during box projection. Set `False` to preserve existing UVs and record that choice. |
-| `UnwrapOptions` | `texel_density` | Desired texture density for generated UVs. |
+| `UnwrapOptions` | `texel_density` | Desired texture density for generated UVs. For AABB projection, `atlas.max_size / texel_density` resolves the real-world size per UV tile when `uv3d_size` is unset. |
 | `UnwrapOptions` | `padding` | Padding between UV islands in pixels. |
 | `UnwrapOptions` | `max_stretch` | Maximum tolerated UV stretch before reporting unwrap risk. |
 | `UnwrapOptions` | `method` | Requested unwrap solver intent: `default`, `conformal`, or `isometric`. Non-default values are recorded as intent with the xatlas backend. |
@@ -1017,6 +1024,7 @@ Optimization action parameters:
 | Option | Parameter | Meaning |
 |--------|-----------|---------|
 | `BakeMaterialOptions` | `maps_resolution` | Raster atlas texture size in pixels for generated baked maps. |
+| `BakeMaterialOptions` | `lightmap_resolution` | Resolution used when generating or repacking bake/lightmap UVs. Defaults to `1024`. |
 | `BakeMaterialOptions` | `force_uv_generation` | Generate UVs first when selected meshes do not have the required UV channel. |
 | `BakeMaterialOptions` | `uv_channel` | UV channel used for baking. |
 | `BakeMaterialOptions` | `padding` | Texture padding between islands in pixels. |
@@ -1056,12 +1064,20 @@ Optimization action parameters:
 | `LODGeneratorOptions` | `output` | LOD representation: `variants`, `extras`, or `separate`. |
 | `LODGeneratorOptions` | `allow_non_monotonic` | Permit non-monotonic LODs without failing validation. |
 | `LODOptions` | `engine_profile` | Switch-distance and glTF export profile: `generic`, `unity`, or `unreal`. `unity` resolves to `MSFT_lod` variant export; `unreal` resolves to separate `_LOD#` scene nodes for import tools that ignore `MSFT_lod`. |
+| `LODOptions` | `switch_distance_overrides` | Optional per-level switch distances. Use `None` for levels that should keep the profile formula. |
 | `LODOptions` | `far_lod_bake` | For far-distance levels, collapse material indices to a one-material far LOD policy and record far texture-bake metadata. |
 | `LODOptions` | `scene_far_proxy` | Build an optional scene-level far proxy part from the final LOD occurrence geometry as one mesh, one material, and one draw-call proxy. glTF export attaches it as root `MSFT_lod` metadata. |
 | `LODOptions` / `LODGeneratorOptions` | `jobs` | Worker count for independent mesh-bearing parts. `1` keeps serial behavior. |
 | `LODLevel` | `screen_coverage` | Screen fraction at which this LOD becomes appropriate. |
 | `LODLevel` | `target_ratio` | Fraction of source triangles to keep for this LOD. |
+| `LODLevel` | `switch_distance_override` | Explicit switch distance for this level when using `run_lod_generators()`. |
 | `LODOptions` / `LODGeneratorOptions` | report metadata | LOD steps record `lod_source_*`, `lod_added_*`, and `lod_chain_*` counts for vertices, triangles, and estimated mesh payload bytes, plus per-level vertex/triangle counts, simplification source, omitted tiny-part LOD counts, instance-reuse counts, material-merge counts, texture-bake counts, culling-granularity change counts, scene-far-proxy counts, resolved export mode, and LOD chain advisory counts/codes. |
+
+Switch distances are derived from each part's bounding-box diagonal unless an override is supplied:
+`generic = diagonal / screen_coverage`, `unity = diagonal / (2 * screen_coverage)`, and
+`unreal = diagonal / sqrt(screen_coverage)`. The resolved values are recorded as
+`lod_switch_distance` and `lod_level_switch_distances`; the source is recorded as
+`formula` or `override`.
 
 Occlusion metadata includes `occlusion_candidate_count`, `occlusion_face_count`, `occlusion_sample_count`, `occlusion_visible_sample_count`, `occlusion_hidden_sample_count`, `occlusion_sample_coverage`, `occlusion_direction_coverage`, and `occlusion_confidence`. The confidence score is the lower of sample coverage and direction coverage; lower values mean the result depends on sparse sampling or a reduced direction set.
 
@@ -1150,7 +1166,7 @@ Conversion parameters:
 | `input_path` | CAD input path ending in `.step`, `.stp`, `.igs`, `.iges`, or `.brep`; Python callers may pass a sequence of STEP paths for explicit multi-root import, and the CLI accepts repeated `--input` STEP roots. CLI stdin remains STEP-oriented because stdin has no suffix. |
 | `output_path` | Output path. Suffix selects USD, glTF, OBJ, STL, or FBX. |
 | `profile` | Built-in profile name (`inspect-only`, `realtime-desktop`, `realtime-web`, `realtime-mobile`, `virtual-reality`, `augmented-reality`, `mixed-reality`) or a `ConversionProfile` that supplies default tessellation, repair, stage, optimize, LOD, budget, and workflow-recipe metadata. |
-| `tessellation_sag`, `angle`, `max_triangles`, `lod_ratios` | Profile override keywords for built-in realtime profiles. They are applied while constructing the named profile, before explicit option objects such as `tessellation=...` or `optimize=...` override individual pipeline steps. |
+| `tessellation_sag`, `angle`, `max_triangles`, `lod_ratios` | Profile override keywords for built-in realtime profiles. Realtime profiles use `sag_ratio=0.0002` by default; pass `tessellation_sag` only to switch that profile to an absolute sag tolerance. Overrides are applied while constructing the named profile, before explicit option objects such as `tessellation=...` or `optimize=...` override individual pipeline steps. |
 | `import_options` | `StepReadOptions` for STEP metadata and PMI import. |
 | `tessellation` | Overrides the profile tessellation step. |
 | `heal_brep` | Optional BREP healing step before tessellation. |
@@ -1272,7 +1288,7 @@ part, and material identifiers in Fascat `customData`.
 
 OBJ export writes vertex positions, normals, `f v//vn` face references, material assignments, and smoothing directives. Staged smooth normals export with smoothing enabled; flat, hard-edge, or generated face normals export with smoothing disabled.
 
-FBX export writes ASCII FBX 7.4 files with `Model`, `Geometry`, `Material`, `GlobalSettings`, and `Connections` sections. Geometry uses FBX polygon-end index bits, preserves hierarchy transforms, and can write normal, tangent, UV, and per-face material layers. PBR material factors are approximated through legacy Phong properties, including effective material opacity.
+FBX export writes ASCII FBX 7.4 files with `Model`, `Geometry`, `Material`, `GlobalSettings`, and `Connections` sections. Geometry uses FBX polygon-end index bits, preserves hierarchy transforms, and can write normal, tangent, UV, and per-face material layers. PBR material factors are approximated through legacy Phong properties, including effective material opacity. `CreationTime` is fixed to the Unix epoch so repeated exports are byte-stable for reproducible builds and golden-file tests.
 
 Export option parameters:
 
@@ -1316,7 +1332,6 @@ Profiles provide practical defaults for tessellation, staging, optimization, LOD
 
 ```python
 profile = fc.profiles.realtime_web(
-    tessellation_sag=0.2,
     angle=20.0,
     max_triangles=250_000,
     lod_ratios=(0.5, 0.25),
@@ -1341,6 +1356,10 @@ Pass either a profile name or a `ConversionProfile` from `fc.profiles`. Built-in
 profiles carry a `WorkflowRecipe` naming the target (`web-glb`, `mobile-glb`,
 `vr-glb`, `high-fidelity-desktop`), surfaced as a `workflow_recipe` report step that
 marks each stage `honored`, `disabled`, `metadata_only`, or `unsupported`.
+Realtime profiles default to relative tessellation with `sag_ratio=0.0002`; pass
+`tessellation_sag=...` when a target device profile needs an absolute tolerance.
+They also enable staging atlas metadata by default, with `atlas.max_size` matched
+to the profile's texture-resolution budget.
 
 When the profile has a budget, conversion reports add:
 

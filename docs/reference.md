@@ -202,14 +202,15 @@ keeping the native source shape for tessellation and healing.
 | `--pipeline` | unset | TOML pipeline file with named filters and ordered conversion steps |
 | `--input` | unset | Additional STEP root input for explicit multi-root conversion; may be passed more than once |
 | `--stdout-format` | `usda` | Output format used only when the output path is `-`: `usda`, `usdc`, `usdz`, `gltf`, `glb`, `obj`, `stl`, or `fbx` |
-| `--sag` | profile value | CAD tessellation sag tolerance |
-| `--sag-ratio` | unset | Relative CAD tessellation sag ratio; enables explicit relative deflection when set |
+| `--sag` | profile value | Absolute CAD tessellation sag tolerance; overrides the profile's relative sag ratio when set |
+| `--sag-ratio` | profile value | Relative CAD tessellation sag ratio; realtime profiles default to `0.0002` |
 | `--angle` | profile value | CAD tessellation angle tolerance in degrees |
 | `--target-triangles` | profile value | Target triangle count for optimized LOD0 |
 | `--ratio` | unset | Simplification ratio when no triangle target is set |
 | `--min-edge-length` | unset | Collapse tessellated edges shorter than this length |
 | `--max-edge-length` | profile value | Split tessellated triangles longer than this length |
 | `--max-polygon-length` | unset | Report tessellated polygon edges longer than this length without subdividing geometry |
+| `--max-triangles-per-part` | unset | Fail when any tessellated part exceeds this triangle count |
 | `--preserve-boundaries / --no-preserve-boundaries` | `true` | Preserve sharp/boundary edges during tessellation cleanup |
 | `--curvature-adaptive` | `false` | Use tighter interior meshing on curved CAD faces |
 | `--detail-adaptive` | `false` | Auto-tighten tessellation for shiny or high-detail material/metadata parts |
@@ -235,7 +236,7 @@ keeping the native source shape for tessellation and healing.
 | `--validate-lods` | `false` | Validate generated LOD monotonicity |
 | `--jobs` | `1` | Worker count for independent per-part repair, staging, optimization, decimation, and LOD mesh work |
 | `--normals` | `smooth` | Normal generation mode: `none`, `smooth`, `hard-edges`, or `flat` |
-| `--normal-weighting` | `angle` | Normal averaging weights for smooth or hard-edge normals: `angle` or `area` |
+| `--normal-weighting` | `area` | Normal averaging weights for smooth or hard-edge normals: `angle` or `area` |
 | `--preserve-face-boundaries` | `false` | Treat CAD face-group boundaries as hard normal edges |
 | `--override-normals / --preserve-normals` | `true` | Regenerate existing normals, or preserve existing normals and only generate missing normals |
 | `--tangents` | `false` | Ensure glTF-compatible vertex tangents exist; existing tangents are preserved unless invalidated or overridden |
@@ -261,7 +262,7 @@ keeping the native source shape for tessellation and healing.
 | `--degenerate-area-epsilon` | bbox-derived | Area threshold for standalone degenerate polygon cleanup (default: 1e-12 × squared bbox diagonal) |
 | `--delete-duplicate-polygons / --keep-duplicate-polygons` | `true` | Remove exact duplicate polygons during standalone degenerate polygon cleanup |
 | `--texel-density` | unset | UV texel density metadata for unwrap and atlas workflows |
-| `--uv-padding` | `2` | UV island padding metadata in pixels |
+| `--uv-padding` | `2` | UV island padding metadata in pixels; bake-domain packing clamps values below 2 px to 2 px |
 | `--max-stretch` | unset | Maximum UV stretch metadata for unwrap workflows |
 | `--unwrap-method` | `default` | Unwrap solver intent: `default`, `conformal`, or `isometric` |
 | `--unwrap-iterations` | unset | Requested unwrap solver iteration budget metadata |
@@ -311,7 +312,8 @@ keeping the native source shape for tessellation and healing.
 | `--instance-policy` | `auto` | Instance policy: `auto` and `preserve` reconstruct exact matching mesh instances; `expand` duplicates per occurrence |
 | `--instance-similarity-tolerance` | `0.0` | Position tolerance for reconstructing near-identical mesh instances with matching topology, attributes, materials, and metadata |
 | `--bake-materials` | `false` | Create a shared baked material with raster atlas textures |
-| `--maps-resolution` | `2048` | Requested bake texture resolution in pixels, recorded for downstream atlas generation |
+| `--maps-resolution` | `2048` | Bake texture resolution in pixels for generated raster maps |
+| `--lightmap-resolution` | `1024` | Resolution used for generated bake/lightmap UV packing |
 | `--force-uv-generation` | `false` | Generate UVs before material bake metadata and textures are recorded |
 | `--bake` | `base-color` | Maps to bake into raster atlas textures, such as `base-color,opacity` |
 | `--ambient-occlusion-strategy` | `conservative` | AO sampling direction set for baked AO maps and decimation AO protection: `conservative`, `exterior`, or `advanced` |
@@ -345,7 +347,7 @@ keeping the native source shape for tessellation and healing.
 | `--lod-preset` | `desktop` | LOD preset: `desktop`, `web`, `mobile`, or `vr` |
 | `--preserve-instances / --no-preserve-instances` | `true` | Preserve repeated parts as shared instances, or duplicate per occurrence |
 | `--preserve-hard-edges` | `false` | Protect faces adjacent to hard edges during simplification |
-| `--hard-edge-angle` | `30` | Angle threshold for hard-edge preservation |
+| `--hard-edge-angle` | `45` | Angle threshold for hard-edge preservation |
 | `--preserve-holes` | `false` | Protect open boundary faces during simplification |
 | `--preserve-material-boundaries` | `false` | Protect faces along material boundaries |
 | `--preserve-uv-seams` | `false` | Protect faces touching duplicated-position UV seams |
@@ -391,6 +393,8 @@ keeping the native source shape for tessellation and healing.
 - Ratios (`--ratio`, `--lods`, decimation ratios) and screen-coverage values are fractions between `0` and `1`; LOD ratios must be sorted highest-to-lowest detail. File-size budgets are megabytes; atlas/bake sizes are pixels.
 - Import space normalization uses a root transform: source coordinates stay in source units while the asset declares the target units, up-axis, and handedness, and the import report records the transform.
 - `tessellate`, `heal_brep`, and `repair` report a `tolerance_policy` with effective source/target units, meter conversions, the active deflection kind, converted absolute lengths, and which cleanup backends are implemented.
+- `--sag` and `--sag-ratio` are mutually exclusive in the effective tessellation options: passing `--sag` switches from the realtime profiles' relative `sag_ratio=0.0002` default to an absolute tolerance.
+- Migration note: current staging defaults use `--normal-weighting area` and `--hard-edge-angle 45` instead of the older angle weighting and 30 degree threshold, so re-converted assets can shade or split vertices differently unless the older values are passed explicitly.
 
 ### Repair
 
@@ -413,7 +417,7 @@ keeping the native source shape for tessellation and healing.
 
 ### UVs
 
-- `--uv1 unwrap`/`lightmap` bake channels are packed by xatlas with configured padding/resolution and report pack dimensions, utilization, and padding status.
+- `--uv1 unwrap`/`lightmap` bake channels are packed by xatlas with configured padding/resolution and report pack dimensions, utilization, and padding status. Bake-domain packing warns and clamps requested padding below 2 px to 2 px.
 - `box` UV generation is reported as AABB projection; `--uv-aabb-scope`, `--uv3d-size`, and `--uv-preserve-existing` record local/shared bounds, scale, destination, override policy, and units.
 - `--uv-sharp-to-seam` and `--uv-forbid-overlapping` are recorded as intent (the xatlas backend doesn't expose them directly) and validated after generation.
 

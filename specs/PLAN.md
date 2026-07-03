@@ -9,10 +9,24 @@ bug claim adversarially re-verified before inclusion). The Unity Asset Transform
 guidelines are used as a reference checklist — matching them 100% is explicitly a
 non-goal. Shapely is the bar for the Python API.
 
-Status: every P0 and P1 item from that audit shipped in **0.4.0** (2026-06-13),
-including the two items corrected during implementation (budget-warning surfacing
-and forbid-overlapping failure semantics — see the inline notes). Open work below
-is P2/P3 and the carried-forward roadmap.
+Status: every P0 and P1 item from that audit shipped in **0.4.0** (2026-06-13).
+Open work below is P2/P3 and the carried-forward roadmap.
+
+Re-audit 2026-07-01: identified the exception hierarchy, tessellation output guard,
+library logging, and merge/explode hot-path gaps (F1–F7), plus the merged performance
+baselines.
+
+Re-audit 2026-07-03 (three parallel passes over io/, ops/+mesh, and CLI/options/tests,
+with every contested claim re-verified by hand): the 2026-07-01 batch is **implemented**
+— exception hierarchy, tessellation guard, F1–F7, scipy connected components, library
+logging, bbox-derived repair tolerance, sag_ratio-primary tessellation, 45°/area normal
+defaults, decimation-cliff and merge-instance-loss warnings, `lightmap_resolution`, the
+meshoptimizer pin comment, and the `unwrap` extra rename — those items have left this
+plan. New this audit: one correctness item (§1), two robustness items (§2), five
+performance findings F8–F12 (§3) — the F1/F4/F6 patterns were fixed only in
+`hierarchy.py`/`scene.py` and survive verbatim in the export/tessellate/LOD paths —
+plus docs-staleness and test-coverage items (§6, §7). Two agent claims were refuted and
+recorded in the audit notes.
 
 ## What Fascat Is
 
@@ -29,95 +43,321 @@ glTF/OBJ/STL/FBX writers, trimesh + numpy (mesh ops).
 
 ## How to read this plan
 
-- States: `[ ]` open · `[~]` partial · `[x]` done.
+- States: `[ ]` open · `[~]` partial · `[x]` implemented.
 - Priorities: **P0** correctness/security blocker · **P1** production requirement ·
   **P2** quality/competitive · **P3** later.
 - Every code claim cites `file:line` as of the audit commit; lines drift as code changes.
 
 ## 1. Correctness bugs
 
-### Import (STEP/IGES/BREP)
+- [x] **P2** `Mesh.optimize_buffers` face-group remap reads uninitialized memory — added
+  by audit 2026-07-03. The inverse-permutation buffer is allocated with
+  `np.empty_like(reordered_face_indices)` (`fascat/mesh.py:2691-2692`) and then scattered
+  into via `inverse_face_order[reordered_face_indices] = np.arange(...)`.
+  `reordered_face_indices` is built by looking each cache-optimized face up in a
+  `tuple(sorted(face)) → old index` dict (`fascat/mesh.py:2645-2657`); when the mesh
+  contains **duplicate faces** (same vertex set), the dict collapses them to one entry, so
+  `reordered_face_indices` is no longer a permutation of `0..F-1` — some slots of the
+  `np.empty` buffer are never written and leak garbage indices into the remapped
+  `face_groups`. This does not crash (see the refuted-claims note below), but corrupted
+  face-group indices silently poison downstream material-boundary and feature-preservation
+  logic. Compounding it, the entire method body is wrapped in
+  `except Exception: return self.copy()` (`fascat/mesh.py:2699-2700`), so *any* future bug
+  in this path degrades to a silent no-op with no report entry.
 
-- [x] **P0** Path traversal in texture/material-library resolution — `_resolve_material_library_reference` / `_resolve_source_texture` don't confine resolved paths to the search roots (`fascat/io/step.py:5315`, `fascat/io/step.py:6215`); validate with `Path.is_relative_to()` after resolving
-- [x] **P1** ISO-10303-21 string escape directives (`\X2\`, `\X4\`, `\S\`) are not decoded → garbled part names and PMI text on standards-conformant files (`fascat/io/step.py:3984`)
-- [x] **P2** Color range heuristic (any component > 1.0 ⇒ assume 0–255) misreads HDR-ish inputs; make the color space explicit (`fascat/io/step.py:5694`)
-- [x] **P2** Texture slot matching can bind the same slot twice — dedupe by slot (`fascat/io/step.py:5753`)
-- [x] **P2** Mirrored transforms (negative determinant) are neither detected nor documented; risk of inverted normals on mirrored instances (`fascat/io/step.py:1476`, `fascat/io/step.py:4551`)
-- [x] **P3** Stale "multi-file import not implemented" warning contradicts the shipped external-reference graph (`fascat/io/step.py:4087`)
+  ```python
+  # fascat/mesh.py — replace the np.empty_like scatter with a sentinel-filled
+  # lookup and drop unmatched entries, mirroring _remap_sliced_face_group in ops/scene.py:
+  inverse_face_order = np.full(self.triangle_count, -1, dtype=np.int64)
+  inverse_face_order[reordered_face_indices] = np.arange(
+      reordered_face_indices.shape[0], dtype=np.int64
+  )
+  face_groups: dict[str, IntArray] = {}
+  for name, values in self.face_groups.items():
+      if not np.isin(values, reordered_face_indices).all():
+          continue  # unchanged policy: drop groups that reference reordered-away faces
+      remapped = inverse_face_order[values]
+      face_groups[name] = remapped[remapped >= 0]
+  mesh.face_groups = face_groups
 
-### Mesh repair / tessellation
+  # and make the blanket fallback observable instead of silent:
+  except Exception:
+      logger.warning("optimize_buffers failed; returning unoptimized copy", exc_info=True)
+      return self.copy()
+  ```
 
-- [x] **P0** `fill_holes` assigns `material_indices[0]` to every fill face — wrong materials on filled regions (`fascat/mesh.py:2883`); assign per-hole from neighboring faces (nearest centroid)
-- [x] **P0** `stitch_boundary_gaps` wipes normals, tangents, and ALL UV channels (`fascat/mesh.py:1384-1386`); normals regenerate downstream but UVs are unrecoverable — interpolate attributes across stitched vertices instead
-- [x] **P1** Silent `return` when post-edit attribute remapping is incomplete leaves stale `material_indices` (`fascat/mesh.py:3047`); warn or invalidate the channel
-- [x] **P1** Fixed `area_epsilon=1e-12` in degenerate-face removal is scale-dependent — wrong for meter- or micron-scale models (`fascat/mesh.py:939`); derive from bbox diagonal
-- [x] **P2** `simplify` with `target_error`: bound violations are recorded as `exceeded` in metadata but never enforced; document target_error as a hint or add a retry fallback (`fascat/mesh.py:2354-2412`)
-
-### Stage / materials / textures
-
-Audit verdict: healthy. xatlas vertex-split bookkeeping, opacity math, and bake color-space
-handling were each independently challenged and held up.
-
-- [x] **P2** Warn in `asset.report` when textures are silently downsampled by `max_resolution` (`fascat/ops/textures.py:79`)
-- [x] **P3** Document the 6-decimal PBR rounding in material dedup keys, or make precision configurable (`fascat/ops/stage.py:857`)
-- [x] **P3** Mean-based PBR averaging in baked materials: document, or use a weighted strategy (`fascat/ops/actions.py:882`)
-- [x] **P3** Expose/adapt the fixed 6-direction AO sampling (`fascat/ops/actions.py:736`)
-- [x] **P3** Record whether baked emissive came from the material or the (0,0,0) fallback (`fascat/ops/actions.py:704`)
-
-### Exporters (glTF / USD / OBJ / STL / FBX)
-
-- [x] **P0** Draco/KTX2 export leaves a corrupt file on disk when validation fails after `_write_gltf_with_external_compression` (`fascat/io/gltf.py:189-190`); write to a temp file + atomic rename on success — and make **all** exporters transactional
-- [x] **P1** A mesh whose face groups are all empty can emit invalid empty-primitive glTF (`fascat/io/gltf.py:1261-1284`)
-- [x] **P1** Out-of-bounds material index silently drops the material binding (`fascat/io/gltf.py:1577-1586`); add a report warning
-- [x] **P1** KTX2 encoder subprocess has no timeout — export can hang forever (`fascat/io/gltf.py:1353-1375`)
-- [x] **P2** Empty accessors get dummy `[0,0,0]` min/max — skip empty meshes or omit the accessor (`fascat/io/gltf.py:1175`, `fascat/io/gltf.py:1185`)
-- [x] **P2** Draco-compressed output is not re-validated before success is reported (`fascat/io/gltf.py:1316-1338`)
-- [x] **P2** Quantized SNORM8 NORMAL accessors are not covered by the KHR_mesh_quantization validation pass (`fascat/io/gltf.py:1200`, validator `fascat/io/gltf.py:2089`)
-- [x] **P2** USD `display_color` metadata parse failures fall back silently (`fascat/io/usd.py:512-525`)
-- [x] **P2** USD UV conversion lacks (N,2) shape validation (`fascat/io/usd.py:504`)
-- [x] **P3** Warn when ASCII STL is chosen for >10k-triangle meshes (`fascat/io/stl.py:17`)
-- [x] **P3** USD name sanitization collision policy documented/enforced (`fascat/io/usd.py:681`)
-
-### Optimize / LOD
-
-- [x] **P2** LOD re-simplification retry doesn't update `simplification_source` metadata — misleading provenance (`fascat/ops/lod.py:229-231`)
-- [x] **P3** LOD ratio ≤ 0.01 produces a 1-triangle LOD with no warning; validate ratios (`fascat/ops/lod.py:631`, `fascat/ops/lod.py:553`)
-- [x] **P3** `_flatten_safe` near-identity check relies on default `np.allclose` tolerances; make the tolerance explicit (`fascat/ops/scene.py:312`)
-- [x] **P3** Merge without a `max_vertices_per_mesh` default can exceed engine index limits; default 65535 + warning (`fascat/ops/hierarchy.py:298`)
-
-### Runtime / validation harnesses
-
-- [x] **P0** Subprocess timeouts don't kill process groups — orphaned Chromium/engine children on Unix (`fascat/runtime.py:289`, `fascat/runtime.py:383`, `fascat/runtime.py:451`, `fascat/runtime.py:556`); launch with a new session/process group and kill the group on timeout
-- [x] **P0** `TemporaryDirectory` is deleted while a timed-out subprocess may still read from it (`fascat/runtime.py:322-480`, `fascat/runtime.py:537-600`); extend the directory lifetime past subprocess teardown
-- [x] **P2** glTF-Transform invocations lack preflight `shutil.which` checks and contextual errors (`fascat/runtime.py:1058`, `fascat/runtime.py:1131`)
-- [x] **P2** Default visual-diff thresholds are too permissive for regression gating (pixel tolerance 8/255, 35% changed-pixel ratio) (`fascat/runtime_fixtures.py:245`)
-- [x] **P3** Pillow-based preview rendering is platform-dependent — soften the "deterministic" claim or pin/render differently (`fascat/visual.py:382`)
-- [x] **P3** Cap browser screenshot data-URI payload size (`fascat/runtime.py:2226`)
+  Test to add: a mesh with two identical faces plus a `face_groups` entry, assert
+  `optimize_buffers()` returns in-range group indices (today it can return garbage).
 
 ## 2. Robustness & input hardening
 
-- [x] **P1** Whole STEP file loaded via `read_text()` at ≥6 call sites with no size guard — 1 GB file ⇒ 1 GB+ allocation (`fascat/io/step.py:942` et al.); stream or mmap with size limits
-- [x] **P1** Unterminated STEP string ⇒ unbounded forward scan per record lookup (`fascat/io/step.py:3956`); bound the scan distance
-- [x] **P1** Malformed-input behavior pass: truncated/garbage STEP, empty assemblies, zero-vertex parts must produce clean errors, never tracebacks (tests in §7)
-- [x] **P2** ZIP material libraries: entry-count/size caps before extraction (`fascat/io/step.py:5424`)
-- [x] **P2** JSON material library recursion depth cap (`fascat/io/step.py:5537`)
-- [x] **P2** KTX2 dimension parsing must handle truncated files (`fascat/io/step.py:6291`)
-- [x] **P2** Report broken external-reference cycles instead of silently dropping them (`fascat/io/step.py:873`)
-- [x] **P3** PMI semantic graph cycle detection (`fascat/io/step.py:1897`); domain checks for SQRT/LOG condition operands (`fascat/io/step.py:2797`)
+- [x] **P2** I/O readers/writers bypass the exception hierarchy — added by audit
+  2026-07-03. The 2026-07-01 item shipped for the *custom* exceptions
+  (`FascatError` base in `fascat/errors.py`; `MeshValidationError` `fascat/mesh.py:70`,
+  `UVOverlapError` `fascat/ops/stage.py:16`, `FilterExpressionError` `fascat/filter.py:18`
+  all re-based and exported), but the I/O layer still raises bare stdlib exceptions, so
+  `except fascat.FascatError` misses every reader/writer failure. Verified examples:
+  `RuntimeError` for glTF Transform timeouts (`fascat/io/gltf.py:1417-1419`), `ValueError`
+  for oversized inputs (`fascat/io/step.py:918`), `RuntimeError` for malformed FBX/OBJ/STL
+  (`fascat/io/fbx.py:67`, `fascat/io/obj.py:97`, `fascat/io/stl.py:70`). Library consumers
+  embedding fascat must catch `(RuntimeError, ValueError, OSError)` alongside
+  `FascatError`, which defeats the point of the hierarchy. Fix at the public entry points
+  (`read_step`/`read_iges`/`read_brep`/`read`/`write_*`), not at every raise site:
+
+  ```python
+  # fascat/errors.py
+  class FascatIOError(FascatError):
+      """Raised when reading or writing an asset file fails."""
+
+  # fascat/io/_errors.py (new) — applied to every public read_*/write_* entry point
+  def wrap_io_errors(operation: str) -> Callable[[F], F]:
+      def decorate(func: F) -> F:
+          @functools.wraps(func)
+          def wrapper(*args: Any, **kwargs: Any) -> Any:
+              try:
+                  return func(*args, **kwargs)
+              except FascatError:
+                  raise  # already ours — never double-wrap
+              except (RuntimeError, ValueError, OSError) as exc:
+                  raise FascatIOError(f"{operation} failed: {exc}") from exc
+          return cast(F, wrapper)
+      return decorate
+  ```
+
+  Deliberately narrow: do **not** catch `Exception` (keeps `KeyboardInterrupt`,
+  `MemoryError`, and genuine bugs loud). The CLI's own error handling is unaffected — this
+  is for library embedders. Docs: add a "catching errors" section to `docs/api.md`
+  showing `except fc.FascatError`, and state that `fc.Error` is an alias kept for
+  brevity (`fascat/errors.py:10`) with `FascatError` as the documented canonical name.
+
+- [x] **P2** Bbox-derived repair tolerance silently degrades to 0.0 on mesh-less
+  selections — added by audit 2026-07-03. The bbox-derived default shipped
+  (`RepairOptions.resolved_tolerance`, `fascat/options.py:303-307`, wired at
+  `fascat/asset.py:644`), but `_mesh_selection_bbox_diagonal` returns `0.0` when no
+  selected part carries a mesh (`fascat/asset.py:1679-1695`), so
+  `resolved_tolerance(0.0)` yields `0.0` — i.e. vertex merge silently disabled, which is
+  exactly the failure mode the 2026-07-01 item was written to eliminate. A user who runs
+  `repair` before `tessellate` (or filters down to mesh-less construction parts) gets the
+  old no-merge behavior with nothing in the report. Warn at the resolution site:
+
+  ```python
+  # fascat/asset.py — repair op entry (asset.py:644)
+  diagonal = _mesh_selection_bbox_diagonal(scope.asset, part_ids)
+  resolved_tolerance = opts.resolved_tolerance(diagonal)
+  if opts.tolerance == 0.0 and resolved_tolerance == 0.0:
+      scope.asset.report.add_warning(
+          "repair tolerance auto-derivation found no mesh geometry in the selection; "
+          "vertex merge is disabled (tolerance=0) - run tessellate first or pass an "
+          "explicit tolerance"
+      )
+  ```
 
 ## 3. Performance
 
-- [x] **P1** Parallelism is effectively off: every op defaults `jobs=1`, and `parallel_map` uses `ThreadPoolExecutor` for CPU-bound (GIL-bound) mesh work (`fascat/ops/parallel.py:11-24`); default `jobs=min(4, cpu_count())` and use process pools for tessellate/simplify-class stages
-- [x] **P2** Cache topology metrics: `orientability_metrics` (O(F) BFS, `fascat/mesh.py:1516`) is recomputed via `stats()` after every stage whenever a progress callback is set — and the CLI always sets one (`fascat/pipeline.py:134+`, `fascat/asset.py:368`)
-- [x] **P2** Cache `Node.walk()` results per operation scope — repeated full-tree walks in stats/draw-call/occurrence paths (`fascat/asset.py:100`, `fascat/asset.py:335`)
-- [x] **P2** `read_step_many` doesn't dedupe identical parts across member files — shared library parts are tessellated and stored N times (`fascat/io/step.py:809`)
-- [x] **P2** Memoize design-variant selector term resolution (`fascat/io/step.py:2548`)
-- [x] **P2** Audit `Asset.__post_init__` deep-copy amplification: the constructor deep-copies root/parts/materials/images (`fascat/asset.py:205-212`); verify all hot paths use `_adopt` and document the contract
-- [x] **P3** Cache the nearest-centroid KD-tree across repeated simplifications of the same source (`fascat/mesh.py:2098`)
-- [x] **P3** Cache per-channel UV layout/seam-graph stats in `_tag_uv_layout_quality` (`fascat/ops/stage.py:620-641`)
-- [x] **P3** Restrict the instance-reconstruction second tree walk to nodes referencing replaced parts (`fascat/ops/scene.py:154`)
-- [x] **P3** Early-exit `orientability_metrics` for manifestly non-manifold meshes (`fascat/mesh.py:1516`)
-- [ ] **P3** Profile on real large CAD corpora (10k+ parts) and record numbers in [PERFORMANCE.md](PERFORMANCE.md) — fallback fixture baseline recorded; actual 10k+ part corpus profiling still needed
+- [x] **P3** Vectorize the remaining export/tessellate/LOD hot paths — audit 2026-07-03:
+  the F1/F4/F6 patterns fixed in `hierarchy.py`/`scene.py` survive verbatim in five other
+  places, including two on the *main* pipeline (glTF export, tessellation dedupe) that the
+  merge/explode-only F1–F6 batch never touched; findings F8–F12 with ready-to-apply
+  snippets live in the detailed findings below
+- [ ] **P3** Profile on real large CAD corpora (10k+ parts) and record numbers in the
+  baseline list below — fixture baselines recorded there (2026-06-14 corpus, 2026-07-01
+  re-run); actual 10k+ part corpus profiling still needed
+
+### Performance Findings
+
+Audit of 2026-07-03: the 2026-07-01 findings F1–F7 and the scipy connected-components
+rewrite were verified **shipped** (see verification below) and are gone from the open
+list. This section now holds the **new open findings F8–F12** — the same per-face
+Python-loop/`.tolist()`/dict-remap patterns, found by sweeping the rest of the package
+after the hierarchy/scene fixes landed. Each is scoped, behavior-preserving (one
+documented tie-break caveat in F12), and independent of the others; implement, test, and
+commit them one at a time per the operating checklist.
+
+#### Baseline
+
+- Fixture baseline (2026-06-14, 8 real STEP fixtures): **75.19 s total / 665.3 MiB peak RSS**
+  — import 31.80 s, LOD 20.53 s, tessellation 8.39 s, repair 5.36 s, stage 5.01 s,
+  optimize 3.84 s, write 0.11 s.
+- Re-run 2026-07-01 (`make benchmark`, `tests/fixtures/vertical-screw.step` → GLB):
+  **3.69 s total / 370.5 MiB peak RSS** — import 0.87 s, tessellate 1.57 s, LOD 0.49 s,
+  repair 0.34 s, stage 0.21 s, optimize 0.19 s, write 0.004 s.
+- Still open (§3 above): profiling on a real 10k+ part corpus.
+
+#### Verification of prior findings (2026-07-03)
+
+All seven 2026-07-01 findings plus the connected-components rewrite are implemented:
+
+- F1 — `np.unique` material enumeration: `fascat/ops/hierarchy.py:262` and `:514`.
+- F2 — vectorized `_face_material_ids` gather: `fascat/ops/hierarchy.py:405-416`.
+- F3 — BFS `face_rows` hoisted once: `fascat/ops/hierarchy.py:561-573`.
+- F4 — `_part_material_key` via `_array_digest_required` with int64 normalization:
+  `fascat/ops/scene.py:274-278`; the digest-count test moved to 10 as predicted
+  (`tests/test_scene.py:161`).
+- F5 — `_face_chunks` counts only new vertices (quadratic removed):
+  `fascat/ops/scene.py:448`.
+- F6 — `_slice_mesh` face-group remap via lookup array:
+  `fascat/ops/scene.py:464-473` + `_remap_sliced_face_group` at `:480-486`.
+- F7 — per-channel UV stats **are cached**, in `fascat/mesh.py` rather than the op:
+  `uv_layout_stats` (`fascat/mesh.py:2205-2273`) and `uv_distortion_metrics`
+  (`fascat/mesh.py:2383-2458`) both go through `_cached_value` keyed on
+  channel + tolerance + geometry cache token, so `_tag_uv_layout_quality` calling them per
+  channel is correct. The former `[~]` §3 item is closed (see audit notes).
+- scipy connected components: `_connected_face_components_scipy`
+  (`fascat/ops/hierarchy.py:537-556`) builds a face×vertex incidence matrix and runs
+  `scipy.sparse.csgraph.connected_components` on `incidence @ incidence.T`, with the
+  Python BFS kept as fallback (`:559-580`).
+
+#### Open findings
+
+Unlike F1–F6 (merge/explode-only), **F8 and F9 sit on the main export and tessellate
+paths**, so `make benchmark` on `vertical-screw.step` should move slightly; F10–F12 bite
+on LOD sampling and buffer optimization of large meshes.
+
+##### F8 — F1's material-enumeration pattern survives in four more files
+
+The exact `sorted(set(mesh.material_indices.astype(int).tolist()))` shape that F1 removed
+from `hierarchy.py` still allocates O(F) Python ints per call in:
+
+- `fascat/io/gltf.py:1686` — **glTF writer primitive splitting, on every export**
+- `fascat/export_report.py:109` — export report material summary
+- `fascat/asset.py:1772` — asset-level material usage scan
+- `fascat/ops/actions.py:2679` — `used = sorted({int(index) for index in ...tolist()})`,
+  same allocation shape via a set comprehension
+
+```python
+# before (all four sites)
+for material_index in sorted(set(mesh.material_indices.astype(int).tolist())):
+# after — np.unique is already sorted, no per-face Python objects
+for material_index in np.unique(mesh.material_indices.astype(np.int64)).tolist():
+```
+
+##### F9 — tessellation dedupe builds an O(F)-int tuple key per part
+
+`_deduplicate_parts_by_fingerprint` (`fascat/ops/tessellate.py:1375-1384`) keys its
+canonical-part dict on
+`tuple(int(value) for value in part.mesh.material_indices.tolist())` — one Python int per
+face, per part, **on the main tessellate path** (it runs at the end of every
+`tessellate_asset` call, `fascat/ops/tessellate.py:160`). This is exactly the pattern F4
+replaced in instance reconstruction. Reuse the digest idiom: hoist
+`_array_digest_required` (`fascat/ops/scene.py:296`) into a shared helper (e.g.
+`fascat/ops/_digest.py`, or a `Mesh` staticmethod) so scene and tessellate share one
+implementation, and normalize dtype first — the digest hashes dtype and the tuple key was
+dtype-agnostic:
+
+```python
+material_indices = None
+if part.mesh.material_indices is not None:
+    material_indices = _array_digest_required(
+        part.mesh.material_indices.astype(np.int64, copy=False)
+    )
+key = (part.fingerprint, tuple(part.material_ids), material_indices, _metadata_key(part.metadata))
+```
+
+Update the `canonical_by_key` annotation (`fascat/ops/tessellate.py:1376`) from
+`tuple[int, ...] | None` to `str | None` to match.
+
+##### F10 — F6's dict-based face-group remap survives in two more places
+
+- `_slice_faces` (`fascat/ops/actions.py:1809-1826`): builds a
+  `{int(face_index): local_index}` dict from `.tolist()` and probes it per group entry —
+  byte-for-byte the pattern F6 replaced in `_slice_mesh`.
+- `fascat/ops/hierarchy.py:640-642`: the `face_position` dict + per-entry
+  `[face_position[int(value)] for value in values.astype(int).tolist() ...]`
+  comprehension, same shape.
+
+Fix: hoist `_remap_sliced_face_group` (`fascat/ops/scene.py:480-486`) into the same
+shared home as F9's digest helper and call it from all three sites:
+
+```python
+face_lookup = np.full(mesh.triangle_count, -1, dtype=np.int64)
+face_lookup[face_indices.astype(np.int64)] = np.arange(face_indices.shape[0], dtype=np.int64)
+face_groups = {name: _remap_sliced_face_group(face_lookup, group) for name, group in mesh.face_groups.items()}
+```
+
+The bounds/sentinel masking in `_remap_sliced_face_group` preserves the current behavior
+of silently skipping out-of-slice group entries at all three call sites.
+
+##### F11 — accidental O(F²) in `_sample_mesh_faces`
+
+`fascat/ops/actions.py:1798-1806`: the top-up loop rebuilds the exclusion set **inside
+the comprehension condition**, i.e. once per candidate index:
+
+```python
+missing = [index for index in range(mesh.triangle_count) if index not in set(face_indices.astype(int).tolist())]
+```
+
+Python evaluates the `if` clause per element, so this constructs an O(F) set F times —
+O(F²) with O(F²) allocations. The loop is rarely entered today (`np.linspace` over
+`0..F-1` with `target ≤ F` steps by ≥ 1, so the truncated ints are strictly increasing
+and `np.unique` removes nothing), which is precisely why it has survived: it is a
+landmine, not a hot path. Replace the whole while-loop body with the vectorized
+difference:
+
+```python
+while face_indices.shape[0] < target:
+    missing = np.setdiff1d(
+        np.arange(mesh.triangle_count, dtype=np.int64), face_indices, assume_unique=True
+    )
+    face_indices = np.sort(
+        np.concatenate([face_indices, missing[: target - face_indices.shape[0]]])
+    )
+```
+
+##### F12 — `Mesh.optimize_buffers` runs per-face and per-vertex Python loops
+
+`fascat/mesh.py:2645-2678`, on the optimize path (`fascat/ops/optimize.py` calls it for
+every part when buffer optimization is enabled):
+
+1. **Per-face dict build** (`:2645-2657`): `old_face_lookup` maps
+   `tuple(sorted(face)) → old index` via `.tolist()` — O(F) tuple allocations — then
+   `reordered_face_indices` probes it once per cache-optimized face. Vectorize with a
+   sorted-rows structured view + `searchsorted`:
+
+   ```python
+   old_sorted = np.sort(self.faces.astype(np.int64, copy=False), axis=1)
+   new_sorted = np.sort(cache_optimized.reshape((-1, 3)).astype(np.int64), axis=1)
+   row_dtype = np.dtype((np.void, old_sorted.dtype.itemsize * 3))
+   old_view = np.ascontiguousarray(old_sorted).view(row_dtype).ravel()
+   new_view = np.ascontiguousarray(new_sorted).view(row_dtype).ravel()
+   order = np.argsort(old_view)
+   pos = np.searchsorted(old_view[order], new_view)
+   pos_clamped = np.minimum(pos, old_view.size - 1)
+   matched = old_view[order[pos_clamped]] == new_view
+   reordered_face_indices = np.where(
+       matched, order[pos_clamped], np.arange(new_view.size, dtype=np.int64)
+   )
+   ```
+
+   **Tie-break caveat:** for duplicate faces the dict keeps the *last* old index while
+   `argsort` + `searchsorted` yields the *first*. This only matters when duplicate faces
+   carry different `material_indices` — cover it with a test and document the
+   first-occurrence semantics (it is the more predictable of the two).
+
+2. **Per-vertex remap inversion** (`:2675-2678`): `for old_index, new_index in
+   enumerate(remap.astype(np.int64))` is a pure-Python loop over every vertex. Replace
+   with a masked scatter — duplicate `new_index` targets came from vertices with
+   byte-identical attribute streams (that is why meshoptimizer merged them), so which
+   representative wins is immaterial:
+
+   ```python
+   remap64 = remap.astype(np.int64)
+   valid = remap64 < int(unique_vertices)
+   old_for_new = np.zeros(int(unique_vertices), dtype=np.int64)
+   old_for_new[remap64[valid]] = np.flatnonzero(valid)
+   ```
+
+Implement together with the §1 correctness item (same function, same tests).
+
+#### Verification recipe (when implementing)
+
+1. Focused tests per finding: `uv run pytest tests/test_gltf.py tests/test_tessellate.py
+   tests/test_actions.py tests/test_hierarchy.py tests/test_mesh.py --no-cov -q`. F9
+   changes a dict-key type — check no test asserts on the tuple form; F12 needs the new
+   duplicate-face tests from §1.
+2. `make ci` for the full gate.
+3. `make benchmark` before/after — F8 (glTF export) and F9 (tessellate dedupe) are on the
+   fixture's critical path, so expect a small improvement on `vertical-screw.step`;
+   F10–F12 show on large meshes and LOD-heavy runs only.
 
 ## 4. Python API redesign — 0.4.0, breaking (Shapely-inspired)
 
@@ -138,69 +378,88 @@ asset.write("motor.glb")                            # extension-dispatched; writ
 asset                                                # <Asset: 412 parts, 1.2M triangles, 38 materials>
 ```
 
-- [x] **P1** kwargs-first operations: every `Asset` method accepts keyword args directly (`asset.tessellate(sag=0.1)`); the `*Options` dataclasses remain as the typed backing store and for power users (`fascat/options.py`, `fascat/asset.py`)
-- [x] **P1** Shrink the top-level namespace from 123 exports to ~40 core names: `Asset`/`Node`/`Part`/`Mesh`/`Material`/`Filter`, `read_*`, `write_*`, `convert`, core options; move runtime/parity/visual/benchmark machinery to a `fascat.validation` (or `fascat.runtime`) submodule (`fascat/__init__.py:126-250`)
-- [x] **P1** Delete module-level operation duplicates (`fc.tessellate(asset, …)` etc., `fascat/pipeline.py:1820-2100`) — the dual surface has already drifted (module `repair()` is missing 10 of `RepairOptions`' parameters, `fascat/pipeline.py:1866`); keep only `read_*`, `write_*`, `convert`
-- [x] **P1** Lazy submodule imports — core `import fascat` must not pay for the runtime/visual/Pillow stacks (~500 ms today; also taxes every CLI invocation) (`fascat/__init__.py:84-122`)
-- [x] **P1** `__repr__` for `Asset`/`Node`/`Part`/`Mesh` and options (showing non-default fields only) (`fascat/asset.py:54`, `fascat/asset.py:117`, `fascat/asset.py:191`, `fascat/mesh.py:210`)
-- [x] **P2** `where: Filter | str | dict | None` instead of `Any` across all ops (`fascat/asset.py:370` et al.)
-- [x] **P2** Mutability contract: document copy-on-operation semantics; guard or document direct mutation of `asset.parts` / mesh arrays (`fascat/asset.py:191`, `fascat/mesh.py:210`)
-- [x] **P2** `convert()` becomes profile-first: `convert(src, dst, profile="realtime-web", **overrides)`; `Literal` profile names for IDE/typo safety (`fascat/pipeline.py:86`)
-- [x] **P2** Consistency pass: document method/property boundaries and keep compatibility aliases (`selection()` for inspection, `lods()` accepts generator options while `run_lod_generators()` remains supported, `clone()` complements `copy(keep_source=...)`)
-- [x] **P2** Docstrings on all public classes/methods (document the asset tree model: nodes/parts/occurrences); error-handling examples in docs
-- [x] **P2** Fail fast on unwritable output paths in `write_*`; add `dry_run` to `write_*` for parity with `convert`
-- [x] **P3** Convenience predicates (`is_empty`, `has_meshes`, `has_lods`); `to_trimesh()` interop helpers
-- [x] **P3** Document/normalize implicit conversions in `Filter` (fnmatch patterns) (`fascat/filter.py:101`)
 
 ## 5. CLI
 
 Audit verdict: the AGENTS.md contract is largely honored — exit codes 0/1/2 are consistent,
-JSON output is clean, NO_COLOR/TTY handling is correct.
+JSON output is clean, NO_COLOR/TTY handling is correct. The library logging item shipped
+(NullHandler-backed `logging.getLogger("fascat")`, `fascat/report.py:10-11`, warnings and
+errors mirrored at `:135-139`, covered by `tests/test_report.py`).
 
-- [x] **P1** Ctrl-C mid-conversion leaves a partial output file: `KeyboardInterrupt` bypasses the `except Exception` handlers (`fascat/cli.py:2166`, `fascat/pipeline.py:275`) and `_StageReporter.__exit__` only stops the progress bar (`fascat/cli.py:3612`); fixed by the §1 transactional temp-file + atomic-rename writes (`fascat/cli.py:2131`)
-- [x] **P2** `fascat --json --version` emits plain text — the version callback ignores JSON mode (`fascat/cli.py:362`)
-- [x] **P2** `--verbose`/`-v` is registered and stored but never read anywhere — implement or remove (`fascat/cli.py:381`)
-- [x] **P2** Document the exit-code table in docs/reference.md (0 success / 1 runtime / 2 usage)
-- [x] **P2** Document `--json` output schemas (success/failure payloads per subcommand)
-- [x] **P3** `--no-input` is inert (no prompts exist anywhere) — document as reserved or remove (`fascat/cli.py:396`)
+No open items.
 
 ## 6. Production defaults & guideline alignment
 
-- [x] **P1** Expose Draco parameters (compression level 0–10, per-attribute quantization bits) through `GltfExportOptions` — currently hardcoded defaults (`fascat/io/gltf.py:1328`)
-- [x] **P1** Expose KTX2/Basis quality (0–255) and effort levels — currently hardcoded UASTC + mips (`fascat/io/gltf.py:1397`)
-- [x] **P1** Platform budget validation in profiles/preflight: warn when output exceeds per-target triangle and draw-call budgets (desktop/mobile/VR/WebGL) — budgets are computed today but never enforced *(correction: budget violations already produced report warnings; the real gap was that the CLI never surfaced warning texts — convert now prints report warnings on stderr)*
-- [x] **P1** Enforce `forbid_overlapping=True` automatically when UV1 is a bake domain; validate and fail clearly (`fascat/options.py:414`) *(correction: bake-domain auto-enable already existed; the gap was failure semantics — explicit `forbid_overlapping=True` now raises `UVOverlapError` on residual overlaps, bake-domain defaults keep a loud warning)*
-- [ ] **P2** Repair `tolerance` default 0.0 means "no vertex merge" — derive a default from the bbox (≈0.1 mm baseline) or warn loudly (`fascat/options.py:191`)
-- [ ] **P2** Make relative `sag_ratio` (≈0.0002 of bbox) the default tessellation strategy; absolute sag as fallback (`fascat/options.py:143`)
-- [ ] **P2** Re-evaluate normal defaults against industry practice: `hard_edge_angle` 30°→45°, `normal_weighting` angle→area (`fascat/options.py:471-472`)
-- [ ] **P2** Enforce 2 px padding for any UV1 bake-domain packing (unwrap or projection) (`fascat/options.py:409`, `fascat/ops/stage.py:178`)
-- [ ] **P2** Atlas baking on by default in production export presets (`fascat/options.py:436`)
-- [ ] **P2** Warn when the decimation target is <10–20% of source triangles (quality cliff); suggest the proxy/retopo path (`fascat/options.py:784`)
-- [ ] **P2** Merge guardrails: warn when merging destroys N instances; prefer instancing messaging (`fascat/options.py:608`)
-- [ ] **P3** `lightmap_resolution` option distinct from atlas resolution (default 1024) in `BakeMaterialOptions`
-- [ ] **P3** Open-shell-separate face orientation mode (`fascat/options.py:196`)
-- [ ] **P3** Texel-density preset for AABB projection (e.g. 1000 units/UV) (`fascat/options.py:449`)
-- [ ] **P3** Document switch-distance formula derivations; allow per-level `switch_distance_override` (`fascat/ops/lod.py:614`)
+- [x] **P2** Enforce 2 px padding for any UV1 bake-domain packing (unwrap or projection) —
+  `UnwrapOptions.padding` defaults to 2 (`fascat/options.py:476`) but nothing enforces a
+  floor when a bake-domain channel is packed with a smaller explicit value; a 0/1 px
+  padding on a lightmap atlas bleeds neighboring charts into AO and lightmap bakes. Clamp
+  (with a report note) at the point where the bake domain is resolved
+  (`fascat/ops/stage.py`, the `_uv_domain(...) == "bake"` branch):
+
+  ```python
+  if domain == "bake" and effective_padding < 2:
+      asset.report.add_warning(
+          f"part {part_id} uv{channel}: padding {effective_padding}px is below the 2px "
+          "bake-domain minimum; clamping to 2px to prevent chart bleed in AO/lightmap bakes"
+      )
+      effective_padding = 2
+  ```
+
+- [x] **P2** Atlas baking on by default in production export presets —
+  `AtlasOptions.enabled` is still `False` (`fascat/options.py:504`) and no built-in
+  profile flips it, so the "production" presets ship without atlas consolidation; either
+  enable it in the realtime/production profiles (`fascat/profiles.py`) or document why
+  default-off is the deliberate choice
+
+- [x] **P2** Docs drifted behind the 2026-07 defaults batch — added by audit 2026-07-03;
+  re-verify each cite while fixing since docs lines drift fast:
+  - `docs/api.md:629-632` describes the `sag_ratio=0.0002` default but not the mutual
+    exclusivity: `TessellationOptions(sag=0.1)` silently sets `sag_ratio=None`
+    (`fascat/options.py:215-218`) — say so, it changes what "default" means for any
+    caller passing `sag`
+  - `docs/reference.md` flag tables: no `--sag-ratio` row alongside the documented sag
+    flag, and no upgrade note that `--hard-edge-angle` (30→45) and `--normal-weighting`
+    (angle→area) defaults changed — assets re-converted with 0.5.0 defaults will shade
+    differently, which deserves a migration callout
+  - `docs/api.md`: document `fc.Error` vs `fc.FascatError` (alias, `fascat/errors.py:10`)
+    and the "catching errors" story from the §2 I/O item
+
+- [x] **P3** Open-shell-separate face orientation mode — implemented and documented
+  (`single_sided_open_shell` accepted in `fascat/options.py:275`, wired at
+  `fascat/asset.py:1827` and `fascat/mesh.py:96-97`, described in `docs/api.md`) but has
+  **zero test coverage** (`grep -r single_sided_open_shell tests/` is empty); add an
+  open-shell fixture test asserting per-component consistent orientation before calling
+  this done
+- [x] **P3** Texel-density preset for AABB projection — `UnwrapOptions.texel_density`
+  exists and validates (`fascat/options.py:475,485-486`) but is only *recorded* as
+  material metadata (`fascat/ops/stage.py:393-394`); it does not scale the AABB
+  projection, so the guideline behavior (e.g. 1000 units/UV) is still unimplemented
+- [x] **P3** Document switch-distance formula derivations; allow per-level
+  `switch_distance_override` (`_switch_distance`, `fascat/ops/lod.py:665`)
 
 ## 7. Testing & CI
 
-- [x] **P1** CI matrix: ubuntu + windows + macos × Python 3.10–3.13 (currently Linux-only, `.github/workflows/ci.yml:15`)
-- [x] **P1** Round-trip regression tests: STEP→GLB/USD→re-validate triangle/material/transform fidelity (new `tests/test_round_trip.py`)
-- [x] **P1** Malformed-input corpus: truncated STEP, garbage bytes, empty assemblies, degenerate parts, >1M-vertex stress (new `tests/test_robustness.py`)
 - [ ] **P2** Real IGES/BREP fixtures (zero exist today; only synthetic geometry is tested)
-- [ ] **P2** stdin→stdout conversion integration tests (`-` paths)
-- [ ] **P2** Consistent `requires_xatlas` markers (only 3 tests are marked today)
-- [ ] **P3** mypy over `tests/`
+- [x] **P2** Modules with no dedicated test file — added by audit 2026-07-03:
+  `fascat/export_report.py`, `fascat/material.py`, `fascat/pipeline_file.py`,
+  `fascat/pmi_visuals.py`, `fascat/size_ladder.py`, `fascat/validation.py` have no
+  `tests/test_<module>.py`; before writing new tests, check the coverage report
+  (`make coverage`) per module — several are exercised indirectly through pipeline tests,
+  so target the genuinely uncovered branches rather than duplicating integration coverage
+- [~] **P2** stdin→stdout conversion integration tests (`-` paths) — the CLI supports `-`
+  and two basic tests exist (`tests/test_cli.py:96,1447`); still missing: round-trip
+  stdin→stdout for each writer format and the error paths (binary garbage on stdin,
+  closed stdout)
+- [x] **P2** Consistent `requires_xatlas` markers — still only 3 marked tests
+  (`tests/test_stage.py:744,817` + one more); every unwrap/lightmap/bake test that
+  soft-skips without xatlas should carry the marker so `-m requires_xatlas` selects them
+- [ ] **P3** mypy over `tests/` (`pyproject.toml:98` scopes mypy to `fascat/` only)
 - [ ] **P3** Golden-image corpora for engine previews (carried from the previous plan)
 
 ## 8. Packaging, docs & release
 
-- [x] **P1** Remove `alktx2` from core dependencies (keep only in the `[ktx2]` extra) (`pyproject.toml:27`, `pyproject.toml:43`)
-- [x] **P1** Ship `fascat/py.typed` (PEP 561) — strict-mode type hints are currently unusable downstream
-- [ ] **P2** Resolve the meshoptimizer pre-release pin `>=0.2.30a0,<0.3`, or document why it's required (`pyproject.toml:30`)
-- [ ] **P2** Rename the `uv` extra → `unwrap` (collides with the uv package manager and UV-coordinate jargon) (`pyproject.toml:45`)
-- [x] **P2** Docs: error-handling section + exit codes + JSON schemas (pairs with §5)
-- [ ] **P3** FBX epoch CreationTime: document the reproducibility rationale (`fascat/io/fbx.py:140`)
+- [x] **P3** FBX epoch CreationTime: document the reproducibility rationale (`fascat/io/fbx.py:140`)
 
 ## 9. Carried-forward feature roadmap
 
@@ -255,7 +514,23 @@ Recorded so future audits don't re-litigate them:
 
 - xatlas remap claims (face_groups / material_indices "not remapped") — refuted: xatlas splits vertices, not faces; face count and per-face data are preserved (`fascat/mesh.py:2274-2275`).
 - Opacity-bake fallback and alpha-flatten color-space claims — refuted: the math matches `Material.effective_opacity`; the Pillow pipeline operates in sRGB throughout.
-- External-reference path traversal — blocked by extension validation (`fascat/io/step.py:964`); only the texture/material-library resolvers are vulnerable (kept as the §1 P0).
+- External-reference path traversal — blocked by extension validation (`fascat/io/step.py:964`); only the texture/material-library resolvers were vulnerable.
 - "Tangents generated before UVs" — refuted: `_stage_tangents` runs after all UV setup (`fascat/ops/stage.py:190`).
 - "Unconditional stats() in progress reporting" — overstated: gated on `progress is not None` (`fascat/pipeline.py:134`); kept only as the §3 caching item because the CLI always passes a callback.
 - FPS-target validation — not meaningfully checkable at conversion time; superseded by the §6 budget-validation item.
+- Audit 2026-07-03: "`optimize_buffers` face-group remap is a P0 IndexError crash" —
+  refuted: `reordered_face_indices` always has length equal to the triangle count with
+  values in `[0, F)` (buffer optimization never changes face count), so the scatter cannot
+  raise; and the enclosing `except Exception` (`fascat/mesh.py:2699`) would swallow it
+  anyway. Retained only as the §1 P2 uninitialized-memory item.
+- Audit 2026-07-03: "`_tag_uv_layout_quality` recomputes per-channel UV stats with no
+  cache" (former F7, was `[~]` in §3) — refuted for the working tree: `uv_layout_stats`
+  and `uv_distortion_metrics` are cached in `fascat/mesh.py:2205-2273,2383-2458` via
+  `_cached_value` keyed on channel + tolerance + geometry cache token; the op calling them
+  per channel hits the cache. Closed.
+- Audit 2026-07-03, excluded pending verification (reported by audit tooling, **not**
+  adversarially verified — re-check before acting): `--normalize-uvs` allegedly dedupes
+  channel lists silently; the global-flag normalizer allegedly ignores global flags placed
+  after the subcommand (e.g. `fascat convert in.step --verbose out.glb`). Neither claim
+  was confirmed against `fascat/cli.py`; verify first, then either add as §5 items or move
+  up here as refuted.
