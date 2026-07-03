@@ -448,7 +448,7 @@ dependencies = [
 ktx2 = [
     { name = "alktx2", marker = "(python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'linux') or (python_full_version >= '3.11' and platform_machine == 'AMD64' and sys_platform == 'win32') or (python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'win32')" },
 ]
-uv = [
+unwrap = [
     { name = "xatlas" },
 ]
 
@@ -474,9 +474,9 @@ requires-dist = [
     { name = "typer", specifier = ">=0.15" },
     { name = "typing-extensions", specifier = ">=4.8" },
     { name = "usd-core", specifier = ">=24.8" },
-    { name = "xatlas", marker = "extra == 'uv'", specifier = ">=0.0.9" },
+    { name = "xatlas", marker = "extra == 'unwrap'", specifier = ">=0.0.9" },
 ]
-provides-extras = ["ktx2", "uv"]
+provides-extras = ["ktx2", "unwrap"]
 
 [package.metadata.requires-dev]
 dev = [

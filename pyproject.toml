@@ -27,6 +27,7 @@ classifiers = [
 dependencies = [
     "cadquery-ocp>=7.7",
     "fast-simplification>=0.1",
+    # PyPI has not published a stable Python-wrapper release beyond 0.2.30a0 yet.
     "meshoptimizer>=0.2.30a0,<0.3",
     "numpy>=1.24",
     "pillow>=10.0",
@@ -42,7 +43,7 @@ dependencies = [
 ktx2 = [
     "alktx2>=0.1.6; python_version >= '3.11' and ((sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'win32' and (platform_machine == 'AMD64' or platform_machine == 'x86_64')))",
 ]
-uv = [
+unwrap = [
     "xatlas>=0.0.9",
 ]
 
@@ -102,6 +103,7 @@ module = [
     "meshoptimizer",
     "OCP.*",
     "pxr.*",
+    "scipy.*",
     "trimesh",
     "trimesh.*",
     "xatlas",

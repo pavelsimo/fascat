@@ -27,6 +27,15 @@ validation when `KHR_texture_basisu` textures are present; it supports Python
 the extra, Fascat falls back to glTF Transform plus KTX-Software when those
 external tools are installed.
 
+## UV Unwrap Backend
+
+```bash
+pip install 'fascat[unwrap]'
+```
+
+The `unwrap` extra installs xatlas for `uv0="unwrap"`, `uv1="unwrap"`,
+lightmap UV packing, and bake UV generation.
+
 ## glTF Compression Tooling
 
 Draco export requires the glTF Transform CLI on `PATH`, or a
