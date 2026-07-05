@@ -1093,6 +1093,13 @@ def test_box_uv_matches_vertex_count() -> None:
     assert staged.uvs[0].max() <= 1.0
 
 
+def _mesh_with_uv_triangles(uv_triangles: list[list[list[float]]]) -> Mesh:
+    uv = np.asarray(uv_triangles, dtype=float).reshape(-1, 2)
+    points = np.column_stack((uv, np.zeros(uv.shape[0], dtype=float)))
+    faces = np.arange(uv.shape[0], dtype=int).reshape(-1, 3)
+    return Mesh(points=points, faces=faces, uvs={0: uv})
+
+
 def test_uv_layout_stats_detects_overlap_bounds_and_degenerate_faces() -> None:
     mesh = Mesh(
         points=np.array(
@@ -1135,6 +1142,58 @@ def test_uv_layout_stats_detects_overlap_bounds_and_degenerate_faces() -> None:
     assert skipped["out_of_unit_vertices"] == 1
     assert skipped["degenerate_faces"] == 1
     assert skipped["overlapping_face_pairs"] == 0
+
+
+def test_uv_layout_stats_counts_multi_cell_overlap_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    mesh = _mesh_with_uv_triangles(
+        [
+            [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+            [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+            [[10.0, 10.0], [10.02, 10.0], [10.0, 10.02]],
+            [[11.0, 10.0], [11.02, 10.0], [11.0, 10.02]],
+            [[12.0, 10.0], [12.02, 10.0], [12.0, 10.02]],
+            [[13.0, 10.0], [13.02, 10.0], [13.0, 10.02]],
+            [[14.0, 10.0], [14.02, 10.0], [14.0, 10.02]],
+        ]
+    )
+    original_overlap = mesh_module._triangle_overlap_area_2d
+    overlap_calls = 0
+
+    def count_overlap(left: np.ndarray, right: np.ndarray, *, tolerance: float) -> float:
+        nonlocal overlap_calls
+        overlap_calls += 1
+        return original_overlap(left, right, tolerance=tolerance)
+
+    monkeypatch.setattr(mesh_module, "_triangle_overlap_area_2d", count_overlap)
+
+    stats = mesh.uv_layout_stats(0)
+
+    assert stats["overlapping_face_pairs"] == 1
+    assert overlap_calls == 1
+
+
+def test_uv_layout_stats_skips_clipper_for_packed_non_overlapping_triangles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    uv_triangles = [
+        [[0.02, y], [0.98, y], [0.02, y + 0.02]]
+        for y in [0.02, 0.14, 0.26, 0.38, 0.5, 0.62]
+    ]
+    mesh = _mesh_with_uv_triangles(uv_triangles)
+    original_overlap = mesh_module._triangle_overlap_area_2d
+    overlap_calls = 0
+
+    def count_overlap(left: np.ndarray, right: np.ndarray, *, tolerance: float) -> float:
+        nonlocal overlap_calls
+        overlap_calls += 1
+        return original_overlap(left, right, tolerance=tolerance)
+
+    monkeypatch.setattr(mesh_module, "_triangle_overlap_area_2d", count_overlap)
+
+    stats = mesh.uv_layout_stats(0)
+
+    assert stats["overlapping_face_pairs"] == 0
+    assert overlap_calls == 0
 
 
 def test_uv_layout_stats_cache_is_per_channel_and_returns_copy(monkeypatch: pytest.MonkeyPatch) -> None:

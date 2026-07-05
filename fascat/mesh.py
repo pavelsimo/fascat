@@ -26,6 +26,7 @@ _CachedValue = TypeVar("_CachedValue")
 # per-edge work bounded for rare giant/diagonal edges (which only occur on coarse
 # meshes, where the full scan is cheap anyway).
 _T_JUNCTION_CELL_BUDGET = 4096
+_UV_OVERLAP_CELL_BUDGET = 4096
 _NEAREST_CENTROID_PAIR_LIMIT = 4_000_000
 # Degenerate-face area threshold relative to the squared bbox diagonal, so the
 # default classification is scale-invariant (unit-scale meshes resolve to ~1e-12).
@@ -226,6 +227,93 @@ def _triangle_overlap_area_2d(left: FloatArray, right: FloatArray, *, tolerance:
         return 0.0
     intersection = _clip_polygon_to_triangle(subject, clip, tolerance=tolerance)
     return abs(_polygon_area_2d(intersection))
+
+
+def _count_uv_overlapping_face_pairs(
+    triangles: FloatArray,
+    degenerate: NDArray[np.bool_],
+    *,
+    tolerance: float,
+) -> int:
+    valid = np.flatnonzero(~degenerate)
+    if valid.size < 2:
+        return 0
+
+    min_uv = triangles.min(axis=1)
+    max_uv = triangles.max(axis=1)
+    extents = max_uv[valid] - min_uv[valid]
+    bbox_areas = extents[:, 0] * extents[:, 1]
+    positive_bbox_areas = bbox_areas[bbox_areas > 0.0]
+    if positive_bbox_areas.size > 0:
+        cell_size = math.sqrt(float(np.median(positive_bbox_areas)))
+    else:
+        positive_extents = extents[extents > 0.0]
+        if positive_extents.size == 0:
+            return 0
+        cell_size = float(np.median(positive_extents))
+    cell_size = max(cell_size, tolerance)
+    if not math.isfinite(cell_size) or cell_size <= 0.0:
+        cell_size = 1.0
+
+    grid: dict[tuple[int, int], list[int]] = defaultdict(list)
+    overflow: list[int] = []
+    low_keys = np.floor((min_uv[valid] - tolerance) / cell_size).astype(np.int64)
+    high_keys = np.floor((max_uv[valid] + tolerance) / cell_size).astype(np.int64)
+    for offset, index_value in enumerate(valid):
+        index = int(index_value)
+        low = low_keys[offset]
+        high = high_keys[offset]
+        span_u = int(high[0] - low[0] + 1)
+        span_v = int(high[1] - low[1] + 1)
+        if span_u * span_v > _UV_OVERLAP_CELL_BUDGET:
+            overflow.append(index)
+            continue
+        for u_cell in range(int(low[0]), int(high[0]) + 1):
+            for v_cell in range(int(low[1]), int(high[1]) + 1):
+                grid[(u_cell, v_cell)].append(index)
+
+    seen: set[tuple[int, int]] = set()
+    overlapping_pairs = 0
+
+    def aabb_survivors(left: int, candidates: Sequence[int]) -> list[int]:
+        unseen: list[int] = []
+        for candidate in candidates:
+            right = int(candidate)
+            if right == left:
+                continue
+            pair = (left, right) if left < right else (right, left)
+            if pair in seen:
+                continue
+            seen.add(pair)
+            unseen.append(right)
+        if not unseen:
+            return []
+
+        candidate_indices = np.asarray(unseen, dtype=np.int64)
+        mask = (
+            (min_uv[candidate_indices, 0] <= max_uv[left, 0] + tolerance)
+            & (max_uv[candidate_indices, 0] + tolerance >= min_uv[left, 0])
+            & (min_uv[candidate_indices, 1] <= max_uv[left, 1] + tolerance)
+            & (max_uv[candidate_indices, 1] + tolerance >= min_uv[left, 1])
+        )
+        return [int(index) for index in candidate_indices[mask].tolist()]
+
+    for bucket in grid.values():
+        if len(bucket) < 2:
+            continue
+        for position, left in enumerate(bucket[:-1]):
+            for right in aabb_survivors(left, bucket[position + 1 :]):
+                if _triangle_overlap_area_2d(triangles[left], triangles[right], tolerance=tolerance) > tolerance:
+                    overlapping_pairs += 1
+
+    if overflow:
+        valid_indices = [int(index) for index in valid.tolist()]
+        for left in overflow:
+            for right in aabb_survivors(left, valid_indices):
+                if _triangle_overlap_area_2d(triangles[left], triangles[right], tolerance=tolerance) > tolerance:
+                    overlapping_pairs += 1
+
+    return overlapping_pairs
 
 
 @dataclass
@@ -2234,35 +2322,11 @@ class Mesh:
             degenerate = np.abs(signed_areas) <= tolerance
             overlapping_pairs = 0
             if detect_overlaps:
-                min_uv = triangles.min(axis=1)
-                max_uv = triangles.max(axis=1)
-                order = np.argsort(min_uv[:, 0], kind="mergesort")
-
-                for position, left_index_value in enumerate(order):
-                    left_index = int(left_index_value)
-                    if bool(degenerate[left_index]):
-                        continue
-                    left_min = min_uv[left_index]
-                    left_max = max_uv[left_index]
-                    for right_index_value in order[position + 1 :]:
-                        right_index = int(right_index_value)
-                        if min_uv[right_index, 0] > left_max[0] + tolerance:
-                            break
-                        if bool(degenerate[right_index]):
-                            continue
-                        if min_uv[right_index, 1] > left_max[1] + tolerance:
-                            continue
-                        if max_uv[right_index, 1] + tolerance < left_min[1]:
-                            continue
-                        if (
-                            _triangle_overlap_area_2d(
-                                triangles[left_index],
-                                triangles[right_index],
-                                tolerance=tolerance,
-                            )
-                            > tolerance
-                        ):
-                            overlapping_pairs += 1
+                overlapping_pairs = _count_uv_overlapping_face_pairs(
+                    triangles,
+                    degenerate,
+                    tolerance=tolerance,
+                )
 
             return {
                 "vertices": self.vertex_count,
