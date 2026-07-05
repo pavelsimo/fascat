@@ -5160,30 +5160,27 @@ def _mixed_construction_curve_shape(shape: Any, counts: _ShapeTopologyCounts) ->
     try:
         from OCP.BRep import BRep_Builder
         from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
-        from OCP.TopExp import TopExp_Explorer
+        from OCP.TopExp import TopExp, TopExp_Explorer
         from OCP.TopoDS import TopoDS, TopoDS_Compound
+        from OCP.TopTools import TopTools_IndexedMapOfShape
     except ImportError:
         return None
 
-    face_edges: list[Any] = []
+    face_edge_map = TopTools_IndexedMapOfShape()
     face_explorer = TopExp_Explorer(shape, TopAbs_FACE)
     while face_explorer.More():
-        face = face_explorer.Current()
-        edge_explorer = TopExp_Explorer(face, TopAbs_EDGE)
-        while edge_explorer.More():
-            face_edges.append(TopoDS.Edge_s(edge_explorer.Current()))
-            edge_explorer.Next()
+        TopExp.MapShapes_s(face_explorer.Current(), TopAbs_EDGE, face_edge_map)
         face_explorer.Next()
-    if not face_edges:
+    if face_edge_map.IsEmpty():
         return None
 
     free_edges: list[Any] = []
+    free_edge_map = TopTools_IndexedMapOfShape()
     edge_explorer = TopExp_Explorer(shape, TopAbs_EDGE)
     while edge_explorer.More():
         edge = TopoDS.Edge_s(edge_explorer.Current())
-        if not any(edge.IsSame(face_edge) for face_edge in face_edges) and not any(
-            edge.IsSame(existing) for existing in free_edges
-        ):
+        if not face_edge_map.Contains(edge) and not free_edge_map.Contains(edge):
+            free_edge_map.Add(edge)
             free_edges.append(edge)
         edge_explorer.Next()
     if not free_edges:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import types
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -4308,6 +4309,107 @@ def test_mixed_construction_curve_shape_extracts_edges_not_used_by_faces() -> No
     assert curve_shape is not None
     assert _shape_topology_counts(curve_shape) == _ShapeTopologyCounts(vertices=2, edges=1, faces=0)
     assert _mixed_construction_curve_shape(box, _shape_topology_counts(box)) is None
+
+
+def test_mixed_construction_curve_shape_uses_occt_shape_maps(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeEdge:
+        def __init__(self, key: str) -> None:
+            self.key = key
+
+        def IsSame(self, other: object) -> bool:
+            raise AssertionError("free-edge detection should use shape maps, not IsSame scans")
+
+    class FakeShape:
+        def __init__(self, *, faces: list[FakeShape] | None = None, edges: list[FakeEdge] | None = None) -> None:
+            self.faces = faces or []
+            self.edges = edges or []
+
+    class FakeIndexedMapOfShape:
+        def __init__(self) -> None:
+            self._keys: set[str] = set()
+
+        def Add(self, shape: FakeEdge) -> None:
+            self._keys.add(shape.key)
+
+        def Contains(self, shape: FakeEdge) -> bool:
+            return shape.key in self._keys
+
+        def IsEmpty(self) -> bool:
+            return not self._keys
+
+    class FakeExplorer:
+        def __init__(self, shape: FakeShape, shape_type: str) -> None:
+            self._items = shape.faces if shape_type == "face" else shape.edges
+            self._index = 0
+
+        def More(self) -> bool:
+            return self._index < len(self._items)
+
+        def Current(self) -> FakeShape | FakeEdge:
+            return self._items[self._index]
+
+        def Next(self) -> None:
+            self._index += 1
+
+    class FakeTopExp:
+        @staticmethod
+        def MapShapes_s(shape: FakeShape, shape_type: str, shape_map: FakeIndexedMapOfShape) -> None:
+            assert shape_type == "edge"
+            for edge in shape.edges:
+                shape_map.Add(edge)
+
+    class FakeTopoDS:
+        @staticmethod
+        def Edge_s(shape: FakeEdge) -> FakeEdge:
+            return shape
+
+    class FakeCompound:
+        def __init__(self) -> None:
+            self.edges: list[FakeEdge] = []
+
+    class FakeBuilder:
+        def MakeCompound(self, compound: FakeCompound) -> None:
+            compound.edges.clear()
+
+        def Add(self, compound: FakeCompound, edge: FakeEdge) -> None:
+            compound.edges.append(edge)
+
+    face_edge = FakeEdge("face")
+    free_edge = FakeEdge("free")
+    duplicate_free_edge = FakeEdge("free")
+    face = FakeShape(edges=[face_edge, FakeEdge("face")])
+    shape = FakeShape(faces=[face], edges=[face_edge, free_edge, duplicate_free_edge])
+
+    fake_ocp = types.ModuleType("OCP")
+    fake_ocp.__path__ = []  # type: ignore[attr-defined]
+    fake_brep = types.ModuleType("OCP.BRep")
+    fake_brep.BRep_Builder = FakeBuilder
+    fake_top_abs = types.ModuleType("OCP.TopAbs")
+    fake_top_abs.TopAbs_EDGE = "edge"
+    fake_top_abs.TopAbs_FACE = "face"
+    fake_top_exp = types.ModuleType("OCP.TopExp")
+    fake_top_exp.TopExp = FakeTopExp
+    fake_top_exp.TopExp_Explorer = FakeExplorer
+    fake_top_tools = types.ModuleType("OCP.TopTools")
+    fake_top_tools.TopTools_IndexedMapOfShape = FakeIndexedMapOfShape
+    fake_topods = types.ModuleType("OCP.TopoDS")
+    fake_topods.TopoDS = FakeTopoDS
+    fake_topods.TopoDS_Compound = FakeCompound
+
+    for name, module in {
+        "OCP": fake_ocp,
+        "OCP.BRep": fake_brep,
+        "OCP.TopAbs": fake_top_abs,
+        "OCP.TopExp": fake_top_exp,
+        "OCP.TopTools": fake_top_tools,
+        "OCP.TopoDS": fake_topods,
+    }.items():
+        monkeypatch.setitem(sys.modules, name, module)
+
+    curve_shape = _mixed_construction_curve_shape(shape, _ShapeTopologyCounts(vertices=4, edges=3, faces=1))
+
+    assert curve_shape is not None
+    assert [edge.key for edge in curve_shape.edges] == ["free"]
 
 
 def test_mixed_construction_curve_metadata_records_policy_and_action() -> None:
