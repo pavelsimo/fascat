@@ -1926,11 +1926,7 @@ def _classified_hole_loops(mesh: Mesh) -> list[_HoleLoop]:
 
 
 def _edge_faces(mesh: Mesh) -> dict[tuple[int, int], list[int]]:
-    edge_faces: dict[tuple[int, int], list[int]] = {}
-    for face_index, face in enumerate(mesh.faces.astype(int).tolist()):
-        for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
-            edge_faces.setdefault(_edge_key(start, end), []).append(face_index)
-    return edge_faces
+    return _grouped_edge_faces(_face_major_edges(mesh), mesh.triangle_count)
 
 
 def _loop_adjacent_faces(loop: list[int], edge_faces: dict[tuple[int, int], list[int]]) -> tuple[int, ...]:
@@ -2006,17 +2002,14 @@ def _face_normals(mesh: Mesh, face_indices: tuple[int, ...]) -> FloatArray:
 def _boundary_loops(mesh: Mesh) -> list[list[int]]:
     if mesh.triangle_count == 0:
         return []
-    edge_counts: dict[tuple[int, int], int] = {}
-    directed: list[tuple[int, int]] = []
-    for face in mesh.faces.astype(int).tolist():
-        for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
-            key = _edge_key(start, end)
-            edge_counts[key] = edge_counts.get(key, 0) + 1
-            directed.append((start, end))
+    directed = _face_major_edges(mesh)
+    edge_faces = _grouped_edge_faces(directed, mesh.triangle_count)
 
     adjacency: dict[int, list[int]] = {}
-    for start, end in directed:
-        if edge_counts[_edge_key(start, end)] != 1:
+    for edge in directed:
+        start = int(edge[0])
+        end = int(edge[1])
+        if len(edge_faces[_edge_key(start, end)]) != 1:
             continue
         adjacency.setdefault(start, []).append(end)
         adjacency.setdefault(end, []).append(start)
@@ -2053,6 +2046,41 @@ def _boundary_loops(mesh: Mesh) -> list[list[int]]:
 
 def _edge_key(start: int, end: int) -> tuple[int, int]:
     return (start, end) if start <= end else (end, start)
+
+
+def _face_major_edges(mesh: Mesh) -> IntArray:
+    if mesh.triangle_count == 0:
+        return np.empty((0, 2), dtype=np.int64)
+    return cast(
+        IntArray,
+        np.stack(
+            [
+                mesh.faces[:, [0, 1]],
+                mesh.faces[:, [1, 2]],
+                mesh.faces[:, [2, 0]],
+            ],
+            axis=1,
+        ).reshape((-1, 2)),
+    )
+
+
+def _grouped_edge_faces(directed_edges: IntArray, triangle_count: int) -> dict[tuple[int, int], list[int]]:
+    if directed_edges.size == 0:
+        return {}
+    edge_keys = np.sort(directed_edges, axis=1)
+    face_indices = np.repeat(np.arange(triangle_count, dtype=np.int64), 3)
+    order = np.lexsort((np.arange(edge_keys.shape[0], dtype=np.int64), edge_keys[:, 1], edge_keys[:, 0]))
+    sorted_keys = edge_keys[order]
+    sorted_faces = face_indices[order]
+    boundaries = np.flatnonzero(np.any(sorted_keys[1:] != sorted_keys[:-1], axis=1)) + 1
+    starts = np.concatenate([np.zeros(1, dtype=np.int64), boundaries])
+    ends = np.concatenate([boundaries, np.asarray([sorted_keys.shape[0]], dtype=np.int64)])
+    return {
+        (int(sorted_keys[int(start), 0]), int(sorted_keys[int(start), 1])): [
+            int(face_index) for face_index in sorted_faces[int(start) : int(end)]
+        ]
+        for start, end in zip(starts, ends, strict=True)
+    }
 
 
 def _loop_diameter(points: FloatArray, loop: list[int]) -> float:
@@ -2649,25 +2677,24 @@ def _expand_face_mask(mesh: Mesh, visible_faces: NDArray[np.bool_], rings: int) 
     keep = visible_faces.copy()
     if rings <= 0 or not bool(np.any(keep)):
         return cast(NDArray[np.bool_], keep)
-    edge_faces: dict[tuple[int, int], list[int]] = {}
-    for face_index, face in enumerate(mesh.faces.astype(int).tolist()):
-        for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
-            edge_faces.setdefault(_edge_key(start, end), []).append(face_index)
+    edge_faces = _edge_faces(mesh)
     neighbors: list[set[int]] = [set() for _ in range(mesh.triangle_count)]
     for face_indices in edge_faces.values():
         if len(face_indices) < 2:
             continue
         for face_index in face_indices:
             neighbors[face_index].update(index for index in face_indices if index != face_index)
-    frontier = set(np.flatnonzero(keep).astype(int).tolist())
+    kept_faces = {int(face_index) for face_index in np.flatnonzero(keep)}
+    frontier = set(kept_faces)
     for _ in range(rings):
         next_frontier: set[int] = set()
         for face_index in frontier:
             next_frontier.update(neighbors[face_index])
-        next_frontier.difference_update(np.flatnonzero(keep).astype(int).tolist())
+        next_frontier.difference_update(kept_faces)
         if not next_frontier:
             break
         keep[np.asarray(sorted(next_frontier), dtype=np.int64)] = True
+        kept_faces.update(next_frontier)
         frontier = next_frontier
     return cast(NDArray[np.bool_], keep)
 

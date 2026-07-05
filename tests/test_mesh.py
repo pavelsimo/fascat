@@ -1719,6 +1719,24 @@ def test_mesh_topology_cache_rebuilds_after_in_place_face_mutation() -> None:
     assert updated_edge_faces[(0, 2)] == [0]
 
 
+def test_shared_edge_incidence_feeds_topology_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [2, 1, 3]], dtype=int),
+        material_indices=np.array([2, 4], dtype=int),
+    )
+
+    def fail_face_edges(self: Mesh) -> np.ndarray:
+        pytest.fail("topology helpers should use shared edge incidence")
+
+    monkeypatch.setattr(Mesh, "_face_edges", fail_face_edges)
+
+    assert mesh._edge_faces_map()[(1, 2)] == [0, 1]
+    assert mesh._boundary_loops() == [[0, 1, 3, 2]]
+    assert mesh._vertex_material_signatures()[1] == (2, 4)
+    assert mesh._vertex_material_signatures()[2] == (2, 4)
+
+
 def test_mesh_fingerprint_cache_rebuilds_after_in_place_point_mutation() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),

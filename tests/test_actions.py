@@ -997,6 +997,17 @@ def test_remove_occluded_records_visibility_sampling_metadata() -> None:
     assert result.metadata["occlusion_confidence"] == "1"
 
 
+def test_action_edge_helpers_feed_boundary_loops_and_mask_expansion() -> None:
+    mesh = Mesh(
+        points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.asarray([[0, 1, 2], [2, 1, 3]], dtype=int),
+    )
+
+    assert actions._edge_faces(mesh)[(1, 2)] == [0, 1]
+    assert actions._boundary_loops(mesh) == [[0, 1, 3, 2]]
+    assert actions._expand_face_mask(mesh, np.asarray([True, False], dtype=np.bool_), 1).tolist() == [True, True]
+
+
 def test_remove_occluded_records_lower_confidence_for_sparse_sampling() -> None:
     asset = Asset(
         root=Node(id="root", name="root", children=[Node(id="strip", name="Strip", part_id="strip")]),

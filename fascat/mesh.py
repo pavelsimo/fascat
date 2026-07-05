@@ -52,6 +52,17 @@ _ORIENTABILITY_METRIC_KEYS = (
 logger = logging.getLogger("fascat")
 
 
+@dataclass(frozen=True, slots=True)
+class _EdgeIncidence:
+    unique_edges: IntArray
+    counts: IntArray
+    directed_edges: IntArray
+    faces: IntArray
+    directions: IntArray
+    starts: IntArray
+    ends: IntArray
+
+
 def _tolerance_decimals(tolerance: float) -> int:
     if tolerance <= 0.0:
         return 12
@@ -60,6 +71,108 @@ def _tolerance_decimals(tolerance: float) -> int:
 
 def _rounded_key(values: NDArray[np.float64], decimals: int) -> tuple[float, ...]:
     return tuple(float(value) for value in np.round(values, decimals).tolist())
+
+
+def _face_edges_from_faces(faces: IntArray) -> IntArray:
+    if faces.size == 0:
+        return np.empty((0, 2), dtype=np.int64)
+    return cast(
+        IntArray,
+        np.concatenate(
+            [
+                faces[:, [0, 1]],
+                faces[:, [1, 2]],
+                faces[:, [2, 0]],
+            ],
+            axis=0,
+        ),
+    )
+
+
+def _face_major_edges_from_faces(faces: IntArray) -> IntArray:
+    if faces.size == 0:
+        return np.empty((0, 2), dtype=np.int64)
+    return cast(
+        IntArray,
+        np.stack(
+            [
+                faces[:, [0, 1]],
+                faces[:, [1, 2]],
+                faces[:, [2, 0]],
+            ],
+            axis=1,
+        ).reshape((-1, 2)),
+    )
+
+
+def _face_edge_keys_by_face(faces: IntArray) -> IntArray:
+    if faces.size == 0:
+        return np.empty((0, 3, 2), dtype=np.int64)
+    return cast(
+        IntArray,
+        np.sort(
+            np.stack(
+                [
+                    faces[:, [0, 1]],
+                    faces[:, [1, 2]],
+                    faces[:, [2, 0]],
+                ],
+                axis=1,
+            ),
+            axis=2,
+        ),
+    )
+
+
+def _edge_incidence_from_faces(faces: IntArray) -> _EdgeIncidence:
+    if faces.size == 0:
+        empty_edges = np.empty((0, 2), dtype=np.int64)
+        empty = np.empty((0,), dtype=np.int64)
+        return _EdgeIncidence(
+            unique_edges=empty_edges,
+            counts=empty,
+            directed_edges=empty_edges,
+            faces=empty,
+            directions=empty,
+            starts=empty,
+            ends=empty,
+        )
+
+    directed_edges = _face_major_edges_from_faces(faces)
+    undirected_edges = np.sort(directed_edges, axis=1)
+    face_indices = np.repeat(np.arange(faces.shape[0], dtype=np.int64), 3)
+    directions = np.where(directed_edges[:, 0] == undirected_edges[:, 0], 1, -1).astype(np.int64)
+    occurrence_order = np.arange(directed_edges.shape[0], dtype=np.int64)
+    order = np.lexsort((occurrence_order, undirected_edges[:, 1], undirected_edges[:, 0]))
+    sorted_edges = undirected_edges[order]
+    sorted_directed_edges = directed_edges[order]
+    sorted_faces = face_indices[order]
+    sorted_directions = directions[order]
+    boundaries = np.flatnonzero(np.any(sorted_edges[1:] != sorted_edges[:-1], axis=1)) + 1
+    starts = np.concatenate([np.zeros(1, dtype=np.int64), boundaries])
+    ends = np.concatenate([boundaries, np.asarray([sorted_edges.shape[0]], dtype=np.int64)])
+    return _EdgeIncidence(
+        unique_edges=cast(IntArray, sorted_edges[starts]),
+        counts=cast(IntArray, ends - starts),
+        directed_edges=sorted_directed_edges,
+        faces=sorted_faces,
+        directions=sorted_directions,
+        starts=cast(IntArray, starts),
+        ends=cast(IntArray, ends),
+    )
+
+
+def _edge_tuple(edge: NDArray[np.int64]) -> tuple[int, int]:
+    return int(edge[0]), int(edge[1])
+
+
+def _edge_tuple_set(edges: IntArray) -> set[tuple[int, int]]:
+    return {_edge_tuple(edge) for edge in edges}
+
+
+def _sorted_triangle_key(face: NDArray[np.int64]) -> tuple[int, int, int]:
+    values = sorted((int(face[0]), int(face[1]), int(face[2])))
+    return values[0], values[1], values[2]
 
 
 def _load_scipy_ckdtree() -> Any | None:
@@ -937,7 +1050,7 @@ class Mesh:
 
     def _connected_edge_pairs(self) -> set[tuple[int, int]]:
         edges, _counts = self._undirected_edges_and_counts()
-        return {(int(edge[0]), int(edge[1])) for edge in edges.astype(int).tolist()}
+        return _edge_tuple_set(edges)
 
     def _spatial_bucket_key(self, point: FloatArray, cell_size: float) -> tuple[int, int, int]:
         key = np.floor(point / cell_size).astype(np.int64)
@@ -1168,10 +1281,12 @@ class Mesh:
         if self.material_indices is None:
             return tuple(() for _index in range(self.vertex_count))
         signatures: list[set[int]] = [set() for _index in range(self.vertex_count)]
-        for face_index, face in enumerate(self.faces):
-            material_index = int(self.material_indices[face_index])
-            for vertex_index in face.astype(int).tolist():
-                signatures[vertex_index].add(material_index)
+        vertex_materials = np.unique(
+            np.column_stack((self.faces.reshape(-1), np.repeat(self.material_indices, 3))),
+            axis=0,
+        )
+        for vertex_index, material_index in vertex_materials:
+            signatures[int(vertex_index)].add(int(material_index))
         return tuple(tuple(sorted(signature)) for signature in signatures)
 
     def remove_duplicate_faces(self) -> Mesh:
@@ -1480,11 +1595,11 @@ class Mesh:
             return 0
         distance_tolerance = max(float(tolerance), 1e-12)
         all_edges, counts = self._undirected_edges_and_counts()
-        boundary_edges = {(int(edge[0]), int(edge[1])) for edge in all_edges[counts == 1].astype(int).tolist()}
+        boundary_edges = _edge_tuple_set(all_edges[counts == 1])
         if not boundary_edges:
             return 0
         boundary_vertices = sorted({vertex for edge in boundary_edges for vertex in edge})
-        connected_edges = {(int(edge[0]), int(edge[1])) for edge in all_edges.astype(int).tolist()}
+        connected_edges = _edge_tuple_set(all_edges)
         close_pairs = self._close_vertex_pairs(
             tolerance=distance_tolerance,
             vertex_indices=np.asarray(boundary_vertices, dtype=np.int64),
@@ -1500,13 +1615,13 @@ class Mesh:
         if not edge_splits:
             return self.copy()
 
-        points = self.points.tolist()
-        uvs = {channel: values.tolist() for channel, values in self.uvs.items()}
+        extra_points: list[FloatArray] = []
+        extra_uvs: dict[int, list[FloatArray]] = {channel: [] for channel in self.uvs}
         new_faces: list[list[int]] = []
         source_faces: list[int] = []
         changed = False
-        for face_index, face_values in enumerate(self.faces.astype(int).tolist()):
-            a, b, c = face_values
+        for face_index, face_values in enumerate(self.faces):
+            a, b, c = (int(face_values[0]), int(face_values[1]), int(face_values[2]))
             polygon: list[int] = [a]
             polygon.extend(_oriented_edge_splits(edge_splits, a, b))
             polygon.append(b)
@@ -1521,11 +1636,14 @@ class Mesh:
                 source_faces.append(face_index)
                 continue
             changed = True
-            center_index = len(points)
-            points.append(np.asarray(self.points[polygon], dtype=np.float64).mean(axis=0).astype(float).tolist())
-            for channel, values in uvs.items():
-                values.append(
-                    np.asarray(self.uvs[channel][polygon], dtype=np.float64).mean(axis=0).astype(float).tolist()
+            polygon_indices = np.asarray(polygon, dtype=np.int64)
+            center_index = self.vertex_count + len(extra_points)
+            extra_points.append(
+                cast(FloatArray, np.asarray(self.points[polygon_indices], dtype=np.float64).mean(axis=0))
+            )
+            for channel, values in self.uvs.items():
+                extra_uvs[channel].append(
+                    cast(FloatArray, np.asarray(values[polygon_indices], dtype=np.float64).mean(axis=0))
                 )
             for index, start in enumerate(polygon):
                 end = polygon[(index + 1) % len(polygon)]
@@ -1536,12 +1654,22 @@ class Mesh:
         if not changed:
             return self.copy()
 
+        points = (
+            self.points.copy()
+            if not extra_points
+            else cast(FloatArray, np.vstack([self.points, np.asarray(extra_points, dtype=np.float64)]))
+        )
         mesh = Mesh(
-            points=np.asarray(points, dtype=np.float64),
+            points=points,
             faces=np.asarray(new_faces, dtype=np.int64),
             normals=None,
             tangents=None,
-            uvs={channel: np.asarray(values, dtype=np.float64) for channel, values in uvs.items()},
+            uvs={
+                channel: values.copy()
+                if not extra_uvs[channel]
+                else cast(FloatArray, np.vstack([values, np.asarray(extra_uvs[channel], dtype=np.float64)]))
+                for channel, values in self.uvs.items()
+            },
             material_indices=None,
             face_groups={},
             metadata=dict(self.metadata),
@@ -1550,15 +1678,11 @@ class Mesh:
         if self.material_indices is not None:
             mesh.material_indices = self.material_indices[source].copy()
         old_to_new: dict[int, list[int]] = defaultdict(list)
-        for new_index, old_index in enumerate(source.astype(int).tolist()):
-            old_to_new[old_index].append(new_index)
+        for new_index, old_index in enumerate(source):
+            old_to_new[int(old_index)].append(new_index)
         mesh.face_groups = {
             name: np.asarray(
-                [
-                    new_index
-                    for old_index in values.astype(int).tolist()
-                    for new_index in old_to_new.get(int(old_index), [])
-                ],
+                [new_index for old_index in values for new_index in old_to_new.get(int(old_index), [])],
                 dtype=np.int64,
             )
             for name, values in self.face_groups.items()
@@ -1573,11 +1697,11 @@ class Mesh:
         if tolerance <= 0.0 or self.triangle_count == 0 or self.vertex_count < 2:
             return self.copy()
         all_edges, counts = self._undirected_edges_and_counts()
-        boundary_edges = {(int(edge[0]), int(edge[1])) for edge in all_edges[counts == 1].astype(int).tolist()}
+        boundary_edges = _edge_tuple_set(all_edges[counts == 1])
         if not boundary_edges:
             return self.copy()
         boundary_vertices = sorted({vertex for edge in boundary_edges for vertex in edge})
-        connected_edges = {(int(edge[0]), int(edge[1])) for edge in all_edges.astype(int).tolist()}
+        connected_edges = _edge_tuple_set(all_edges)
         parent = np.arange(self.vertex_count, dtype=np.int64)
         rank = np.zeros(self.vertex_count, dtype=np.int64)
         merged = False
@@ -1798,19 +1922,10 @@ class Mesh:
             if self.triangle_count == 0:
                 return (0, 0, 0, 0)
 
-            edge_incidents: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
-            face_edges: list[list[tuple[int, int]]] = []
-            for face_index, face in enumerate(self.faces.astype(int).tolist()):
-                edges: list[tuple[int, int]] = []
-                for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
-                    key = (min(start, end), max(start, end))
-                    direction = 1 if (start, end) == key else -1
-                    incidents = edge_incidents[key]
-                    incidents.append((face_index, direction))
-                    if len(incidents) > 2:
-                        return (0, 0, 0, 0)
-                    edges.append(key)
-                face_edges.append(edges)
+            edge_incidents = self._edge_direction_incidents()
+            if any(len(incidents) > 2 for incidents in edge_incidents.values()):
+                return (0, 0, 0, 0)
+            face_edges = _face_edge_keys_by_face(self.faces)
 
             adjacency: dict[int, list[tuple[int, int, tuple[int, int]]]] = defaultdict(list)
             for edge, incidents in edge_incidents.items():
@@ -1848,7 +1963,7 @@ class Mesh:
             flipped_components = 0
             volume_epsilon = self._orientation_volume_epsilon()
             for faces in component_faces:
-                component_edges = {edge for face_index in faces for edge in face_edges[face_index]}
+                component_edges = {_edge_tuple(edge) for face_index in faces for edge in face_edges[face_index]}
                 if any(edge in conflict_edges or len(edge_incidents[edge]) != 2 for edge in component_edges):
                     continue
                 closed_components += 1
@@ -2405,21 +2520,22 @@ class Mesh:
             ] = defaultdict(set)
             edge_lengths: dict[tuple[tuple[float, ...], tuple[float, ...]], float] = {}
             edge_vertices: dict[tuple[tuple[float, ...], tuple[float, ...]], set[int]] = defaultdict(set)
-            for face in self.faces.astype(int).tolist():
-                for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
-                    start_key = position_keys[start]
-                    end_key = position_keys[end]
-                    if start_key == end_key:
-                        continue
-                    if start_key <= end_key:
-                        edge_key = (start_key, end_key)
-                        uv_pair = (uv_keys[start], uv_keys[end])
-                    else:
-                        edge_key = (end_key, start_key)
-                        uv_pair = (uv_keys[end], uv_keys[start])
-                    edge_uvs[edge_key].add(uv_pair)
-                    edge_vertices[edge_key].update((start, end))
-                    edge_lengths.setdefault(edge_key, float(np.linalg.norm(self.points[start] - self.points[end])))
+            for edge in _face_major_edges_from_faces(self.faces):
+                start = int(edge[0])
+                end = int(edge[1])
+                start_key = position_keys[start]
+                end_key = position_keys[end]
+                if start_key == end_key:
+                    continue
+                if start_key <= end_key:
+                    edge_key = (start_key, end_key)
+                    uv_pair = (uv_keys[start], uv_keys[end])
+                else:
+                    edge_key = (end_key, start_key)
+                    uv_pair = (uv_keys[end], uv_keys[start])
+                edge_uvs[edge_key].add(uv_pair)
+                edge_vertices[edge_key].update((start, end))
+                edge_lengths.setdefault(edge_key, float(np.linalg.norm(self.points[start] - self.points[end])))
 
             seam_edges = [edge for edge, uv_pairs in edge_uvs.items() if len(uv_pairs) > 1]
             if not seam_edges:
@@ -2914,9 +3030,9 @@ class Mesh:
         if preserve_uv_seams:
             seam_vertices = self._uv_seam_vertices()
             if seam_vertices:
-                for face_index, face in enumerate(self.faces.astype(int).tolist()):
-                    if any(vertex in seam_vertices for vertex in face):
-                        groups["uv_seams"].add(face_index)
+                seam_mask = np.zeros(self.vertex_count, dtype=np.bool_)
+                seam_mask[np.asarray(sorted(seam_vertices), dtype=np.int64)] = True
+                groups["uv_seams"].update(int(index) for index in np.flatnonzero(np.any(seam_mask[self.faces], axis=1)))
         if preserve_silhouette:
             groups["silhouette"].update(self._silhouette_face_indices())
         return groups
@@ -2951,7 +3067,7 @@ class Mesh:
     def _face_group_by_face(self) -> dict[int, str]:
         result: dict[int, str] = {}
         for name, values in self.face_groups.items():
-            for face_index in values.astype(int).tolist():
+            for face_index in values:
                 result[int(face_index)] = name
         return result
 
@@ -2959,19 +3075,12 @@ class Mesh:
         def build() -> dict[tuple[int, int], list[int]]:
             if self.triangle_count == 0:
                 return {}
-            edges = np.sort(self._face_edges(), axis=1)
-            face_indices = np.tile(np.arange(self.triangle_count, dtype=np.int64), 3)
-            order = np.lexsort((edges[:, 1], edges[:, 0]))
-            sorted_edges = edges[order]
-            sorted_faces = face_indices[order]
-            boundaries = np.flatnonzero(np.any(sorted_edges[1:] != sorted_edges[:-1], axis=1)) + 1
-            starts = np.concatenate([np.zeros(1, dtype=np.int64), boundaries])
-            ends = np.concatenate([boundaries, np.asarray([sorted_edges.shape[0]], dtype=np.int64)])
+            incidence = self._edge_incidence()
             return {
-                (int(sorted_edges[start, 0]), int(sorted_edges[start, 1])): np.sort(sorted_faces[start:end])
-                .astype(int)
-                .tolist()
-                for start, end in zip(starts.tolist(), ends.tolist(), strict=True)
+                _edge_tuple(incidence.unique_edges[index]): [
+                    int(face_index) for face_index in np.sort(incidence.faces[int(start) : int(end)])
+                ]
+                for index, (start, end) in enumerate(zip(incidence.starts, incidence.ends, strict=True))
             }
 
         return self._cached_value("edge_faces_map", self._faces_cache_token(), build)
@@ -3040,9 +3149,10 @@ class Mesh:
         edge_a = uv_triangles[:, 1] - uv_triangles[:, 0]
         edge_b = uv_triangles[:, 2] - uv_triangles[:, 0]
         uv_areas = np.abs(0.5 * (edge_a[:, 0] * edge_b[:, 1] - edge_a[:, 1] * edge_b[:, 0]))
-        valid_faces = set(np.flatnonzero(uv_areas > tolerance).astype(int).tolist())
-        if not valid_faces:
+        valid_face_indices = np.flatnonzero(uv_areas > tolerance)
+        if valid_face_indices.size == 0:
             return 0
+        valid_mask = uv_areas > tolerance
 
         parent = np.arange(self.triangle_count, dtype=np.int64)
 
@@ -3058,18 +3168,22 @@ class Mesh:
             if left_root != right_root:
                 parent[right_root] = left_root
 
-        edge_incidents: dict[tuple[int, int], list[tuple[int, int, int]]] = defaultdict(list)
-        for face_index, face in enumerate(self.faces.astype(int).tolist()):
-            if face_index not in valid_faces:
+        incidence = self._edge_incidence()
+        for group_start, group_end in zip(incidence.starts, incidence.ends, strict=True):
+            start = int(group_start)
+            end = int(group_end)
+            incident_faces = incidence.faces[start:end]
+            valid_incidents = np.flatnonzero(valid_mask[incident_faces])
+            if valid_incidents.shape[0] != 2:
                 continue
-            for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
-                edge_incidents[(min(start, end), max(start, end))].append((face_index, start, end))
-
-        for incidents in edge_incidents.values():
-            if len(incidents) != 2:
-                continue
-            left_face, left_start, left_end = incidents[0]
-            right_face, right_start, right_end = incidents[1]
+            left_index = start + int(valid_incidents[0])
+            right_index = start + int(valid_incidents[1])
+            left_face = int(incidence.faces[left_index])
+            right_face = int(incidence.faces[right_index])
+            left_start = int(incidence.directed_edges[left_index, 0])
+            left_end = int(incidence.directed_edges[left_index, 1])
+            right_start = int(incidence.directed_edges[right_index, 0])
+            right_end = int(incidence.directed_edges[right_index, 1])
             same_direction = bool(
                 np.linalg.norm(uv[left_start] - uv[right_start]) <= tolerance
                 and np.linalg.norm(uv[left_end] - uv[right_end]) <= tolerance
@@ -3081,7 +3195,7 @@ class Mesh:
             if same_direction or opposite_direction:
                 union(left_face, right_face)
 
-        return len({find(face_index) for face_index in valid_faces})
+        return len({find(int(face_index)) for face_index in valid_face_indices})
 
     def _flip_inward_closed_components(self) -> Mesh:
         flipped_components = self._flipped_closed_orientation_component_faces()
@@ -3100,16 +3214,8 @@ class Mesh:
         if self.triangle_count == 0:
             return []
 
-        edge_incidents: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
-        face_edges: list[list[tuple[int, int]]] = []
-        for face_index, face in enumerate(self.faces.astype(int).tolist()):
-            edges: list[tuple[int, int]] = []
-            for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
-                key = (min(start, end), max(start, end))
-                direction = 1 if (start, end) == key else -1
-                edge_incidents[key].append((face_index, direction))
-                edges.append(key)
-            face_edges.append(edges)
+        edge_incidents = self._edge_direction_incidents()
+        face_edges = _face_edge_keys_by_face(self.faces)
 
         adjacency: dict[int, list[int]] = defaultdict(list)
         for incidents in edge_incidents.values():
@@ -3138,7 +3244,7 @@ class Mesh:
                     faces.add(neighbor)
                     queue.append(neighbor)
 
-            component_edges = {edge for component_face in faces for edge in face_edges[component_face]}
+            component_edges = {_edge_tuple(edge) for component_face in faces for edge in face_edges[component_face]}
             if any(len(edge_incidents[edge]) != 2 for edge in component_edges):
                 continue
             if any(edge_incidents[edge][0][1] == edge_incidents[edge][1][1] for edge in component_edges):
@@ -3177,11 +3283,7 @@ class Mesh:
             np.isclose(self.points, maxs, atol=tolerance),
             axis=1,
         )
-        return {
-            face_index
-            for face_index, face in enumerate(self.faces.astype(int).tolist())
-            if any(on_extents[vertex] for vertex in face)
-        }
+        return {int(face_index) for face_index in np.flatnonzero(np.any(on_extents[self.faces], axis=1))}
 
     def _assign_materials_by_nearest_centroid(self, points: FloatArray, faces: IntArray) -> IntArray | None:
         if self.material_indices is None or self.triangle_count == 0 or faces.size == 0:
@@ -3244,15 +3346,8 @@ class Mesh:
         if self.triangle_count == 0:
             return self.copy()
 
-        edge_incidents: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
-        for face_index, face in enumerate(self.faces.astype(int).tolist()):
-            for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
-                key = (min(start, end), max(start, end))
-                direction = 1 if (start, end) == key else -1
-                edge_incidents[key].append((face_index, direction))
-
         adjacency: dict[int, list[tuple[int, int]]] = defaultdict(list)
-        for incidents in edge_incidents.values():
+        for incidents in self._edge_direction_incidents().values():
             if len(incidents) != 2:
                 continue
             (left_face, left_direction), (right_face, right_direction) = incidents
@@ -3291,13 +3386,15 @@ class Mesh:
         def build() -> list[list[int]]:
             if self.triangle_count == 0:
                 return []
-            edges, counts = self._undirected_edges_and_counts()
-            boundary_edges = edges[counts == 1]
+            incidence = self._edge_incidence()
+            boundary_edges = incidence.unique_edges[incidence.counts == 1]
             if boundary_edges.size == 0:
                 return []
 
             adjacency: dict[int, set[int]] = {}
-            for start, end in boundary_edges.astype(int).tolist():
+            for edge in boundary_edges:
+                start = int(edge[0])
+                end = int(edge[1])
                 adjacency.setdefault(start, set()).add(end)
                 adjacency.setdefault(end, set()).add(start)
 
@@ -3360,32 +3457,41 @@ class Mesh:
         return cast(FloatArray, np.linalg.norm(np.cross(p1 - p0, p2 - p0), axis=1) * 0.5)
 
     def _face_edges(self) -> IntArray:
-        if self.triangle_count == 0:
-            return np.empty((0, 2), dtype=np.int64)
-        return cast(
-            IntArray,
-            np.concatenate(
-                [
-                    self.faces[:, [0, 1]],
-                    self.faces[:, [1, 2]],
-                    self.faces[:, [2, 0]],
+        return _face_edges_from_faces(self.faces)
+
+    def _edge_incidence(self) -> _EdgeIncidence:
+        def build() -> _EdgeIncidence:
+            return _edge_incidence_from_faces(self.faces)
+
+        return self._cached_value("edge_incidence", self._faces_cache_token(), build)
+
+    def _edge_direction_incidents(self) -> dict[tuple[int, int], list[tuple[int, int]]]:
+        def build() -> dict[tuple[int, int], list[tuple[int, int]]]:
+            incidence = self._edge_incidence()
+            return {
+                _edge_tuple(incidence.unique_edges[index]): [
+                    (int(face_index), int(direction))
+                    for face_index, direction in zip(
+                        incidence.faces[int(start) : int(end)],
+                        incidence.directions[int(start) : int(end)],
+                        strict=True,
+                    )
                 ]
-            ),
-        )
+                for index, (start, end) in enumerate(zip(incidence.starts, incidence.ends, strict=True))
+            }
+
+        return self._cached_value("edge_direction_incidents", self._faces_cache_token(), build)
 
     def _undirected_edges_and_counts(self) -> tuple[IntArray, IntArray]:
         def build() -> tuple[IntArray, IntArray]:
-            if self.triangle_count == 0:
-                return np.empty((0, 2), dtype=np.int64), np.empty((0,), dtype=np.int64)
-            undirected = np.sort(self._face_edges(), axis=1)
-            edges, counts = np.unique(undirected, axis=0, return_counts=True)
-            return edges, counts
+            incidence = self._edge_incidence()
+            return incidence.unique_edges, incidence.counts
 
         return self._cached_value("undirected_edges_and_counts", self._faces_cache_token(), build)
 
     def _boundary_edges_set(self) -> set[tuple[int, int]]:
         edges, counts = self._undirected_edges_and_counts()
-        return {(int(edge[0]), int(edge[1])) for edge in edges[counts == 1].astype(int).tolist()}
+        return _edge_tuple_set(edges[counts == 1])
 
     def _drop_non_finite(self) -> Mesh:
         finite = np.asarray(np.isfinite(self.points).all(axis=1), dtype=np.bool_)
@@ -3431,12 +3537,12 @@ class Mesh:
             return
 
         old_face_indices_by_key: dict[tuple[int, int, int], list[int]] = {}
-        for index, face in enumerate(source.faces.astype(int).tolist()):
-            old_face_indices_by_key.setdefault(tuple(sorted(face)), []).append(index)
+        for index, face in enumerate(source.faces):
+            old_face_indices_by_key.setdefault(_sorted_triangle_key(face), []).append(index)
 
         new_to_old: list[int] = []
-        for face in self.faces.astype(int).tolist():
-            candidates = old_face_indices_by_key.get(tuple(sorted(face)))
+        for face in self.faces:
+            candidates = old_face_indices_by_key.get(_sorted_triangle_key(face))
             if not candidates:
                 self._invalidate_face_attributes("face_keys_unmatched")
                 return
@@ -3722,19 +3828,8 @@ def _split_faces_at_edges(
 def _boundary_edges_from_faces(faces: IntArray) -> set[tuple[int, int]]:
     if faces.size == 0:
         return set()
-    edges = np.sort(
-        np.concatenate(
-            [
-                faces[:, [0, 1]],
-                faces[:, [1, 2]],
-                faces[:, [2, 0]],
-            ],
-            axis=0,
-        ),
-        axis=1,
-    )
-    unique_edges, counts = np.unique(edges, axis=0, return_counts=True)
-    return {(int(edge[0]), int(edge[1])) for edge in unique_edges[counts == 1].astype(int).tolist()}
+    incidence = _edge_incidence_from_faces(faces)
+    return _edge_tuple_set(incidence.unique_edges[incidence.counts == 1])
 
 
 def _fallback_tangent(normal: FloatArray) -> FloatArray:
