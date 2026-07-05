@@ -36,6 +36,10 @@ ambient-occlusion bake, the tessellation OCP boundary, STEP import scaling, CLI 
 imports, and the Asset copy discipline. Three agent claims were refuted and recorded in
 the audit notes.
 
+Implementation pass 2026-07-05: F13-F19 and F21-F24 shipped in separate focused commits.
+F20 now has a synthetic copy-cost profile recorded below; the real 10k+ part corpus
+profile and any copy-ownership redesign remain open.
+
 ## What Fascat Is
 
 A Python library and CLI that converts CAD (STEP, IGES, BREP) into realtime-ready OpenUSD,
@@ -168,10 +172,13 @@ glTF/OBJ/STL/FBX writers, trimesh + numpy (mesh ops).
   merge/explode-only F1–F6 batch never touched; findings F8–F12 with ready-to-apply
   snippets live in the detailed findings below — audit 2026-07-05: F8–F12 verified
   **shipped** (see verification below)
-- [ ] **P2** Fix the 2026-07-05 hot-path findings — the AO bake's O(F² × D) Python ray
-  casting (F13), the per-vertex OCP round-trips on the main tessellate path (F14), and
-  the per-construction Asset geometry deep-copies (F20, profile first); details below
-- [ ] **P3** Fix the 2026-07-05 scaling and cleanup findings F15–F19 and F21–F24 —
+- [x] **P2** Fix the 2026-07-05 hot-path code findings — the AO bake's O(F² × D)
+  Python ray casting (F13) and the per-vertex OCP round-trips on the main tessellate
+  path (F14); details below
+- [~] **P2** Profile the per-construction Asset geometry deep-copies (F20) before
+  changing copy ownership — synthetic profile recorded below; real 10k+ corpus profile
+  and ownership redesign still open
+- [x] **P3** Fix the 2026-07-05 scaling and cleanup findings F15–F19 and F21–F24 —
   analysis O(n²) pair scans, STEP import list scans, CLI startup imports, and the
   remaining `.tolist()`/per-face Python-loop sites; details below
 - [ ] **P3** Profile on real large CAD corpora (10k+ parts) and record numbers in the
@@ -182,13 +189,10 @@ glTF/OBJ/STL/FBX writers, trimesh + numpy (mesh ops).
 
 Audit of 2026-07-05: the 2026-07-03 findings F8–F12 were verified **shipped** (see
 verification below) and are gone from the open list, joining F1–F7 and the scipy
-connected-components rewrite. This section now holds the **new open findings F13–F24**,
-from a five-pass sweep of the whole package (mesh/analysis, pipeline/runtime/asset,
-CLI/options, `io/`, `ops/`) with every high-impact claim re-verified by hand. The batch
-splits into algorithmic rewrites (F13–F16, F18), scaling fixes (F17, F21), startup
-work (F19), one architectural item to profile before acting (F20), and the recurring
-`.tolist()`/per-face-Python-loop sweep (F22–F24). Findings are independent unless noted;
-implement, test, and commit them one at a time per the operating checklist.
+connected-components rewrite. The 2026-07-05 implementation pass shipped the code
+findings F13-F19 and F21-F24 in separate commits; F20 is documented with a synthetic
+profile and remains open only for real-corpus profiling and any future copy-ownership
+redesign. The detailed finding notes stay below as provenance and regression context.
 
 #### Baseline
 
