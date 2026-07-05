@@ -5305,11 +5305,15 @@ def _canonical_part_id(
 
 def _material_binding_plan(base_material_id: str, face_material_ids: list[str]) -> tuple[list[str], list[int]]:
     material_ids = [base_material_id]
+    material_index_by_id = {base_material_id: 0}
     material_indices: list[int] = []
     for face_material_id in face_material_ids:
-        if face_material_id not in material_ids:
+        material_index = material_index_by_id.get(face_material_id)
+        if material_index is None:
+            material_index = len(material_ids)
             material_ids.append(face_material_id)
-        material_indices.append(material_ids.index(face_material_id))
+            material_index_by_id[face_material_id] = material_index
+        material_indices.append(material_index)
     return material_ids, material_indices
 
 

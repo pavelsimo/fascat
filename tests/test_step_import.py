@@ -136,11 +136,11 @@ def test_canonical_part_id_prefers_source_label_before_shape_hash() -> None:
 def test_material_binding_plan_maps_step_face_colors_to_indices() -> None:
     material_ids, material_indices = _material_binding_plan(
         "mat-red",
-        ["mat-red", "mat-blue", "mat-red", "mat-green"],
+        ["mat-blue", "mat-red", "mat-green", "mat-blue", "mat-yellow", "mat-green"],
     )
 
-    assert material_ids == ["mat-red", "mat-blue", "mat-green"]
-    assert material_indices == [0, 1, 0, 2]
+    assert material_ids == ["mat-red", "mat-blue", "mat-green", "mat-yellow"]
+    assert material_indices == [1, 0, 2, 1, 3, 2]
 
 
 def test_shape_fingerprint_falls_back_to_python_hash() -> None:
