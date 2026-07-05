@@ -891,8 +891,8 @@ def _append_pmi_visual_mesh(
         component_type=_FLOAT,
         accessor_type="VEC3",
         target=_ARRAY_BUFFER,
-        minimum=points.min(axis=0).astype(float).tolist(),
-        maximum=points.max(axis=0).astype(float).tolist(),
+        minimum=points.min(axis=0).tolist(),
+        maximum=points.max(axis=0).tolist(),
     )
     indices = marker.faces.reshape(-1)
     if points.shape[0] <= np.iinfo(np.uint16).max:
@@ -1209,8 +1209,8 @@ def _append_mesh(
             component_type=_FLOAT,
             accessor_type="VEC3",
             target=_ARRAY_BUFFER,
-            minimum=float_points.min(axis=0).astype(float).tolist(),
-            maximum=float_points.max(axis=0).astype(float).tolist(),
+            minimum=float_points.min(axis=0).tolist(),
+            maximum=float_points.max(axis=0).tolist(),
         )
     else:
         quantized_points = _quantize_positions(points, quantization)
@@ -1219,8 +1219,8 @@ def _append_mesh(
             component_type=_UNSIGNED_SHORT,
             accessor_type="VEC3",
             target=_ARRAY_BUFFER,
-            minimum=quantized_points.min(axis=0).astype(int).tolist(),
-            maximum=quantized_points.max(axis=0).astype(int).tolist(),
+            minimum=quantized_points.min(axis=0).tolist(),
+            maximum=quantized_points.max(axis=0).tolist(),
             byte_stride=8,
         )
     attributes: dict[str, int] = {"POSITION": position_accessor}
@@ -1718,7 +1718,7 @@ def _append_node(
     separate_lod_indices: list[int] = []
     transform = _node_transform(node, export_space, quantization)
     if not np.allclose(transform, np.eye(4)):
-        gltf_node["matrix"] = transform.T.reshape(-1).astype(float).tolist()
+        gltf_node["matrix"] = transform.T.reshape(-1).tolist()
     if node.part_id is not None and node.part_id in part_meshes:
         gltf_node["mesh"] = part_meshes[node.part_id]
         lods = part_lods.get(node.part_id)
@@ -1807,7 +1807,7 @@ def _append_lod_node(
         gltf_node["extras"]["fascat"]["metadata"] = dict(node.metadata)
     transform = _node_transform(node, export_space, quantization)
     if not np.allclose(transform, np.eye(4)):
-        gltf_node["matrix"] = transform.T.reshape(-1).astype(float).tolist()
+        gltf_node["matrix"] = transform.T.reshape(-1).tolist()
     nodes.append(gltf_node)
     return len(nodes) - 1
 

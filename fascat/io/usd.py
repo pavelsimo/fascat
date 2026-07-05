@@ -567,12 +567,13 @@ def _bind_materials(
         first_material = UsdShade.Material.Get(stage, first_material_path)
         UsdShade.MaterialBindingAPI.Apply(usd_mesh.GetPrim()).Bind(first_material)
 
-    if mesh.material_indices is None or len(set(mesh.material_indices.astype(int).tolist())) <= 1:
+    material_indices = mesh.material_indices
+    if material_indices is None or np.unique(material_indices).size <= 1:
         return
 
     used_subset_names: set[str] = set()
     for material_index, material_id in enumerate(part.material_ids):
-        face_indices = np.flatnonzero(mesh.material_indices == material_index).astype(int).tolist()
+        face_indices = np.flatnonzero(material_indices == material_index).tolist()
         material_path = material_paths.get(material_id)
         if not face_indices or not material_path:
             continue

@@ -202,7 +202,7 @@ def _face_chunks(
         ]
 
     chunks: list[str] = []
-    material_ids = [_face_material_id(part, mesh, face_index) for face_index in range(mesh.triangle_count)]
+    material_ids = _face_material_ids(part, mesh)
     start = 0
     while start < mesh.triangle_count:
         material_id = material_ids[start]
@@ -256,13 +256,13 @@ def _face_lines(
     return output.getvalue()
 
 
-def _face_material_id(part: Part, mesh: Mesh, face_index: int) -> str | None:
+def _face_material_ids(part: Part, mesh: Mesh) -> list[str | None]:
     if not part.material_ids:
-        return None
+        return [None] * mesh.triangle_count
     if mesh.material_indices is None:
-        return part.material_ids[0]
-    material_index = int(mesh.material_indices[face_index])
-    return part.material_ids[material_index] if material_index < len(part.material_ids) else None
+        return [part.material_ids[0]] * mesh.triangle_count
+    lookup = list(part.material_ids)
+    return [lookup[index] if index < len(lookup) else None for index in mesh.material_indices.tolist()]
 
 
 def _write_mtl(path: Path, materials: dict[str, Material]) -> None:

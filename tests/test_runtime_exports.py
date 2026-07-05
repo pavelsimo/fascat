@@ -457,6 +457,28 @@ def test_obj_export_writes_mesh_and_mtl_sidecar(tmp_path) -> None:  # type: igno
     assert "d 0.6" in mtl
 
 
+def test_obj_export_groups_bulk_material_runs(tmp_path: Path) -> None:
+    mesh = Mesh(
+        points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.asarray([[0, 1, 2], [2, 1, 3], [0, 2, 3]], dtype=int),
+        material_indices=np.asarray([0, 1, 0], dtype=np.int64),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="panel", name="Panel", part_id="panel")]),
+        parts={"panel": Part(id="panel", name="Panel", mesh=mesh, material_ids=["red", "blue"])},
+        materials={
+            "red": Material(id="red", name="Red", base_color=(1.0, 0.0, 0.0, 1.0)),
+            "blue": Material(id="blue", name="Blue", base_color=(0.0, 0.0, 1.0, 1.0)),
+        },
+    )
+    output = tmp_path / "runs.obj"
+
+    asset.write_obj(output, options=ObjExportOptions(materials=True, write_mtl=False))
+
+    material_lines = [line for line in output.read_text(encoding="utf-8").splitlines() if line.startswith("usemtl ")]
+    assert material_lines == ["usemtl red", "usemtl blue", "usemtl red"]
+
+
 def test_obj_export_writes_staged_vertex_normals_and_smoothing_groups(tmp_path) -> None:  # type: ignore[no-untyped-def]
     smooth_mesh = Mesh(
         points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),

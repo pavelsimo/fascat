@@ -238,6 +238,11 @@ def test_free_edge_geometry_stores_boundary_segments() -> None:
     assert with_edges.metadata["tessellation_free_edge_geometry"] == "stored"
     assert with_edges.metadata["tessellation_free_edge_segment_count"] == "3"
     assert len(segments) == 3
+    assert segments == [
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+        [[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+    ]
 
 
 @pytest.mark.requires_ocp
@@ -544,9 +549,26 @@ def test_tube_mesh_from_construction_curve_segments_builds_triangle_tubes() -> N
 
     assert mesh.vertex_count == 18
     assert mesh.triangle_count == 32
+    np.testing.assert_array_equal(mesh.faces[:4], [[0, 1, 9], [0, 9, 8], [16, 0, 1], [17, 9, 8]])
     assert mesh.face_groups["construction_curve_segment_0"].shape == (32,)
     assert mesh.metadata["construction_curve_tube_segments"] == "1"
     assert mesh.metadata["construction_curve_tube_radius"] == "0.1"
+
+
+def test_tube_mesh_skips_degenerate_segments_without_renumbering_groups() -> None:
+    mesh = _tube_mesh_from_segments(
+        [
+            (np.array([0.0, 0.0, 0.0]), np.array([1e-14, 0.0, 0.0])),
+            (np.array([0.0, 0.0, 0.0]), np.array([1.0, 0.0, 0.0])),
+        ],
+        radius=0.1,
+        sides=4,
+    )
+
+    assert mesh.vertex_count == 10
+    assert mesh.triangle_count == 16
+    assert sorted(mesh.face_groups) == ["construction_curve_segment_1"]
+    assert mesh.metadata["construction_curve_tube_segments"] == "2"
 
 
 def test_tessellation_preserves_construction_curves_as_metadata_by_default(monkeypatch) -> None:  # type: ignore[no-untyped-def]

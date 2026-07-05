@@ -356,9 +356,10 @@ def _construction_curve_segments(shape: object) -> list[tuple[np.ndarray, np.nda
             _occt_curve_point(curve, first + (last - first) * index / _CONSTRUCTION_CURVE_SAMPLE_SEGMENTS)
             for index in range(_CONSTRUCTION_CURVE_SAMPLE_SEGMENTS + 1)
         ]
-        for start, end in zip(samples, samples[1:], strict=False):
-            if float(np.linalg.norm(end - start)) > _CONSTRUCTION_CURVE_MIN_SEGMENT_LENGTH:
-                segments.append((start, end))
+        samples_array = np.asarray(samples, dtype=np.float64)
+        lengths = np.linalg.norm(np.diff(samples_array, axis=0), axis=1)
+        keep = lengths > _CONSTRUCTION_CURVE_MIN_SEGMENT_LENGTH
+        segments.extend(zip(samples_array[:-1][keep], samples_array[1:][keep], strict=True))
         explorer.Next()
     return segments
 
@@ -379,9 +380,25 @@ def _tube_mesh_from_segments(
     if sides < 3:
         raise ValueError("construction curve tube sides must be at least 3")
 
-    points: list[np.ndarray] = []
-    faces: list[tuple[int, int, int]] = []
+    side_indices = np.arange(sides, dtype=np.int64)
+    next_side_indices = (side_indices + 1) % sides
+    face_template = np.empty((sides, 4, 3), dtype=np.int64)
+    face_template[:, 0, :] = np.column_stack([side_indices, next_side_indices, sides + next_side_indices])
+    face_template[:, 1, :] = np.column_stack([side_indices, sides + next_side_indices, sides + side_indices])
+    face_template[:, 2, :] = np.column_stack([np.full(sides, 2 * sides), side_indices, next_side_indices])
+    face_template[:, 3, :] = np.column_stack(
+        [np.full(sides, 2 * sides + 1), sides + next_side_indices, sides + side_indices]
+    )
+    face_template = face_template.reshape((-1, 3))
+    angles = 2.0 * math.pi * side_indices.astype(np.float64) / sides
+    cos_angles = np.cos(angles)[:, None]
+    sin_angles = np.sin(angles)[:, None]
+
+    point_blocks: list[np.ndarray] = []
+    face_blocks: list[np.ndarray] = []
     face_groups: dict[str, np.ndarray] = {}
+    point_offset = 0
+    face_offset = 0
     for segment_index, (start, end) in enumerate(segments):
         direction = end - start
         length = float(np.linalg.norm(direction))
@@ -389,35 +406,29 @@ def _tube_mesh_from_segments(
             continue
         direction = direction / length
         u_axis, v_axis = _tube_frame(direction)
-        start_offset = len(points)
-        for center in (start, end):
-            for side in range(sides):
-                angle = 2.0 * math.pi * side / sides
-                points.append(center + radius * (math.cos(angle) * u_axis + math.sin(angle) * v_axis))
-        start_center = len(points)
-        points.append(start)
-        end_center = len(points)
-        points.append(end)
-
-        group_start = len(faces)
-        for side in range(sides):
-            next_side = (side + 1) % sides
-            a0 = start_offset + side
-            a1 = start_offset + next_side
-            b0 = start_offset + sides + side
-            b1 = start_offset + sides + next_side
-            faces.append((a0, a1, b1))
-            faces.append((a0, b1, b0))
-            faces.append((start_center, a0, a1))
-            faces.append((end_center, b1, b0))
+        offsets = radius * (cos_angles * u_axis + sin_angles * v_axis)
+        point_blocks.append(
+            np.concatenate(
+                [
+                    start + offsets,
+                    end + offsets,
+                    np.asarray(start, dtype=np.float64).reshape((1, 3)),
+                    np.asarray(end, dtype=np.float64).reshape((1, 3)),
+                ],
+                axis=0,
+            )
+        )
+        face_blocks.append(face_template + point_offset)
         face_groups[f"construction_curve_segment_{segment_index}"] = np.arange(
-            group_start,
-            len(faces),
+            face_offset,
+            face_offset + face_template.shape[0],
             dtype=np.int64,
         )
+        point_offset += 2 * sides + 2
+        face_offset += face_template.shape[0]
 
-    points_array = np.asarray(points, dtype=np.float64).reshape((-1, 3))
-    faces_array = np.asarray(faces, dtype=np.int64).reshape((-1, 3))
+    points_array = np.vstack(point_blocks) if point_blocks else np.empty((0, 3), dtype=np.float64)
+    faces_array = np.vstack(face_blocks) if face_blocks else np.empty((0, 3), dtype=np.int64)
     return Mesh(
         points=points_array,
         faces=faces_array,
@@ -480,11 +491,10 @@ def _normalize_uv_values(values: np.ndarray) -> np.ndarray:
 
 def _store_free_edge_geometry(mesh: Mesh) -> Mesh:
     edges, counts = mesh._undirected_edges_and_counts()
-    boundary_edges = edges[counts == 1].astype(int)
-    segments = []
+    boundary_edges = edges[counts == 1].astype(np.int64, copy=False)
     max_segments = 1024
-    for start, end in boundary_edges[:max_segments].tolist():
-        segments.append([mesh.points[start].astype(float).tolist(), mesh.points[end].astype(float).tolist()])
+    clipped_edges = boundary_edges[:max_segments]
+    segments = np.stack([mesh.points[clipped_edges[:, 0]], mesh.points[clipped_edges[:, 1]]], axis=1).tolist()
     result = mesh.copy()
     result.metadata = {
         **result.metadata,
