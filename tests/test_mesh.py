@@ -73,6 +73,26 @@ def flipped_tetrahedron_mesh() -> Mesh:
     )
 
 
+def _install_fake_ckdtree(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, float]]:
+    calls: list[tuple[int, float]] = []
+
+    class FakeCKDTree:
+        def __init__(self, points: np.ndarray) -> None:
+            self.points = np.asarray(points, dtype=float)
+
+        def query_pairs(self, radius: float) -> set[tuple[int, int]]:
+            calls.append((int(self.points.shape[0]), float(radius)))
+            pairs: set[tuple[int, int]] = set()
+            for left in range(self.points.shape[0]):
+                for right in range(left + 1, self.points.shape[0]):
+                    if float(np.linalg.norm(self.points[left] - self.points[right])) <= radius:
+                        pairs.add((left, right))
+            return pairs
+
+    monkeypatch.setattr(mesh_module, "_load_scipy_ckdtree", lambda: FakeCKDTree)
+    return calls
+
+
 def test_mesh_copies_mutable_inputs_on_construction() -> None:
     points = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float)
     faces = np.array([[0, 1, 2]], dtype=int)
@@ -337,6 +357,67 @@ def test_merge_vertices_uses_distance_tolerance_across_position_buckets() -> Non
     assert merged.metadata["merge_vertices_candidate_position_buckets"] == "1"
     assert merged.metadata["merge_vertices_candidate_vertices"] == "1"
     assert merged.metadata["merge_vertices_skipped_by_protection"] == "0"
+
+
+def test_merge_vertices_uses_ckdtree_close_pair_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_ckdtree(monkeypatch)
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0.048, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [0.147, 0, 0],
+                [2, 0, 0],
+                [0, 2, 0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=int),
+    )
+
+    merged = mesh.merge_vertices(MergeVerticesOptions(tolerance=0.1))
+
+    assert merged.vertex_count == 5
+    assert calls == [(6, 0.1)]
+
+
+def test_near_duplicate_stats_use_ckdtree_close_pair_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_ckdtree(monkeypatch)
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [0.001, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.empty((0, 3), dtype=int),
+    )
+
+    near_pairs, nearest = mesh._near_duplicate_unmerged_stats(tolerance=0.0001, diagonal=1.0, min_edge=1.0)
+
+    assert near_pairs == 1
+    assert nearest == pytest.approx(0.001)
+    assert calls == [(4, 0.01)]
+
+
+def test_merge_vertices_close_pair_search_falls_back_without_scipy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(mesh_module, "_load_scipy_ckdtree", lambda: None)
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0.048, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [0.147, 0, 0],
+                [2, 0, 0],
+                [0, 2, 0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=int),
+    )
+
+    merged = mesh.merge_vertices(MergeVerticesOptions(tolerance=0.1, quality_report=True))
+
+    assert merged.vertex_count == 5
+    assert merged.metadata["merge_vertices_candidate_position_buckets"] == "1"
+    assert merged.metadata["merge_vertices_candidate_vertices"] == "1"
 
 
 def test_merge_vertices_preserves_cross_bucket_attribute_seams() -> None:
@@ -611,6 +692,27 @@ def test_repair_records_boundary_gap_counts() -> None:
     assert repaired.metadata["repair_boundary_gaps_after"] == "1"
 
 
+def test_boundary_gap_count_uses_ckdtree_close_pair_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_ckdtree(monkeypatch)
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [1.005, 0, 0],
+                [2, 0, 0],
+                [1.005, 1, 0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=int),
+    )
+
+    assert mesh.boundary_gap_count(tolerance=0.01) == 1
+    assert calls == [(6, 0.01)]
+
+
 def test_orientability_metrics_early_exits_for_non_manifold_edges(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     mesh = Mesh(
         points=np.array(
@@ -838,6 +940,20 @@ def test_stitch_boundary_gaps_records_uv_seam_conflicts() -> None:
     stitched = mesh.stitch_boundary_gaps(0.01)
 
     assert stitched.uvs[0].shape == (5, 2)
+    assert stitched.metadata["boundary_gap_stitching_uv_conflicts"] == "1"
+
+
+def test_stitch_boundary_gaps_keeps_order_sensitive_bucket_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_ckdtree_load() -> None:
+        raise AssertionError("stitching keeps bucket order to preserve representative attributes")
+
+    monkeypatch.setattr(mesh_module, "_load_scipy_ckdtree", fail_ckdtree_load)
+    mesh = _gap_mesh_with_attributes(gap_uvs=True)
+
+    stitched = mesh.stitch_boundary_gaps(0.01)
+
+    assert stitched.vertex_count == 5
+    assert stitched.metadata["boundary_gap_stitching_attributes"] == "representative_vertex"
     assert stitched.metadata["boundary_gap_stitching_uv_conflicts"] == "1"
 
 
@@ -1175,10 +1291,7 @@ def test_uv_layout_stats_counts_multi_cell_overlap_once(monkeypatch: pytest.Monk
 def test_uv_layout_stats_skips_clipper_for_packed_non_overlapping_triangles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    uv_triangles = [
-        [[0.02, y], [0.98, y], [0.02, y + 0.02]]
-        for y in [0.02, 0.14, 0.26, 0.38, 0.5, 0.62]
-    ]
+    uv_triangles = [[[0.02, y], [0.98, y], [0.02, y + 0.02]] for y in [0.02, 0.14, 0.26, 0.38, 0.5, 0.62]]
     mesh = _mesh_with_uv_triangles(uv_triangles)
     original_overlap = mesh_module._triangle_overlap_area_2d
     overlap_calls = 0

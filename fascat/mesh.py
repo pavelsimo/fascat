@@ -62,6 +62,38 @@ def _rounded_key(values: NDArray[np.float64], decimals: int) -> tuple[float, ...
     return tuple(float(value) for value in np.round(values, decimals).tolist())
 
 
+def _load_scipy_ckdtree() -> Any | None:
+    try:
+        from scipy.spatial import cKDTree
+    except ImportError:
+        return None
+    return cKDTree
+
+
+def _scipy_close_point_pairs(points: FloatArray, vertices: IntArray, radius: float) -> list[tuple[int, int]] | None:
+    ckd_tree = _load_scipy_ckdtree()
+    if ckd_tree is None or vertices.size < 2:
+        return None
+    selected = points[vertices]
+    if not np.isfinite(selected).all():
+        return None
+    tree = ckd_tree(selected)
+    raw_pairs = tree.query_pairs(float(radius))
+    positions = {int(vertex): position for position, vertex in enumerate(vertices.astype(int).tolist())}
+    pairs: list[tuple[int, int]] = []
+    for local_left, local_right in raw_pairs:
+        left = int(vertices[int(local_left)])
+        right = int(vertices[int(local_right)])
+        pairs.append((left, right) if left < right else (right, left))
+    return sorted(
+        pairs,
+        key=lambda pair: (
+            max(positions[pair[0]], positions[pair[1]]),
+            min(positions[pair[0]], positions[pair[1]]),
+        ),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class _CentroidKdNode:
     index: int
@@ -880,24 +912,15 @@ class Mesh:
         if upper <= lower or upper <= 0.0:
             return 0, 0.0
         connected_edges = self._connected_edge_pairs()
-        buckets: dict[tuple[int, int, int], list[int]] = defaultdict(list)
         near_pairs = 0
         nearest = math.inf
-        for vertex, point in enumerate(self.points):
-            key = self._spatial_bucket_key(point, upper)
-            for dx in (-1, 0, 1):
-                for dy in (-1, 0, 1):
-                    for dz in (-1, 0, 1):
-                        neighbor_key = (key[0] + dx, key[1] + dy, key[2] + dz)
-                        for other in buckets.get(neighbor_key, []):
-                            pair = (min(vertex, other), max(vertex, other))
-                            if pair in connected_edges:
-                                continue
-                            distance = float(np.linalg.norm(point - self.points[other]))
-                            if lower < distance <= upper:
-                                near_pairs += 1
-                                nearest = min(nearest, distance)
-            buckets[key].append(vertex)
+        for left, right in self._close_vertex_pairs(tolerance=upper):
+            if (left, right) in connected_edges:
+                continue
+            distance = float(np.linalg.norm(self.points[left] - self.points[right]))
+            if lower < distance <= upper:
+                near_pairs += 1
+                nearest = min(nearest, distance)
         return near_pairs, 0.0 if math.isinf(nearest) else nearest
 
     def _near_duplicate_advisory_limit(self, *, tolerance: float, diagonal: float, min_edge: float) -> float:
@@ -919,6 +942,47 @@ class Mesh:
     def _spatial_bucket_key(self, point: FloatArray, cell_size: float) -> tuple[int, int, int]:
         key = np.floor(point / cell_size).astype(np.int64)
         return (int(key[0]), int(key[1]), int(key[2]))
+
+    def _close_vertex_pairs(
+        self,
+        *,
+        tolerance: float,
+        vertex_indices: IntArray | None = None,
+    ) -> list[tuple[int, int]]:
+        if tolerance <= 0.0:
+            return []
+        vertices = (
+            np.arange(self.vertex_count, dtype=np.int64)
+            if vertex_indices is None
+            else np.asarray(vertex_indices, dtype=np.int64)
+        )
+        if vertices.size < 2:
+            return []
+        scipy_pairs = _scipy_close_point_pairs(self.points, vertices, tolerance)
+        if scipy_pairs is not None:
+            return scipy_pairs
+        return self._bucket_close_vertex_pairs(tolerance=tolerance, vertex_indices=vertices)
+
+    def _bucket_close_vertex_pairs(
+        self,
+        *,
+        tolerance: float,
+        vertex_indices: IntArray,
+    ) -> list[tuple[int, int]]:
+        buckets: dict[tuple[int, int, int], list[int]] = defaultdict(list)
+        pairs: list[tuple[int, int]] = []
+        for vertex in vertex_indices.astype(int).tolist():
+            point = self.points[vertex]
+            key = self._spatial_bucket_key(point, tolerance)
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for dz in (-1, 0, 1):
+                        neighbor_key = (key[0] + dx, key[1] + dy, key[2] + dz)
+                        for other in buckets.get(neighbor_key, []):
+                            if float(np.linalg.norm(point - self.points[other])) <= tolerance:
+                                pairs.append((other, vertex) if other < vertex else (vertex, other))
+            buckets[key].append(vertex)
+        return pairs
 
     def _distance_connected_components(
         self,
@@ -959,20 +1023,10 @@ class Mesh:
                 parent[right_root] = left_root
                 rank[left_root] += 1
 
-        buckets: dict[tuple[int, int, int], list[int]] = defaultdict(list)
-        for vertex, point in enumerate(self.points):
-            key = self._spatial_bucket_key(point, tolerance)
-            component_key = None if component_keys is None else component_keys[vertex]
-            for dx in (-1, 0, 1):
-                for dy in (-1, 0, 1):
-                    for dz in (-1, 0, 1):
-                        neighbor_key = (key[0] + dx, key[1] + dy, key[2] + dz)
-                        for other in buckets.get(neighbor_key, []):
-                            if component_keys is not None and component_keys[other] != component_key:
-                                continue
-                            if float(np.linalg.norm(point - self.points[other])) <= tolerance:
-                                union(vertex, other)
-            buckets[key].append(vertex)
+        for left, right in self._close_vertex_pairs(tolerance=tolerance):
+            if component_keys is not None and component_keys[left] != component_keys[right]:
+                continue
+            union(left, right)
 
         components: dict[int, list[int]] = {}
         for vertex in range(self.vertex_count):
@@ -1431,28 +1485,11 @@ class Mesh:
             return 0
         boundary_vertices = sorted({vertex for edge in boundary_edges for vertex in edge})
         connected_edges = {(int(edge[0]), int(edge[1])) for edge in all_edges.astype(int).tolist()}
-        buckets: dict[tuple[int, int, int], list[int]] = {}
-        gaps: set[tuple[int, int]] = set()
-
-        def bucket_key(point: FloatArray) -> tuple[int, int, int]:
-            key = np.floor(point / distance_tolerance).astype(np.int64)
-            return (int(key[0]), int(key[1]), int(key[2]))
-
-        for vertex in boundary_vertices:
-            point = self.points[vertex]
-            key = bucket_key(point)
-            for dx in (-1, 0, 1):
-                for dy in (-1, 0, 1):
-                    for dz in (-1, 0, 1):
-                        neighbor_key = (key[0] + dx, key[1] + dy, key[2] + dz)
-                        for other in buckets.get(neighbor_key, []):
-                            pair = (min(vertex, other), max(vertex, other))
-                            if pair in connected_edges:
-                                continue
-                            if float(np.linalg.norm(point - self.points[other])) <= distance_tolerance:
-                                gaps.add(pair)
-            buckets.setdefault(key, []).append(vertex)
-        return len(gaps)
+        close_pairs = self._close_vertex_pairs(
+            tolerance=distance_tolerance,
+            vertex_indices=np.asarray(boundary_vertices, dtype=np.int64),
+        )
+        return sum(1 for pair in close_pairs if pair not in connected_edges)
 
     def split_t_junctions(self, *, tolerance: float = 1e-9) -> Mesh:
         """Return a mesh with detected T-junction edges split."""
@@ -1543,7 +1580,6 @@ class Mesh:
         connected_edges = {(int(edge[0]), int(edge[1])) for edge in all_edges.astype(int).tolist()}
         parent = np.arange(self.vertex_count, dtype=np.int64)
         rank = np.zeros(self.vertex_count, dtype=np.int64)
-        buckets: dict[tuple[int, int, int], list[int]] = {}
         merged = False
 
         def find(vertex: int) -> int:
@@ -1565,19 +1601,14 @@ class Mesh:
                 rank[left_root] += 1
             merged = True
 
-        for vertex in boundary_vertices:
-            point = self.points[vertex]
-            key = self._spatial_bucket_key(point, tolerance)
-            for dx in (-1, 0, 1):
-                for dy in (-1, 0, 1):
-                    for dz in (-1, 0, 1):
-                        for other in buckets.get((key[0] + dx, key[1] + dy, key[2] + dz), []):
-                            edge = (min(vertex, other), max(vertex, other))
-                            if edge in connected_edges:
-                                continue
-                            if float(np.linalg.norm(point - self.points[other])) <= tolerance:
-                                union(vertex, other)
-            buckets.setdefault(key, []).append(vertex)
+        close_pairs = self._bucket_close_vertex_pairs(
+            tolerance=tolerance,
+            vertex_indices=np.asarray(boundary_vertices, dtype=np.int64),
+        )
+        for left, right in close_pairs:
+            if (left, right) in connected_edges:
+                continue
+            union(right, left)
         if not merged:
             return self.copy()
         roots = np.asarray([find(index) for index in range(self.vertex_count)], dtype=np.int64)
