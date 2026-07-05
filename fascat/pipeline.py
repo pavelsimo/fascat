@@ -13,16 +13,26 @@ from fascat.export_report import referenced_materials
 from fascat.export_report import stats_with_file_size as _stats_with_file_size
 from fascat.filter import Filter
 from fascat.io._atomic import preflight_output_path
-from fascat.io.brep import BREP_SUFFIXES, read_brep
-from fascat.io.fbx import FBX_SUFFIXES, validate_fbx
+from fascat.io._suffixes import (
+    BREP_SUFFIXES,
+    FBX_SUFFIXES,
+    GLTF_SUFFIXES,
+    IGES_SUFFIXES,
+    OBJ_SUFFIXES,
+    STL_SUFFIXES,
+    USD_SUFFIXES,
+)
+from fascat.io._suffixes import CAD_SUFFIXES as _CAD_SUFFIXES
+from fascat.io.brep import read_brep
+from fascat.io.fbx import validate_fbx
 from fascat.io.fbx import write_fbx_with_validation_stats as _write_fbx
-from fascat.io.gltf import GLTF_SUFFIXES, runtime_dependency_report, validate_gltf
+from fascat.io.gltf import runtime_dependency_report, validate_gltf
 from fascat.io.gltf import write_gltf_with_validation as _write_gltf
-from fascat.io.iges import IGES_SUFFIXES, read_iges
-from fascat.io.obj import OBJ_SUFFIXES, validate_obj
+from fascat.io.iges import read_iges
+from fascat.io.obj import validate_obj
 from fascat.io.obj import write_obj_with_validation_stats as _write_obj
 from fascat.io.step import read_step, read_step_many
-from fascat.io.stl import STL_SUFFIXES, validate_stl
+from fascat.io.stl import validate_stl
 from fascat.io.stl import write_stl_with_validation_stats as _write_stl
 from fascat.io.usd import validate_usd
 from fascat.io.usd import write_usd_with_validation_stats as _write_usd
@@ -63,8 +73,7 @@ from fascat.size_ladder import measure_gltf_size_ladder
 if TYPE_CHECKING:
     from fascat.analysis import AnalysisReport
 
-USD_SUFFIXES = {".usd", ".usda", ".usdc", ".usdz"}
-CAD_SUFFIXES = {".step", ".stp"} | IGES_SUFFIXES | BREP_SUFFIXES
+CAD_SUFFIXES = _CAD_SUFFIXES
 ExportFormat = Literal["usd", "gltf", "obj", "stl", "fbx"]
 InputPath = str | Path | Sequence[str | Path]
 _LOAD_ESTIMATE_BYTES_PER_MS = 50_000

@@ -382,14 +382,15 @@ def _tube_mesh_from_segments(
 
     side_indices = np.arange(sides, dtype=np.int64)
     next_side_indices = (side_indices + 1) % sides
-    face_template = np.empty((sides, 4, 3), dtype=np.int64)
-    face_template[:, 0, :] = np.column_stack([side_indices, next_side_indices, sides + next_side_indices])
-    face_template[:, 1, :] = np.column_stack([side_indices, sides + next_side_indices, sides + side_indices])
-    face_template[:, 2, :] = np.column_stack([np.full(sides, 2 * sides), side_indices, next_side_indices])
-    face_template[:, 3, :] = np.column_stack(
+    face_template_blocks = np.empty((sides, 4, 3), dtype=np.int64)
+    face_template_blocks[:, 0, :] = np.column_stack([side_indices, next_side_indices, sides + next_side_indices])
+    face_template_blocks[:, 1, :] = np.column_stack([side_indices, sides + next_side_indices, sides + side_indices])
+    face_template_blocks[:, 2, :] = np.column_stack([np.full(sides, 2 * sides), side_indices, next_side_indices])
+    face_template_blocks[:, 3, :] = np.column_stack(
         [np.full(sides, 2 * sides + 1), sides + next_side_indices, sides + side_indices]
     )
-    face_template = face_template.reshape((-1, 3))
+    face_template = face_template_blocks.reshape((-1, 3))
+    face_template_count = sides * 4
     angles = 2.0 * math.pi * side_indices.astype(np.float64) / sides
     cos_angles = np.cos(angles)[:, None]
     sin_angles = np.sin(angles)[:, None]
@@ -421,11 +422,11 @@ def _tube_mesh_from_segments(
         face_blocks.append(face_template + point_offset)
         face_groups[f"construction_curve_segment_{segment_index}"] = np.arange(
             face_offset,
-            face_offset + face_template.shape[0],
+            face_offset + face_template_count,
             dtype=np.int64,
         )
         point_offset += 2 * sides + 2
-        face_offset += face_template.shape[0]
+        face_offset += face_template_count
 
     points_array = np.vstack(point_blocks) if point_blocks else np.empty((0, 3), dtype=np.float64)
     faces_array = np.vstack(face_blocks) if face_blocks else np.empty((0, 3), dtype=np.int64)
