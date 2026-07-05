@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import sys
+import types
 
 import numpy as np
 import pytest
@@ -257,6 +259,174 @@ def test_tessellate_shape_extracts_occt_faces_into_numpy_buffers() -> None:
     assert mesh.material_indices.shape == (mesh.triangle_count,)
     assert len(mesh.face_groups) == 6
     assert sum(values.shape[0] for values in mesh.face_groups.values()) == mesh.triangle_count
+
+
+def test_tessellate_shape_vectorizes_occt_transform_and_reversed_winding(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    top_abs_reversed = "reversed"
+
+    class FakePoint:
+        def __init__(self, x: float, y: float, z: float = 0.0) -> None:
+            self.x = x
+            self.y = y
+            self.z = z
+
+        def X(self) -> float:
+            return self.x
+
+        def Y(self) -> float:
+            return self.y
+
+        def Z(self) -> float:
+            return self.z
+
+        def Transformed(self, _transform: object) -> object:
+            raise AssertionError("tessellation should apply OCCT transforms in bulk")
+
+    class FakeArray:
+        def __init__(self, values: list[object]) -> None:
+            self.values = values
+
+        def Lower(self) -> int:
+            return 1
+
+        def Value(self, index: int) -> object:
+            return self.values[index - 1]
+
+    class FakeTriangle:
+        def __init__(self, a: int, b: int, c: int) -> None:
+            self.values = (a, b, c)
+
+        def Get(self) -> tuple[int, int, int]:
+            return self.values
+
+    class FakeTriangulation:
+        def __init__(self) -> None:
+            self.nodes = [
+                FakePoint(1.0, 2.0, 3.0),
+                FakePoint(2.0, 0.0, 0.0),
+                FakePoint(0.0, 1.0, 1.0),
+            ]
+            self.triangles = [FakeTriangle(1, 2, 3)]
+            self.uvs = [FakePoint(0.0, 0.0), FakePoint(2.0, 0.0), FakePoint(0.0, 4.0)]
+
+        def NbNodes(self) -> int:
+            return len(self.nodes)
+
+        def NbTriangles(self) -> int:
+            return len(self.triangles)
+
+        def MapNodeArray(self) -> FakeArray:
+            return FakeArray(self.nodes)
+
+        def MapTriangleArray(self) -> FakeArray:
+            return FakeArray(self.triangles)
+
+        def HasUVNodes(self) -> bool:
+            return True
+
+        def MapUVNodeArray(self) -> FakeArray:
+            return FakeArray(self.uvs)
+
+    class FakeTransform:
+        def __init__(self) -> None:
+            self.matrix = (
+                (2.0, 0.0, 0.0, 10.0),
+                (0.0, 3.0, 0.0, 20.0),
+                (0.0, 0.0, 4.0, 30.0),
+            )
+
+        def Value(self, row: int, column: int) -> float:
+            return self.matrix[row - 1][column - 1]
+
+    class FakeLocation:
+        def __init__(self) -> None:
+            self.transform = FakeTransform()
+
+        def Transformation(self) -> FakeTransform:
+            return self.transform
+
+    class FakeFace:
+        def __init__(self) -> None:
+            self.triangulation = FakeTriangulation()
+            self.transform = FakeTransform()
+
+        def Orientation(self) -> str:
+            return top_abs_reversed
+
+    class FakeShape:
+        def __init__(self) -> None:
+            self.faces = [FakeFace()]
+
+    class FakeBRepTool:
+        @staticmethod
+        def Triangulation_s(face: FakeFace, location: FakeLocation) -> FakeTriangulation:
+            location.transform = face.transform
+            return face.triangulation
+
+    class FakeMesher:
+        def __init__(self, _shape: object, _parameters: object) -> None:
+            pass
+
+        def Perform(self) -> None:
+            pass
+
+    class FakeParameters:
+        pass
+
+    class FakeExplorer:
+        def __init__(self, shape: FakeShape, _kind: object) -> None:
+            self.faces = shape.faces
+            self.index = 0
+
+        def More(self) -> bool:
+            return self.index < len(self.faces)
+
+        def Current(self) -> FakeFace:
+            return self.faces[self.index]
+
+        def Next(self) -> None:
+            self.index += 1
+
+    class FakeTopoDS:
+        @staticmethod
+        def Face_s(face: FakeFace) -> FakeFace:
+            return face
+
+    ocp_module = types.ModuleType("OCP")
+    ocp_module.__path__ = []  # type: ignore[attr-defined]
+    modules = {
+        "OCP": ocp_module,
+        "OCP.BRep": types.ModuleType("OCP.BRep"),
+        "OCP.BRepMesh": types.ModuleType("OCP.BRepMesh"),
+        "OCP.IMeshTools": types.ModuleType("OCP.IMeshTools"),
+        "OCP.TopAbs": types.ModuleType("OCP.TopAbs"),
+        "OCP.TopExp": types.ModuleType("OCP.TopExp"),
+        "OCP.TopLoc": types.ModuleType("OCP.TopLoc"),
+        "OCP.TopoDS": types.ModuleType("OCP.TopoDS"),
+    }
+    modules["OCP.BRep"].BRep_Tool = FakeBRepTool  # type: ignore[attr-defined]
+    modules["OCP.BRepMesh"].BRepMesh_IncrementalMesh = FakeMesher  # type: ignore[attr-defined]
+    modules["OCP.IMeshTools"].IMeshTools_Parameters = FakeParameters  # type: ignore[attr-defined]
+    modules["OCP.TopAbs"].TopAbs_FACE = "face"  # type: ignore[attr-defined]
+    modules["OCP.TopAbs"].TopAbs_REVERSED = top_abs_reversed  # type: ignore[attr-defined]
+    modules["OCP.TopExp"].TopExp_Explorer = FakeExplorer  # type: ignore[attr-defined]
+    modules["OCP.TopLoc"].TopLoc_Location = FakeLocation  # type: ignore[attr-defined]
+    modules["OCP.TopoDS"].TopoDS = FakeTopoDS  # type: ignore[attr-defined]
+    for name, module in modules.items():
+        monkeypatch.setitem(sys.modules, name, module)
+
+    mesh = tessellate_shape(
+        FakeShape(),
+        TessellationOptions(sag=0.1, relative=False, cad_uvs=True, create_normals=False),
+        face_material_indices=[4],
+    )
+
+    np.testing.assert_allclose(mesh.points, [[12.0, 26.0, 42.0], [14.0, 20.0, 30.0], [10.0, 23.0, 34.0]])
+    np.testing.assert_array_equal(mesh.faces, [[2, 1, 0]])
+    np.testing.assert_array_equal(mesh.material_indices, [4])
+    np.testing.assert_array_equal(mesh.face_groups["occt_face_0"], [0])
+    np.testing.assert_allclose(mesh.uvs[0], [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    assert mesh.metadata["uv0"] == "cad_surface_uv"
 
 
 @pytest.mark.requires_ocp

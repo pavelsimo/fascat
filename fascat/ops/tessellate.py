@@ -235,9 +235,12 @@ def tessellate_shape(
     for payload in face_triangulations:
         nodes = payload.triangulation.MapNodeArray()
         node_lower = int(nodes.Lower())
-        for local_index in range(payload.node_count):
-            point = nodes.Value(node_lower + local_index).Transformed(payload.transform)
-            points[payload.point_offset + local_index] = (point.X(), point.Y(), point.Z())
+        points[payload.point_offset : payload.point_offset + payload.node_count] = _transformed_occt_nodes(
+            nodes,
+            node_lower,
+            payload.node_count,
+            payload.transform,
+        )
         if cad_uv_values is not None:
             surface_uvs = _triangulation_uv_nodes(payload.triangulation, payload.node_count)
             if surface_uvs is not None:
@@ -252,20 +255,11 @@ def tessellate_shape(
         )
         if face_group.size:
             face_groups[f"occt_face_{payload.face_index}"] = face_group
-        for local_index in range(payload.triangle_count):
-            a, b, c = triangles.Value(triangle_lower + local_index).Get()
-            if payload.reversed_face:
-                faces[payload.triangle_offset + local_index] = (
-                    payload.point_offset + c - 1,
-                    payload.point_offset + b - 1,
-                    payload.point_offset + a - 1,
-                )
-            else:
-                faces[payload.triangle_offset + local_index] = (
-                    payload.point_offset + a - 1,
-                    payload.point_offset + b - 1,
-                    payload.point_offset + c - 1,
-                )
+        local_faces = _triangulation_faces(triangles, triangle_lower, payload.triangle_count)
+        local_faces += payload.point_offset - 1
+        if payload.reversed_face:
+            local_faces = local_faces[:, ::-1]
+        faces[payload.triangle_offset : payload.triangle_offset + payload.triangle_count] = local_faces
         if material_values is not None and payload.material_index is not None:
             material_values[payload.triangle_offset : payload.triangle_offset + payload.triangle_count] = (
                 payload.material_index
@@ -296,6 +290,33 @@ def tessellate_shape(
         mesh = _store_free_edge_geometry(mesh)
     mesh.validate()
     return mesh
+
+
+def _transformed_occt_nodes(nodes: Any, node_lower: int, node_count: int, transform: Any) -> np.ndarray:
+    raw_points = np.empty((node_count, 3), dtype=np.float64)
+    for local_index in range(node_count):
+        point = nodes.Value(node_lower + local_index)
+        raw_points[local_index] = (float(point.X()), float(point.Y()), float(point.Z()))
+    matrix = _occt_transform_matrix(transform)
+    return cast(np.ndarray, raw_points @ matrix[:, :3].T + matrix[:, 3])
+
+
+def _occt_transform_matrix(transform: Any) -> np.ndarray:
+    return np.asarray(
+        [
+            [transform.Value(1, 1), transform.Value(1, 2), transform.Value(1, 3), transform.Value(1, 4)],
+            [transform.Value(2, 1), transform.Value(2, 2), transform.Value(2, 3), transform.Value(2, 4)],
+            [transform.Value(3, 1), transform.Value(3, 2), transform.Value(3, 3), transform.Value(3, 4)],
+        ],
+        dtype=np.float64,
+    )
+
+
+def _triangulation_faces(triangles: Any, triangle_lower: int, triangle_count: int) -> np.ndarray:
+    faces = np.empty((triangle_count, 3), dtype=np.int64)
+    for local_index in range(triangle_count):
+        faces[local_index] = triangles.Value(triangle_lower + local_index).Get()
+    return faces
 
 
 def tessellate_construction_curve_shape(
