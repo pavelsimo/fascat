@@ -10,11 +10,11 @@ from fascat._ocp import shape_fingerprint as _shape_fingerprint
 from fascat.asset import Asset, Node, Part
 from fascat.io import step as _step
 from fascat.io._errors import wrap_io_errors
+from fascat.io._suffixes import BREP_SUFFIXES
 from fascat.material import Material
 from fascat.options import BrepReadOptions, StepReadOptions
 from fascat.report import Report, timed_step
 
-BREP_SUFFIXES = {".brep"}
 _DEFAULT_MATERIAL_COLOR = (0.75, 0.75, 0.75, 1.0)
 
 

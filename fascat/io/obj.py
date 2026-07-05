@@ -9,11 +9,10 @@ from fascat.asset import Asset, Node, Part
 from fascat.export_report import referenced_materials
 from fascat.io._atomic import atomic_outputs
 from fascat.io._errors import wrap_io_errors
+from fascat.io._suffixes import OBJ_SUFFIXES
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.options import ObjExportOptions
-
-OBJ_SUFFIXES = {".obj"}
 
 
 @wrap_io_errors("write OBJ")

@@ -8,11 +8,10 @@ from typing import Any, cast
 from fascat.asset import Asset, Node, Part
 from fascat.io import step as _step
 from fascat.io._errors import wrap_io_errors
+from fascat.io._suffixes import IGES_SUFFIXES
 from fascat.material import Material
 from fascat.options import IgesReadOptions, StepReadOptions
 from fascat.report import Report, timed_step
-
-IGES_SUFFIXES = {".igs", ".iges"}
 
 
 @wrap_io_errors("read IGES")

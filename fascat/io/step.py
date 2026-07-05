@@ -19,6 +19,7 @@ from fascat._ocp import shape_fingerprint as _shape_fingerprint
 from fascat.asset import Asset, Node, Part
 from fascat.image import ImageMimeType, ImageResource
 from fascat.io._errors import wrap_io_errors
+from fascat.io._suffixes import STEP_SUFFIXES as _STEP_SUFFIXES
 from fascat.material import Material
 from fascat.metadata import Metadata, PmiAnnotation, PmiKind, Tolerance
 from fascat.options import StepReadOptions
@@ -61,7 +62,6 @@ _MATERIAL_RECORD_SUFFIXES = {".json", ".mtl"}
 _MATERIAL_LIBRARY_CONTAINER_SUFFIXES = {".zip"}
 _MATERIAL_LIBRARY_SUFFIXES = _MATERIAL_RECORD_SUFFIXES | _MATERIAL_LIBRARY_CONTAINER_SUFFIXES
 _MATERIAL_LIBRARY_REF_RE = re.compile(r"'([^']+\.(?:json|mtl|zip)(?:[#?][^']*)?)'", re.IGNORECASE)
-_STEP_SUFFIXES = {".step", ".stp"}
 _STEP_EXTERNAL_REF_RE = re.compile(r"'([^']+\.(?:step|stp)(?:[#?][^']*)?)'", re.IGNORECASE)
 # Resource caps for the auxiliary textual passes over untrusted input (PMI,
 # design variants, external/texture/library references). OCCT geometry import

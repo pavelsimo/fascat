@@ -10,9 +10,9 @@ from numpy.typing import NDArray
 from fascat.asset import Asset, Node
 from fascat.io._atomic import atomic_output
 from fascat.io._errors import wrap_io_errors
+from fascat.io._suffixes import STL_SUFFIXES
 from fascat.options import StlExportOptions
 
-STL_SUFFIXES = {".stl"}
 ASCII_STL_TRIANGLE_WARNING_THRESHOLD = 10_000
 FloatArray = NDArray[np.float64]
 

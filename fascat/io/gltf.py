@@ -22,6 +22,7 @@ from fascat.export_report import referenced_materials
 from fascat.image import ImageResource
 from fascat.io._atomic import atomic_output, publish_staged
 from fascat.io._errors import wrap_io_errors
+from fascat.io._suffixes import GLTF_SUFFIXES
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.metadata import pmi_ids_by_part
@@ -29,7 +30,6 @@ from fascat.options import GltfExportOptions, MetadataExportOptions, resolve_glt
 from fascat.pmi_visuals import PmiVisualMarker, build_pmi_visual_markers
 from fascat.report import Report
 
-GLTF_SUFFIXES = {".gltf", ".glb"}
 BinaryPayload = bytes | bytearray | memoryview
 
 _GLB_MAGIC = b"glTF"

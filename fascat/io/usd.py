@@ -13,6 +13,7 @@ from fascat.export_report import referenced_materials
 from fascat.image import ImageResource
 from fascat.io._atomic import atomic_output
 from fascat.io._errors import wrap_io_errors
+from fascat.io._suffixes import USD_SUFFIXES
 from fascat.material import Material
 from fascat.metadata import pmi_ids_by_part
 from fascat.options import MetadataExportOptions, UsdExportOptions
@@ -89,7 +90,7 @@ def write_usd_with_validation_stats(
         raise RuntimeError("USD export requires usd-core") from exc
 
     output_path = Path(path)
-    if output_path.suffix.lower() not in {".usd", ".usda", ".usdc", ".usdz"}:
+    if output_path.suffix.lower() not in USD_SUFFIXES:
         raise ValueError(f"unsupported USD extension: {output_path.suffix or '<none>'}")
     if opts.package == "usdz" and output_path.suffix.lower() != ".usdz":
         raise ValueError("USDZ package export requires a .usdz output path")

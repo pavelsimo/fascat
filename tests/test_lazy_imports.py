@@ -26,7 +26,8 @@ def test_import_fascat_is_lazy() -> None:
 def test_cli_import_does_not_load_harnesses() -> None:
     completed = _run_python(
         "import sys, fascat.cli\n"
-        "heavy = [name for name in ('fascat.runtime', 'fascat.visual', 'PIL') if name in sys.modules]\n"
+        "heavy = [name for name in ('fascat.runtime', 'fascat.visual', 'PIL', 'numpy', "
+        "'fascat.io.step', 'fascat.analysis', 'fascat.pipeline') if name in sys.modules]\n"
         "assert not heavy, f'eagerly imported: {heavy}'\n"
     )
 

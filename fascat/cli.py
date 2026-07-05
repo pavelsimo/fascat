@@ -11,7 +11,7 @@ from dataclasses import replace as dataclass_replace
 from difflib import get_close_matches
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Any, NoReturn, cast
+from typing import TYPE_CHECKING, Annotated, Any, NoReturn, cast
 
 import typer
 import typer.rich_utils as rich_utils
@@ -19,15 +19,16 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TaskID, TextColumn, TimeElapsedColumn
 
 from fascat import __version__
-from fascat.analysis import AnalysisReport, analyze_output
-from fascat.filter import Filter, FilterExpressionError
-from fascat.io.brep import BREP_SUFFIXES, read_brep
-from fascat.io.fbx import FBX_SUFFIXES
-from fascat.io.gltf import GLTF_SUFFIXES
-from fascat.io.iges import IGES_SUFFIXES, read_iges
-from fascat.io.obj import OBJ_SUFFIXES
-from fascat.io.step import read_step, read_step_bytes
-from fascat.io.stl import STL_SUFFIXES
+from fascat.io._suffixes import (
+    BREP_SUFFIXES,
+    CAD_SUFFIXES,
+    EXPORT_SUFFIXES,
+    GLTF_SUFFIXES,
+    IGES_SUFFIXES,
+    OBJ_SUFFIXES,
+    STEP_SUFFIXES,
+    STL_SUFFIXES,
+)
 from fascat.options import (
     AabbProjectionOptions,
     AnalyzeOptions,
@@ -60,20 +61,16 @@ from fascat.options import (
     UsdExportOptions,
     default_jobs,
 )
-from fascat.pipeline import convert
-from fascat.pipeline import validate_output as validate_export
-from fascat.pipeline_file import PipelineSpec
-from fascat.profiles import by_name
-from fascat.profiles import from_file as profile_from_file
 from fascat.report import Report
+
+if TYPE_CHECKING:
+    from fascat.analysis import AnalysisReport
+    from fascat.filter import Filter
+    from fascat.pipeline_file import PipelineSpec
 
 DOCS_URL = "https://pavelsimo.github.io/fascat"
 ISSUES_URL = "https://github.com/pavelsimo/fascat/issues"
 rich_utils.MAX_WIDTH = 120
-STEP_SUFFIXES = {".step", ".stp"}
-CAD_SUFFIXES = STEP_SUFFIXES | IGES_SUFFIXES | BREP_SUFFIXES
-USD_SUFFIXES = {".usd", ".usda", ".usdc", ".usdz"}
-EXPORT_SUFFIXES = USD_SUFFIXES | GLTF_SUFFIXES | OBJ_SUFFIXES | STL_SUFFIXES | FBX_SUFFIXES
 COMMAND_NAMES = ("inspect", "convert", "validate", "runtime-fixtures", "version", "help")
 GLOBAL_FLAG_ALIASES = {
     "--json",
@@ -112,6 +109,34 @@ app = typer.Typer(
 
 out = Console()
 err = Console(stderr=True)
+
+
+def by_name(name: str, **overrides: Any) -> ConversionProfile:
+    from fascat.profiles import by_name as _by_name
+
+    return _by_name(name, **overrides)
+
+
+def profile_from_file(
+    path: str | Path,
+    *,
+    base: str | ConversionProfile = "realtime-desktop",
+) -> ConversionProfile:
+    from fascat.profiles import from_file as _profile_from_file
+
+    return _profile_from_file(path, base=base)
+
+
+def convert(*args: Any, **kwargs: Any) -> Any:
+    from fascat.pipeline import convert as _convert
+
+    return _convert(*args, **kwargs)
+
+
+def validate_export(path: str | Path) -> dict[str, int]:
+    from fascat.pipeline import validate_output
+
+    return validate_output(path)
 
 
 class Profile(str, Enum):
@@ -3195,6 +3220,8 @@ def _parse_filter_options(
     ctx: typer.Context,
     payload: dict[str, Any],
 ) -> Filter | None:
+    from fascat.filter import Filter, FilterExpressionError
+
     try:
         return Filter.from_cli(filters or [], exclude=exclude_filters or [])
     except FilterExpressionError as exc:
@@ -3302,6 +3329,8 @@ def _decimate_target_for_cli(
 
 
 def _read_pipeline_for_cli(path: Path, ctx: typer.Context, payload: dict[str, Any]) -> PipelineSpec:
+    from fascat.pipeline_file import PipelineSpec
+
     _require_existing_file(path, "pipeline", ctx, payload)
     try:
         return PipelineSpec.from_file(path)
@@ -3477,6 +3506,8 @@ def _read_cad_for_cli(
     import_options: StepReadOptions | None = None,
 ) -> Any:
     if _is_stdio(path):
+        from fascat.io.step import read_step_bytes
+
         data = sys.stdin.buffer.read()
         if not data:
             _fail(ctx, payload, "Missing input data on stdin.")
@@ -3485,10 +3516,16 @@ def _read_cad_for_cli(
     try:
         suffix = path.suffix.lower()
         if suffix in STEP_SUFFIXES:
+            from fascat.io.step import read_step
+
             return read_step(path, options=import_options)
         if suffix in IGES_SUFFIXES:
+            from fascat.io.iges import read_iges
+
             return read_iges(path, options=import_options)
         if suffix in BREP_SUFFIXES:
+            from fascat.io.brep import read_brep
+
             return read_brep(path, options=import_options)
         raise ValueError(f"unsupported CAD extension: {path.suffix or '<none>'}")
     except Exception as exc:
@@ -3901,18 +3938,24 @@ def _validate_and_analyze_output_for_cli(
                 handle.flush()
             assert temp_path is not None
             stats = validate_export(temp_path)
-            analysis = (
-                analyze_output(temp_path, options, where=where, validation_stats=stats, source_path="-")
-                if options is not None
-                else None
-            )
+            if options is not None:
+                from fascat.analysis import analyze_output
+
+                analysis = analyze_output(temp_path, options, where=where, validation_stats=stats, source_path="-")
+            else:
+                analysis = None
             return stats, analysis
         finally:
             if temp_path is not None:
                 with suppress(FileNotFoundError):
                     temp_path.unlink()
     stats = validate_export(path)
-    analysis = analyze_output(path, options, where=where, validation_stats=stats) if options is not None else None
+    if options is not None:
+        from fascat.analysis import analyze_output
+
+        analysis = analyze_output(path, options, where=where, validation_stats=stats)
+    else:
+        analysis = None
     return stats, analysis
 
 
