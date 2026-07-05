@@ -174,6 +174,88 @@ def test_segment_blocked_uses_occluder_bvh_leaves(monkeypatch: pytest.MonkeyPatc
     assert checked_node_ids == ["node-127"]
 
 
+def test_segment_blocked_skips_excluded_occluder_in_shared_bvh(monkeypatch: pytest.MonkeyPatch) -> None:
+    points = np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=float)
+    faces = np.asarray([[0, 1, 2]], dtype=int)
+    triangles = points[faces]
+    triangle_bounds_min = triangles.min(axis=1)
+    triangle_bounds_max = triangles.max(axis=1)
+    occurrence = _WorldOccurrence(
+        node=Node(id="candidate", name="Candidate", part_id="part"),
+        part_id="part",
+        world_points=points,
+        faces=faces,
+        triangles=triangles,
+        triangle_edges1=triangles[:, 1] - triangles[:, 0],
+        triangle_edges2=triangles[:, 2] - triangles[:, 0],
+        triangle_bounds_min=triangle_bounds_min,
+        triangle_bounds_max=triangle_bounds_max,
+        triangle_bvh=_build_triangle_bvh(triangle_bounds_min, triangle_bounds_max),
+        bounds_min=points.min(axis=0),
+        bounds_max=points.max(axis=0),
+        volume=0.0,
+    )
+    occluders = _OccluderSet(
+        occurrences=(occurrence,),
+        bvh=_build_occurrence_bvh(occurrence.bounds_min.reshape(1, 3), occurrence.bounds_max.reshape(1, 3)),
+        excluded_node_id="candidate",
+    )
+
+    def fail_occurrence_check(*_args: object, **_kwargs: object) -> bool:
+        raise AssertionError("excluded candidate should not be tested as its own occluder")
+
+    monkeypatch.setattr("fascat.ops.actions._segment_intersects_occurrence", fail_occurrence_check)
+
+    assert not occluders
+    assert (
+        _segment_blocked(
+            np.asarray([0.25, 0.25, 1.0], dtype=float),
+            np.asarray([0.25, 0.25, -1.0], dtype=float),
+            occluders,
+        )
+        is False
+    )
+
+
+def test_remove_occluded_builds_occluder_bvh_once_per_operation(monkeypatch: pytest.MonkeyPatch) -> None:
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(id="outer", name="Outer", part_id="outer"),
+                Node(id="inner", name="Inner", part_id="inner"),
+                Node(id="side", name="Side", part_id="side"),
+            ],
+        ),
+        parts={
+            "outer": Part(id="outer", name="Outer", mesh=_cube_mesh(2.0)),
+            "inner": Part(id="inner", name="Inner", mesh=_cube_mesh(0.5)),
+            "side": Part(id="side", name="Side", mesh=_translated_mesh(_cube_mesh(0.5), 4.0)),
+        },
+    )
+    calls = 0
+    original = actions._build_occurrence_bvh
+
+    def count_occurrence_bvh(
+        bounds_min_all: np.ndarray,
+        bounds_max_all: np.ndarray,
+        indices: np.ndarray | None = None,
+        *,
+        depth: int = 0,
+    ) -> object | None:
+        nonlocal calls
+        if depth == 0:
+            calls += 1
+        return original(bounds_min_all, bounds_max_all, indices, depth=depth)
+
+    monkeypatch.setattr(actions, "_build_occurrence_bvh", count_occurrence_bvh)
+
+    asset.remove_occluded(RemoveOccludedOptions(level="parts", preserve_cavities=False))
+
+    assert calls == 1
+
+
 def _triangle_strip_with_uvs(count: int) -> Mesh:
     mesh = _triangle_strip(count)
     mesh.uvs[0] = np.column_stack(

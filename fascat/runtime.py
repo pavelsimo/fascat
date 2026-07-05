@@ -10,7 +10,6 @@ import shutil
 import subprocess
 import tempfile
 from collections.abc import Iterable
-from copy import deepcopy
 from dataclasses import asdict, dataclass
 from importlib import import_module, resources
 from pathlib import Path
@@ -1088,7 +1087,7 @@ def _write_python_ktx2_decoded_preview_asset(asset_path: Path, output_path: Path
         raise RuntimeError("default alktx2 KTX2 decoder is not installed for this environment") from exc
 
     source_document, buffers = _read_gltf_json_and_buffers_for_preview(asset_path)
-    document = deepcopy(source_document)
+    document = _preview_document_copy(source_document, images=True, textures=True, extension_lists=True)
     images = document.get("images")
     if not isinstance(images, list):
         raise RuntimeError("glTF KTX2 decode requires an images array")
@@ -1118,10 +1117,9 @@ def _write_python_ktx2_decoded_preview_asset(asset_path: Path, output_path: Path
     _remove_gltf_extension(document, "KHR_texture_basisu")
     _embed_preview_buffers(document, buffers)
     _rewrite_external_image_uris(document, asset_path.parent)
-    output_path.write_text(json.dumps(document), encoding="utf-8")
-    decoded_document = _read_gltf_json_document(output_path)
-    if _document_uses_basis_textures(decoded_document):
+    if _document_uses_basis_textures(document):
         raise RuntimeError("alktx2 KTX2 decode preserved KHR_texture_basisu")
+    output_path.write_text(json.dumps(document), encoding="utf-8")
     return output_path
 
 
@@ -1145,7 +1143,7 @@ def _write_meshopt_decoded_preview_asset(asset_path: Path, output_path: Path) ->
         raise RuntimeError("meshoptimizer is not installed") from exc
 
     source_document, buffers = _read_gltf_json_and_buffers_for_preview(asset_path)
-    document = deepcopy(source_document)
+    document = _preview_document_copy(source_document, images=True, buffer_views=True, extension_lists=True)
     buffer_views = document.get("bufferViews")
     if not isinstance(buffer_views, list):
         raise RuntimeError("glTF bufferViews must be an array")
@@ -1186,6 +1184,8 @@ def _write_meshopt_decoded_preview_asset(asset_path: Path, output_path: Path) ->
     ]
     _remove_gltf_extension(document, "EXT_meshopt_compression")
     _rewrite_external_image_uris(document, asset_path.parent)
+    if _document_has_meshopt_only_buffer_views(document, output_path):
+        raise RuntimeError("meshoptimizer decode preserved EXT_meshopt_compression")
     output_path.write_text(json.dumps(document), encoding="utf-8")
     return output_path
 
@@ -1209,6 +1209,46 @@ def _read_gltf_json_and_buffers_for_preview(asset_path: Path) -> tuple[dict[str,
         else:
             buffers.append(b"")
     return document, buffers
+
+
+def _preview_document_copy(
+    source_document: dict[str, Any],
+    *,
+    images: bool = False,
+    textures: bool = False,
+    buffer_views: bool = False,
+    extension_lists: bool = False,
+) -> dict[str, Any]:
+    document = dict(source_document)
+    if images:
+        _copy_preview_object_list(document, "images")
+    if textures:
+        _copy_preview_object_list(document, "textures", copy_extensions=True)
+    if buffer_views:
+        _copy_preview_object_list(document, "bufferViews", copy_extensions=True)
+    if extension_lists:
+        for field in ("extensionsUsed", "extensionsRequired"):
+            value = source_document.get(field)
+            if isinstance(value, list):
+                document[field] = list(value)
+    return document
+
+
+def _copy_preview_object_list(document: dict[str, Any], field: str, *, copy_extensions: bool = False) -> None:
+    value = document.get(field)
+    if not isinstance(value, list):
+        return
+    copied: list[object] = []
+    for item in value:
+        if isinstance(item, dict):
+            item_copy = dict(item)
+            extensions = item_copy.get("extensions")
+            if copy_extensions and isinstance(extensions, dict):
+                item_copy["extensions"] = dict(extensions)
+            copied.append(item_copy)
+        else:
+            copied.append(item)
+    document[field] = copied
 
 
 def _read_glb_json_and_binary(asset_path: Path) -> tuple[dict[str, Any], bytes]:

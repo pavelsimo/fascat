@@ -76,10 +76,11 @@ def export_material_counts(asset: Any) -> dict[str, int]:
 def export_image_counts(asset: Any) -> dict[str, int]:
     source_refs = _texture_refs(asset, asset.materials.values())
     referenced_refs = _texture_refs(asset, referenced_materials(asset).values())
-    source_unique = _source_image_ids(asset) | set(source_refs)
+    source_image_ids = _source_image_ids(asset)
+    source_unique = source_image_ids | set(source_refs)
     referenced_unique = set(referenced_refs)
     return {
-        "export_source_image_count": len(_source_image_ids(asset) | source_unique),
+        "export_source_image_count": len(source_unique),
         "export_source_image_reference_count": len(source_refs),
         "export_referenced_image_count": len(referenced_unique),
         "export_referenced_image_reference_count": len(referenced_refs),

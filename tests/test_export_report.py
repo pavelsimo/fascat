@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
+import fascat.export_report as export_report
 from fascat.asset import Asset, Node, Part
 from fascat.export_report import export_image_counts, export_material_counts, stats_with_file_size
 from fascat.image import ImageResource
@@ -52,6 +54,22 @@ def test_export_report_counts_referenced_materials_and_images() -> None:
         "export_duplicate_image_reference_count": 0,
         "export_written_image_count": 1,
     }
+
+
+def test_export_image_counts_reads_source_image_ids_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    asset = _asset()
+    calls = 0
+    original = export_report._source_image_ids
+
+    def count_source_image_ids(source_asset: object) -> set[str]:
+        nonlocal calls
+        calls += 1
+        return original(source_asset)
+
+    monkeypatch.setattr(export_report, "_source_image_ids", count_source_image_ids)
+
+    assert export_image_counts(asset)["export_source_image_count"] == 2
+    assert calls == 1
 
 
 def test_stats_with_file_size_records_budget_warning(tmp_path) -> None:  # type: ignore[no-untyped-def]

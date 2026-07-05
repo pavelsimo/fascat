@@ -23,6 +23,7 @@ from fascat.runtime import (
     RuntimeBrowserOptions,
     RuntimeBrowserRenderOptions,
     RuntimeEngineOptions,
+    _preview_document_copy,
     _runtime_browser_render_html,
     copy_engine_runtime_harness,
     measure_browser_runtime,
@@ -661,6 +662,36 @@ def test_browser_render_preview_decodes_bundled_ktx2_with_default_python_decoder
     assert report.textured_primitives == 1
     assert report.sampled_textures == 1
     assert Image.open(preview).getpixel((0, 0)) == (115, 125, 135, 255)
+
+
+def test_preview_document_copy_only_copies_mutated_containers() -> None:
+    document = {
+        "extensionsUsed": ["KHR_texture_basisu"],
+        "images": [{"uri": "texture.ktx2"}],
+        "textures": [{"extensions": {"KHR_texture_basisu": {"source": 0}}}],
+        "bufferViews": [{"extensions": {"EXT_meshopt_compression": {"buffer": 0}}}],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0}}]}],
+    }
+
+    copied = _preview_document_copy(
+        document,
+        images=True,
+        textures=True,
+        buffer_views=True,
+        extension_lists=True,
+    )
+
+    assert copied is not document
+    assert copied["images"] is not document["images"]
+    assert copied["images"][0] is not document["images"][0]
+    assert copied["textures"] is not document["textures"]
+    assert copied["textures"][0] is not document["textures"][0]
+    assert copied["textures"][0]["extensions"] is not document["textures"][0]["extensions"]
+    assert copied["bufferViews"] is not document["bufferViews"]
+    assert copied["bufferViews"][0] is not document["bufferViews"][0]
+    assert copied["bufferViews"][0]["extensions"] is not document["bufferViews"][0]["extensions"]
+    assert copied["extensionsUsed"] is not document["extensionsUsed"]
+    assert copied["meshes"] is document["meshes"]
 
 
 def test_ktx2_python_decoder_is_extra_only() -> None:

@@ -250,6 +250,7 @@ def remove_occluded_asset(
     )
     occurrences = _world_occurrences(result)
     selected_occurrences = [item for item in occurrences if item.node.id in selected_node_ids]
+    operation_occluders = _candidate_occluder_pool(result, occurrences, options)
     directions = _occlusion_directions(options)
     ray_distance = _occlusion_ray_distance(occurrences)
     removed_node_ids: set[str] = set()
@@ -258,7 +259,7 @@ def remove_occluded_asset(
     for candidate in selected_occurrences:
         if _preserve_candidate_cavity(result, candidate, options):
             continue
-        occluders = _candidate_occluders(result, candidate, occurrences, options)
+        occluders = _candidate_occluders(candidate, operation_occluders)
         if options.level == "parts":
             measurement = _occurrence_visibility_measurement(candidate, occluders, directions, ray_distance, options)
             measurements.append(measurement)
@@ -421,9 +422,12 @@ class _WorldOccurrence:
 class _OccluderSet:
     occurrences: tuple[_WorldOccurrence, ...]
     bvh: _OccurrenceBvhNode | None
+    excluded_node_id: str | None = None
 
     def __bool__(self) -> bool:
-        return bool(self.occurrences)
+        if self.excluded_node_id is None:
+            return bool(self.occurrences)
+        return any(occurrence.node.id != self.excluded_node_id for occurrence in self.occurrences)
 
 
 @dataclass(frozen=True)
@@ -2117,17 +2121,15 @@ def _isolate_selected_occurrence_parts(asset: Asset, selected_node_ids: set[str]
             node.part_id = new_part_id
 
 
-def _candidate_occluders(
+def _candidate_occluder_pool(
     asset: Asset,
-    candidate: _WorldOccurrence,
     occurrences: list[_WorldOccurrence],
     options: RemoveOccludedOptions,
 ) -> _OccluderSet:
     candidates = tuple(
         occluder
         for occluder in occurrences
-        if occluder.node.id != candidate.node.id
-        and (options.consider_transparency_opaque or not _part_is_transparent(asset, occluder.part_id))
+        if options.consider_transparency_opaque or not _part_is_transparent(asset, occluder.part_id)
     )
     if not candidates:
         return _OccluderSet(occurrences=(), bvh=None)
@@ -2136,6 +2138,16 @@ def _candidate_occluders(
     return _OccluderSet(
         occurrences=candidates,
         bvh=_build_occurrence_bvh(bounds_min, bounds_max),
+    )
+
+
+def _candidate_occluders(candidate: _WorldOccurrence, occluders: _OccluderSet) -> _OccluderSet:
+    if not occluders.occurrences:
+        return occluders
+    return _OccluderSet(
+        occurrences=occluders.occurrences,
+        bvh=occluders.bvh,
+        excluded_node_id=candidate.node.id,
     )
 
 
@@ -2331,8 +2343,16 @@ def _sample_is_visible(
 
 def _segment_blocked(start: FloatArray, end: FloatArray, occluders: _OccluderSet) -> bool:
     if occluders.bvh is not None:
-        return _segment_intersects_occluder_bvh(start, end, occluders.bvh, occluders.occurrences)
+        return _segment_intersects_occluder_bvh(
+            start,
+            end,
+            occluders.bvh,
+            occluders.occurrences,
+            occluders.excluded_node_id,
+        )
     for occluder in occluders.occurrences:
+        if occluder.node.id == occluders.excluded_node_id:
+            continue
         if not _segment_intersects_bounds(start, end, occluder.bounds_min, occluder.bounds_max):
             continue
         if _segment_intersects_occurrence(start, end, occluder):
@@ -2345,20 +2365,35 @@ def _segment_intersects_occluder_bvh(
     end: FloatArray,
     node: _OccurrenceBvhNode,
     occurrences: tuple[_WorldOccurrence, ...],
+    excluded_node_id: str | None = None,
 ) -> bool:
     if not _segment_intersects_bounds(start, end, node.bounds_min, node.bounds_max):
         return False
     if node.indices is not None:
         for index in node.indices:
             occurrence = occurrences[int(index)]
+            if occurrence.node.id == excluded_node_id:
+                continue
             if not _segment_intersects_bounds(start, end, occurrence.bounds_min, occurrence.bounds_max):
                 continue
             if _segment_intersects_occurrence(start, end, occurrence):
                 return True
         return False
-    if node.left is not None and _segment_intersects_occluder_bvh(start, end, node.left, occurrences):
+    if node.left is not None and _segment_intersects_occluder_bvh(
+        start,
+        end,
+        node.left,
+        occurrences,
+        excluded_node_id,
+    ):
         return True
-    return node.right is not None and _segment_intersects_occluder_bvh(start, end, node.right, occurrences)
+    return node.right is not None and _segment_intersects_occluder_bvh(
+        start,
+        end,
+        node.right,
+        occurrences,
+        excluded_node_id,
+    )
 
 
 def _segment_intersects_occurrence(start: FloatArray, end: FloatArray, occurrence: _WorldOccurrence) -> bool:

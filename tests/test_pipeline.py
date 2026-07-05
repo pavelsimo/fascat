@@ -1699,6 +1699,42 @@ def test_convert_report_checks_profile_budget(monkeypatch, tmp_path: Path) -> No
     assert converted.report.warnings[-5:] == budget_step.warnings
 
 
+def test_profile_budget_reuses_texture_summaries(monkeypatch: pytest.MonkeyPatch) -> None:
+    profile = ConversionProfile(
+        name="strict",
+        tessellation=None,
+        repair=RepairOptions(),
+        stage=StageOptions(uv0="none", uv1=None),
+        optimize=None,
+        lods=None,
+        budget=PlatformBudget(
+            max_texture_resolution=1_024,
+            max_texture_memory_mb=1,
+            max_load_time_ms=1,
+        ),
+    )
+    asset = _triangle_asset()
+    asset.materials["mat"] = Material(
+        id="mat",
+        name="Material",
+        base_color=(1.0, 1.0, 1.0, 1.0),
+        metadata={"baked_texture_resolution": "2048", "baked_maps": "base_color,normal"},
+    )
+    calls = 0
+    original = pipeline._material_texture_summaries
+
+    def count_texture_summaries(source_asset: Asset) -> list[tuple[int, int]]:
+        nonlocal calls
+        calls += 1
+        return original(source_asset)
+
+    monkeypatch.setattr(pipeline, "_material_texture_summaries", count_texture_summaries)
+
+    pipeline._add_profile_budget_report(asset, profile)
+
+    assert calls == 1
+
+
 def test_convert_reports_texture_export_policy_before_write(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     import fascat.pipeline as pipeline
 
@@ -1780,6 +1816,45 @@ def test_convert_reports_texture_export_policy_before_write(monkeypatch, tmp_pat
         "resize preprocessing is recommended before compressed or fallback texture export"
     ]
     assert policy_step.warnings[0] in converted.report.warnings
+
+
+def test_texture_export_policy_reuses_summary_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+    profile = ConversionProfile(
+        name="texture-cap",
+        tessellation=None,
+        repair=RepairOptions(),
+        stage=StageOptions(uv0="none", uv1=None),
+        optimize=None,
+        lods=None,
+        budget=PlatformBudget(max_texture_resolution=1_024),
+    )
+    asset = _triangle_asset()
+    asset.parts["part"].material_ids = ["paint"]
+    asset.materials["paint"] = Material(
+        id="paint",
+        name="Paint",
+        base_color=(1.0, 1.0, 1.0, 1.0),
+        metadata={"baked_texture_resolution": "2048", "baked_maps": "base_color,normal"},
+    )
+    asset.materials["unused"] = Material(
+        id="unused",
+        name="Unused",
+        base_color=(1.0, 0.0, 0.0, 1.0),
+        metadata={"baked_texture_resolution": "4096", "baked_maps": "base_color"},
+    )
+    calls = 0
+    original = pipeline._material_texture_summary
+
+    def count_texture_summary(material: Material) -> tuple[int, int] | None:
+        nonlocal calls
+        calls += 1
+        return original(material)
+
+    monkeypatch.setattr(pipeline, "_material_texture_summary", count_texture_summary)
+
+    pipeline._add_texture_export_policy_report(asset, profile, "gltf")
+
+    assert calls == 3
 
 
 def test_convert_reports_alpha_risk_for_explicit_jpeg_texture_fallback(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]

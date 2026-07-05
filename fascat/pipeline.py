@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -77,6 +78,13 @@ _RUNTIME_COMPRESSION_BY_EXTENSION = {
     "KHR_draco_mesh_compression": "draco",
     "KHR_texture_basisu": "basisu",
 }
+
+
+@dataclass(frozen=True)
+class _TextureSummary:
+    material: Any
+    resolution: int
+    map_count: int
 
 
 def convert(
@@ -844,9 +852,11 @@ def _add_texture_export_policy_report(
     *,
     gltf_options: GltfExportOptions | None = None,
 ) -> None:
-    source_summaries = _material_texture_summaries(asset)
-    referenced_texture_materials = list(referenced_materials(asset).values())
-    referenced_summaries = _material_texture_summaries_from_materials(referenced_texture_materials)
+    source_texture_summaries = _material_texture_summary_entries(asset.materials.values())
+    source_summaries = _texture_summary_tuples(source_texture_summaries)
+    referenced_texture_summaries = _material_texture_summary_entries(referenced_materials(asset).values())
+    referenced_texture_materials = [summary.material for summary in referenced_texture_summaries]
+    referenced_summaries = _texture_summary_tuples(referenced_texture_summaries)
     if not referenced_summaries:
         return
     budget = profile.budget
@@ -956,6 +966,21 @@ def _add_profile_budget_report(asset: Asset, profile: ConversionProfile) -> None
     violations = 0
     timings = _measured_report_timings(asset)
     frame_profile = _estimated_frame_profile(asset)
+    texture_summaries: list[tuple[int, int]] | None = None
+    texture_totals: tuple[int, int] | None = None
+
+    def profile_texture_summaries() -> list[tuple[int, int]]:
+        nonlocal texture_summaries
+        if texture_summaries is None:
+            texture_summaries = _material_texture_summaries(asset)
+        return texture_summaries
+
+    def profile_texture_totals() -> tuple[int, int]:
+        nonlocal texture_totals
+        if texture_totals is None:
+            texture_totals = _texture_summary_totals(profile_texture_summaries())
+        return texture_totals
+
     after.update(
         {
             "profile_runtime_frame_estimated_ms": frame_profile["estimated_frame_ms"],
@@ -1010,7 +1035,7 @@ def _add_profile_budget_report(asset: Asset, profile: ConversionProfile) -> None
                 f"{budget.max_vertices_per_mesh} vertices (largest {largest})"
             )
     if budget.max_texture_resolution is not None:
-        texture_resolutions = _material_texture_resolutions(asset)
+        texture_resolutions = [resolution for resolution, _texture_count in profile_texture_summaries()]
         largest = max(texture_resolutions, default=0)
         over_count = sum(1 for resolution in texture_resolutions if resolution > budget.max_texture_resolution)
         after["profile_texture_resolution_budget"] = budget.max_texture_resolution
@@ -1024,7 +1049,7 @@ def _add_profile_budget_report(asset: Asset, profile: ConversionProfile) -> None
                 f"{budget.max_texture_resolution}px (largest {largest}px)"
             )
     if budget.max_texture_memory_mb is not None:
-        texture_count, estimated_bytes = _estimated_texture_memory(asset)
+        texture_count, estimated_bytes = profile_texture_totals()
         budget_bytes = budget.max_texture_memory_mb * 1_000_000
         over = max(0, estimated_bytes - budget_bytes)
         after["profile_texture_memory_budget_bytes"] = budget_bytes
@@ -1038,7 +1063,7 @@ def _add_profile_budget_report(asset: Asset, profile: ConversionProfile) -> None
                 f"{estimated_bytes} bytes > {budget_bytes} bytes"
             )
     if budget.max_load_time_ms is not None:
-        load_time = _estimated_load_time(asset)
+        load_time = _estimated_load_time(asset, texture_bytes=profile_texture_totals()[1])
         over = max(0, load_time["estimated_ms"] - budget.max_load_time_ms)
         after["profile_load_time_budget_ms"] = budget.max_load_time_ms
         after["profile_estimated_load_time_ms"] = load_time["estimated_ms"]
@@ -1472,8 +1497,9 @@ def _estimated_texture_memory(asset: Asset) -> tuple[int, int]:
     return _texture_summary_totals(_material_texture_summaries(asset))
 
 
-def _estimated_load_time(asset: Asset) -> dict[str, int]:
-    _texture_count, texture_bytes = _estimated_texture_memory(asset)
+def _estimated_load_time(asset: Asset, *, texture_bytes: int | None = None) -> dict[str, int]:
+    if texture_bytes is None:
+        _texture_count, texture_bytes = _estimated_texture_memory(asset)
     geometry_bytes = _estimated_geometry_bytes(asset)
     file_bytes = _output_file_size_bytes(asset)
     estimated_ms = _ceil_div(file_bytes + geometry_bytes + texture_bytes, _LOAD_ESTIMATE_BYTES_PER_MS)
@@ -1499,13 +1525,19 @@ def _estimated_frame_profile(asset: Asset) -> dict[str, int]:
 
 
 def _measured_report_timings(asset: Asset) -> dict[str, int]:
-    pipeline_ms = int(round(sum(step.duration for step in asset.report.steps) * 1000.0))
-    write_ms = int(round(sum(step.duration for step in asset.report.steps if step.name == "write") * 1000.0))
-    validate_ms = int(round(sum(step.duration for step in asset.report.steps if step.name == "validate") * 1000.0))
+    pipeline_seconds = 0.0
+    write_seconds = 0.0
+    validate_seconds = 0.0
+    for step in asset.report.steps:
+        pipeline_seconds += step.duration
+        if step.name == "write":
+            write_seconds += step.duration
+        elif step.name == "validate":
+            validate_seconds += step.duration
     return {
-        "pipeline_ms": pipeline_ms,
-        "write_ms": write_ms,
-        "validate_ms": validate_ms,
+        "pipeline_ms": int(round(pipeline_seconds * 1000.0)),
+        "write_ms": int(round(write_seconds * 1000.0)),
+        "validate_ms": int(round(validate_seconds * 1000.0)),
     }
 
 
@@ -1539,12 +1571,21 @@ def _material_texture_summaries(asset: Asset) -> list[tuple[int, int]]:
 
 
 def _material_texture_summaries_from_materials(materials: Iterable[Any]) -> list[tuple[int, int]]:
-    summaries: list[tuple[int, int]] = []
+    return _texture_summary_tuples(_material_texture_summary_entries(materials))
+
+
+def _material_texture_summary_entries(materials: Iterable[Any]) -> list[_TextureSummary]:
+    summaries: list[_TextureSummary] = []
     for material in materials:
         summary = _material_texture_summary(material)
         if summary is not None:
-            summaries.append(summary)
+            resolution, map_count = summary
+            summaries.append(_TextureSummary(material=material, resolution=resolution, map_count=map_count))
     return summaries
+
+
+def _texture_summary_tuples(summaries: Iterable[_TextureSummary]) -> list[tuple[int, int]]:
+    return [(summary.resolution, summary.map_count) for summary in summaries]
 
 
 def _material_texture_summary(material: Any) -> tuple[int, int] | None:
@@ -1582,7 +1623,7 @@ def _texture_fallback_label(texture_fallback_format: str) -> str:
 
 
 def _texture_fallback_stats(materials: Iterable[Any], options: GltfExportOptions) -> dict[str, int]:
-    texture_materials = [material for material in materials if _material_texture_summary(material) is not None]
+    texture_materials = list(materials)
     alpha_sets = sum(1 for material in texture_materials if _material_needs_alpha_safe_fallback(material))
     color_sets = max(0, len(texture_materials) - alpha_sets)
     if options.texture_fallback_format == "png":
