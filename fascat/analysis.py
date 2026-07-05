@@ -342,13 +342,36 @@ def _self_intersection_count(mesh: Mesh, max_pairs: int) -> _SelfIntersectionRes
     triangles = mesh.points[mesh.faces]
     mins = triangles.min(axis=1)
     maxs = triangles.max(axis=1)
-    face_vertices = [set(face) for face in mesh.faces.astype(int).tolist()]
+    faces = mesh.faces.astype(np.int64, copy=False)
+    order = np.argsort(mins[:, 0], kind="mergesort")
+    sorted_mins = mins[order]
+    sorted_maxs = maxs[order]
+    sorted_faces = faces[order]
     intersections = 0
     checked = 0
-    for left in range(mesh.triangle_count - 1):
-        for right in range(left + 1, mesh.triangle_count):
-            if face_vertices[left] & face_vertices[right]:
-                continue
+
+    for left_position in range(mesh.triangle_count - 1):
+        right_start = left_position + 1
+        right_end = int(np.searchsorted(sorted_mins[:, 0], sorted_maxs[left_position, 0], side="right"))
+        if right_end <= right_start:
+            continue
+
+        window = slice(right_start, right_end)
+        overlaps = np.all(sorted_maxs[window] >= sorted_mins[left_position], axis=1) & np.all(
+            sorted_mins[window] <= sorted_maxs[left_position], axis=1
+        )
+        if not bool(np.any(overlaps)):
+            continue
+
+        right_positions = np.nonzero(overlaps)[0] + right_start
+        shared_vertices = np.any(
+            sorted_faces[right_positions, :, np.newaxis] == sorted_faces[left_position, np.newaxis, :],
+            axis=(1, 2),
+        )
+        candidate_positions = right_positions[~shared_vertices]
+
+        left = int(order[left_position])
+        for right_position in candidate_positions:
             if checked >= max_pairs:
                 return _SelfIntersectionResult(
                     intersections=intersections,
@@ -357,10 +380,10 @@ def _self_intersection_count(mesh: Mesh, max_pairs: int) -> _SelfIntersectionRes
                     pair_limit=max_pairs,
                 )
             checked += 1
-            if not bool(np.all(maxs[left] >= mins[right]) and np.all(maxs[right] >= mins[left])):
-                continue
+            right = int(order[int(right_position)])
             if _triangles_intersect(triangles[left], triangles[right]):
                 intersections += 1
+
     return _SelfIntersectionResult(
         intersections=intersections,
         truncated=False,

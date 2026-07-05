@@ -199,7 +199,26 @@ def test_asset_analyze_ignores_adjacent_triangles_during_self_intersection_check
 def test_asset_analyze_marks_truncated_self_intersections_as_lower_bound() -> None:
     points: list[list[float]] = []
     faces: list[list[int]] = []
-    for index in range(4):
+    for _ in range(4):
+        base = len(points)
+        points.extend([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+        faces.append([base, base + 1, base + 2])
+    mesh = Mesh(points=np.asarray(points, dtype=float), faces=np.asarray(faces, dtype=int))
+
+    report = _asset_from_mesh(mesh).analyze(AnalyzeOptions(self_intersections=True, max_self_intersection_pairs=2))
+
+    assert report.summary["self_intersections"] == 2
+    assert report.summary["self_intersections_lower_bound"] is True
+    assert report.summary["self_intersection_pairs_checked"] == 2
+    assert report.summary["self_intersection_pair_limit"] == 2
+    assert report.parts[0]["self_intersections_lower_bound"] is True
+    assert any("self_intersections=2 is a lower bound" in warning for warning in report.warnings)
+
+
+def test_asset_analyze_does_not_truncate_self_intersections_for_non_overlapping_broad_phase_rejects() -> None:
+    points: list[list[float]] = []
+    faces: list[list[int]] = []
+    for index in range(20):
         base = len(points)
         offset = float(index * 10)
         points.extend([[offset, 0.0, 0.0], [offset + 1.0, 0.0, 0.0], [offset, 1.0, 0.0]])
@@ -209,11 +228,10 @@ def test_asset_analyze_marks_truncated_self_intersections_as_lower_bound() -> No
     report = _asset_from_mesh(mesh).analyze(AnalyzeOptions(self_intersections=True, max_self_intersection_pairs=2))
 
     assert report.summary["self_intersections"] == 0
-    assert report.summary["self_intersections_lower_bound"] is True
-    assert report.summary["self_intersection_pairs_checked"] == 2
+    assert report.summary["self_intersections_lower_bound"] is False
+    assert report.summary["self_intersection_pairs_checked"] == 0
     assert report.summary["self_intersection_pair_limit"] == 2
-    assert report.parts[0]["self_intersections_lower_bound"] is True
-    assert any("self_intersections=0 is a lower bound" in warning for warning in report.warnings)
+    assert report.parts[0]["self_intersections_lower_bound"] is False
 
 
 def test_asset_analyze_does_not_count_aabb_only_self_intersection_candidates() -> None:
