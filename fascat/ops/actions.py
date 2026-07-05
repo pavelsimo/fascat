@@ -825,7 +825,7 @@ def _face_ambient_occlusion(mesh: Mesh, strategy: str = "conservative") -> Float
             if float(np.dot(direction, normal)) <= 0.0:
                 continue
             tested += 1
-            if _ray_hits_mesh(origin, direction, mesh.points, mesh.faces, ignore_face=face_index, max_t=ray_length):
+            if _ray_hits_mesh(origin, direction, triangles, ignore_face=face_index, max_t=ray_length):
                 hits += 1
         values[face_index] = 1.0 if tested == 0 else 1.0 - (hits / tested)
     return values
@@ -839,20 +839,29 @@ def _ambient_occlusion_directions(strategy: str) -> tuple[FloatArray, ...]:
 def _ray_hits_mesh(
     origin: FloatArray,
     direction: FloatArray,
-    points: FloatArray,
-    faces: IntArray,
+    triangles: FloatArray,
     *,
     ignore_face: int,
     max_t: float,
 ) -> bool:
-    triangles = points[faces]
-    for face_index, triangle in enumerate(triangles):
-        if face_index == ignore_face:
-            continue
-        hit = _ray_triangle_t(origin, direction, triangle)
-        if hit is not None and 1e-8 < hit < max_t:
-            return True
-    return False
+    if triangles.size == 0:
+        return False
+    edge1 = triangles[:, 1] - triangles[:, 0]
+    edge2 = triangles[:, 2] - triangles[:, 0]
+    h = np.cross(direction, edge2)
+    determinant = np.einsum("ij,ij->i", edge1, h)
+    valid = np.abs(determinant) > 1e-12
+    inv_det = np.zeros_like(determinant)
+    np.divide(1.0, determinant, out=inv_det, where=valid)
+    s = origin - triangles[:, 0]
+    u = inv_det * np.einsum("ij,ij->i", s, h)
+    q = np.cross(s, edge1)
+    v = inv_det * np.einsum("j,ij->i", direction, q)
+    t = inv_det * np.einsum("ij,ij->i", edge2, q)
+    hits = valid & (u >= 0.0) & (u <= 1.0) & (v >= 0.0) & (u + v <= 1.0) & (t > 1e-8) & (t < max_t)
+    if 0 <= ignore_face < hits.size:
+        hits[ignore_face] = False
+    return bool(np.any(hits))
 
 
 def _ray_triangle_t(origin: FloatArray, direction: FloatArray, triangle: FloatArray) -> float | None:

@@ -16,6 +16,7 @@ from fascat.ops.actions import (
     _build_occurrence_bvh,
     _build_triangle_bvh,
     _OccluderSet,
+    _ray_hits_mesh,
     _segment_blocked,
     _segment_intersects_mesh,
     _segment_intersects_occurrence,
@@ -360,6 +361,53 @@ def test_bake_materials_records_emissive_material_vs_fallback_source() -> None:
     }
     assert baked.images["baked_emissive"].metadata.items() >= expected.items()
     assert baked.materials["baked_material"].metadata.items() >= expected.items()
+
+
+def test_ambient_occlusion_detects_tiny_occluder_and_open_sky() -> None:
+    mesh = Mesh(
+        points=np.asarray(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.5],
+                [1.0, 0.0, 0.5],
+                [0.0, 1.0, 0.5],
+            ],
+            dtype=float,
+        ),
+        faces=np.asarray([[0, 1, 2], [3, 4, 5]], dtype=int),
+    )
+    open_mesh = Mesh(points=mesh.points[:3].copy(), faces=np.asarray([[0, 1, 2]], dtype=int))
+
+    assert np.allclose(actions._face_ambient_occlusion(mesh, "conservative"), np.asarray([0.0, 1.0]))
+    assert np.allclose(actions._face_ambient_occlusion(open_mesh, "conservative"), np.asarray([1.0]))
+
+
+def test_ray_hits_mesh_vectorized_preserves_self_ignore_and_distance_window() -> None:
+    points = np.asarray(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 2.0],
+            [1.0, 0.0, 2.0],
+            [0.0, 1.0, 2.0],
+        ],
+        dtype=float,
+    )
+    triangles = points[np.asarray([[0, 1, 2], [3, 4, 5]], dtype=int)]
+    origin = np.asarray([0.25, 0.25, -1.0], dtype=float)
+    direction = np.asarray([0.0, 0.0, 1.0], dtype=float)
+
+    assert _ray_hits_mesh(origin, direction, triangles, ignore_face=99, max_t=1.5) is True
+    assert _ray_hits_mesh(origin, direction, triangles, ignore_face=0, max_t=1.5) is False
+    assert _ray_hits_mesh(origin, direction, triangles, ignore_face=0, max_t=3.5) is True
+    assert _ray_hits_mesh(origin, direction, triangles, ignore_face=99, max_t=1.0) is False
+    assert (
+        _ray_hits_mesh(np.asarray([1.5, 0.25, -1.0], dtype=float), direction, triangles, ignore_face=99, max_t=3.5)
+        is False
+    )
 
 
 def test_decimate_uses_selection_budget() -> None:
