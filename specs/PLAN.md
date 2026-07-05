@@ -709,6 +709,17 @@ Behavior-sensitive: write aliasing tests first (mutating a returned Asset must n
 corrupt the input Asset) so the `_adopt` migration can't silently introduce sharing
 bugs.
 
+Profiling note (2026-07-05): a synthetic inline benchmark built already-owned inputs
+with `_adopt` and timed only `Asset(root=..., parts=...)`. A 10,000-part / 20,000-triangle
+minimal-mesh case copied 1.8 MiB of mesh arrays in 28.4 ms median over five runs
+(`Asset._adopt` baseline: 4.4 us; tracemalloc peak: 17.4 MiB). A 64-part /
+524,288-triangle full-attribute case copied 188.0 MiB in 26.1 ms median, about
+7.2 GiB/s (`Asset._adopt` baseline: 5.7 us; tracemalloc peak: 188.2 MiB). `cProfile`
+attributed the representative large run to `Asset.__post_init__ -> Part.copy ->
+Mesh.copy`, with 577 `numpy.ndarray.copy` calls. This confirms the copy cost, but
+does not yet justify changing copy ownership semantics without the real 10k+ corpus
+profile.
+
 ##### F21 — spatial-bucket neighbor search is per-vertex Python with scalar norms
 
 Four sites in `fascat/mesh.py` share a hand-rolled 3×3×3-cell grid walk — `:800`
