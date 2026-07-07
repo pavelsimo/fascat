@@ -191,6 +191,10 @@ the pure-Python stage-2 path as infeasible:
   substitute for Fascat's tessellation extraction: they do not preserve the per-face
   groups, material indices, shape transforms, and CAD UVs that the current path carries
   through `Poly_Triangulation`.
+- `BRepTools` exposes triangulation helpers such as `Triangulation_s`,
+  `LoadTriangulation_s`, `LoadAllTriangulations_s`, and `ActivateTriangulation_s`, but
+  these verify, load, or activate existing face triangulation data; they do not expose a
+  numeric bulk-copy path from OCCT wrapper arrays into Python/NumPy.
 
 Conclusion: keep the stage-1 Python extraction as the supported pure-Python path. A small
 compiled helper could still bulk-copy OCCT arrays in a future performance pass, but that
