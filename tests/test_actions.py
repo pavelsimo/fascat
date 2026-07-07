@@ -17,6 +17,7 @@ from fascat.ops.actions import (
     _build_triangle_bvh,
     _OccluderSet,
     _ray_hits_mesh,
+    _ray_hits_mesh_batch,
     _segment_blocked,
     _segment_intersects_mesh,
     _segment_intersects_occurrence,
@@ -490,6 +491,50 @@ def test_ray_hits_mesh_vectorized_preserves_self_ignore_and_distance_window() ->
         _ray_hits_mesh(np.asarray([1.5, 0.25, -1.0], dtype=float), direction, triangles, ignore_face=99, max_t=3.5)
         is False
     )
+
+
+def test_ray_hits_mesh_batch_matches_single_direction_wrapper() -> None:
+    points = np.asarray(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 2.0],
+            [1.0, 0.0, 2.0],
+            [0.0, 1.0, 2.0],
+        ],
+        dtype=float,
+    )
+    triangles = points[np.asarray([[0, 1, 2], [3, 4, 5]], dtype=int)]
+    origin = np.asarray([0.25, 0.25, -1.0], dtype=float)
+    directions = np.asarray(
+        [
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, -1.0],
+            [1.0, 0.0, 0.0],
+        ],
+        dtype=float,
+    )
+
+    for ignore_face, max_t in ((99, 3.5), (0, 1.5), (0, 3.0), (0, 3.5)):
+        batched = _ray_hits_mesh_batch(
+            origin,
+            directions,
+            triangles,
+            ignore_face=ignore_face,
+            max_t=max_t,
+            direction_chunk_size=2,
+            triangle_chunk_size=1,
+        )
+        scalar = np.asarray(
+            [
+                _ray_hits_mesh(origin, direction, triangles, ignore_face=ignore_face, max_t=max_t)
+                for direction in directions
+            ],
+            dtype=np.bool_,
+        )
+
+        assert np.array_equal(batched, scalar)
 
 
 def test_decimate_uses_selection_budget() -> None:
