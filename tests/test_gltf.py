@@ -625,6 +625,24 @@ def test_out_of_bounds_material_index_emits_report_warning_and_unbound_primitive
     assert any("[5]" in warning and "without a material" in warning for warning in asset.report.warnings)
 
 
+def test_face_groups_preserve_sorted_materials_and_stable_face_order() -> None:
+    from fascat.io.gltf import _face_groups
+
+    mesh = Mesh(
+        points=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=float),
+        faces=np.tile(np.array([[0, 1, 2]], dtype=int), (7, 1)),
+        material_indices=np.zeros(7, dtype=int),
+    )
+    mesh.material_indices = np.array([2, 0, 2, 1, 0, 5, -1], dtype=np.int64)
+    part = Part(id="p", name="P", mesh=mesh, material_ids=["mat0", "mat1", "mat2"])
+
+    result = _face_groups(part, mesh)
+
+    assert result.out_of_bounds == [-1, 5]
+    assert [material_id for material_id, _ in result.groups] == [None, "mat0", "mat1", "mat2", None]
+    assert [face_indices.tolist() for _, face_indices in result.groups] == [[6], [1, 4], [3], [0, 2], [5]]
+
+
 def test_negative_material_index_does_not_wrap() -> None:
     # Mesh.validate() rejects negative material indices before export, so this
     # exercises the _face_groups bounds check directly as defense in depth: a

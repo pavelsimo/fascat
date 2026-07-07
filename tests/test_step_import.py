@@ -39,6 +39,7 @@ from fascat.io.step import (
     _mixed_construction_curve_metadata,
     _mixed_construction_curve_shape,
     _multi_file_import_decisions,
+    _namespace_metadata_ids,
     _resolve_step_external_reference_graph,
     _shape_fingerprint,
     _shape_topology_counts,
@@ -5309,6 +5310,39 @@ def test_read_step_many_namespaces_members_and_prefixes_member_warnings(
     assert import_step.options["failed_member_count"] == 0
     assert import_step.options["import_decisions"]["multi_file"]["state"] == "honored"
     assert asset.metadata["multi_file_import"]["member_count"] == 2
+
+
+def test_namespace_metadata_ids_remaps_values_without_key_mutation() -> None:
+    metadata = {
+        "source_part_id": "part",
+        "source_part_ids": "part|other",
+        "source_node_ids": ["node", "other"],
+        "source_texture_base_color_image": "img",
+        "label": "part",
+    }
+
+    result = _namespace_metadata_ids(
+        metadata,
+        part_ids={"part": "member__part"},
+        node_ids={"node": "member__node"},
+        image_ids={"img": "member__img"},
+    )
+
+    assert set(result) == set(metadata)
+    assert result == {
+        "source_part_id": "member__part",
+        "source_part_ids": "member__part|other",
+        "source_node_ids": ["member__node", "other"],
+        "source_texture_base_color_image": "member__img",
+        "label": "part",
+    }
+    assert metadata == {
+        "source_part_id": "part",
+        "source_part_ids": "part|other",
+        "source_node_ids": ["node", "other"],
+        "source_texture_base_color_image": "img",
+        "label": "part",
+    }
 
 
 def test_read_step_many_reuses_identical_member_parts(

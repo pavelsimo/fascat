@@ -1686,7 +1686,14 @@ def _face_groups(part: Part, mesh: Mesh) -> _FaceGroupResult:
         return _FaceGroupResult(groups=[(material_id, all_faces)], out_of_bounds=[])
     groups: list[tuple[str | None, NDArray[np.int64]]] = []
     out_of_bounds: list[int] = []
-    for material_index in np.unique(mesh.material_indices.astype(np.int64, copy=False)).tolist():
+    material_indices = mesh.material_indices.astype(np.int64, copy=False)
+    if material_indices.size == 0:
+        return _FaceGroupResult(groups=groups, out_of_bounds=out_of_bounds)
+    material_order = np.argsort(material_indices, kind="stable").astype(np.int64, copy=False)
+    sorted_material_indices = material_indices[material_order]
+    boundaries = np.flatnonzero(sorted_material_indices[1:] != sorted_material_indices[:-1]) + 1
+    for face_indices in np.split(material_order, boundaries):
+        material_index = int(material_indices[face_indices[0]])
         # An explicit bounds check: negative indices must not wrap around via
         # Python indexing and silently bind the wrong material.
         if 0 <= material_index < len(part.material_ids):
@@ -1694,7 +1701,7 @@ def _face_groups(part: Part, mesh: Mesh) -> _FaceGroupResult:
         else:
             material_id = None
             out_of_bounds.append(material_index)
-        groups.append((material_id, np.flatnonzero(mesh.material_indices == material_index).astype(np.int64)))
+        groups.append((material_id, face_indices.astype(np.int64, copy=False)))
     return _FaceGroupResult(groups=groups, out_of_bounds=out_of_bounds)
 
 

@@ -1612,7 +1612,7 @@ def _namespace_metadata_ids(
     part_ids = part_ids or {}
     node_ids = node_ids or {}
     image_ids = image_ids or {}
-    for key, value in list(result.items()):
+    for key, value in result.items():
         if key.endswith("_image") and isinstance(value, str) and value in image_ids:
             result[key] = image_ids[value]
         elif key in {"source_part_id", "source_part_ids", "split_source_part_id", "split_source_part_ids"}:

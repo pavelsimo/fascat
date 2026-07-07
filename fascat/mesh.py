@@ -1361,8 +1361,8 @@ class Mesh:
         areas = np.linalg.norm(np.cross(p1 - p0, p2 - p0), axis=1) * 0.5
         edge_epsilon = math.sqrt(area_epsilon) if area_epsilon > 0.0 else 0.0
         for face_index in np.flatnonzero(areas <= area_epsilon).astype(int).tolist():
-            face = self.faces[face_index].astype(int).tolist()
-            if len(set(face)) < 3:
+            face = self.faces[face_index]
+            if np.unique(face).size < 3:
                 counts["delete_degenerate_polygons_removed_duplicate_vertices"] += 1
                 continue
             triangle = self.points[face]
