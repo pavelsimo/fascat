@@ -3256,19 +3256,23 @@ class Mesh:
     def _uv_seam_vertices(self) -> set[int]:
         if not self.uvs or self.vertex_count == 0:
             return set()
-        by_position: dict[tuple[float, float, float], list[int]] = {}
-        rounded = np.round(self.points, 9)
-        for index, point in enumerate(rounded.tolist()):
-            by_position.setdefault((float(point[0]), float(point[1]), float(point[2])), []).append(index)
+        _, inverse = np.unique(np.round(self.points, 9), axis=0, return_inverse=True)
+        order = np.argsort(inverse)
+        sorted_inverse = inverse[order]
+        boundaries = np.flatnonzero(sorted_inverse[1:] != sorted_inverse[:-1]) + 1
+        starts = np.concatenate([np.zeros(1, dtype=np.int64), boundaries])
+        ends = np.concatenate([boundaries, np.asarray([order.shape[0]], dtype=np.int64)])
+        counts = ends - starts
 
         seam_vertices: set[int] = set()
-        for indices in by_position.values():
-            if len(indices) < 2:
+        for start, end, count in zip(starts, ends, counts, strict=True):
+            if count < 2:
                 continue
+            indices = order[int(start) : int(end)]
             for channel_values in self.uvs.values():
                 rounded_uvs = np.round(channel_values[indices], 9)
                 if np.unique(rounded_uvs, axis=0).shape[0] > 1:
-                    seam_vertices.update(indices)
+                    seam_vertices.update(int(index) for index in indices)
                     break
         return seam_vertices
 
