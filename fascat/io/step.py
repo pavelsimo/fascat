@@ -4,6 +4,7 @@ import json
 import re
 import tempfile
 import zipfile
+from collections import deque
 from collections.abc import Iterable, Iterator
 from contextlib import suppress
 from dataclasses import dataclass, replace
@@ -930,10 +931,10 @@ def _resolve_step_external_reference_graph(source: Path) -> _StepExternalReferen
     reference_cache: dict[str, list[str]] = {}
     records: list[_StepExternalReferenceRecord] = []
     warnings: list[str] = []
-    queue: list[tuple[Path, tuple[str, ...]]] = [(root, (root_key,))]
+    queue: deque[tuple[Path, tuple[str, ...]]] = deque([(root, (root_key,))])
 
     while queue:
-        current, path_keys = queue.pop(0)
+        current, path_keys = queue.popleft()
         if _step_scan_capped(current):
             warnings.append(f"external reference scan skipped: {current} exceeds {_MAX_STEP_SCAN_BYTES} bytes")
             continue
@@ -2166,7 +2167,7 @@ def _extract_step_pmi_semantic_graph(source: Path, options: StepReadOptions) -> 
             reverse_references.setdefault(reference, []).append(record_id)
 
     included_ids: set[str] = set(pmi_ids)
-    pending_ids: list[str] = list(pmi_ids)
+    pending_ids: deque[str] = deque(pmi_ids)
     edges: list[_StepPmiSemanticGraphEdge] = []
     edge_keys: set[tuple[str, str, str]] = set()
     missing_references = 0
@@ -2191,7 +2192,7 @@ def _extract_step_pmi_semantic_graph(source: Path, options: StepReadOptions) -> 
         pending_ids.append(record_id)
 
     while pending_ids:
-        record_id = pending_ids.pop(0)
+        record_id = pending_ids.popleft()
         record = records[record_id]
         source_is_pmi = record_id in pmi_ids
         source_is_semantic = record.entity in _STEP_PMI_SEMANTIC_ENTITY_KINDS
