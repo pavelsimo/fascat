@@ -5544,12 +5544,12 @@ def _label_name(label: Any) -> str | None:
     return value or None
 
 
-def _label_color(label: Any) -> tuple[float, float, float, float] | None:
+def _label_color(label: Any, reusable_color: Any | None = None) -> tuple[float, float, float, float] | None:
     from OCP.Quantity import Quantity_Color
     from OCP.XCAFDoc import XCAFDoc_ColorGen, XCAFDoc_ColorSurf, XCAFDoc_ColorTool
 
+    color = reusable_color if reusable_color is not None else Quantity_Color()
     for color_type in (XCAFDoc_ColorSurf, XCAFDoc_ColorGen):
-        color = Quantity_Color()
         if XCAFDoc_ColorTool.GetColor_s(label, color_type, color):
             return (float(color.Red()), float(color.Green()), float(color.Blue()), 1.0)
     return None
@@ -5572,19 +5572,28 @@ def _face_material_ids(
 
     material_ids: list[str] = []
     specs: dict[str, _CadMaterialSpec] = {}
+    reusable_color: Any | None = None
     explorer = TopExp_Explorer(shape, TopAbs_FACE)
     while explorer.More():
         face = TopoDS.Face_s(explorer.Current())
         spec = _shape_visual_material_spec(vis_material_tool, face, options)
-        sub_label = TDF_Label()
-        found_sub_label = shape_tool.FindSubShape(shape_label, face, sub_label)
-        if spec is None and found_sub_label:
-            spec = _label_visual_material_spec(vis_material_tool, sub_label, options)
-        color = _shape_color(color_tool, face)
-        if spec is None and color is None and found_sub_label:
-            color = _label_color(sub_label)
-        if spec is None and color is not None:
-            spec = _color_material_spec(color)
+        found_sub_label = False
+        sub_label: Any | None = None
+        if spec is None:
+            sub_label = TDF_Label()
+            found_sub_label = shape_tool.FindSubShape(shape_label, face, sub_label)
+            if found_sub_label:
+                spec = _label_visual_material_spec(vis_material_tool, sub_label, options)
+        if spec is None:
+            if reusable_color is None:
+                from OCP.Quantity import Quantity_Color
+
+                reusable_color = Quantity_Color()
+            color = _shape_color(color_tool, face, reusable_color)
+            if color is None and found_sub_label and sub_label is not None:
+                color = _label_color(sub_label, reusable_color)
+            if color is not None:
+                spec = _color_material_spec(color)
         if spec is None:
             material_ids.append(base_material_id)
         else:
@@ -5595,12 +5604,16 @@ def _face_material_ids(
     return material_ids, specs
 
 
-def _shape_color(color_tool: Any, shape: Any) -> tuple[float, float, float, float] | None:
+def _shape_color(
+    color_tool: Any,
+    shape: Any,
+    reusable_color: Any | None = None,
+) -> tuple[float, float, float, float] | None:
     from OCP.Quantity import Quantity_Color
     from OCP.XCAFDoc import XCAFDoc_ColorGen, XCAFDoc_ColorSurf
 
+    color = reusable_color if reusable_color is not None else Quantity_Color()
     for color_type in (XCAFDoc_ColorSurf, XCAFDoc_ColorGen):
-        color = Quantity_Color()
         if color_tool.GetColor(shape, color_type, color):
             return (float(color.Red()), float(color.Green()), float(color.Blue()), 1.0)
         if color_tool.GetInstanceColor(shape, color_type, color):
