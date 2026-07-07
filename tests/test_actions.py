@@ -445,6 +445,116 @@ def test_bake_materials_records_emissive_material_vs_fallback_source() -> None:
     assert baked.materials["baked_material"].metadata.items() >= expected.items()
 
 
+def test_face_bake_values_uses_material_lut_with_fallbacks() -> None:
+    mesh = _triangle_strip(5)
+    mesh.material_indices = np.asarray([0, 1, 2, 99], dtype=int)
+    part = Part(id="panel", name="Panel", mesh=mesh, material_ids=["paint", "glow", "missing"])
+    asset = Asset(
+        root=Node(id="root", name="root"),
+        parts={"panel": part},
+        materials={
+            "paint": Material(
+                id="paint",
+                name="Paint",
+                base_color=(1.0, 0.25, 0.0, 0.9),
+                metallic=0.25,
+                roughness=0.75,
+                opacity=0.5,
+                metadata={"emissive_color": "1,0.5,0"},
+            ),
+            "glow": Material(
+                id="glow",
+                name="Glow",
+                base_color=(0.0, 0.0, 1.0, 1.0),
+                metallic=1.0,
+                roughness=0.2,
+                metadata={"emissive_color": "0,0,0"},
+            ),
+        },
+    )
+
+    assert actions._face_bake_values(asset, part, mesh, "base_color", "conservative").tolist() == [
+        [255, 64, 0, 128],
+        [0, 0, 255, 255],
+        [255, 255, 255, 255],
+        [255, 255, 255, 255],
+        [255, 255, 255, 255],
+    ]
+    assert actions._face_bake_values(asset, part, mesh, "metallic_roughness", "conservative").tolist() == [
+        [255, 191, 64, 255],
+        [255, 51, 255, 255],
+        [255, 128, 0, 255],
+        [255, 128, 0, 255],
+        [255, 128, 0, 255],
+    ]
+    assert actions._face_bake_values(asset, part, mesh, "emissive", "conservative").tolist() == [
+        [255, 128, 0, 255],
+        [0, 0, 0, 255],
+        [0, 0, 0, 255],
+        [0, 0, 0, 255],
+        [0, 0, 0, 255],
+    ]
+
+
+def test_face_bake_values_uses_slot_zero_when_material_indices_are_absent() -> None:
+    mesh = _triangle_strip(2)
+    part = Part(id="panel", name="Panel", mesh=mesh, material_ids=["paint"])
+    asset = Asset(
+        root=Node(id="root", name="root"),
+        parts={"panel": part},
+        materials={"paint": Material(id="paint", name="Paint", base_color=(0.0, 1.0, 0.0, 1.0))},
+    )
+    empty_part = Part(id="empty", name="Empty", mesh=mesh)
+
+    assert actions._face_bake_values(asset, part, mesh, "base_color", "conservative").tolist() == [
+        [0, 255, 0, 255],
+        [0, 255, 0, 255],
+    ]
+    assert actions._face_bake_values(asset, empty_part, mesh, "base_color", "conservative").tolist() == [
+        [255, 255, 255, 255],
+        [255, 255, 255, 255],
+    ]
+
+
+def test_emissive_provenance_counts_repeated_slots_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    mesh = _triangle_strip(6)
+    mesh.material_indices = np.asarray([0, 0, 0, 1, 2, 99], dtype=int)
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="panel", name="Panel", part_id="panel")]),
+        parts={"panel": Part(id="panel", name="Panel", mesh=mesh, material_ids=["explicit", "invalid", "missing"])},
+        materials={
+            "explicit": Material(
+                id="explicit",
+                name="Explicit Black Emissive",
+                base_color=(1.0, 1.0, 1.0, 1.0),
+                metadata={"emissive_color": "0,0,0"},
+            ),
+            "invalid": Material(
+                id="invalid",
+                name="Invalid Emissive",
+                base_color=(1.0, 1.0, 1.0, 1.0),
+                metadata={"emissive_color": "not,a,color"},
+            ),
+        },
+    )
+    calls: dict[str, int] = {}
+    original = actions._emissive_color_with_source
+
+    def count_material_classification(material: Material | None) -> tuple[tuple[float, float, float, float], str]:
+        if material is not None:
+            calls[material.id] = calls.get(material.id, 0) + 1
+        return original(material)
+
+    monkeypatch.setattr(actions, "_emissive_color_with_source", count_material_classification)
+
+    assert actions._emissive_provenance_metadata(asset, ["panel"]) == {
+        "baked_emissive_source": "mixed",
+        "baked_emissive_material_faces": "3",
+        "baked_emissive_fallback_faces": "3",
+    }
+    assert calls == {"explicit": 1, "invalid": 1}
+
+
 def test_ambient_occlusion_detects_tiny_occluder_and_open_sky() -> None:
     mesh = Mesh(
         points=np.asarray(

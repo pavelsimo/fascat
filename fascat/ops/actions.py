@@ -721,21 +721,51 @@ def _face_bake_values(
         alpha = np.full((mesh.triangle_count, 1), 255, dtype=np.uint8)
         return cast(NDArray[np.uint8], np.hstack((np.repeat(values, 3, axis=1), alpha)))
 
-    result = np.empty((mesh.triangle_count, 4), dtype=np.uint8)
-    for face_index in range(mesh.triangle_count):
-        material = _face_material(asset, part, mesh, face_index)
-        if kind == "base_color":
-            color = material.base_color if material is not None else (1.0, 1.0, 1.0, 1.0)
-            opacity = material.opacity if material is not None else color[3]
-            values = (color[0], color[1], color[2], min(color[3], opacity))
-        elif kind == "metallic_roughness":
-            metallic = 0.0 if material is None else material.metallic
-            roughness = 0.5 if material is None else material.roughness
-            values = (1.0, roughness, metallic, 1.0)
-        else:
-            values, _source = _emissive_color_with_source(material)
-        result[face_index] = np.asarray([_color_byte(value) for value in values], dtype=np.uint8)
-    return result
+    lut = _material_bake_lut(asset, part, kind)
+    return lut[_face_material_slots(part, mesh)]
+
+
+def _material_bake_lut(asset: Asset, part: Part, kind: str) -> NDArray[np.uint8]:
+    fallback = _material_bake_row(None, kind)
+    lut = np.empty((len(part.material_ids) + 1, 4), dtype=np.uint8)
+    for slot, material_id in enumerate(part.material_ids):
+        material = asset.materials.get(material_id)
+        lut[slot] = fallback if material is None else _material_bake_row(material, kind)
+    lut[-1] = fallback
+    return lut
+
+
+def _material_bake_row(material: Material | None, kind: str) -> NDArray[np.uint8]:
+    if kind == "base_color":
+        color = material.base_color if material is not None else (1.0, 1.0, 1.0, 1.0)
+        opacity = material.opacity if material is not None else color[3]
+        values = (color[0], color[1], color[2], min(color[3], opacity))
+    elif kind == "metallic_roughness":
+        metallic = 0.0 if material is None else material.metallic
+        roughness = 0.5 if material is None else material.roughness
+        values = (1.0, roughness, metallic, 1.0)
+    else:
+        values, _source = _emissive_color_with_source(material)
+    return np.asarray([_color_byte(value) for value in values], dtype=np.uint8)
+
+
+def _face_material_slots(part: Part, mesh: Mesh) -> IntArray:
+    fallback_slot = len(part.material_ids)
+    slots = np.full(mesh.triangle_count, fallback_slot, dtype=np.int64)
+    if not part.material_ids or mesh.triangle_count == 0:
+        return slots
+    if mesh.material_indices is None:
+        slots.fill(0)
+        return slots
+
+    available = min(mesh.triangle_count, mesh.material_indices.shape[0])
+    if available <= 0:
+        return slots
+    candidates = mesh.material_indices[:available].astype(np.int64, copy=False)
+    valid = (candidates >= 0) & (candidates < len(part.material_ids))
+    valid_positions = np.flatnonzero(valid)
+    slots[valid_positions] = candidates[valid_positions]
+    return slots
 
 
 def _face_material(asset: Asset, part: Part, mesh: Mesh, face_index: int) -> Material | None:
@@ -776,13 +806,14 @@ def _emissive_provenance_metadata(asset: Asset, part_ids: list[str]) -> dict[str
         mesh = part.mesh
         if mesh is None:
             continue
-        for face_index in range(mesh.triangle_count):
-            material = _face_material(asset, part, mesh, face_index)
-            _color, source = _emissive_color_with_source(material)
-            if source == "material":
-                material_faces += 1
-            else:
-                fallback_faces += 1
+        slots = _face_material_slots(part, mesh)
+        unique_slots, counts = np.unique(slots, return_counts=True)
+        material_sources = np.asarray(
+            [_emissive_slot_is_material(asset, part, int(slot)) for slot in unique_slots],
+            dtype=bool,
+        )
+        material_faces += int(counts[material_sources].sum())
+        fallback_faces += int(counts[~material_sources].sum())
     if material_faces and fallback_faces:
         source = "mixed"
     elif material_faces:
@@ -796,6 +827,16 @@ def _emissive_provenance_metadata(asset: Asset, part_ids: list[str]) -> dict[str
         "baked_emissive_material_faces": str(material_faces),
         "baked_emissive_fallback_faces": str(fallback_faces),
     }
+
+
+def _emissive_slot_is_material(asset: Asset, part: Part, slot: int) -> bool:
+    if slot < 0 or slot >= len(part.material_ids):
+        return False
+    material = asset.materials.get(part.material_ids[slot])
+    if material is None:
+        return False
+    _color, source = _emissive_color_with_source(material)
+    return source == "material"
 
 
 def _bake_face_normals(mesh: Mesh) -> FloatArray:
