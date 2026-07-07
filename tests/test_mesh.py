@@ -1363,8 +1363,8 @@ def test_uv_layout_stats_cache_is_per_channel_and_returns_copy(monkeypatch: pyte
     assert overlap_calls == 3
 
 
-def test_uv_seam_graph_stats_cache_is_per_channel_and_returns_copy(monkeypatch: pytest.MonkeyPatch) -> None:
-    uv = np.array(
+def test_uv_seam_graph_stats_cache_invalidation_and_lengths(monkeypatch: pytest.MonkeyPatch) -> None:
+    seamed_uv = np.array(
         [
             [0.0, 0.0],
             [1.0, 0.0],
@@ -1375,51 +1375,64 @@ def test_uv_seam_graph_stats_cache_is_per_channel_and_returns_copy(monkeypatch: 
         ],
         dtype=float,
     )
+    unseamed_uv = seamed_uv.copy()
+    unseamed_uv[3] = [0.0, 0.0]
+    unseamed_uv[4] = [1.0, 0.0]
     mesh = Mesh(
         points=np.array(
             [
                 [0, 0, 0],
                 [1, 0, 0],
                 [0, 1, 0],
-                [0, 0, 0],
-                [1, 0, 0],
+                [0.04, 0, 0],
+                [0.96, 0, 0],
                 [1, -1, 0],
             ],
             dtype=float,
         ),
         faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=int),
-        uvs={0: uv.copy(), 1: uv.copy()},
+        uvs={0: seamed_uv.copy(), 1: unseamed_uv.copy()},
     )
-    original_rounded_key = mesh_module._rounded_key
-    rounded_key_calls = 0
+    original_face_edges = mesh_module._face_major_edges_from_faces
+    edge_build_calls = 0
 
-    def count_rounded_key(values: np.ndarray, decimals: int) -> tuple[float, ...]:
-        nonlocal rounded_key_calls
-        rounded_key_calls += 1
-        return original_rounded_key(values, decimals)
+    def count_face_edges(faces: np.ndarray) -> np.ndarray:
+        nonlocal edge_build_calls
+        edge_build_calls += 1
+        return original_face_edges(faces)
 
-    monkeypatch.setattr(mesh_module, "_rounded_key", count_rounded_key)
+    monkeypatch.setattr(mesh_module, "_face_major_edges_from_faces", count_face_edges)
 
-    first = mesh.uv_seam_graph_stats(0)
-    calls_after_first = rounded_key_calls
-    mesh.uv_seam_graph_stats(1)
-    calls_after_second = rounded_key_calls
-    third = mesh.uv_seam_graph_stats(0)
+    exact_stats = mesh.uv_seam_graph_stats(0)
+    first = mesh.uv_seam_graph_stats(0, tolerance=0.1)
+    calls_after_first = edge_build_calls
+    channel_one = mesh.uv_seam_graph_stats(1, tolerance=0.1)
+    calls_after_second_channel = edge_build_calls
+    third = mesh.uv_seam_graph_stats(0, tolerance=0.1)
 
+    assert exact_stats["edges"] == 0
     assert first == third
-    assert int(first["edges"]) == 1
-    assert calls_after_first > 0
-    assert calls_after_second > calls_after_first
-    assert rounded_key_calls == calls_after_second
+    assert first["mesh_vertices"] == 4
+    assert first["position_vertices"] == 2
+    assert first["edges"] == 1
+    assert first["components"] == 1
+    assert first["total_length"] == pytest.approx(1.0)
+    assert first["longest_component_length"] == pytest.approx(1.0)
+    assert channel_one["edges"] == 0
+    assert calls_after_first == 2
+    assert calls_after_second_channel == 3
+    assert edge_build_calls == calls_after_second_channel
     first["edges"] = 99
-    assert mesh.uv_seam_graph_stats(0)["edges"] == 1
-    assert rounded_key_calls == calls_after_second
+    assert mesh.uv_seam_graph_stats(0, tolerance=0.1)["edges"] == 1
+    assert edge_build_calls == calls_after_second_channel
 
     mesh.uvs[0] = mesh.uvs[0].copy()
-    mesh.uvs[0][0, 0] = 0.05
-    mesh.uv_seam_graph_stats(0)
+    mesh.uvs[0][3] = [0.0, 0.0]
+    mesh.uvs[0][4] = [1.0, 0.0]
+    updated = mesh.uv_seam_graph_stats(0, tolerance=0.1)
 
-    assert rounded_key_calls > calls_after_second
+    assert updated["edges"] == 0
+    assert edge_build_calls == calls_after_second_channel + 1
 
 
 def test_uv_distortion_metrics_record_islands_pack_and_stretch() -> None:
