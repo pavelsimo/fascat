@@ -18,27 +18,25 @@ baselines.
 
 Re-audit 2026-07-03 (three parallel passes over io/, ops/+mesh, and CLI/options/tests,
 with every contested claim re-verified by hand): the 2026-07-01 batch is **implemented**
-— exception hierarchy, tessellation guard, F1–F7, scipy connected components, library
-logging, bbox-derived repair tolerance, sag_ratio-primary tessellation, 45°/area normal
-defaults, decimation-cliff and merge-instance-loss warnings, `lightmap_resolution`, the
-meshoptimizer pin comment, and the `unwrap` extra rename — those items have left this
-plan. New this audit: one correctness item (§1), two robustness items (§2), five
-performance findings F8–F12 (§3) — the F1/F4/F6 patterns were fixed only in
-`hierarchy.py`/`scene.py` and survive verbatim in the export/tessellate/LOD paths —
-plus docs-staleness and test-coverage items (§6, §7). Two agent claims were refuted and
-recorded in the audit notes.
+and left this plan; new that audit: one correctness item, two robustness items, five
+performance findings F8–F12, plus docs-staleness and test-coverage items.
 
 Re-audit 2026-07-05 (five parallel passes over mesh/analysis, pipeline/runtime/asset,
 CLI/options, `io/`, and `ops/`, every high-impact claim re-verified by hand): the F8–F12
-batch is **implemented** (shipped with the mesh/scene vectorization commit) and has left
-the open list. New this audit: twelve performance findings F13–F24 (§3), spanning the
-ambient-occlusion bake, the tessellation OCP boundary, STEP import scaling, CLI startup
-imports, and the Asset copy discipline. Three agent claims were refuted and recorded in
-the audit notes.
+batch is **implemented** and left the open list. New that audit: twelve performance
+findings F13–F24. Implementation pass 2026-07-05: F13–F19 and F21–F24 shipped in
+separate focused commits; the 2026-07-03 correctness, robustness, docs, and coverage
+items shipped alongside.
 
-Implementation pass 2026-07-05: F13-F19 and F21-F24 shipped in separate focused commits.
-F20 now has a synthetic copy-cost profile recorded below; the real 10k+ part corpus
-profile and any copy-ownership redesign remain open.
+Re-audit 2026-07-07 (three parallel performance-only passes over mesh/analysis/asset,
+`ops/`, and io/+pipeline/runtime/CLI, every high-impact claim re-verified by hand): the
+F13–F24 batch is **implemented** (⚡️ commits `b969a41`…`bcd4cd7`) and has left the plan,
+as have the last open correctness (§1), robustness (§2), production-defaults (§6), and
+packaging (§8) items. New this audit: performance findings F25–F35 (§3) — including two
+surviving instances of previously fixed patterns (the pre-F14 OCP extraction in
+`ops/heal.py`, the unshipped F22 sub-item in the UV-seam metrics) and the carried-forward
+stage-2 follow-ups to F13/F14. Six agent claims were refuted and recorded in the audit
+notes.
 
 ## What Fascat Is
 
@@ -62,137 +60,39 @@ glTF/OBJ/STL/FBX writers, trimesh + numpy (mesh ops).
 
 ## 1. Correctness bugs
 
-- [x] **P2** `Mesh.optimize_buffers` face-group remap reads uninitialized memory — added
-  by audit 2026-07-03. The inverse-permutation buffer is allocated with
-  `np.empty_like(reordered_face_indices)` (`fascat/mesh.py:2691-2692`) and then scattered
-  into via `inverse_face_order[reordered_face_indices] = np.arange(...)`.
-  `reordered_face_indices` is built by looking each cache-optimized face up in a
-  `tuple(sorted(face)) → old index` dict (`fascat/mesh.py:2645-2657`); when the mesh
-  contains **duplicate faces** (same vertex set), the dict collapses them to one entry, so
-  `reordered_face_indices` is no longer a permutation of `0..F-1` — some slots of the
-  `np.empty` buffer are never written and leak garbage indices into the remapped
-  `face_groups`. This does not crash (see the refuted-claims note below), but corrupted
-  face-group indices silently poison downstream material-boundary and feature-preservation
-  logic. Compounding it, the entire method body is wrapped in
-  `except Exception: return self.copy()` (`fascat/mesh.py:2699-2700`), so *any* future bug
-  in this path degrades to a silent no-op with no report entry.
-
-  ```python
-  # fascat/mesh.py — replace the np.empty_like scatter with a sentinel-filled
-  # lookup and drop unmatched entries, mirroring _remap_sliced_face_group in ops/scene.py:
-  inverse_face_order = np.full(self.triangle_count, -1, dtype=np.int64)
-  inverse_face_order[reordered_face_indices] = np.arange(
-      reordered_face_indices.shape[0], dtype=np.int64
-  )
-  face_groups: dict[str, IntArray] = {}
-  for name, values in self.face_groups.items():
-      if not np.isin(values, reordered_face_indices).all():
-          continue  # unchanged policy: drop groups that reference reordered-away faces
-      remapped = inverse_face_order[values]
-      face_groups[name] = remapped[remapped >= 0]
-  mesh.face_groups = face_groups
-
-  # and make the blanket fallback observable instead of silent:
-  except Exception:
-      logger.warning("optimize_buffers failed; returning unoptimized copy", exc_info=True)
-      return self.copy()
-  ```
-
-  Test to add: a mesh with two identical faces plus a `face_groups` entry, assert
-  `optimize_buffers()` returns in-range group indices (today it can return garbage).
+No open items.
 
 ## 2. Robustness & input hardening
 
-- [x] **P2** I/O readers/writers bypass the exception hierarchy — added by audit
-  2026-07-03. The 2026-07-01 item shipped for the *custom* exceptions
-  (`FascatError` base in `fascat/errors.py`; `MeshValidationError` `fascat/mesh.py:70`,
-  `UVOverlapError` `fascat/ops/stage.py:16`, `FilterExpressionError` `fascat/filter.py:18`
-  all re-based and exported), but the I/O layer still raises bare stdlib exceptions, so
-  `except fascat.FascatError` misses every reader/writer failure. Verified examples:
-  `RuntimeError` for glTF Transform timeouts (`fascat/io/gltf.py:1417-1419`), `ValueError`
-  for oversized inputs (`fascat/io/step.py:918`), `RuntimeError` for malformed FBX/OBJ/STL
-  (`fascat/io/fbx.py:67`, `fascat/io/obj.py:97`, `fascat/io/stl.py:70`). Library consumers
-  embedding fascat must catch `(RuntimeError, ValueError, OSError)` alongside
-  `FascatError`, which defeats the point of the hierarchy. Fix at the public entry points
-  (`read_step`/`read_iges`/`read_brep`/`read`/`write_*`), not at every raise site:
-
-  ```python
-  # fascat/errors.py
-  class FascatIOError(FascatError):
-      """Raised when reading or writing an asset file fails."""
-
-  # fascat/io/_errors.py (new) — applied to every public read_*/write_* entry point
-  def wrap_io_errors(operation: str) -> Callable[[F], F]:
-      def decorate(func: F) -> F:
-          @functools.wraps(func)
-          def wrapper(*args: Any, **kwargs: Any) -> Any:
-              try:
-                  return func(*args, **kwargs)
-              except FascatError:
-                  raise  # already ours — never double-wrap
-              except (RuntimeError, ValueError, OSError) as exc:
-                  raise FascatIOError(f"{operation} failed: {exc}") from exc
-          return cast(F, wrapper)
-      return decorate
-  ```
-
-  Deliberately narrow: do **not** catch `Exception` (keeps `KeyboardInterrupt`,
-  `MemoryError`, and genuine bugs loud). The CLI's own error handling is unaffected — this
-  is for library embedders. Docs: add a "catching errors" section to `docs/api.md`
-  showing `except fc.FascatError`, and state that `fc.Error` is an alias kept for
-  brevity (`fascat/errors.py:10`) with `FascatError` as the documented canonical name.
-
-- [x] **P2** Bbox-derived repair tolerance silently degrades to 0.0 on mesh-less
-  selections — added by audit 2026-07-03. The bbox-derived default shipped
-  (`RepairOptions.resolved_tolerance`, `fascat/options.py:303-307`, wired at
-  `fascat/asset.py:644`), but `_mesh_selection_bbox_diagonal` returns `0.0` when no
-  selected part carries a mesh (`fascat/asset.py:1679-1695`), so
-  `resolved_tolerance(0.0)` yields `0.0` — i.e. vertex merge silently disabled, which is
-  exactly the failure mode the 2026-07-01 item was written to eliminate. A user who runs
-  `repair` before `tessellate` (or filters down to mesh-less construction parts) gets the
-  old no-merge behavior with nothing in the report. Warn at the resolution site:
-
-  ```python
-  # fascat/asset.py — repair op entry (asset.py:644)
-  diagonal = _mesh_selection_bbox_diagonal(scope.asset, part_ids)
-  resolved_tolerance = opts.resolved_tolerance(diagonal)
-  if opts.tolerance == 0.0 and resolved_tolerance == 0.0:
-      scope.asset.report.add_warning(
-          "repair tolerance auto-derivation found no mesh geometry in the selection; "
-          "vertex merge is disabled (tolerance=0) - run tessellate first or pass an "
-          "explicit tolerance"
-      )
-  ```
+No open items.
 
 ## 3. Performance
 
-- [x] **P3** Vectorize the remaining export/tessellate/LOD hot paths — audit 2026-07-03:
-  the F1/F4/F6 patterns fixed in `hierarchy.py`/`scene.py` survive verbatim in five other
-  places, including two on the *main* pipeline (glTF export, tessellation dedupe) that the
-  merge/explode-only F1–F6 batch never touched; findings F8–F12 with ready-to-apply
-  snippets live in the detailed findings below — audit 2026-07-05: F8–F12 verified
-  **shipped** (see verification below)
-- [x] **P2** Fix the 2026-07-05 hot-path code findings — the AO bake's O(F² × D)
-  Python ray casting (F13) and the per-vertex OCP round-trips on the main tessellate
-  path (F14); details below
+- [ ] **P2** Fix the 2026-07-07 hot-path findings — heal's pre-F14 OCP extraction
+  (F25), the bake-materials per-face Python fills (F28), and the STEP per-face
+  material/color loop (F29); details below
+- [x] **P3** Close OCP batch triangulation access (F26) as pure-Python infeasible —
+  evidence recorded below; a small compiled helper remains possible future work
+- [ ] **P3** F13 stage-2 follow-up — AO direction-batching/BVH pruning (F27);
+  details below
+- [ ] **P3** Fix the 2026-07-07 scaling and cleanup findings F30–F35 — STEP BFS
+  queues, the surviving UV-seam-metrics loops, material-index remap, UV-seam vertex
+  grouping, export-report double pass, and small writer cleanups; details below
 - [~] **P2** Profile the per-construction Asset geometry deep-copies (F20) before
   changing copy ownership — synthetic profile recorded below; real 10k+ corpus profile
   and ownership redesign still open
-- [x] **P3** Fix the 2026-07-05 scaling and cleanup findings F15–F19 and F21–F24 —
-  analysis O(n²) pair scans, STEP import list scans, CLI startup imports, and the
-  remaining `.tolist()`/per-face Python-loop sites; details below
 - [ ] **P3** Profile on real large CAD corpora (10k+ parts) and record numbers in the
   baseline list below — fixture baselines recorded there (2026-06-14 corpus, 2026-07-01
   re-run); actual 10k+ part corpus profiling still needed
 
 ### Performance Findings
 
-Audit of 2026-07-05: the 2026-07-03 findings F8–F12 were verified **shipped** (see
-verification below) and are gone from the open list, joining F1–F7 and the scipy
-connected-components rewrite. The 2026-07-05 implementation pass shipped the code
-findings F13-F19 and F21-F24 in separate commits; F20 is documented with a synthetic
-profile and remains open only for real-corpus profiling and any future copy-ownership
-redesign. The detailed finding notes stay below as provenance and regression context.
+Audit of 2026-07-07: the 2026-07-05 findings F13–F24 were verified **shipped** (see
+verification below) and are gone from the open list, joining F1–F12 and the scipy
+connected-components rewrite. New findings F25–F35 below; F25 and F31 are surviving
+instances of previously fixed patterns in paths the earlier batches never touched. F26
+has since been closed as pure-Python infeasible; F27 remains the explicitly deferred
+stage-2 half of F13.
 
 #### Baseline
 
@@ -202,849 +102,325 @@ redesign. The detailed finding notes stay below as provenance and regression con
 - Re-run 2026-07-01 (`make benchmark`, `tests/fixtures/vertical-screw.step` → GLB):
   **3.69 s total / 370.5 MiB peak RSS** — import 0.87 s, tessellate 1.57 s, LOD 0.49 s,
   repair 0.34 s, stage 0.21 s, optimize 0.19 s, write 0.004 s.
-- Still open (§3 above): profiling on a real 10k+ part corpus.
+- Still open (§3 above): profiling on a real 10k+ part corpus, and a fresh
+  `make benchmark` re-run to capture the F13–F24 batch (the 2026-07-01 numbers predate
+  it).
 
-#### Verification of prior findings (2026-07-03)
+#### Verification of prior findings (2026-07-07)
 
-All seven 2026-07-01 findings plus the connected-components rewrite are implemented:
+All twelve 2026-07-05 findings are implemented (current locations / commits):
 
-- F1 — `np.unique` material enumeration: `fascat/ops/hierarchy.py:262` and `:514`.
-- F2 — vectorized `_face_material_ids` gather: `fascat/ops/hierarchy.py:405-416`.
-- F3 — BFS `face_rows` hoisted once: `fascat/ops/hierarchy.py:561-573`.
-- F4 — `_part_material_key` via `_array_digest_required` with int64 normalization:
-  `fascat/ops/scene.py:274-278`; the digest-count test moved to 10 as predicted
-  (`tests/test_scene.py:161`).
-- F5 — `_face_chunks` counts only new vertices (quadratic removed):
-  `fascat/ops/scene.py:448`.
-- F6 — `_slice_mesh` face-group remap via lookup array:
-  `fascat/ops/scene.py:464-473` + `_remap_sliced_face_group` at `:480-486`.
-- F7 — per-channel UV stats **are cached**, in `fascat/mesh.py` rather than the op:
-  `uv_layout_stats` (`fascat/mesh.py:2205-2273`) and `uv_distortion_metrics`
-  (`fascat/mesh.py:2383-2458`) both go through `_cached_value` keyed on
-  channel + tolerance + geometry cache token, so `_tag_uv_layout_quality` calling them per
-  channel is correct. The former `[~]` §3 item is closed (see audit notes).
-- scipy connected components: `_connected_face_components_scipy`
-  (`fascat/ops/hierarchy.py:537-556`) builds a face×vertex incidence matrix and runs
-  `scipy.sparse.csgraph.connected_components` on `incidence @ incidence.T`, with the
-  Python BFS kept as fallback (`:559-580`).
+- F13 — `_ray_hits_mesh` vectorized Möller–Trumbore: `fascat/ops/actions.py:843-869`
+  (`1aaf2f3`); the triangle gather is hoisted out of the ray loop.
+- F14 (stage 1) — `_transformed_occt_nodes` / `_occt_transform_matrix` /
+  `_triangulation_faces`: `fascat/ops/tessellate.py:295-319` (`09d697f`); no more
+  per-vertex `.Transformed()`, winding flip hoisted.
+- F15 — self-intersection candidate pruning: `463f79d`.
+- F16 — UV-overlap grid pruning in `uv_layout_stats`: `fa6272c`.
+- F17 — STEP material binding via `{material_id: index}` dict: `b969a41`.
+- F18 — STEP free-edge detection via `TopTools_IndexedMapOfShape`: `1f8a785`.
+- F19 — CLI heavy imports deferred (`fascat/io/_suffixes.py`, TYPE_CHECKING analysis
+  import, command-body io imports): `209a678`.
+- F21 — `_scipy_close_point_pairs` cKDTree fast paths, gated ahead of the bucket walk
+  (`fascat/mesh.py:1074`): `f69ce7d`.
+- F22 — shared `edge_incidence` helper replacing the per-face `.astype(int).tolist()`
+  edge-map builds: `3a0bf4f`. (One listed sub-site did not ship — see F31.)
+- F23 — export-writer conversion churn: `374f81c`.
+- F24 — per-run reporting overhead (duplicate `_source_image_ids`, single-pass report
+  timings, hoisted occluder BVH, preview-decoder copies): `2a7774a`.
 
-#### Verification of prior findings (2026-07-05)
-
-All five 2026-07-03 findings are implemented (current lines):
-
-- F8 — the `np.unique(...astype(np.int64, copy=False))` idiom is in place at all four
-  sites: `fascat/io/gltf.py:1689`, `fascat/export_report.py:111`,
-  `fascat/asset.py:1764,1779`, `fascat/ops/actions.py:2684`.
-- F9 — tessellation dedupe keys on `array_digest_required(...)`:
-  `fascat/ops/tessellate.py:1382-1385`.
-- F10 — `_slice_faces` uses the shared `sliced_face_lookup` +
-  `remap_sliced_face_group` helpers: `fascat/ops/actions.py:1820-1831`.
-- F11 — `_sample_mesh_faces` tops up via `np.setdiff1d`:
-  `fascat/ops/actions.py:1805-1817`.
-- F12 — `Mesh.optimize_buffers` uses the sorted-rows void-view + `searchsorted` remap
-  and the masked-scatter remap inversion: `fascat/mesh.py:2650-2661`.
+F20 remains `[~]`: synthetic profile recorded (see below), real-corpus profile open.
 
 #### Open findings
 
-F13 and F14 sit on user-facing hot paths (the `bake-materials` action and the main
-tessellate step — 1.57 s of the 3.69 s fixture baseline); F20 multiplies with pipeline
-depth on every run; the rest bite on large imports, analysis of large meshes, or CLI
-startup.
+F25 sits on the heal/repair path; F27/F28 are the entire cost of the `bake-materials`
+action; F29/F30 bite on large styled or PMI-rich STEP imports; the rest bite on analysis
+of large meshes or add up as per-run overhead. F26 is retained below as closure evidence.
 
-##### F13 — AO bake is O(F² × D) Python with a full-mesh gather per ray
+##### F25 — heal face-overlap extraction still uses the pre-F14 per-vertex OCP pattern
 
-`_face_ambient_occlusion` (`fascat/ops/actions.py:809-831`) shades every face by casting
-one ray per hemisphere direction and testing it against every other triangle in the
-mesh, in Python:
+`_face_overlap_descriptor` (`fascat/ops/heal.py:578-593`) is a surviving verbatim
+instance of the pattern F14 removed from tessellate.py:
+
+```python
+nodes = triangulation.MapNodeArray()
+node_lower = int(nodes.Lower())
+points = np.empty((node_count, 3), dtype=np.float64)
+for local_index in range(node_count):
+    point = nodes.Value(node_lower + local_index).Transformed(transform)
+    points[local_index] = (point.X(), point.Y(), point.Z())
+...
+for local_index in range(triangle_count):
+    a, b, c = triangles.Value(triangle_lower + local_index).Get()
+    if reversed_face:
+        face_triangles[local_index] = (c - 1, b - 1, a - 1)
+    else:
+        face_triangles[local_index] = (a - 1, b - 1, c - 1)
+```
+
+~6 OCP boundary crossings per vertex — `.Transformed()` constructs a new `gp_Pnt` and
+round-trips through the wrapper per vertex — plus a Python branch per triangle. Called
+once **per face** by `_face_overlap_descriptors` (`fascat/ops/heal.py:551`) on the heal
+path, so dense tessellations pay the full pre-F14 cost during repair. Fix: reuse the F14
+helpers that already exist — `_transformed_occt_nodes`, `_occt_transform_matrix`,
+`_triangulation_faces` (`fascat/ops/tessellate.py:295-319`). Move them to a shared
+module (e.g. `fascat/ops/_occt_mesh.py`), re-export from tessellate for compatibility,
+and apply the `reversed_face` flip as a `[:, ::-1]` column slice after the bulk read.
+Impact: HIGH on repair/heal for dense tessellations; behavior-preserving (the heal tests
+pin the descriptors).
+
+##### F26 — OCP batch triangulation access is closed as pure-Python infeasible
+
+`fascat/ops/tessellate.py:297-299` (nodes), `:317-318` (triangles), and the UV-node loop
+(`_triangulation_uv_nodes`, `:~468`). Stage 1 shipped — the transform is applied
+vectorized and the winding flip is hoisted — but one `Value()` call plus coordinate
+getters per vertex (~4 crossings) and one `Value().Get()` per triangle (2 crossings)
+remain on the **main tessellate path**. Investigation in the current environment closes
+the pure-Python stage-2 path as infeasible:
+
+- `cadquery-ocp` is 7.9.3.1.
+- `Poly_Triangulation.MapNodeArray()` returns `TColgp_HArray1OfPnt`;
+  `MapTriangleArray()` returns `Poly_HArray1OfTriangle`.
+- `InternalNodes()` and `InternalUVNodes()` still expose wrapper arrays with per-index
+  `Value()` access.
+- The node, triangle, and internal arrays expose no NumPy/buffer bridge: no `__array__`,
+  no `__buffer__`, `memoryview(...)` fails, and `np.asarray(...)` produces a scalar
+  `object` array containing the wrapper rather than numeric coordinates.
+- `RWMesh`/`RWStl` APIs are reader/writer/iterator oriented (`RWMesh_FaceIterator`,
+  `RWMesh_TriangulationReader`, `RWStl.ReadFile_s`/`Write*`) and are not a safe
+  substitute for Fascat's tessellation extraction: they do not preserve the per-face
+  groups, material indices, shape transforms, and CAD UVs that the current path carries
+  through `Poly_Triangulation`.
+- `BRepTools` exposes triangulation helpers such as `Triangulation_s`,
+  `LoadTriangulation_s`, `LoadAllTriangulations_s`, and `ActivateTriangulation_s`, but
+  these verify, load, or activate existing face triangulation data; they do not expose a
+  numeric bulk-copy path from OCCT wrapper arrays into Python/NumPy.
+
+Conclusion: keep the stage-1 Python extraction as the supported pure-Python path. A small
+compiled helper could still bulk-copy OCCT arrays in a future performance pass, but that
+is out of scope for F26.
+
+##### F27 — AO bake outer loop is still O(F² × D) (F13 stage 2/3)
+
+`_face_ambient_occlusion` (`fascat/ops/actions.py:824-834`). F13 vectorized the inner
+ray test, but the outer loop is still one Python iteration per (face × direction) with a
+scalar `np.dot` gate:
 
 ```python
 for face_index, (centroid, normal) in enumerate(zip(centroids, normals, strict=True)):
-    hits = 0
-    tested = 0
-    origin = centroid + normal * epsilon
+    ...
     for direction in directions:
         if float(np.dot(direction, normal)) <= 0.0:
             continue
         tested += 1
-        if _ray_hits_mesh(origin, direction, mesh.points, mesh.faces, ignore_face=face_index, max_t=ray_length):
+        if _ray_hits_mesh(origin, direction, triangles, ignore_face=face_index, max_t=ray_length):
             hits += 1
 ```
 
-and `_ray_hits_mesh` (`:839-855`) re-gathers the whole mesh **on every ray** before its
-per-triangle scan:
+and each `_ray_hits_mesh` call is a full O(F) vectorized pass over all triangles — total
+O(F² × D) numpy work with F × D Python iterations and no spatial pruning. Fix in two
+steps: (1) batch directions per face — precompute `dots = directions_arr @ normals.T`
+once (D × F), and evaluate all valid directions for a face in one broadcast
+Möller–Trumbore (D_valid, F) pass, reducing per face with `np.any(..., axis=1)`;
+(2) if still hot on very large meshes, add AABB/BVH pruning per ray (reuse the
+`_build_occurrence_bvh` idiom on per-triangle bounds). Keep the `1e-8 < t < max_t`
+window and the ignore-self semantics exactly — the bake tests pin them. Impact: HIGH for
+`bake-materials` on non-toy meshes; not on the default pipeline.
+
+##### F28 — bake-materials per-face Python fills
+
+Two sites, same cure — compute per unique material index, not per face:
+
+- `fascat/ops/actions.py:724-737` — the base_color / metallic_roughness / emissive fill
+  calls `_face_material(...)` once per face and allocates per face:
+
+  ```python
+  for face_index in range(mesh.triangle_count):
+      material = _face_material(asset, part, mesh, face_index)
+      ...
+      result[face_index] = np.asarray([_color_byte(value) for value in values], dtype=np.uint8)
+  ```
+
+  Fix: build a small `(len(part.material_ids) + 1, 4)` uint8 LUT per kind (one
+  `_color_byte` pass per material, last row = the None-material fallback), map
+  out-of-range/missing indices to the fallback row, then
+  `result = lut[safe_indices]` — an O(F) numpy gather instead of O(F) Python calls.
+
+- `fascat/ops/actions.py:771-798` — `_emissive_provenance_metadata` loops over **every
+  face of every part** calling `_face_material` + `_emissive_color_with_source`, which
+  **string-parses `material.metadata["emissive_color"]` per face**. Fix: classify each
+  unique material once (material vs fallback), then count faces per material index via
+  `np.unique(mesh.material_indices, return_counts=True)` (all faces of a part share the
+  base material when `material_indices is None`).
+
+Impact: MEDIUM-HIGH — this is per-face work on every `bake-materials` run.
+
+##### F29 — STEP per-face material/color extraction does unconditional OCP work
+
+`_face_material_ids` (`fascat/io/step.py:5574-5594`), per part on the styled-STEP import
+path:
 
 ```python
-def _ray_hits_mesh(origin, direction, points, faces, *, ignore_face, max_t):
-    triangles = points[faces]                    # full-mesh (F, 3, 3) copy, once per ray
-    for face_index, triangle in enumerate(triangles):
-        if face_index == ignore_face:
-            continue
-        hit = _ray_triangle_t(origin, direction, triangle)   # scalar Möller–Trumbore
-        if hit is not None and 1e-8 < hit < max_t:
-            return True
-    return False
+while explorer.More():
+    face = TopoDS.Face_s(explorer.Current())
+    spec = _shape_visual_material_spec(vis_material_tool, face, options)
+    sub_label = TDF_Label()
+    found_sub_label = shape_tool.FindSubShape(shape_label, face, sub_label)
+    if spec is None and found_sub_label:
+        spec = _label_visual_material_spec(vis_material_tool, sub_label, options)
+    color = _shape_color(color_tool, face)
+    if spec is None and color is None and found_sub_label:
+        color = _label_color(sub_label)
 ```
 
-Three compounding costs: (1) the `points[faces]` gather allocates an F×3×3 float array
-per ray — F × D times per bake; (2) the inner loop is O(F) Python iterations per ray,
-each running ~6 scalar `np.dot`/`np.cross` calls inside `_ray_triangle_t` (`:858-876`),
-so the total is O(F² × D) interpreter-level work — a 100k-face mesh at ~26 directions is
-on the order of 10¹¹ scalar numpy calls; (3) there is no spatial pruning, so rays that
-leave the scene immediately still pay the full scan. The bake is unusable beyond toy
-meshes. Fix, in order of payoff:
+`FindSubShape` is called **unconditionally** per face even though its result is only
+consumed when `spec is None`; if it scans the label tree per call, a part with F faces
+pays O(F × labels). `_shape_color` (`:5597-5604`) additionally constructs a fresh
+`Quantity_Color` and calls `GetColor` up to twice per face. Fix: (1) defer
+`FindSubShape` — call it only when `spec is None`; (2) hoist one reusable
+`Quantity_Color` out of the loop; (3) investigate whether XCAF exposes a sub-shape label
+map per shape label (e.g. iterating the shape label's children once into a
+`TopTools`-keyed dict) to replace per-face `FindSubShape` entirely. Impact: MEDIUM-HIGH
+on import of styled assemblies (thousands of faces per part). Behavior-preserving; the
+STEP color/material tests pin the outputs.
 
-1. Hoist the gather out of `_ray_hits_mesh` (one line; removes F × D full-mesh
-   allocations):
+##### F30 — `list.pop(0)` BFS queues in STEP scanning
 
-   ```python
-   triangles = mesh.points[mesh.faces]          # once, before the face loop
-   ```
+Two sites shift the whole list on every dequeue:
 
-2. Vectorize Möller–Trumbore over all triangles per ray. The math in `_ray_triangle_t`
-   is already array-shaped — broadcast it and reduce with `np.any`; `hit` short-circuits
-   nothing today anyway because Python-loop iterations dominate:
+- `fascat/io/step.py:936` — external-reference traversal:
+  `current, path_keys = queue.pop(0)`
+- `fascat/io/step.py:2194` — PMI semantic-graph traversal:
+  `record_id = pending_ids.pop(0)` (this queue can hold every reachable record id on
+  PMI-rich files)
 
-   ```python
-   def _ray_hits_any(origin, direction, tri, *, ignore_face, max_t):
-       edge1 = tri[:, 1] - tri[:, 0]
-       edge2 = tri[:, 2] - tri[:, 0]
-       h = np.cross(direction, edge2)
-       det = np.einsum("ij,ij->i", edge1, h)
-       valid = np.abs(det) > 1e-12
-       inv_det = np.where(valid, 1.0 / np.where(valid, det, 1.0), 0.0)
-       s = origin - tri[:, 0]
-       u = inv_det * np.einsum("ij,ij->i", s, h)
-       q = np.cross(s, edge1)
-       v = inv_det * (q @ direction)
-       t = inv_det * np.einsum("ij,ij->i", edge2, q)
-       hit = valid & (u >= 0.0) & (u <= 1.0) & (v >= 0.0) & (u + v <= 1.0)
-       hit &= (t > 1e-8) & (t < max_t)
-       hit[ignore_face] = False
-       return bool(np.any(hit))
-   ```
+O(n) per pop → O(n²) on deep reference chains / large PMI graphs. Fix: two-line change
+per site — `collections.deque` + `popleft()`. Both are FIFO today; preserve visit order.
 
-   This turns the per-ray cost from O(F) Python iterations into a handful of vectorized
-   passes; the remaining face × direction loop can later be batched into a single
-   (D, F) broadcast per face if needed.
+##### F31 — UV-seam metrics: the F22 sub-item for this site never shipped
 
-3. If still hot on very large meshes, add spatial pruning: reuse the
-   `_build_occurrence_bvh` AABB idiom on per-triangle bounds to cull candidates per ray.
-
-Call context: per part in `bake_materials` — this loop is the entire cost of the AO
-channel. Verify against the existing bake tests; the vectorized form must keep the
-`1e-8 < t < max_t` window and the ignore-self semantics exactly.
-
-##### F14 — tessellation reads triangulation node-by-node through OCP
-
-On the **main tessellate path**, the mesh-assembly loop extracts every vertex and every
-triangle through individual OCP method calls (`fascat/ops/tessellate.py:235-268`):
+`fascat/mesh.py:2516-2517` and `:2538`, inside the (cached) seam-metrics computation.
+The original F22 entry specified this fix, but the shipped batch only landed the
+`edge_incidence` half:
 
 ```python
-for payload in face_triangulations:
-    nodes = payload.triangulation.MapNodeArray()
-    node_lower = int(nodes.Lower())
-    for local_index in range(payload.node_count):
-        point = nodes.Value(node_lower + local_index).Transformed(payload.transform)
-        points[payload.point_offset + local_index] = (point.X(), point.Y(), point.Z())
-    ...
-    for local_index in range(payload.triangle_count):
-        a, b, c = triangles.Value(triangle_lower + local_index).Get()
-        if payload.reversed_face:
-            faces[payload.triangle_offset + local_index] = (
-                payload.point_offset + c - 1, payload.point_offset + b - 1, payload.point_offset + a - 1,
-            )
-        else:
-            ...
-```
-
-with the same shape for UVs in `_triangulation_uv_nodes` (`:431-437`):
-
-```python
-for local_index in range(node_count):
-    point = uv_nodes.Value(lower + local_index)
-    values[local_index] = (float(point.X()), float(point.Y()))
-```
-
-Per vertex that is a `Value()` call, a `Transformed()` call (which constructs a new
-`gp_Pnt` and multiplies through the `gp_Trsf` in C++ but pays a Python round-trip), and
-three coordinate getters — ~6 OCP boundary crossings per vertex, plus 4 per triangle
-(`Value` + `Get` + the per-row Python branch on `reversed_face`). Each crossing is
-~microseconds of wrapper overhead; on dense tessellations this dominates the step
-(tessellate was 1.57 s of the 3.69 s `vertical-screw.step` baseline). Fix in two stages:
-
-1. Drop `.Transformed()` — read raw coordinates once and apply the transform vectorized;
-   and hoist the `reversed_face` branch out of the triangle loop as a column flip:
-
-   ```python
-   raw = np.empty((payload.node_count, 3), dtype=np.float64)
-   for local_index in range(payload.node_count):
-       point = nodes.Value(node_lower + local_index)          # no .Transformed()
-       raw[local_index] = (point.X(), point.Y(), point.Z())
-   trsf = payload.transform
-   matrix = np.array(
-       [[trsf.Value(r, c) for c in (1, 2, 3, 4)] for r in (1, 2, 3)], dtype=np.float64
-   )                                                          # 3×4, once per payload
-   points[offset : offset + payload.node_count] = raw @ matrix[:, :3].T + matrix[:, 3]
-
-   rows = np.empty((payload.triangle_count, 3), dtype=np.int64)
-   for local_index in range(payload.triangle_count):
-       rows[local_index] = triangles.Value(triangle_lower + local_index).Get()
-   if payload.reversed_face:
-       rows = rows[:, ::-1]
-   faces[t_off : t_off + payload.triangle_count] = payload.point_offset + rows - 1
-   ```
-
-   This removes the per-vertex transform round-trip and moves all arithmetic and the
-   winding flip out of Python; the material fill at `:269-272` is already vectorized.
-
-2. Investigate OCP batch access on `Poly_Triangulation` to eliminate the remaining
-   per-element `Value()` calls entirely (e.g. whether the node/triangle arrays expose a
-   buffer, or whether `RWStl`/`BRepTools`-style bulk copies apply). If OCP offers no
-   batch path, stage 1 is still roughly a 3× reduction in boundary crossings.
-
-`make benchmark` must move on this finding; it is the fixture's largest step.
-
-##### F15 — `_self_intersection_count` scans O(n²) pairs in Python
-
-`fascat/analysis.py:339-369` enumerates every triangle pair in a Python double loop:
-
-```python
-face_vertices = [set(face) for face in mesh.faces.astype(int).tolist()]
+position_keys = [_rounded_key(point, decimals) for point in self.points]
+uv_keys = [_rounded_key(uv, decimals) for uv in self.uvs[channel]]
 ...
-for left in range(mesh.triangle_count - 1):
-    for right in range(left + 1, mesh.triangle_count):
-        if face_vertices[left] & face_vertices[right]:
-            continue
-        if checked >= max_pairs:
-            return _SelfIntersectionResult(..., truncated=True, ...)
-        checked += 1
-        if not bool(np.all(maxs[left] >= mins[right]) and np.all(maxs[right] >= mins[left])):
-            continue
-        if _triangles_intersect(triangles[left], triangles[right]):
-            intersections += 1
+edge_lengths.setdefault(edge_key, float(np.linalg.norm(self.points[start] - self.points[end])))
 ```
 
-Two problems. First, the AABB reject runs two scalar `np.all` calls per pair (`:360`),
-so even rejected pairs cost ~microseconds each — F²/2 of them. Second, `max_pairs` was
-meant as a safety valve, but because pairs are visited in row order, the budget is spent
-entirely on the near-diagonal neighborhood of the first few hundred triangles; large
-meshes get a **truncated result that sampled almost none of the mesh**, i.e. slow *and*
-wrong-ish. Fix: generate candidate pairs vectorized first, then test only survivors:
+`_rounded_key` (`fascat/mesh.py:72-73`) runs its own `np.round` on a 3-vector plus
+`.tolist()` per call (~µs each), once per vertex and per UV — O(V) scalar-shaped numpy
+calls; and the `setdefault` evaluates the norm argument even when the key already
+exists. Fix as originally specified: round in one vectorized pass —
+`position_keys = list(map(tuple, np.round(self.points, decimals).tolist()))`, same for
+UVs — and precompute all edge lengths in one
+`np.linalg.norm(points[edges[:, 0]] - points[edges[:, 1]], axis=1)` pass, indexed by
+edge row. The result is cached per channel + tolerance + geometry token (F7), so this is
+first-computation cost per analyzed mesh. Impact: MEDIUM on analysis of large UV'd
+meshes.
+
+##### F32 — `_compact_material_slots` remaps material indices in Python, per face
+
+`fascat/ops/actions.py:2752-2761`:
 
 ```python
-order = np.argsort(mins[:, 0], kind="mergesort")
-smin, smax = mins[order], maxs[order]
-for pos in range(order.size - 1):
-    # sweep window: only triangles whose min-x is inside [.., smax[pos, 0]]
-    end = pos + 1 + int(np.searchsorted(smin[pos + 1 :, 0], smax[pos, 0], side="right"))
-    if end == pos + 1:
-        continue
-    window = slice(pos + 1, end)
-    overlap = np.all(smax[window] >= smin[pos], axis=1) & np.all(smin[window] <= smax[pos], axis=1)
-    for right in order[window][overlap]:                     # AABB-confirmed candidates only
-        ...  # shared-vertex check, budget check, _triangles_intersect
+remap = {old: new for new, old in enumerate(used)}
+mesh.material_indices = np.asarray([remap[int(index)] for index in mesh.material_indices], dtype=np.int64)
 ```
 
-The per-row AABB test is one vectorized pass over the window instead of two scalar calls
-per pair, and `max_pairs` is then spent on genuine AABB-overlapping candidates.
-(`scipy.spatial.cKDTree` on triangle centroids with a radius of the max triangle extent
-is an equivalent alternative; scipy is already a dependency.) Preserve the exact
-`truncated`/`pairs_checked` reporting semantics — tests assert on them. Keep the scalar
-`_triangles_intersect` as-is: after the prefilter it runs on a tiny survivor set and
-vectorizing it buys little.
+Iterates the numpy array directly — boxing a numpy scalar per element, the exact
+anti-pattern the audit notes call out — with a dict lookup per face. Fix: lookup array —
+`lookup = np.empty(len(material_ids), dtype=np.int64)`,
+`lookup[used] = np.arange(len(used), dtype=np.int64)`,
+`mesh.material_indices = lookup[mesh.material_indices]` (bounds already validated at
+`:2757`). Called on the occlusion-removal/compaction paths; O(F) numpy gather replaces
+O(F) Python. Impact: MEDIUM.
 
-##### F16 — UV overlap detection degrades to O(n²) with Python polygon clipping
+##### F33 — `_uv_seam_vertices` groups vertices via per-vertex Python dict inserts
 
-The overlap sweep in `uv_layout_stats` (`fascat/mesh.py:2236-2265`) sorts triangles on U
-and prunes only on the U axis:
+`fascat/mesh.py:3257-3268`:
 
 ```python
-order = np.argsort(min_uv[:, 0], kind="mergesort")
-for position, left_index_value in enumerate(order):
-    ...
-    for right_index_value in order[position + 1 :]:
-        right_index = int(right_index_value)
-        if min_uv[right_index, 0] > left_max[0] + tolerance:
-            break                                            # U-axis pruning only
-        ...
-        if _triangle_overlap_area_2d(triangles[left_index], triangles[right_index],
-                                     tolerance=tolerance) > tolerance:
-            overlapping_pairs += 1
+rounded = np.round(self.points, 9)
+for index, point in enumerate(rounded.tolist()):
+    by_position.setdefault((float(point[0]), float(point[1]), float(point[2])), []).append(index)
 ```
 
-On atlas-packed meshes — the normal case after unwrap, where charts tile the full 0–1
-square and most triangles' U intervals overlap somebody's — the `break` rarely fires
-early and the sweep degrades toward F²/2 iterations, each surviving pair paying
-`_triangle_overlap_area_2d`, a pure-Python Sutherland–Hodgman polygon clip. The result
-is cached per channel + tolerance + geometry token (F7), but the *first* computation on
-every analyzed mesh is the cost. Fix: prune on both axes with a 2D grid keyed by UV
-AABB, then AABB-prefilter within buckets and clip only survivors:
-
-```python
-cell = max(float(np.median(max_uv - min_uv)), tolerance)     # ~triangle-sized cells
-grid: dict[tuple[int, int], list[int]] = defaultdict(list)
-for index in np.flatnonzero(~degenerate).tolist():
-    lo = np.floor(min_uv[index] / cell).astype(int)
-    hi = np.floor(max_uv[index] / cell).astype(int)
-    for gx in range(lo[0], hi[0] + 1):
-        for gy in range(lo[1], hi[1] + 1):
-            grid[(gx, gy)].append(index)
-seen: set[tuple[int, int]] = set()
-for bucket in grid.values():
-    for i, left in enumerate(bucket):
-        for right in bucket[i + 1 :]:
-            pair = (left, right) if left < right else (right, left)
-            if pair in seen:
-                continue
-            seen.add(pair)
-            # vectorizable AABB test, then _triangle_overlap_area_2d on survivors
-```
-
-Expected cost drops to O(F × occupancy): pairs are only generated within cells, and
-genuinely overlapping charts are the only thing that still pays the Python clipper.
-Counting semantics (`overlapping_pairs` counts unordered pairs once) must be preserved —
-hence the `seen` dedupe for triangles spanning multiple cells.
-
-##### F17 — STEP material binding uses `list.index()` per face
-
-`_material_binding_plan` (`fascat/io/step.py:5306-5313`) runs two linear scans of the
-materials list for **every face** of a part:
-
-```python
-def _material_binding_plan(base_material_id: str, face_material_ids: list[str]) -> tuple[list[str], list[int]]:
-    material_ids = [base_material_id]
-    material_indices: list[int] = []
-    for face_material_id in face_material_ids:
-        if face_material_id not in material_ids:             # O(M) scan
-            material_ids.append(face_material_id)
-        material_indices.append(material_ids.index(face_material_id))  # O(M) scan again
-    return material_ids, material_indices
-```
-
-That is O(faces × distinct materials) with two string-comparison scans per face — on a
-10k-face part with dozens of face colors (common in styled STEP assemblies), millions of
-string comparisons during import. Fix: keep a `{material_id: index}` dict beside the
-list; identical return values, O(faces) total:
-
-```python
-def _material_binding_plan(base_material_id: str, face_material_ids: list[str]) -> tuple[list[str], list[int]]:
-    material_ids = [base_material_id]
-    index_by_id = {base_material_id: 0}
-    material_indices: list[int] = []
-    for face_material_id in face_material_ids:
-        index = index_by_id.get(face_material_id)
-        if index is None:
-            index = len(material_ids)
-            index_by_id[face_material_id] = index
-            material_ids.append(face_material_id)
-        material_indices.append(index)
-    return material_ids, material_indices
-```
-
-Call context: per part during STEP import, whenever per-face materials are bound.
-
-##### F18 — STEP free-edge detection is O(edges × face_edges) via `IsSame` scans
-
-The mixed construction-curve detector (`fascat/io/step.py:5170-5197`) first collects
-every edge of every face into a Python list, then checks each candidate edge against
-that list — and against the growing result list — one `IsSame` call at a time:
-
-```python
-free_edges: list[Any] = []
-edge_explorer = TopExp_Explorer(shape, TopAbs_EDGE)
-while edge_explorer.More():
-    edge = TopoDS.Edge_s(edge_explorer.Current())
-    if not any(edge.IsSame(face_edge) for face_edge in face_edges) and not any(
-        edge.IsSame(existing) for existing in free_edges
-    ):
-        free_edges.append(edge)
-    edge_explorer.Next()
-```
-
-Every `IsSame` is an OCP boundary crossing, and shared edges (the common case — interior
-edges belong to two faces, so `face_edges` holds duplicates) make the list longer than
-the edge count. A shape with E edges pays O(E × |face_edges|) OCP calls; on edge-rich
-imported geometry this is quadratic in practice. Fix: use OCCT's own shape-hashing map,
-whose `Contains()` honors `IsSame` semantics as an O(1) hash lookup:
-
-```python
-from OCP.TopTools import TopTools_IndexedMapOfShape
-from OCP.TopExp import TopExp
-
-face_edge_map = TopTools_IndexedMapOfShape()
-face_explorer = TopExp_Explorer(shape, TopAbs_FACE)
-while face_explorer.More():
-    TopExp.MapShapes_s(face_explorer.Current(), TopAbs_EDGE, face_edge_map)
-    face_explorer.Next()
-if face_edge_map.IsEmpty():
-    return None
-
-free_edges: list[Any] = []
-free_edge_map = TopTools_IndexedMapOfShape()
-edge_explorer = TopExp_Explorer(shape, TopAbs_EDGE)
-while edge_explorer.More():
-    edge = TopoDS.Edge_s(edge_explorer.Current())
-    if not face_edge_map.Contains(edge) and not free_edge_map.Contains(edge):
-        free_edge_map.Add(edge)
-        free_edges.append(edge)
-    edge_explorer.Next()
-```
-
-This also deduplicates `face_edges` for free (the map stores each shape once). Do
-**not** key on Python `id()`: OCP wrapper objects are transient across explorer
-iterations (see audit notes). Call context: per part, when a shape mixes faces and
-standalone construction edges.
-
-##### F19 — CLI startup imports numpy, `io/step.py`, and `fascat.analysis` eagerly
-
-Measured 2026-07-05: `import fascat.cli` takes ~129 ms, and `python -X importtime`
-attributes ~59 ms of it to the `fascat.analysis` subtree alone
-(analysis → asset → export_report → mesh → options, plus numpy at ~26 ms). Every
-`fascat` invocation — including `--help` and `--version` — pays this. Three eager
-chains, all in the `fascat/cli.py` header:
-
-```python
-from fascat.analysis import AnalysisReport, analyze_output   # :22
-from fascat.io.brep import BREP_SUFFIXES, read_brep          # :24
-from fascat.io.fbx import FBX_SUFFIXES                       # :25
-from fascat.io.gltf import GLTF_SUFFIXES                     # :26
-from fascat.io.iges import IGES_SUFFIXES, read_iges          # :27
-from fascat.io.obj import OBJ_SUFFIXES                       # :28
-from fascat.io.step import read_step, read_step_bytes        # :29
-from fascat.io.stl import STL_SUFFIXES                       # :30
-```
-
-- `AnalysisReport` appears **only** inside a return-type annotation (`:3889`), and
-  `from __future__ import annotations` is active, so the annotation is never evaluated —
-  the import exists purely for the type checker. `analyze_output` runs only on the
-  analyze path.
-- `read_step`/`read_brep`/`read_iges` pull in `fascat/io/step.py` — 7k lines with
-  `import numpy` at `:16` — before any command has been chosen.
-- The `*_SUFFIXES` constants are small frozen sets, but they live in modules that import
-  numpy at top (`fascat/io/gltf.py:16`, `io/fbx.py:7`, `io/obj.py:6`, `io/stl.py:7`),
-  so importing the constant loads the writer.
-
-Fix:
-
-```python
-# fascat/io/_suffixes.py — new, zero-dependency
-BREP_SUFFIXES = frozenset({".brep", ...})    # moved verbatim from each io module,
-FBX_SUFFIXES = frozenset({".fbx"})           # re-exported there for compatibility
-...
-
-# fascat/cli.py
-from typing import TYPE_CHECKING
-from fascat.io._suffixes import (BREP_SUFFIXES, FBX_SUFFIXES, GLTF_SUFFIXES,
-                                 IGES_SUFFIXES, OBJ_SUFFIXES, STL_SUFFIXES)
-if TYPE_CHECKING:
-    from fascat.analysis import AnalysisReport
-
-def _validate_and_analyze_output_for_cli(...) -> tuple[dict[str, int], AnalysisReport | None]:
-    from fascat.analysis import analyze_output               # deferred to the analyze path
-    ...
-
-def _read_cad_input(path: Path, ...):
-    from fascat.io.step import read_step                     # deferred to command bodies
-    ...
-```
-
-Pin the fix in the existing contract: `tests/test_lazy_imports.py` already forbids numpy
-after `import fascat` (`:15-23`), but the CLI test (`:26-33`) excludes only
-runtime/visual/PIL — extend its exclusion list:
-
-```python
-"heavy = [name for name in ('fascat.runtime', 'fascat.visual', 'PIL',"
-" 'numpy', 'fascat.io.step', 'fascat.analysis') if name in sys.modules]\n"
-```
-
-Expected result: `import fascat.cli` drops to typer + rich + stdlib (~40 ms), a
-~90 ms/invocation saving, and heavy imports move to first use inside commands.
-
-##### F20 — every `Asset(...)` construction deep-copies all geometry
-
-`Asset.__post_init__` (`fascat/asset.py:327-334`) defensively copies the entire object
-graph on every construction:
-
-```python
-def __post_init__(self) -> None:
-    self.root = self.root.copy()
-    self.parts = {part_id: part.copy(keep_source=True) for part_id, part in self.parts.items()}
-    self.materials = {material_id: material.copy() for material_id, material in self.materials.items()}
-    self.images = {image_id: image.copy() for image_id, image in self.images.items()}
-    self.metadata = dict(self.metadata)
-    self.pmi = [annotation for annotation in self.pmi]
-    self.report = self.report.copy()
-```
-
-and `Part.copy(keep_source=True)` reaches `Mesh.copy()` (`fascat/mesh.py:306-320`),
-which clones **every** numpy array — points, faces, normals, tangents, all UV channels,
-material indices, and all face groups:
-
-```python
-mesh = Mesh._adopt(
-    points=self.points.copy(),
-    faces=self.faces.copy(),
-    normals=None if self.normals is None else self.normals.copy(),
-    tangents=None if self.tangents is None else self.tangents.copy(),
-    uvs={channel: values.copy() for channel, values in self.uvs.items()},
-    ...
-)
-```
-
-So constructing an `Asset` costs a full copy of all scene geometry, and a pipeline run
-constructs Assets at every stage — total bytes copied scale with **pipeline depth ×
-scene size**. For a 500 MB-geometry assembly through a ~10-stage pipeline that is
-gigabytes of pure memcpy plus the allocator pressure that comes with it. The escape
-hatch already exists: `Asset._adopt` (`fascat/asset.py:336`) constructs without copying,
-exactly like `Mesh._adopt` above.
-
-This is a deliberate immutability/ownership design, so treat it as architectural rather
-than a drop-in fix:
-
-1. First profile it on the 10k+ part corpus (§3 open item) to size the win — if
-   conversion time is dominated by tessellation/import, this can stay P3.
-2. Then migrate internal pipeline stages that already own their intermediates (built a
-   fresh `parts` dict, never alias caller data) from `Asset(...)` to `Asset._adopt(...)`
-   — the same pattern `Mesh.copy` itself uses.
-3. Alternatively add copy-on-write to `Mesh`: mark arrays read-only at adopt time
-   (`array.setflags(write=False)`) and copy lazily in mutators.
-
-Behavior-sensitive: write aliasing tests first (mutating a returned Asset must not
-corrupt the input Asset) so the `_adopt` migration can't silently introduce sharing
-bugs.
-
-Profiling note (2026-07-05): a synthetic inline benchmark built already-owned inputs
-with `_adopt` and timed only `Asset(root=..., parts=...)`. A 10,000-part / 20,000-triangle
-minimal-mesh case copied 1.8 MiB of mesh arrays in 28.4 ms median over five runs
-(`Asset._adopt` baseline: 4.4 us; tracemalloc peak: 17.4 MiB). A 64-part /
-524,288-triangle full-attribute case copied 188.0 MiB in 26.1 ms median, about
-7.2 GiB/s (`Asset._adopt` baseline: 5.7 us; tracemalloc peak: 188.2 MiB). `cProfile`
-attributed the representative large run to `Asset.__post_init__ -> Part.copy ->
-Mesh.copy`, with 577 `numpy.ndarray.copy` calls. This confirms the copy cost, but
-does not yet justify changing copy ownership semantics without the real 10k+ corpus
-profile.
-
-##### F21 — spatial-bucket neighbor search is per-vertex Python with scalar norms
-
-Four sites in `fascat/mesh.py` share a hand-rolled 3×3×3-cell grid walk — `:800`
-(`_near_duplicate_unmerged_stats`), `:878`, `:1356`, `:1483` (the merge-vertices,
-boundary-gap, and stitch paths). Representative shape:
-
-```python
-buckets: dict[tuple[int, int, int], list[int]] = defaultdict(list)
-for vertex, point in enumerate(self.points):
-    key = self._spatial_bucket_key(point, upper)
-    for dx in (-1, 0, 1):
-        for dy in (-1, 0, 1):
-            for dz in (-1, 0, 1):
-                neighbor_key = (key[0] + dx, key[1] + dy, key[2] + dz)
-                for other in buckets.get(neighbor_key, []):
-                    pair = (min(vertex, other), max(vertex, other))
-                    if pair in connected_edges:
-                        continue
-                    distance = float(np.linalg.norm(point - self.points[other]))
-                    if lower < distance <= upper:
-                        near_pairs += 1
-    buckets[key].append(vertex)
-```
-
-Per vertex: a Python bucket-key computation, 27 dict probes, and one **scalar**
-`np.linalg.norm` call (~µs each) per candidate neighbor — all interpreter-bound. The
-algorithm is the right complexity class; the constant factor is 100–1000× a vectorized
-equivalent. Fix: scipy is already a dependency (connected components); its cKDTree
-returns all close pairs in one call, and the distance filter vectorizes:
-
-```python
-from scipy.spatial import cKDTree
-
-pairs = cKDTree(self.points).query_pairs(upper, output_type="ndarray")   # (P, 2) int64
-distances = np.linalg.norm(self.points[pairs[:, 0]] - self.points[pairs[:, 1]], axis=1)
-mask = distances > lower
-# _near_duplicate_unmerged_stats: drop connected pairs, then count/min vectorized
-keys = pairs[mask]
-unconnected = np.array([tuple(row) not in connected_edges for row in keys.tolist()])
-near_pairs = int(np.count_nonzero(unconnected))
-nearest = float(distances[mask][unconnected].min()) if near_pairs else 0.0
-```
-
-(`query_pairs` returns each unordered pair once with `i < j`, matching the
-`(min, max)` canonicalization above; if `connected_edges` grows large, replace the
-membership comprehension with a sorted structured-view `np.isin`.) Apply per site — the
-merge/stitch variants differ in what they do with a found pair, not in the search — and
-keep a grid only if a site's tests pin an exact visit order.
-
-##### F22 — per-face `.astype(int).tolist()` loops survive in mesh repair/analysis
-
-The same shape F8/F12 removed elsewhere. The dominant pattern is the per-face edge-map
-build, copied three times in `fascat/ops/actions.py` — `:1917-1919` (`_edge_faces`),
-`:1998-2002` (`_boundary_loops`), `:2609-2611` (keep-frontier edge map):
-
-```python
-for face_index, face in enumerate(mesh.faces.astype(int).tolist()):
-    for start, end in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
-        edge_faces.setdefault(_edge_key(start, end), []).append(face_index)
-```
-
-That is O(F) list materialization plus 3F tuple allocations and dict probes in Python.
-Build the edge table once, vectorized, in a shared helper (same home as the F9/F10
-helpers) and derive all three consumers from its grouped form:
-
-```python
-def edge_incidence(faces: IntArray) -> tuple[IntArray, IntArray]:
-    """Sorted (E*3, 2) canonical edges and the face index of each row."""
-    faces64 = faces.astype(np.int64, copy=False)
-    edges = np.concatenate([faces64[:, [0, 1]], faces64[:, [1, 2]], faces64[:, [2, 0]]])
-    edges.sort(axis=1)                                   # canonical (min, max) per row
-    face_ids = np.tile(np.arange(faces64.shape[0], dtype=np.int64), 3)
-    order = np.lexsort((edges[:, 1], edges[:, 0]))
-    return edges[order], face_ids[order]
-```
-
-Consumers then use `np.diff`-based group boundaries: boundary edges are groups of size
-1 (`_boundary_loops`), face adjacency reads face ids within a group (`_edge_faces`, the
-keep-frontier map). Remaining sites, same disease, individual cures:
-
-- `fascat/mesh.py:1029-1032` — the material-signature build converts each face row
-  inside the loop (`for vertex_index in face.astype(int).tolist():`); faces are already
-  int64, so at minimum iterate the row directly, or vectorize the whole build as unique
-  (vertex, material) pairs: `np.unique(np.stack([self.faces.reshape(-1),
-  np.repeat(self.material_indices, 3)], axis=1), axis=0)`.
-- `fascat/mesh.py:1378-1383` — `split_t_junctions` round-trips `points`, every UV
-  channel, and `faces` through Python lists **up front**, before knowing whether any
-  T-junction exists; splits are rare. Keep the arrays, collect only the appended
-  vertices/faces in small Python lists, and `np.concatenate` once at the end.
-- `fascat/mesh.py:1684-1686` — orientability edge map iterates
-  `self.faces.astype(int).tolist()`; use `edge_incidence` above (it preserves the
-  per-face directed order needed for the orientation check via `face_ids`).
-- `fascat/mesh.py:2306-2327` — UV-seam metrics: `_rounded_key` is called once per vertex
-  and per UV in list comprehensions, and the edge loop runs
-  `edge_lengths.setdefault(edge_key, float(np.linalg.norm(...)))` (`:2327`), which
-  evaluates the norm argument **even when the key is already present**. Round in one
-  vectorized pass and precompute all lengths:
-
-  ```python
-  position_keys = list(map(tuple, np.round(self.points, decimals).tolist()))
-  uv_keys = list(map(tuple, np.round(self.uvs[channel], decimals).tolist()))
-  edges, _ = edge_incidence(self.faces)
-  lengths = np.linalg.norm(self.points[edges[:, 0]] - self.points[edges[:, 1]], axis=1)
-  ```
-
-Behavior-preserving throughout; the existing repair/analysis tests pin the outputs.
-
-##### F23 — export-writer conversion churn
-
-Small allocations repeated per accessor/node/face on every export. Individually minor;
-together they are the writers' Python overhead. Per site:
-
-- `fascat/io/gltf.py:894-895`, `:1212-1213`, `:1222-1223` — accessor min/max run
-  `.astype(...)` before `.tolist()`; the `astype` allocates a full intermediate copy and
-  `.tolist()` already yields Python floats/ints of the right type. Same on per-node 4×4
-  transforms at `:1721`, `:1810`:
-
-  ```python
-  # before
-  minimum=points.min(axis=0).astype(float).tolist(),
-  gltf_node["matrix"] = transform.T.reshape(-1).astype(float).tolist()
-  # after — drop the astype; dtype is already float64 (quantized path: int via .tolist())
-  minimum=points.min(axis=0).tolist(),
-  gltf_node["matrix"] = transform.T.reshape(-1).tolist()
-  ```
-
-- `fascat/io/usd.py:569` — uniqueness check materializes every face index as a Python
-  int; `:574` — the per-material face list round-trips through `.astype(int).tolist()`
-  (USD's `Vt` arrays accept numpy/int sequences; keep `.tolist()` only if the binding
-  demands it); `:450` — `Gf.Matrix4d(child.transform.tolist())` per node (check the
-  Gf/Vt buffer-protocol constructors):
-
-  ```python
-  # before
-  if mesh.material_indices is None or len(set(mesh.material_indices.astype(int).tolist())) <= 1:
-  # after
-  if mesh.material_indices is None or np.unique(mesh.material_indices).size <= 1:
-  ```
-
-- `fascat/io/obj.py:206` — one Python function call (`_face_material_id`, `:260-266`:
-  bounds check + numpy scalar indexing + `int()`) per triangle:
-
-  ```python
-  # before
-  material_ids = [_face_material_id(part, mesh, face_index) for face_index in range(mesh.triangle_count)]
-  # after — resolve the lookup table once, index in bulk
-  lookup = list(part.material_ids)
-  if not lookup:
-      material_ids = [None] * mesh.triangle_count
-  elif mesh.material_indices is None:
-      material_ids = [lookup[0]] * mesh.triangle_count
-  else:
-      material_ids = [
-          lookup[index] if index < len(lookup) else None
-          for index in mesh.material_indices.tolist()
-      ]
-  ```
-
-- `fascat/ops/tessellate.py:334-340` — construction-curve segment lengths are computed
-  one scalar `np.linalg.norm` per sample pair; stack and vectorize:
-
-  ```python
-  # after
-  samples_array = np.asarray(samples, dtype=np.float64)          # (N+1, 3)
-  lengths = np.linalg.norm(np.diff(samples_array, axis=0), axis=1)
-  keep = lengths > _CONSTRUCTION_CURVE_MIN_SEGMENT_LENGTH
-  segments.extend(zip(samples_array[:-1][keep], samples_array[1:][keep], strict=True))
-  ```
-
-- `fascat/ops/tessellate.py:356-410` — `_tube_mesh_from_segments` appends per-point
-  numpy arrays with `math.cos`/`math.sin` per side in the inner loop. The ring is
-  identical for every segment; compute it once and broadcast:
-
-  ```python
-  angles = 2.0 * math.pi * np.arange(sides, dtype=np.float64) / sides
-  cos_a, sin_a = np.cos(angles)[:, None], np.sin(angles)[:, None]      # (sides, 1)
-  # per segment (u_axis/v_axis depend on direction):
-  offsets = radius * (cos_a * u_axis + sin_a * v_axis)                 # (sides, 3)
-  ring_points = np.concatenate([start + offsets, end + offsets])       # (2*sides, 3)
-  ```
-
-  and build the two-triangles-per-side index block once as a template, offset per
-  segment.
-
-- `fascat/ops/tessellate.py:465-466` — free-edge JSON converts each endpoint separately;
-  gather both sides in bulk:
-
-  ```python
-  # before
-  for start, end in boundary_edges[:max_segments].tolist():
-      segments.append([mesh.points[start].astype(float).tolist(), mesh.points[end].astype(float).tolist()])
-  # after — one gather, one conversion
-  clipped = boundary_edges[:max_segments]
-  segments = np.stack([mesh.points[clipped[:, 0]], mesh.points[clipped[:, 1]]], axis=1).tolist()
-  ```
-
-##### F24 — small per-run overheads
-
-Each is once-per-conversion (or once-per-candidate) rather than per-element; listed
-together because every fix is a few lines.
-
-- `fascat/export_report.py:82` — `export_image_counts` recomputes
-  `_source_image_ids(asset)` (a full pass over `asset.images`) inside a union with
-  `source_unique`, which was built from that same call three lines up (`:79`), so the
-  union is a no-op:
-
-  ```python
-  # before
-  source_unique = _source_image_ids(asset) | set(source_refs)          # :79
-  ...
-  "export_source_image_count": len(_source_image_ids(asset) | source_unique),  # :82
-  # after
-  "export_source_image_count": len(source_unique),
-  ```
-
-- `fascat/pipeline.py:1501-1504` — `_measured_report_timings` makes three full passes
-  over `report.steps`:
-
-  ```python
-  # before
-  pipeline_ms = int(round(sum(step.duration for step in asset.report.steps) * 1000.0))
-  write_ms = int(round(sum(step.duration for step in asset.report.steps if step.name == "write") * 1000.0))
-  validate_ms = int(round(sum(step.duration for step in asset.report.steps if step.name == "validate") * 1000.0))
-  # after — one pass, same rounding (round the float sums at the end)
-  pipeline = write = validate = 0.0
-  for step in asset.report.steps:
-      pipeline += step.duration
-      if step.name == "write":
-          write += step.duration
-      elif step.name == "validate":
-          validate += step.duration
-  ```
-
-- `fascat/pipeline.py:1467-1472` + callers at `:1013`, `:1027`, `:1476` — every
-  budget-report metric independently calls `_material_texture_summaries(asset)`, a full
-  iteration over all materials (`:1537-1538`):
-
-  ```python
-  # after — compute once in _add_profile_budget_report and thread through
-  summaries = _material_texture_summaries(asset)
-  texture_resolutions = [resolution for resolution, _count in summaries]
-  texture_count, estimated_bytes = _texture_summary_totals(summaries)
-  ```
-
-- `fascat/runtime.py:1091`, `:1148` — the preview decoders `deepcopy` the entire glTF
-  JSON document, but the subsequent mutations touch only the `images` list entries,
-  `bufferViews`, and the extension arrays:
-
-  ```python
-  # before
-  document = deepcopy(source_document)
-  # after — copy exactly the containers the decoder mutates
-  document = dict(source_document)
-  document["images"] = [dict(image) for image in source_document.get("images", [])]
-  document["bufferViews"] = [dict(view) for view in source_document.get("bufferViews", [])]
-  ```
-
-  (audit `_promote_basis_texture_sources` / `_remove_gltf_extension` /
-  `_embed_preview_buffers` / `_rewrite_external_image_uris` for the full mutated-key
-  set before landing). And `:1121-1124` writes the document to disk then immediately
-  re-reads and re-parses it just to validate:
-
-  ```python
-  # before
-  output_path.write_text(json.dumps(document), encoding="utf-8")
-  decoded_document = _read_gltf_json_document(output_path)
-  if _document_uses_basis_textures(decoded_document):
-      raise RuntimeError("alktx2 KTX2 decode preserved KHR_texture_basisu")
-  # after — validate in memory, then write
-  if _document_uses_basis_textures(document):
-      raise RuntimeError("alktx2 KTX2 decode preserved KHR_texture_basisu")
-  output_path.write_text(json.dumps(document), encoding="utf-8")
-  ```
-
-  Preview harness only; lowest priority of the batch.
-
-- `fascat/ops/actions.py:261` + `:2111-2130` — the occlusion-removal loop calls
-  `_candidate_occluders` once **per candidate**, and that function rebuilds the filtered
-  occluder tuple, both bounds vstacks, and a **full BVH** each time:
-
-  ```python
-  for candidate in selected_occurrences:                     # :261 — N times
-      occluders = _candidate_occluders(result, candidate, occurrences, options)
-      # inside: tuple filter over all occurrences, two np.vstack, _build_occurrence_bvh
-  ```
-
-  The only per-candidate difference is excluding the candidate itself — the
-  transparency filter is candidate-invariant. Build the opaque set and one BVH before
-  the loop, and skip self-hits by node id at query time:
-
-  ```python
-  opaque = tuple(
-      occluder for occluder in occurrences
-      if options.consider_transparency_opaque or not _part_is_transparent(asset, occluder.part_id)
-  )
-  bvh = _build_occurrence_bvh(
-      np.vstack([occluder.bounds_min for occluder in opaque]),
-      np.vstack([occluder.bounds_max for occluder in opaque]),
-  )
-  for candidate in selected_occurrences:
-      ...  # query bvh; discard hits where occurrence.node.id == candidate.node.id
-  ```
-
-  Turns O(N² log N) BVH construction into O(N log N); the self-exclusion moves from
-  set-construction time to query time with identical results.
+The rounding is vectorized but the grouping is O(V) Python dict work, followed by
+per-group UV comparisons. Fix: vectorize the grouping —
+`np.unique(rounded, axis=0, return_inverse=True)`, take groups from
+`np.argsort(inverse)` split at count boundaries (`np.cumsum` of the unique counts); the
+per-group UV-mismatch check becomes
+`np.unique(np.round(channel_values[group], 9), axis=0).shape[0] > 1` per channel.
+Callers: feature-group preservation for decimation (`fascat/mesh.py:3031`) and repair
+stats (`fascat/ops/actions.py:1400`). Impact: MEDIUM on large meshes entering
+feature-preserving decimation.
+
+##### F34 — `referenced_material_ids` computed twice per export-stats call
+
+`fascat/export_report.py:67` (`export_material_counts`) and `:104` (via
+`referenced_materials`, called from `export_image_counts` at `:78`). Each call is a full
+pass over all parts × LOD meshes with an `np.unique` per mesh — the same disease F24
+fixed for `_source_image_ids`, one function over. Fix: compute once in the shared caller
+and thread through, or give `export_image_counts`/`referenced_materials` an optional
+`referenced: set[str] | None = None` parameter defaulting to recompute. Impact:
+LOW-MEDIUM (per export-stats call, scales with part × LOD count).
+
+##### F35 — small per-site cleanups
+
+Each is a few lines; listed together:
+
+- `fascat/io/gltf.py:1689-1697` — `_face_groups` runs one `np.flatnonzero` full scan per
+  unique material (O(k × n)); a single `np.argsort(material_indices, kind="stable")` +
+  boundary split makes it one O(n log n) pass. Only worth it for heavily multi-material
+  meshes; keep the sanctioned `np.unique(...).tolist()` idiom for the loop itself.
+- `fascat/io/step.py:1614` — `for key, value in list(result.items())` copies the items
+  list; only values are reassigned in the body, so iterate `result.items()` directly
+  (verify no key mutation first).
+- `fascat/io/usd.py:576` — `np.flatnonzero(...).tolist()` per material subset; check
+  whether `Vt.IntArray` / `CreateGeomSubset` accepts numpy via the buffer protocol and
+  drop the `.tolist()` if so.
+- `fascat/mesh.py:1363-1364` — the degenerate-face duplicate check builds
+  `set(face.astype(int).tolist())` per degenerate face;
+  `np.unique(self.faces[face_index]).size < 3` avoids both allocations (rare path,
+  cheap fix).
+
+##### F20 — every `Asset(...)` construction deep-copies all geometry (carried, `[~]`)
+
+`Asset.__post_init__` (`fascat/asset.py:327-334`) copies the entire object graph —
+root, all parts (through `Mesh.copy()`, which clones every numpy array), materials,
+images, report — on every construction, so total bytes copied scale with **pipeline
+depth × scene size**. The escape hatch exists: `Asset._adopt` (`fascat/asset.py:336`)
+constructs without copying. This is a deliberate immutability/ownership design — treat
+it as architectural, not a drop-in fix.
+
+Synthetic profile (2026-07-05): a 10,000-part / 20,000-triangle minimal-mesh case copied
+1.8 MiB in 28.4 ms median (`_adopt` baseline 4.4 µs); a 64-part / 524,288-triangle
+full-attribute case copied 188.0 MiB in 26.1 ms median (~7.2 GiB/s; `_adopt` baseline
+5.7 µs). `cProfile` attributed the cost to `Asset.__post_init__ → Part.copy →
+Mesh.copy` (577 `ndarray.copy` calls). This confirms the copy cost but does not yet
+justify changing copy-ownership semantics without the real 10k+ corpus profile.
+
+Remaining work: (1) profile on the 10k+ part corpus (§3 open item); (2) if justified,
+migrate internal pipeline stages that already own their intermediates to
+`Asset._adopt(...)`, or add copy-on-write to `Mesh` (`array.setflags(write=False)` at
+adopt time, lazy copy in mutators). Behavior-sensitive: write aliasing tests first.
 
 #### Verification recipe (when implementing)
 
-1. Focused tests per finding: `tests/test_actions.py` (F13, F22, F24),
-   `tests/test_tessellate.py` (F14, F23), `tests/test_analysis.py` (F15),
-   `tests/test_mesh.py` (F16, F21, F22), the STEP/BREP/IGES import tests (F17, F18),
-   `tests/test_lazy_imports.py` + `tests/test_cli.py` (F19 — add the numpy/step/analysis
-   exclusions to the CLI lazy test first so the fix is pinned), `tests/test_asset.py`
-   (F20 — add aliasing tests before touching the copy discipline),
-   `tests/test_gltf.py` / OBJ / USD writer tests (F23).
+1. Focused tests per finding: the heal/repair tests (F25), `tests/test_actions.py` (F27,
+   F28, F32), the STEP import tests (F29, F30), `tests/test_mesh.py` (F31, F33),
+   `tests/test_export_report.py` (F34), the glTF/USD/writer tests (F35),
+   `tests/test_asset.py` aliasing tests before touching F20. F26 is evidence-only
+   closure; `tests/test_tessellate.py` remains the regression suite for the stage-1
+   Python extraction path.
 2. `make ci` for the full gate.
-3. `make benchmark` before/after — F14 is on the fixture's critical path (tessellate was
-   1.57 s of 3.69 s on `vertical-screw.step`), so expect a visible improvement; F13
-   needs a bake-materials scenario to measure; F19 is measured with
-   `python -X importtime -c "import fascat.cli"` (baseline 2026-07-05: ~129 ms);
-   F15–F18 and F20–F24 show on large imports/meshes only.
+3. `make benchmark` before/after — F25 shows on repair of dense tessellations; F27/F28
+   need a bake-materials scenario to measure; F29/F30 show on large styled/PMI-rich STEP
+   imports only. Record a fresh baseline first — the 2026-07-01 numbers predate the
+   F13–F24 batch.
 
 ## 4. Python API redesign — 0.4.0, breaking (Shapely-inspired)
 
@@ -1077,76 +453,21 @@ No open items.
 
 ## 6. Production defaults & guideline alignment
 
-- [x] **P2** Enforce 2 px padding for any UV1 bake-domain packing (unwrap or projection) —
-  `UnwrapOptions.padding` defaults to 2 (`fascat/options.py:476`) but nothing enforces a
-  floor when a bake-domain channel is packed with a smaller explicit value; a 0/1 px
-  padding on a lightmap atlas bleeds neighboring charts into AO and lightmap bakes. Clamp
-  (with a report note) at the point where the bake domain is resolved
-  (`fascat/ops/stage.py`, the `_uv_domain(...) == "bake"` branch):
-
-  ```python
-  if domain == "bake" and effective_padding < 2:
-      asset.report.add_warning(
-          f"part {part_id} uv{channel}: padding {effective_padding}px is below the 2px "
-          "bake-domain minimum; clamping to 2px to prevent chart bleed in AO/lightmap bakes"
-      )
-      effective_padding = 2
-  ```
-
-- [x] **P2** Atlas baking on by default in production export presets —
-  `AtlasOptions.enabled` is still `False` (`fascat/options.py:504`) and no built-in
-  profile flips it, so the "production" presets ship without atlas consolidation; either
-  enable it in the realtime/production profiles (`fascat/profiles.py`) or document why
-  default-off is the deliberate choice
-
-- [x] **P2** Docs drifted behind the 2026-07 defaults batch — added by audit 2026-07-03;
-  re-verify each cite while fixing since docs lines drift fast:
-  - `docs/api.md:629-632` describes the `sag_ratio=0.0002` default but not the mutual
-    exclusivity: `TessellationOptions(sag=0.1)` silently sets `sag_ratio=None`
-    (`fascat/options.py:215-218`) — say so, it changes what "default" means for any
-    caller passing `sag`
-  - `docs/reference.md` flag tables: no `--sag-ratio` row alongside the documented sag
-    flag, and no upgrade note that `--hard-edge-angle` (30→45) and `--normal-weighting`
-    (angle→area) defaults changed — assets re-converted with 0.5.0 defaults will shade
-    differently, which deserves a migration callout
-  - `docs/api.md`: document `fc.Error` vs `fc.FascatError` (alias, `fascat/errors.py:10`)
-    and the "catching errors" story from the §2 I/O item
-
-- [x] **P3** Open-shell-separate face orientation mode — implemented and documented
-  (`single_sided_open_shell` accepted in `fascat/options.py:275`, wired at
-  `fascat/asset.py:1827` and `fascat/mesh.py:96-97`, described in `docs/api.md`) but has
-  **zero test coverage** (`grep -r single_sided_open_shell tests/` is empty); add an
-  open-shell fixture test asserting per-component consistent orientation before calling
-  this done
-- [x] **P3** Texel-density preset for AABB projection — `UnwrapOptions.texel_density`
-  exists and validates (`fascat/options.py:475,485-486`) but is only *recorded* as
-  material metadata (`fascat/ops/stage.py:393-394`); it does not scale the AABB
-  projection, so the guideline behavior (e.g. 1000 units/UV) is still unimplemented
-- [x] **P3** Document switch-distance formula derivations; allow per-level
-  `switch_distance_override` (`_switch_distance`, `fascat/ops/lod.py:665`)
+No open items.
 
 ## 7. Testing & CI
 
 - [ ] **P2** Real IGES/BREP fixtures (zero exist today; only synthetic geometry is tested)
-- [x] **P2** Modules with no dedicated test file — added by audit 2026-07-03:
-  `fascat/export_report.py`, `fascat/material.py`, `fascat/pipeline_file.py`,
-  `fascat/pmi_visuals.py`, `fascat/size_ladder.py`, `fascat/validation.py` have no
-  `tests/test_<module>.py`; before writing new tests, check the coverage report
-  (`make coverage`) per module — several are exercised indirectly through pipeline tests,
-  so target the genuinely uncovered branches rather than duplicating integration coverage
 - [~] **P2** stdin→stdout conversion integration tests (`-` paths) — the CLI supports `-`
   and two basic tests exist (`tests/test_cli.py:96,1447`); still missing: round-trip
   stdin→stdout for each writer format and the error paths (binary garbage on stdin,
   closed stdout)
-- [x] **P2** Consistent `requires_xatlas` markers — still only 3 marked tests
-  (`tests/test_stage.py:744,817` + one more); every unwrap/lightmap/bake test that
-  soft-skips without xatlas should carry the marker so `-m requires_xatlas` selects them
 - [ ] **P3** mypy over `tests/` (`pyproject.toml:98` scopes mypy to `fascat/` only)
 - [ ] **P3** Golden-image corpora for engine previews (carried from the previous plan)
 
 ## 8. Packaging, docs & release
 
-- [x] **P3** FBX epoch CreationTime: document the reproducibility rationale (`fascat/io/fbx.py:140`)
+No open items.
 
 ## 9. Carried-forward feature roadmap
 
@@ -1209,12 +530,12 @@ Recorded so future audits don't re-litigate them:
   refuted: `reordered_face_indices` always has length equal to the triangle count with
   values in `[0, F)` (buffer optimization never changes face count), so the scatter cannot
   raise; and the enclosing `except Exception` (`fascat/mesh.py:2699`) would swallow it
-  anyway. Retained only as the §1 P2 uninitialized-memory item.
+  anyway. Retained only as the §1 P2 uninitialized-memory item (since shipped).
 - Audit 2026-07-03: "`_tag_uv_layout_quality` recomputes per-channel UV stats with no
   cache" (former F7, was `[~]` in §3) — refuted for the working tree: `uv_layout_stats`
-  and `uv_distortion_metrics` are cached in `fascat/mesh.py:2205-2273,2383-2458` via
-  `_cached_value` keyed on channel + tolerance + geometry cache token; the op calling them
-  per channel hits the cache. Closed.
+  and `uv_distortion_metrics` are cached in `fascat/mesh.py` via `_cached_value` keyed on
+  channel + tolerance + geometry cache token; the op calling them per channel hits the
+  cache. Closed.
 - Audit 2026-07-03, excluded pending verification (reported by audit tooling, **not**
   adversarially verified — re-check before acting): `--normalize-uvs` allegedly dedupes
   channel lists silently; the global-flag normalizer allegedly ignores global flags placed
@@ -1230,3 +551,19 @@ Recorded so future audits don't re-litigate them:
 - Audit 2026-07-05: an agent-suggested F18 fix keyed OCP edges on Python `id()` —
   rejected: OCP wrapper objects are transient, so `id()` identity is meaningless across
   explorer iterations; shape identity must come from `IsSame`/`TopTools` hashing.
+- Audit 2026-07-07: "`_bucket_close_vertex_pairs` 27-cell grid walk is a HIGH hot path"
+  (`fascat/mesh.py:1079-1098`) — refuted as HIGH: since F21, `_close_vertex_pairs` takes
+  the `_scipy_close_point_pairs` cKDTree fast path first (`fascat/mesh.py:1074`); the
+  bucket walk only runs when scipy is unavailable. Kept as fallback; not worth
+  optimizing.
+- Audit 2026-07-07: "`_connected_face_components_bfs` `.tolist()` edge map is HIGH"
+  (`fascat/ops/hierarchy.py:561-562`) — refuted: it is the scipy-unavailable fallback;
+  the scipy incidence-matrix path runs first (`:532`).
+- Audit 2026-07-07: "remove `.tolist()` before Python loops" (`fascat/io/obj.py:265`,
+  the mesh.py t-junction loops at `:1463/:1485/:1503/:1527`, `_rounded_key`) — refuted
+  as stated: iterating a numpy array directly boxes a numpy scalar per element and is
+  *slower* than `.tolist()`; `.tolist()`-then-iterate is the sanctioned idiom (see the
+  F8 note above). The actionable form is vectorizing the *loop itself* where possible
+  (F31/F33); the t-junction loops carry early-exit/stateful logic and stay Python.
+- Audit 2026-07-07: "`faces.astype(np.int64, copy=False)` is wasteful"
+  (`fascat/analysis.py:344`) — refuted: no-op-cost dtype guard; sanctioned idiom.
