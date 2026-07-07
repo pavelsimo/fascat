@@ -10,7 +10,7 @@ from fascat.asset import Asset, Node, Part
 from fascat.cli import app
 from fascat.filter import Filter
 from fascat.mesh import Mesh
-from fascat.ops.heal import BrepHealDiagnostics, BrepStatus, brep_status, heal_shape
+from fascat.ops.heal import BrepHealDiagnostics, BrepStatus, _face_overlap_descriptor, brep_status, heal_shape
 from fascat.options import BrepHealOptions, ConversionProfile, RepairOptions, StageOptions
 from fascat.pipeline import convert
 
@@ -312,6 +312,101 @@ def test_heal_brep_records_overlap_cleanup_metadata() -> None:
     assert panel.metadata["brep_overlapping_faces_removed"] == "1"
     assert panel.metadata["brep_faces_removed"] == "1"
     assert panel.metadata["brep_heal_overlap_z_fighting_cleanup"] == "enabled"
+
+
+def test_face_overlap_descriptor_uses_shared_occt_mesh_helpers() -> None:
+    class FakePoint:
+        def __init__(self, x: float, y: float, z: float = 0.0) -> None:
+            self.x = x
+            self.y = y
+            self.z = z
+
+        def X(self) -> float:
+            return self.x
+
+        def Y(self) -> float:
+            return self.y
+
+        def Z(self) -> float:
+            return self.z
+
+        def Transformed(self, _transform: object) -> object:
+            raise AssertionError("heal overlap descriptors should transform nodes in bulk")
+
+    class FakeArray:
+        def __init__(self, values: list[object], lower: int) -> None:
+            self.values = values
+            self.lower = lower
+
+        def Lower(self) -> int:
+            return self.lower
+
+        def Value(self, index: int) -> object:
+            return self.values[index - self.lower]
+
+    class FakeTriangle:
+        def __init__(self, a: int, b: int, c: int) -> None:
+            self.values = (a, b, c)
+
+        def Get(self) -> tuple[int, int, int]:
+            return self.values
+
+    class FakeTriangulation:
+        def __init__(self) -> None:
+            self.nodes = [
+                FakePoint(0.0, 0.0),
+                FakePoint(1.0, 0.0),
+                FakePoint(0.0, 1.0),
+                FakePoint(1.0, 1.0),
+            ]
+            self.triangles = [FakeTriangle(1, 2, 3), FakeTriangle(2, 4, 3)]
+
+        def NbNodes(self) -> int:
+            return len(self.nodes)
+
+        def NbTriangles(self) -> int:
+            return len(self.triangles)
+
+        def MapNodeArray(self) -> FakeArray:
+            return FakeArray(self.nodes, lower=5)
+
+        def MapTriangleArray(self) -> FakeArray:
+            return FakeArray(self.triangles, lower=9)
+
+    class FakeTransform:
+        def __init__(self) -> None:
+            self.matrix = (
+                (-2.0, 0.0, 0.0, 10.0),
+                (0.0, 3.0, 0.0, 20.0),
+                (0.0, 0.0, 1.0, 30.0),
+            )
+
+        def Value(self, row: int, column: int) -> float:
+            return self.matrix[row - 1][column - 1]
+
+    descriptor = _face_overlap_descriptor(
+        7,
+        object(),
+        FakeTriangulation(),
+        FakeTransform(),
+        reversed_face=True,
+    )
+
+    assert descriptor is not None
+    np.testing.assert_allclose(
+        descriptor.points,
+        [
+            [10.0, 20.0, 30.0],
+            [8.0, 20.0, 30.0],
+            [10.0, 23.0, 30.0],
+            [8.0, 23.0, 30.0],
+        ],
+    )
+    np.testing.assert_array_equal(descriptor.triangles, [[2, 1, 0], [2, 3, 1]])
+    np.testing.assert_allclose(descriptor.triangle_areas, [3.0, 3.0])
+    assert descriptor.area == pytest.approx(6.0)
+    np.testing.assert_allclose(descriptor.normal, [0.0, 0.0, 1.0])
+    assert descriptor.plane_offset == pytest.approx(30.0)
 
 
 def test_heal_brep_reports_remaining_topology_risks(monkeypatch) -> None:  # type: ignore[no-untyped-def]

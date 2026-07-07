@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 
 from fascat.asset import Asset
 from fascat.mesh import _triangle_overlap_area_2d
+from fascat.ops._occt_mesh import _transformed_occt_nodes, _triangulation_faces
 from fascat.options import BrepHealOptions
 
 FloatArray = NDArray[np.float64]
@@ -577,20 +578,14 @@ def _face_overlap_descriptor(
 
     nodes = triangulation.MapNodeArray()
     node_lower = int(nodes.Lower())
-    points = np.empty((node_count, 3), dtype=np.float64)
-    for local_index in range(node_count):
-        point = nodes.Value(node_lower + local_index).Transformed(transform)
-        points[local_index] = (point.X(), point.Y(), point.Z())
+    points = _transformed_occt_nodes(nodes, node_lower, node_count, transform)
 
     triangles = triangulation.MapTriangleArray()
     triangle_lower = int(triangles.Lower())
-    face_triangles = np.empty((triangle_count, 3), dtype=np.int64)
-    for local_index in range(triangle_count):
-        a, b, c = triangles.Value(triangle_lower + local_index).Get()
-        if reversed_face:
-            face_triangles[local_index] = (c - 1, b - 1, a - 1)
-        else:
-            face_triangles[local_index] = (a - 1, b - 1, c - 1)
+    face_triangles = _triangulation_faces(triangles, triangle_lower, triangle_count)
+    if reversed_face:
+        face_triangles = face_triangles[:, ::-1]
+    face_triangles -= 1
 
     triangle_points = points[face_triangles]
     crosses = np.cross(triangle_points[:, 1] - triangle_points[:, 0], triangle_points[:, 2] - triangle_points[:, 0])
