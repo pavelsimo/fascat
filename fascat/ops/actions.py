@@ -31,9 +31,12 @@ from fascat.options import (
 
 FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int64]
+BoolArray = NDArray[np.bool_]
 
 _AGGRESSIVE_LOD0_RATIO = 0.2
 _AO_IMPORTANCE_THRESHOLD = 0.5
+_AO_RAY_DIRECTION_BATCH_SIZE = 8
+_AO_RAY_TRIANGLE_BATCH_SIZE = 65_536
 _DECIMATION_MEMORY_BYTES_PER_MILLION_TRIANGLES = 5_000_000_000
 _DECIMATION_MEMORY_GB_PER_MILLION_TRIANGLES = 5.0
 _OCCLUSION_BVH_LEAF_OCCURRENCES = 8
@@ -816,21 +819,25 @@ def _face_ambient_occlusion(mesh: Mesh, strategy: str = "conservative") -> Float
     triangles = mesh.points[mesh.faces]
     centroids = triangles.mean(axis=1)
     normals = _bake_face_normals(mesh)
-    directions = _ambient_occlusion_directions(strategy)
+    directions_arr = np.asarray(_ambient_occlusion_directions(strategy), dtype=np.float64).reshape((-1, 3))
+    dots = directions_arr @ normals.T
     mins, maxs = mesh.bounds()
     ray_length = max(float(np.linalg.norm(maxs - mins)), 1.0) * 2.0
     epsilon = ray_length * 1e-6
     values = np.ones(mesh.triangle_count, dtype=np.float64)
     for face_index, (centroid, normal) in enumerate(zip(centroids, normals, strict=True)):
-        hits = 0
-        tested = 0
         origin = centroid + normal * epsilon
-        for direction in directions:
-            if float(np.dot(direction, normal)) <= 0.0:
-                continue
-            tested += 1
-            if _ray_hits_mesh(origin, direction, triangles, ignore_face=face_index, max_t=ray_length):
-                hits += 1
+        valid_directions = directions_arr[dots[:, face_index] > 0.0]
+        tested = valid_directions.shape[0]
+        hits = (
+            0
+            if tested == 0
+            else int(
+                np.count_nonzero(
+                    _ray_hits_mesh_batch(origin, valid_directions, triangles, ignore_face=face_index, max_t=ray_length)
+                )
+            )
+        )
         values[face_index] = 1.0 if tested == 0 else 1.0 - (hits / tested)
     return values
 
@@ -848,24 +855,58 @@ def _ray_hits_mesh(
     ignore_face: int,
     max_t: float,
 ) -> bool:
-    if triangles.size == 0:
-        return False
-    edge1 = triangles[:, 1] - triangles[:, 0]
-    edge2 = triangles[:, 2] - triangles[:, 0]
-    h = np.cross(direction, edge2)
-    determinant = np.einsum("ij,ij->i", edge1, h)
-    valid = np.abs(determinant) > 1e-12
-    inv_det = np.zeros_like(determinant)
-    np.divide(1.0, determinant, out=inv_det, where=valid)
-    s = origin - triangles[:, 0]
-    u = inv_det * np.einsum("ij,ij->i", s, h)
-    q = np.cross(s, edge1)
-    v = inv_det * np.einsum("j,ij->i", direction, q)
-    t = inv_det * np.einsum("ij,ij->i", edge2, q)
-    hits = valid & (u >= 0.0) & (u <= 1.0) & (v >= 0.0) & (u + v <= 1.0) & (t > 1e-8) & (t < max_t)
-    if 0 <= ignore_face < hits.size:
-        hits[ignore_face] = False
-    return bool(np.any(hits))
+    directions = np.asarray(direction, dtype=np.float64).reshape((1, 3))
+    return bool(_ray_hits_mesh_batch(origin, directions, triangles, ignore_face=ignore_face, max_t=max_t)[0])
+
+
+def _ray_hits_mesh_batch(
+    origin: FloatArray,
+    directions: FloatArray,
+    triangles: FloatArray,
+    *,
+    ignore_face: int,
+    max_t: float,
+    direction_chunk_size: int = _AO_RAY_DIRECTION_BATCH_SIZE,
+    triangle_chunk_size: int = _AO_RAY_TRIANGLE_BATCH_SIZE,
+) -> BoolArray:
+    directions_arr = np.asarray(directions, dtype=np.float64).reshape((-1, 3))
+    direction_count = len(directions_arr)
+    triangle_count = len(triangles)
+    hits_by_direction = np.zeros(direction_count, dtype=np.bool_)
+    if triangles.size == 0 or directions_arr.size == 0:
+        return hits_by_direction
+
+    direction_step = max(direction_chunk_size, 1)
+    triangle_step = max(triangle_chunk_size, 1)
+    for direction_start in range(0, direction_count, direction_step):
+        direction_end = min(direction_start + direction_step, direction_count)
+        direction_chunk = directions_arr[direction_start:direction_end]
+        direction_hits = hits_by_direction[direction_start:direction_end]
+        for triangle_start in range(0, triangle_count, triangle_step):
+            active_mask = ~direction_hits
+            if not bool(np.any(active_mask)):
+                break
+            active_directions = direction_chunk[active_mask]
+            triangle_end = min(triangle_start + triangle_step, triangle_count)
+            triangle_chunk = triangles[triangle_start:triangle_end]
+            edge1 = triangle_chunk[:, 1] - triangle_chunk[:, 0]
+            edge2 = triangle_chunk[:, 2] - triangle_chunk[:, 0]
+            h = np.cross(active_directions[:, None, :], edge2[None, :, :])
+            determinant = np.einsum("tj,dtj->dt", edge1, h)
+            valid = np.abs(determinant) > 1e-12
+            inv_det = np.zeros_like(determinant)
+            np.divide(1.0, determinant, out=inv_det, where=valid)
+            s = origin - triangle_chunk[:, 0]
+            u = inv_det * np.einsum("tj,dtj->dt", s, h)
+            q = np.cross(s, edge1)
+            v = inv_det * np.einsum("dj,tj->dt", active_directions, q)
+            t = inv_det * np.einsum("tj,tj->t", edge2, q)[None, :]
+            hits = valid & (u >= 0.0) & (u <= 1.0) & (v >= 0.0) & (u + v <= 1.0) & (t > 1e-8) & (t < max_t)
+            ignore_local = ignore_face - triangle_start
+            if 0 <= ignore_local < hits.shape[1]:
+                hits[:, ignore_local] = False
+            direction_hits[active_mask] = direction_hits[active_mask] | np.any(hits, axis=1)
+    return hits_by_direction
 
 
 def _ray_triangle_t(origin: FloatArray, direction: FloatArray, triangle: FloatArray) -> float | None:
