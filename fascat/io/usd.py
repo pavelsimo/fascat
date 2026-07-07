@@ -560,7 +560,7 @@ def _bind_materials(
     materials: dict[str, Material],
     material_paths: dict[str, str],
 ) -> None:
-    from pxr import UsdGeom, UsdShade
+    from pxr import UsdGeom, UsdShade, Vt
 
     first_material_path = material_paths.get(part.material_ids[0])
     if first_material_path:
@@ -573,15 +573,15 @@ def _bind_materials(
 
     used_subset_names: set[str] = set()
     for material_index, material_id in enumerate(part.material_ids):
-        face_indices = np.flatnonzero(material_indices == material_index).tolist()
+        face_indices = np.flatnonzero(material_indices == material_index).astype(np.int64, copy=False)
         material_path = material_paths.get(material_id)
-        if not face_indices or not material_path:
+        if face_indices.size == 0 or not material_path:
             continue
         subset = UsdGeom.Subset.CreateGeomSubset(
             usd_mesh,
             _unique_name(_usd_name(material_id), used_subset_names),
             UsdGeom.Tokens.face,
-            face_indices,
+            Vt.IntArray.FromNumpy(face_indices),
             "materialBind",
         )
         subset.GetPrim().SetCustomDataByKey("fascat:materialId", material_id)
