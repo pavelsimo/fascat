@@ -478,21 +478,21 @@ def test_face_bake_values_uses_material_lut_with_fallbacks() -> None:
         [0, 0, 255, 255],
         [255, 255, 255, 255],
         [255, 255, 255, 255],
-        [255, 255, 255, 255],
+        [255, 64, 0, 128],
     ]
     assert actions._face_bake_values(asset, part, mesh, "metallic_roughness", "conservative").tolist() == [
         [255, 191, 64, 255],
         [255, 51, 255, 255],
         [255, 128, 0, 255],
         [255, 128, 0, 255],
-        [255, 128, 0, 255],
+        [255, 191, 64, 255],
     ]
     assert actions._face_bake_values(asset, part, mesh, "emissive", "conservative").tolist() == [
         [255, 128, 0, 255],
         [0, 0, 0, 255],
         [0, 0, 0, 255],
         [0, 0, 0, 255],
-        [0, 0, 0, 255],
+        [255, 128, 0, 255],
     ]
 
 

@@ -751,11 +751,11 @@ def _material_bake_row(material: Material | None, kind: str) -> NDArray[np.uint8
 
 def _face_material_slots(part: Part, mesh: Mesh) -> IntArray:
     fallback_slot = len(part.material_ids)
-    slots = np.full(mesh.triangle_count, fallback_slot, dtype=np.int64)
     if not part.material_ids or mesh.triangle_count == 0:
-        return slots
+        return np.full(mesh.triangle_count, fallback_slot, dtype=np.int64)
+
+    slots = np.zeros(mesh.triangle_count, dtype=np.int64)
     if mesh.material_indices is None:
-        slots.fill(0)
         return slots
 
     available = min(mesh.triangle_count, mesh.material_indices.shape[0])
@@ -763,6 +763,8 @@ def _face_material_slots(part: Part, mesh: Mesh) -> IntArray:
         return slots
     candidates = mesh.material_indices[:available].astype(np.int64, copy=False)
     valid = (candidates >= 0) & (candidates < len(part.material_ids))
+    invalid_positions = np.flatnonzero(~valid)
+    slots[invalid_positions] = fallback_slot
     valid_positions = np.flatnonzero(valid)
     slots[valid_positions] = candidates[valid_positions]
     return slots
