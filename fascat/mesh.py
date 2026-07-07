@@ -2513,14 +2513,16 @@ class Mesh:
                 }
 
             decimals = _tolerance_decimals(tolerance)
-            position_keys = [_rounded_key(point, decimals) for point in self.points]
-            uv_keys = [_rounded_key(uv, decimals) for uv in self.uvs[channel]]
+            position_keys: list[tuple[float, ...]] = list(map(tuple, np.round(self.points, decimals).tolist()))
+            uv_keys: list[tuple[float, ...]] = list(map(tuple, np.round(self.uvs[channel], decimals).tolist()))
             edge_uvs: dict[
                 tuple[tuple[float, ...], tuple[float, ...]], set[tuple[tuple[float, ...], tuple[float, ...]]]
             ] = defaultdict(set)
             edge_lengths: dict[tuple[tuple[float, ...], tuple[float, ...]], float] = {}
             edge_vertices: dict[tuple[tuple[float, ...], tuple[float, ...]], set[int]] = defaultdict(set)
-            for edge in _face_major_edges_from_faces(self.faces):
+            edges = _face_major_edges_from_faces(self.faces)
+            lengths = np.linalg.norm(self.points[edges[:, 0]] - self.points[edges[:, 1]], axis=1)
+            for edge, length in zip(edges, lengths, strict=True):
                 start = int(edge[0])
                 end = int(edge[1])
                 start_key = position_keys[start]
@@ -2535,7 +2537,8 @@ class Mesh:
                     uv_pair = (uv_keys[end], uv_keys[start])
                 edge_uvs[edge_key].add(uv_pair)
                 edge_vertices[edge_key].update((start, end))
-                edge_lengths.setdefault(edge_key, float(np.linalg.norm(self.points[start] - self.points[end])))
+                if edge_key not in edge_lengths:
+                    edge_lengths[edge_key] = float(length)
 
             seam_edges = [edge for edge, uv_pairs in edge_uvs.items() if len(uv_pairs) > 1]
             if not seam_edges:
