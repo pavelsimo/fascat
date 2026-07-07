@@ -1913,6 +1913,62 @@ def test_simplify_preserves_explicit_protected_faces() -> None:
     assert simplified.metadata["simplification_preserved_feature_faces"] == "1"
 
 
+def test_uv_seam_vertices_returns_empty_without_uvs_or_vertices() -> None:
+    assert valid_triangle()._uv_seam_vertices() == set()
+
+    empty = Mesh(
+        points=np.empty((0, 3), dtype=float),
+        faces=np.empty((0, 3), dtype=int),
+        uvs={0: np.empty((0, 2), dtype=float)},
+    )
+
+    assert empty._uv_seam_vertices() == set()
+
+
+def test_uv_seam_vertices_uses_rounded_position_groups_across_uv_channels() -> None:
+    mesh = Mesh(
+        points=np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [0.0000000001, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [2.0, 0.0, 0.0],
+            ],
+            dtype=float,
+        ),
+        faces=np.array([[0, 2, 4], [1, 3, 4]], dtype=int),
+        uvs={
+            0: np.array(
+                [
+                    [0.0, 0.0],
+                    [0.0, 0.0],
+                    [1.0, 0.0],
+                    [1.0, 0.0],
+                    [2.0, 0.0],
+                ],
+                dtype=float,
+            ),
+            1: np.array(
+                [
+                    [0.0, 0.0],
+                    [0.5, 0.5],
+                    [1.0, 0.0],
+                    [1.0, 0.0],
+                    [9.0, 9.0],
+                ],
+                dtype=float,
+            ),
+        },
+    )
+
+    counts = mesh.feature_preservation_counts(preserve_uv_seams=True)
+
+    assert mesh._uv_seam_vertices() == {0, 1}
+    assert counts["uv_seam_faces"] == 2
+    assert counts["total_feature_faces"] == 2
+
+
 def test_merge_close_vertices_preserves_material_indices() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [0.001, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
