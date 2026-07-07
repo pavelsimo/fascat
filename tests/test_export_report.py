@@ -84,3 +84,27 @@ def test_stats_with_file_size_records_budget_warning(tmp_path) -> None:  # type:
     assert stats["export_referenced_material_count"] == 1
     assert stats["export_estimated_payload_bytes"] >= stats["export_estimated_geometry_bytes"]
     assert asset.report.warnings == ["file size budget exceeded: 10 bytes > 1 bytes"]
+
+
+def test_stats_with_file_size_reuses_referenced_material_ids(
+    tmp_path,  # type: ignore[no-untyped-def]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asset = _asset()
+    output = tmp_path / "out.glb"
+    output.write_bytes(b"x" * 10)
+    calls = 0
+    original = export_report.referenced_material_ids
+
+    def count_referenced_material_ids(source_asset: object) -> set[str]:
+        nonlocal calls
+        calls += 1
+        return original(source_asset)
+
+    monkeypatch.setattr(export_report, "referenced_material_ids", count_referenced_material_ids)
+
+    stats = stats_with_file_size({"triangles": 1}, output, None, asset)
+
+    assert stats["export_referenced_material_count"] == 1
+    assert stats["export_referenced_image_count"] == 1
+    assert calls == 1

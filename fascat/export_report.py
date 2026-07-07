@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -38,14 +38,16 @@ def stats_with_file_size(
     if str(path) == "-" or not output_path.exists():
         return stats
     size = output_path.stat().st_size
-    estimates = export_payload_estimates(asset)
+    referenced_ids = referenced_material_ids(asset)
+    referenced_materials_by_id = referenced_materials(asset, referenced_ids=referenced_ids)
+    estimates = export_payload_estimates(asset, referenced_materials_by_id=referenced_materials_by_id)
     result = {
         **stats,
         "file_size_bytes": size,
         **estimates,
         "export_estimated_payload_bytes": sum(estimates.values()),
-        **export_material_counts(asset),
-        **export_image_counts(asset),
+        **export_material_counts(asset, referenced_ids=referenced_ids),
+        **export_image_counts(asset, referenced_materials_by_id=referenced_materials_by_id),
     }
     if budget_mb is not None:
         budget_bytes = int(budget_mb * 1_000_000)
@@ -55,16 +57,28 @@ def stats_with_file_size(
     return result
 
 
-def export_payload_estimates(asset: Any) -> dict[str, int]:
+def export_payload_estimates(
+    asset: Any,
+    *,
+    referenced_materials_by_id: Mapping[str, Any] | None = None,
+) -> dict[str, int]:
     return {
         "export_estimated_geometry_bytes": _geometry_bytes(asset),
-        "export_estimated_texture_bytes": _texture_bytes(asset),
+        "export_estimated_texture_bytes": _texture_bytes(asset, referenced_materials_by_id=referenced_materials_by_id),
         "export_estimated_metadata_bytes": _metadata_bytes(asset),
     }
 
 
-def export_material_counts(asset: Any) -> dict[str, int]:
-    referenced = referenced_material_ids(asset)
+def export_material_counts(
+    asset: Any,
+    *,
+    referenced_ids: Collection[str] | None = None,
+) -> dict[str, int]:
+    referenced = (
+        referenced_material_ids(asset)
+        if referenced_ids is None
+        else {material_id for material_id in referenced_ids if material_id in asset.materials}
+    )
     return {
         "export_source_material_count": len(asset.materials),
         "export_referenced_material_count": len(referenced),
@@ -73,9 +87,14 @@ def export_material_counts(asset: Any) -> dict[str, int]:
     }
 
 
-def export_image_counts(asset: Any) -> dict[str, int]:
+def export_image_counts(
+    asset: Any,
+    *,
+    referenced_materials_by_id: Mapping[str, Any] | None = None,
+) -> dict[str, int]:
+    referenced = referenced_materials(asset) if referenced_materials_by_id is None else referenced_materials_by_id
     source_refs = _texture_refs(asset, asset.materials.values())
-    referenced_refs = _texture_refs(asset, referenced_materials(asset).values())
+    referenced_refs = _texture_refs(asset, referenced.values())
     source_image_ids = _source_image_ids(asset)
     source_unique = source_image_ids | set(source_refs)
     referenced_unique = set(referenced_refs)
@@ -100,8 +119,12 @@ def referenced_material_ids(asset: Any) -> set[str]:
     return {material_id for material_id in referenced if material_id in asset.materials}
 
 
-def referenced_materials(asset: Any) -> dict[str, Any]:
-    referenced = referenced_material_ids(asset)
+def referenced_materials(
+    asset: Any,
+    *,
+    referenced_ids: Collection[str] | None = None,
+) -> dict[str, Any]:
+    referenced = referenced_material_ids(asset) if referenced_ids is None else referenced_ids
     return {material_id: material for material_id, material in asset.materials.items() if material_id in referenced}
 
 
@@ -138,11 +161,13 @@ def _mesh_payload_bytes(mesh: Mesh) -> int:
     return total
 
 
-def _texture_bytes(asset: Any) -> int:
-    return sum(
-        _texture_ref_payload_bytes(asset, ref)
-        for ref in set(_texture_refs(asset, referenced_materials(asset).values()))
-    )
+def _texture_bytes(
+    asset: Any,
+    *,
+    referenced_materials_by_id: Mapping[str, Any] | None = None,
+) -> int:
+    referenced = referenced_materials(asset) if referenced_materials_by_id is None else referenced_materials_by_id
+    return sum(_texture_ref_payload_bytes(asset, ref) for ref in set(_texture_refs(asset, referenced.values())))
 
 
 def _texture_refs(asset: Any, materials: Iterable[Any]) -> list[str]:
