@@ -69,10 +69,6 @@ def _tolerance_decimals(tolerance: float) -> int:
     return max(0, min(12, int(math.ceil(-math.log10(tolerance)))))
 
 
-def _rounded_key(values: NDArray[np.float64], decimals: int) -> tuple[float, ...]:
-    return tuple(float(value) for value in np.round(values, decimals).tolist())
-
-
 def _face_edges_from_faces(faces: IntArray) -> IntArray:
     if faces.size == 0:
         return np.empty((0, 2), dtype=np.int64)
