@@ -2752,12 +2752,14 @@ def _compact_material_slots(part: Part, mesh: Mesh) -> None:
     if mesh.material_indices is None:
         return
     material_ids = part.material_ids
-    used = np.unique(mesh.material_indices.astype(np.int64, copy=False)).tolist()
-    if not used or any(index < 0 or index >= len(material_ids) for index in used):
+    indices = mesh.material_indices.astype(np.int64, copy=False)
+    used = np.unique(indices)
+    if used.size == 0 or bool(np.any(used < 0)) or bool(np.any(used >= len(material_ids))):
         return
-    remap = {old: new for new, old in enumerate(used)}
-    mesh.material_indices = np.asarray([remap[int(index)] for index in mesh.material_indices], dtype=np.int64)
-    part.material_ids = [material_ids[index] for index in used]
+    lookup = np.empty(len(material_ids), dtype=np.int64)
+    lookup[used] = np.arange(len(used), dtype=np.int64)
+    mesh.material_indices = lookup[indices]
+    part.material_ids = [material_ids[int(index)] for index in used]
 
 
 def _world_occurrences(asset: Asset) -> list[_WorldOccurrence]:

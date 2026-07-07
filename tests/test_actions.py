@@ -325,6 +325,38 @@ def _merge_meshes(meshes: list[tuple[Mesh, int]]) -> Mesh:
     )
 
 
+def test_compact_material_slots_remaps_sparse_slots() -> None:
+    mesh = _triangle_strip(3)
+    mesh.material_indices = np.asarray([1, 3, 1], dtype=np.int32)
+    part = Part(id="part", name="Part", mesh=mesh, material_ids=["unused-0", "a", "unused-2", "b"])
+
+    actions._compact_material_slots(part, mesh)
+
+    assert part.material_ids == ["a", "b"]
+    np.testing.assert_array_equal(mesh.material_indices, np.asarray([0, 1, 0], dtype=np.int64))
+
+
+@pytest.mark.parametrize(
+    "material_indices",
+    [
+        np.asarray([], dtype=np.int64),
+        np.asarray([-1, 1], dtype=np.int64),
+        np.asarray([0, 2], dtype=np.int64),
+    ],
+)
+def test_compact_material_slots_keeps_invalid_inputs_unchanged(material_indices: np.ndarray) -> None:
+    mesh = _triangle_strip(int(material_indices.size))
+    mesh.material_indices = material_indices.copy()
+    part = Part(id="part", name="Part", mesh=mesh, material_ids=["a", "b"])
+    original_material_ids = list(part.material_ids)
+    original_material_indices = mesh.material_indices.copy()
+
+    actions._compact_material_slots(part, mesh)
+
+    assert part.material_ids == original_material_ids
+    np.testing.assert_array_equal(mesh.material_indices, original_material_indices)
+
+
 def _open_box_mesh() -> Mesh:
     points = np.asarray(
         [
