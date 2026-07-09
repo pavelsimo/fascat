@@ -202,7 +202,10 @@ def test_asset_operations_return_new_assets_without_mutating_originals() -> None
     assert repaired.parts["part"].mesh.triangle_count == 1
 
 
-@pytest.mark.parametrize("input_name,reader_name", [("input.igs", "read_iges"), ("input.brep", "read_brep")])
+@pytest.mark.parametrize(
+    "input_name,reader_name",
+    [("input.igs", "read_iges"), ("input.brep", "read_brep"), ("input.jt", "read_jt")],
+)
 def test_convert_dispatches_non_step_cad_readers(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -6,6 +6,7 @@ on:
     paths:
       - "docs/**"
       - "scripts/build-docs-site.mjs"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 concurrency:
@@ -23,18 +24,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Fetch source
-        env:
-          SOURCE_TARBALL: https://github.com/${{ github.repository }}/archive/${{ github.sha }}.tar.gz
-        run: |
-          curl -L --fail --retry 3 --retry-delay 5 -o source.tar.gz "$SOURCE_TARBALL"
-          tar -xzf source.tar.gz --strip-components=1
-          rm source.tar.gz
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - uses: actions/configure-pages@v6
 
       - name: Build docs site
         run: node scripts/build-docs-site.mjs
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist/docs-site
 
@@ -48,4 +49,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

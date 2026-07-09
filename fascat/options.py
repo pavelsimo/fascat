@@ -445,6 +445,21 @@ class BrepReadOptions(StepReadOptions):
 
 
 @dataclass(frozen=True, repr=False)
+class JtReadOptions(StepReadOptions):
+    pmi: bool = False
+    design_variants: bool = False
+    multi_file: bool = False
+    source_textures: bool = False
+    material_library_mapping: bool = False
+    lod_selection: str = "finest"
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.lod_selection not in {"finest", "all"}:
+            raise ValueError("lod_selection must be one of: finest, all")
+
+
+@dataclass(frozen=True, repr=False)
 class BrepHealOptions(OptionsRepr):
     tolerance: float = 0.05
     group_open_shells: bool = True

@@ -429,6 +429,7 @@ _TOP_LEVEL_API = [
     "profiles",
     "read_brep",
     "read_iges",
+    "read_jt",
     "read_step",
     "read_step_many",
     "validate_output",

@@ -25,6 +25,7 @@ from fascat.io._suffixes import (
     EXPORT_SUFFIXES,
     GLTF_SUFFIXES,
     IGES_SUFFIXES,
+    JT_SUFFIXES,
     OBJ_SUFFIXES,
     STEP_SUFFIXES,
     STL_SUFFIXES,
@@ -199,6 +200,11 @@ class MaterialLibraryColorSpaceMode(str, Enum):
     AUTO = "auto"
     LINEAR = "linear"
     SRGB255 = "srgb255"
+
+
+class JtLodSelectionMode(str, Enum):
+    FINEST = "finest"
+    ALL = "all"
 
 
 class UV0Mode(str, Enum):
@@ -1076,6 +1082,13 @@ def cmd_convert(
             help="Resolve quoted external STEP references from a master STEP file.",
         ),
     ] = False,
+    jt_lod_selection: Annotated[
+        JtLodSelectionMode,
+        typer.Option(
+            "--jt-lod-selection",
+            help="JT inputs: import only the finest LOD (finest) or all stored LODs (all).",
+        ),
+    ] = JtLodSelectionMode.FINEST,
     material_libraries: Annotated[
         list[Path] | None,
         typer.Option(
@@ -2086,6 +2099,10 @@ def cmd_convert(
                 target_handedness=None if target_handedness is None else target_handedness.value,
             )
         )
+        if import_options is not None and input_path.suffix.lower() in JT_SUFFIXES:
+            from fascat.options import JtReadOptions
+
+            import_options = JtReadOptions(**cast(Any, import_options.to_dict()), lod_selection=jt_lod_selection.value)
         export_metadata = (
             pipeline_spec.export_metadata
             if pipeline_spec is not None and pipeline_spec.export_metadata is not None
@@ -3422,7 +3439,7 @@ def _validate_cad_input(path: Path, ctx: typer.Context, payload: dict[str, Any])
         _fail(
             ctx,
             payload,
-            f"Unsupported CAD extension: {path.suffix or '<none>'}. Use .step, .stp, .igs, .iges, or .brep.",
+            f"Unsupported CAD extension: {path.suffix or '<none>'}. Use .step, .stp, .igs, .iges, .brep, or .jt.",
             code=2,
         )
 
@@ -3527,6 +3544,10 @@ def _read_cad_for_cli(
             from fascat.io.brep import read_brep
 
             return read_brep(path, options=import_options)
+        if suffix in JT_SUFFIXES:
+            from fascat.io.jt import read_jt
+
+            return read_jt(path, options=import_options)
         raise ValueError(f"unsupported CAD extension: {path.suffix or '<none>'}")
     except Exception as exc:
         _fail(ctx, payload, str(exc))

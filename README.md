@@ -14,7 +14,7 @@ Fascat is a Python library and CLI for converting CAD data into RT3D assets.
 
 ```mermaid
 flowchart TD
-    A["STEP / IGES / BREP CAD"] --> B["Imported assembly"]
+    A["STEP / IGES / BREP / JT CAD"] --> B["Imported assembly"]
     B --> C["Tessellated meshes"]
     C --> D["Repaired meshes"]
     D --> E["Staged materials & UVs"]
@@ -80,7 +80,7 @@ fascat validate motor.glb
 | Command | Description |
 |---------|-------------|
 | `fascat inspect input.step` | Inspect a CAD assembly before conversion |
-| `fascat convert input.step [output.usdc]` | Convert STEP, IGES, or BREP CAD into OpenUSD or glTF |
+| `fascat convert input.step [output.usdc]` | Convert STEP, IGES, BREP, or JT CAD into OpenUSD or glTF |
 | `fascat validate output.usdc` | Validate generated USD or glTF output |
 | `fascat help [command]` | Show top-level or command-specific help |
 | `fascat version` | Print version and exit |
@@ -92,7 +92,7 @@ Fascat follows standard CLI stream conventions: primary output and JSON go to st
 ```python
 import fascat as fc
 
-asset = fc.read_step("motor.step")          # or read_iges(...) / read_brep(...)
+asset = fc.read_step("motor.step")          # or read_iges(...) / read_brep(...) / read_jt(...)
 
 asset = (
     asset.tessellate(sag=0.1, angle=15.0)

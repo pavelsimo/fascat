@@ -824,7 +824,7 @@ target_triangles = 80000
     assert payload["pipeline_steps"][0]["reuse_existing_meshes"] is False
 
 
-@pytest.mark.parametrize("input_name", ["legacy.igs", "legacy.iges", "native.brep"])
+@pytest.mark.parametrize("input_name", ["legacy.igs", "legacy.iges", "native.brep", "model.jt"])
 def test_convert_dry_run_accepts_non_step_cad_inputs(input_name: str) -> None:
     output_name = "output.glb"
 
@@ -834,6 +834,31 @@ def test_convert_dry_run_accepts_non_step_cad_inputs(input_name: str) -> None:
     payload = json.loads(result.output)
     assert payload["input"] == input_name
     assert payload["output"] == output_name
+
+
+def test_convert_jt_lod_selection_flag(tmp_path: Path) -> None:
+    from tests._jt_builder import SyntheticPart, build_jt
+
+    tetra_points = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]]
+    tetra_faces = [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]
+    coarser = ([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0], [0.0, 5.0, 0.0], [0.0, 0.0, 5.0]], tetra_faces)
+    part = SyntheticPart(name="tetra.part", points=tetra_points, triangles=tetra_faces, lod_meshes=[coarser])
+    source = tmp_path / "model.jt"
+    source.write_bytes(build_jt([part]))
+    output = tmp_path / "model.glb"
+    report_path = tmp_path / "report.json"
+
+    result = runner.invoke(
+        app,
+        ["convert", str(source), str(output), "--jt-lod-selection", "all", "--report", str(report_path)],
+    )
+
+    assert result.exit_code == 0, result.output
+    report = json.loads(report_path.read_text())
+    import_step = next(step for step in report["steps"] if step["name"] == "import")
+    assert import_step["options"]["format"] == "JT"
+    assert import_step["options"]["lod_summary"]["lod_selection"] == "all"
+    assert import_step["options"]["lod_summary"]["imported_lod_meshes"] == 1
 
 
 def test_convert_dry_run_accepts_extra_step_inputs() -> None:
@@ -2504,6 +2529,7 @@ def test_convert_rejects_bad_input_suffix(capsys) -> None:  # type: ignore[no-un
     result = invoke_run(["--dry-run", "convert", "input.txt", "output.usdc"], capsys)
     assert result.exit_code == 2
     assert "Unsupported CAD extension" in result.stderr
+    assert ".jt" in result.stderr
 
 
 def test_convert_rejects_bad_output_suffix(capsys) -> None:  # type: ignore[no-untyped-def]

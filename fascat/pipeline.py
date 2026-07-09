@@ -18,6 +18,7 @@ from fascat.io._suffixes import (
     FBX_SUFFIXES,
     GLTF_SUFFIXES,
     IGES_SUFFIXES,
+    JT_SUFFIXES,
     OBJ_SUFFIXES,
     STL_SUFFIXES,
     USD_SUFFIXES,
@@ -29,6 +30,7 @@ from fascat.io.fbx import write_fbx_with_validation_stats as _write_fbx
 from fascat.io.gltf import runtime_dependency_report, validate_gltf
 from fascat.io.gltf import write_gltf_with_validation as _write_gltf
 from fascat.io.iges import read_iges
+from fascat.io.jt import read_jt
 from fascat.io.obj import validate_obj
 from fascat.io.obj import write_obj_with_validation_stats as _write_obj
 from fascat.io.step import read_step, read_step_many
@@ -409,6 +411,8 @@ def _read_input(path: InputPath, *, options: StepReadOptions | None = None) -> A
         return read_iges(path, options=options)
     if suffix in BREP_SUFFIXES:
         return read_brep(path, options=options)
+    if suffix in JT_SUFFIXES:
+        return read_jt(path, options=options)
     raise ValueError(f"unsupported CAD extension: {suffix or '<none>'}")
 
 

@@ -28,7 +28,7 @@ what you want to change:
 import fascat as fc
 
 asset = (
-    fc.read_step("motor.step")          # or read_iges(...) / read_brep(...)
+    fc.read_step("motor.step")          # or read_iges(...) / read_brep(...) / read_jt(...)
     .tessellate(sag=0.1, angle=15.0)
     .repair(tolerance=0.05)
     .stage(materials="cad", uv0="box")
@@ -112,6 +112,7 @@ Core pipeline calls:
 | `fc.read_step_many(paths, options=None, continue_on_error=False)` | `paths` is an ordered list of `.step` / `.stp` files. | Import explicit multi-root STEP members into deterministic per-file namespaces, prefix member warnings, and preserve each member as a top-level root. |
 | `fc.read_iges(path, options=None)` | `path` ends in `.igs` or `.iges`. `options` is `IgesReadOptions`. | Import IGES geometry through the same OCP/XDE hierarchy, transform, color, and material path used by STEP. |
 | `fc.read_brep(path, options=None)` | `path` ends in `.brep`. `options` is `BrepReadOptions`. | Import a native OpenCASCADE BREP file as one root occurrence and one source-shape part. |
+| `fc.read_jt(path, options=None)` | `path` ends in `.jt`. `options` is `JtReadOptions` (adds `lod_selection="finest"\|"all"`). | Import JT 9.x pre-tessellated LOD meshes, assembly hierarchy, instances, materials, and properties with a pure-Python reader; parts are mesh-only (`source_shape` is `None`). |
 | `asset.tessellate(options=None, *, where=None, **kwargs)` | Keyword args mirror `TessellationOptions`. `where` optionally scopes the operation with a `Filter`. | Convert source BREP geometry into meshes. |
 | `asset.repair(options=None, *, where=None, **kwargs)` | Keyword args mirror `RepairOptions`. `where` optionally scopes selected parts. | Clean mesh-level issues after tessellation. |
 | `asset.merge_vertices(options=None, *, where=None, **kwargs)` | Keyword args mirror `MergeVerticesOptions`. `where` optionally scopes selected parts. | Merge exact or tolerance-close vertices with attribute and material-boundary protection. |

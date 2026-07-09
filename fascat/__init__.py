@@ -17,6 +17,7 @@ if TYPE_CHECKING:  # static names for type checkers and IDEs; never executed at 
     from fascat.image import ImageResource  # noqa: F401
     from fascat.io.brep import read_brep  # noqa: F401
     from fascat.io.iges import read_iges  # noqa: F401
+    from fascat.io.jt import read_jt  # noqa: F401
     from fascat.io.step import read_step, read_step_many  # noqa: F401
     from fascat.material import Material  # noqa: F401
     from fascat.mesh import Mesh, MeshValidationError  # noqa: F401
@@ -62,6 +63,7 @@ _EXPORTS: dict[str, str] = {
     "ImageResource": "fascat.image",
     "read_brep": "fascat.io.brep",
     "read_iges": "fascat.io.iges",
+    "read_jt": "fascat.io.jt",
     "read_step": "fascat.io.step",
     "read_step_many": "fascat.io.step",
     "Material": "fascat.material",
@@ -131,6 +133,7 @@ __all__ = [
     "profiles",
     "read_brep",
     "read_iges",
+    "read_jt",
     "read_step",
     "read_step_many",
     "validate_output",

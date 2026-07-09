@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- import JT (ISO 14306) files: a pure-Python, clean-room JT 9.x reader (`fc.read_jt`, `JtReadOptions`) covering pre-tessellated LOD meshes (topologically compressed tri-strip sets), assembly hierarchy, instances, transforms, materials, and properties, plus a `--jt-lod-selection finest|all` convert flag; JT 8.x and JT 10 mesh coding fail with clear errors
+
 ## [0.4.0] - 2026-06-13
 
 ### Added

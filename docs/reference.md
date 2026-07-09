@@ -136,7 +136,7 @@ settings), and `workflow_summary` (preparation stages mapped to run/skipped stat
 | Command | Description |
 |---------|-------------|
 | `fascat inspect input.step` | Inspect CAD assembly metadata and planned conversion inputs |
-| `fascat convert input.step [output.usdc]` | Convert STEP, IGES, or BREP CAD into OpenUSD, glTF, OBJ, STL, or FBX |
+| `fascat convert input.step [output.usdc]` | Convert STEP, IGES, BREP, or JT CAD into OpenUSD, glTF, OBJ, STL, or FBX |
 | `fascat validate output.usdc` | Validate generated USD, glTF, OBJ, STL, or FBX output |
 | `fascat validate output.glb --runtime-browser` | Measure optional headless browser/WebGL load and FPS for glTF/GLB output |
 | `fascat validate output.glb --runtime-browser-preview preview.png` | Write a browser/WebGL-rendered glTF/GLB PNG preview |
@@ -168,7 +168,7 @@ all listed formats are implemented.
 | STL `.stl` | Not imported | Supported | Mesh-only manufacturing or inspection output |
 | FBX `.fbx` | Not imported | Supported | ASCII FBX DCC and engine handoff output |
 | Parasolid `.x_t`, `.x_b` | Not supported | Not supported | Native-kernel CAD import candidate, not in scope yet |
-| JT `.jt` | Not supported | Not supported | Visualization/CAD hybrid import candidate, not in scope yet |
+| JT `.jt` | Supported (JT 9.x tessellation) | Not emitted as CAD | Pure-Python import of pre-tessellated JT 9 LOD meshes, assembly structure, and materials |
 | CATIA, NX, SolidWorks, Inventor | Not supported | Not supported | Native CAD coverage is deferred |
 | IFC, 3MF, QIF | Not supported | Not supported | Adjacent workflow formats, deferred unless a user need changes priority |
 
@@ -193,6 +193,20 @@ glTF/USD marker meshes with simple vector text glyphs.
 colors, and materials. **BREP** import creates one root occurrence and one part,
 keeping the native source shape for tessellation and healing.
 
+**JT** import is a pure-Python reader (no OCP dependency) for JT 9.x files. It
+decodes pre-tessellated LOD meshes (topologically compressed tri-strip sets),
+assembly hierarchy, instances, transforms, materials, and properties; parts are
+mesh-only (`source_shape` is `None`) and reuse the imported tessellation. Only
+the finest LOD is imported by default (`--jt-lod-selection all` also fills
+`Part.lod_meshes`). Units come from the `JT_PROP_MEASUREMENT_UNITS` property
+(millimetres assumed when absent); JT declares no up axis, so the NX/Teamcenter
+Z-up right-handed convention is assumed — override with the standard
+`--source-*`/`--target-*` flags. Embedded precise B-rep (Parasolid XT), PMI,
+textures, JT 8.x input, JT 10 mesh coding, JT via stdin, and external
+(shattered) partition references are not supported; unsupported versions and
+B-rep-only files fail with explicit errors, and external references import as
+placeholder nodes with warnings.
+
 ## Convert flags
 
 | Flag | Default | Description |
@@ -201,6 +215,7 @@ keeping the native source shape for tessellation and healing.
 | `--target-device-profile` | unset | TOML or JSON target-device budget overlay for the selected profile |
 | `--pipeline` | unset | TOML pipeline file with named filters and ordered conversion steps |
 | `--input` | unset | Additional STEP root input for explicit multi-root conversion; may be passed more than once |
+| `--jt-lod-selection` | `finest` | JT inputs: import only the finest LOD or all stored LODs (`finest`, `all`) |
 | `--stdout-format` | `usda` | Output format used only when the output path is `-`: `usda`, `usdc`, `usdz`, `gltf`, `glb`, `obj`, `stl`, or `fbx` |
 | `--sag` | profile value | Absolute CAD tessellation sag tolerance; overrides the profile's relative sag ratio when set |
 | `--sag-ratio` | profile value | Relative CAD tessellation sag ratio; realtime profiles default to `0.0002` |
@@ -589,7 +604,7 @@ above and on the [Python API page](api.html) document each field.
 
 | Capability | Status | Report step | Next step |
 |------------|--------|-------------|-----------|
-| CAD import (hierarchy, names, transforms, colors, metadata, PMI, variants) | Implemented for STEP/IGES; BREP as a single part; multi-root and master-file external references supported | `import` (decisions, loaded representations, PMI semantic graph, design-variant records, `external_reference_graph`) | Full AP242 conditional/effectivity geometry evaluation; full PMI semantic + graphical coverage; richer external-reference transforms |
+| CAD import (hierarchy, names, transforms, colors, metadata, PMI, variants) | Implemented for STEP/IGES; BREP as a single part; JT 9.x as pre-tessellated mesh parts; multi-root and master-file external references supported | `import` (decisions, loaded representations, PMI semantic graph, design-variant records, `external_reference_graph`) | Full AP242 conditional/effectivity geometry evaluation; full PMI semantic + graphical coverage; richer external-reference transforms |
 | BREP healing | Partial | `heal_brep` (open shells, edges, slivers, same-domain/overlap cleanup status) | Sliver-face removal and deeper face/wire repair |
 | Tessellation | Implemented | `tessellate` (tolerance policy, detail-adaptive criteria, quality metrics and advisories) | Conformal CAD UV solving; deeper curvature-targeted profiles |
 | Mesh repair | Implemented for core cleanup | `repair`, plus standalone `merge_vertices` / `delete_degenerate_polygons` reports | T-junction sewing, boundary-gap stitching, non-manifold cracking, viewer/open-shell orientation backends |

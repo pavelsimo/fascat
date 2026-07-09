@@ -38,3 +38,4 @@ htmlcov/
 
 # Docs output
 dist/docs-site/
+tests/fixtures/local/
