@@ -2307,6 +2307,184 @@ def test_validate_rejects_visual_baseline_without_preview(tmp_path: Path) -> Non
     assert "--visual-baseline requires --visual-preview" in result.output
 
 
+def _write_turntable_glb(path: Path, *, triangle_only: bool = False) -> None:
+    points = np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float)
+    if triangle_only:
+        mesh = Mesh(points=points[:3].copy(), faces=np.asarray([[0, 1, 2]], dtype=int))
+    else:
+        mesh = Mesh(points=points, faces=np.asarray([[0, 1, 2], [2, 1, 3]], dtype=int))
+    Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Shape", part_id="part")]),
+        parts={"part": Part(id="part", name="Shape", mesh=mesh)},
+        up_axis="Y",
+    ).write_gltf(path)
+
+
+def test_validate_can_write_turntable_previews(tmp_path: Path) -> None:
+    output_file = tmp_path / "turntable.glb"
+    turntable_dir = tmp_path / "views"
+    _write_turntable_glb(output_file)
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "validate",
+            str(output_file),
+            "--turntable-dir",
+            str(turntable_dir),
+            "--turntable-views",
+            "4",
+            "--turntable-elevations",
+            "0",
+            "--turntable-width",
+            "96",
+            "--turntable-height",
+            "96",
+            "--turntable-supersample",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["turntable"]["view_count"] == 4
+    assert payload["turntable"]["diff_passed"] is None
+    names = [view["name"] for view in payload["turntable"]["views"]]
+    assert names == ["az000_el+00", "az090_el+00", "az180_el+00", "az270_el+00"]
+    for name in names:
+        assert (turntable_dir / f"{name}.png").exists()
+    assert (turntable_dir / "turntable.png").exists()
+
+
+def test_validate_turntable_diff_passes_against_matching_baseline(tmp_path: Path) -> None:
+    output_file = tmp_path / "turntable.glb"
+    baseline_dir = tmp_path / "baseline-views"
+    turntable_dir = tmp_path / "views"
+    _write_turntable_glb(output_file)
+    common = ["--turntable-views", "2", "--turntable-elevations", "30", "--turntable-width", "96"]
+    common += ["--turntable-height", "96", "--turntable-supersample", "1"]
+    baseline_run = runner.invoke(
+        app, ["--json", "validate", str(output_file), "--turntable-dir", str(baseline_dir), *common]
+    )
+    assert baseline_run.exit_code == 0, baseline_run.output
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "validate",
+            str(output_file),
+            "--turntable-dir",
+            str(turntable_dir),
+            "--turntable-baseline-dir",
+            str(baseline_dir),
+            *common,
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["turntable"]["diff_passed"] is True
+    assert payload["turntable"]["diff"]["views_failed"] == 0
+
+
+def test_validate_fails_when_turntable_diff_exceeds_threshold(tmp_path: Path) -> None:
+    baseline_file = tmp_path / "baseline.glb"
+    output_file = tmp_path / "turntable.glb"
+    baseline_dir = tmp_path / "baseline-views"
+    turntable_dir = tmp_path / "views"
+    _write_turntable_glb(baseline_file)
+    _write_turntable_glb(output_file, triangle_only=True)
+    common = ["--turntable-views", "2", "--turntable-elevations", "30", "--turntable-width", "96"]
+    common += ["--turntable-height", "96", "--turntable-supersample", "1"]
+    baseline_run = runner.invoke(
+        app, ["--json", "validate", str(baseline_file), "--turntable-dir", str(baseline_dir), *common]
+    )
+    assert baseline_run.exit_code == 0, baseline_run.output
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "validate",
+            str(output_file),
+            "--turntable-dir",
+            str(turntable_dir),
+            "--turntable-baseline-dir",
+            str(baseline_dir),
+            *common,
+        ],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["turntable"]["diff_passed"] is False
+    assert payload["turntable"]["diff"]["views_failed"] > 0
+    assert payload["turntable"]["diff"]["worst_view"] in [view["name"] for view in payload["turntable"]["views"]]
+
+
+def test_validate_rejects_turntable_baseline_without_turntable_dir(tmp_path: Path) -> None:
+    output_file = tmp_path / "turntable.glb"
+    baseline_dir = tmp_path / "baseline-views"
+
+    result = runner.invoke(app, ["validate", str(output_file), "--turntable-baseline-dir", str(baseline_dir)])
+
+    assert result.exit_code == 2
+    assert "--turntable-baseline-dir requires --turntable-dir" in result.output
+
+
+def test_validate_rejects_invalid_turntable_views(tmp_path: Path) -> None:
+    output_file = tmp_path / "turntable.glb"
+    turntable_dir = tmp_path / "views"
+
+    result = runner.invoke(
+        app,
+        ["validate", str(output_file), "--turntable-dir", str(turntable_dir), "--turntable-views", "0"],
+    )
+
+    assert result.exit_code == 2
+    assert "--turntable-views must be greater than 0" in result.output
+
+
+@pytest.mark.parametrize("elevations", ["abc", "", "95", "-95,30"])
+def test_validate_rejects_invalid_turntable_elevations(tmp_path: Path, elevations: str) -> None:
+    output_file = tmp_path / "turntable.glb"
+    turntable_dir = tmp_path / "views"
+
+    result = runner.invoke(
+        app,
+        [
+            "validate",
+            str(output_file),
+            "--turntable-dir",
+            str(turntable_dir),
+            "--turntable-elevations",
+            elevations,
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "--turntable-elevations" in result.output
+
+
+def test_validate_dry_run_includes_turntable_payload_fields(tmp_path: Path) -> None:
+    output_file = tmp_path / "turntable.glb"
+    turntable_dir = tmp_path / "views"
+
+    result = runner.invoke(
+        app,
+        ["--json", "--dry-run", "validate", str(output_file), "--turntable-dir", str(turntable_dir)],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["turntable_dir"] == str(turntable_dir)
+    assert payload["turntable_views"] == 8
+    assert payload["turntable_elevations"] == "-30,30"
+    assert not turntable_dir.exists()
+
+
 def test_validate_missing_usd_backend_exits_nonzero(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

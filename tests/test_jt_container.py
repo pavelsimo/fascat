@@ -19,7 +19,7 @@ from tests._jt_builder import (
     ContainerSpec,
     SegmentSpec,
     build_container,
-    build_jt8_bytes,
+    build_jt7_bytes,
     guid_bytes,
     make_guid,
 )
@@ -62,9 +62,9 @@ class TestFileHeader:
         assert header.version == (10, 5)
         assert 0 < header.toc_offset < len(data)
 
-    def test_rejects_jt8(self) -> None:
-        with pytest.raises(RuntimeError, match="unsupported JT version 8.1"):
-            read_file_header(build_jt8_bytes())
+    def test_rejects_jt7(self) -> None:
+        with pytest.raises(RuntimeError, match="unsupported JT version 7.0"):
+            read_file_header(build_jt7_bytes())
 
     def test_rejects_garbage(self) -> None:
         with pytest.raises(RuntimeError, match="not a JT file"):
@@ -110,6 +110,16 @@ class TestLoadSegment:
     def test_decompresses_per_algorithm_field(self, compression: int) -> None:
         payload = bytes(range(256)) * 8
         data, guid = _single_segment_file(payload, compression=compression)
+        header = read_file_header(data)
+        entry = read_toc(data, header).find(guid)
+        assert entry is not None
+        assert load_segment(data, entry, header=header) == payload
+
+    @pytest.mark.parametrize("compression", [COMPRESSION_NONE, COMPRESSION_LZMA])
+    def test_jt10_flag3_xz_segments(self, compression: int) -> None:
+        # JT 10 writes compression flag 3 with XZ-container LZMA payloads.
+        payload = bytes(range(256)) * 8
+        data, guid = _single_segment_file(payload, compression=compression, version=(10, 0))
         header = read_file_header(data)
         entry = read_toc(data, header).find(guid)
         assert entry is not None

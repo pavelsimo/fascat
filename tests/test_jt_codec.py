@@ -5,7 +5,7 @@ import pytest
 
 from fascat.io.jt import codec
 from fascat.io.jt.container import ByteReader
-from tests._jt_builder import encode_cdp2
+from tests._jt_builder import encode_cdp2, encode_cdp3
 
 _PREDICTORS = ["null", "lag1", "lag2", "stride1", "stride2", "stripindex", "ramp", "xor1", "xor2"]
 
@@ -21,6 +21,12 @@ class TestNullCodec:
 
     def test_empty_packet(self) -> None:
         assert _decode(encode_cdp2([])).tolist() == []
+
+    def test_length_field_counts_bytes(self) -> None:
+        # The Null CODEC's code-text length field is a byte count, unlike the
+        # bit counts used by the entropy codecs.
+        data = encode_cdp2([1, 2, 3])
+        assert int.from_bytes(data[5:9], "little") == 12
 
     @pytest.mark.parametrize("byte_order", ["<", ">"])
     def test_byte_orders(self, byte_order: str) -> None:
@@ -78,30 +84,55 @@ class TestPredictors:
             codec.unpack_residuals(np.zeros(8, dtype=np.int64), "bogus")
 
 
+_BITLENGTH_MODES = ["bitlength", "bitlength-fixed", "bitlength-variable"]
+
+
 class TestBitlengthCodec:
-    def test_hand_derived_golden_vector(self) -> None:
-        # Values [3, -2]. Width starts at 0, so 3 forces two increments
-        # (prefix 1 11 0), then 3 as 4-bit two's complement (0011); -2 fits the
-        # current 4-bit width (prefix 0, value 1110). Bit stream:
-        # 1 1 1 0 0 0 1 1 0 1 1 1 0 -> 13 bits, one word 0xE3700000.
+    def test_hand_derived_fixed_mode_golden_vector(self) -> None:
+        # Values [3, -2], fixed-width mode. Mode bit 0; min = -2 (signed bitsize
+        # 2), max = 3 (signed bitsize 3); header 0 000010 000011 10 011; range 5
+        # -> 3-bit unsigned offsets 101 and 000. 24 bits total:
+        # 00000100 00011100 11101000 -> word 0x041CE800.
         golden = (
             b"\x02\x00\x00\x00"  # value count
             b"\x01"  # Bitlength CODEC
-            b"\x0d\x00\x00\x00"  # code text length in bits
-            b"\x01\x00\x00\x00"  # code text word count
-            b"\x00\x00\x70\xe3"  # 0xE3700000 little-endian
+            b"\x18\x00\x00\x00"  # code text length in bits (24)
+            b"\x00\xe8\x1c\x04"  # 0x041CE800 little-endian
         )
         assert _decode(golden).tolist() == [3, -2]
 
-    def test_round_trips_mixed_widths(self) -> None:
+    def test_hand_derived_variable_mode_golden_vector(self) -> None:
+        # Values [7, 7, 6], variable-width mode. Mode bit 1; mean 7 (32 bits);
+        # delta field size 3 (011), run field size 2 (010); width delta +1
+        # (001), run 3 (11), then 1-bit signed fields 0, 0, -1 (0 0 1).
+        # 47 bits total -> words 0x80000003, 0xB4720000.
+        golden = (
+            b"\x03\x00\x00\x00"  # value count
+            b"\x01"  # Bitlength CODEC
+            b"\x2f\x00\x00\x00"  # code text length in bits (47)
+            b"\x03\x00\x00\x80"  # 0x80000003 little-endian
+            b"\x00\x00\x72\xb4"  # 0xB4720000 little-endian
+        )
+        assert _decode(golden).tolist() == [7, 7, 6]
+
+    def test_constant_array_is_count_independent(self) -> None:
+        # A fixed-mode packet with min == max carries no per-value fields, so
+        # the same code text serves any value count.
+        for count in (4, 2900):
+            data = count.to_bytes(4, "little") + b"\x01\x13\x00\x00\x00\x00\x60\x1b\x06"
+            assert _decode(data).tolist() == [3] * count
+
+    @pytest.mark.parametrize("mode", _BITLENGTH_MODES)
+    def test_round_trips_mixed_widths(self, mode: str) -> None:
         values = [0, 0, 1, -1, 3, 700, -700, 2, 0, 65000, -65000, 12, 5, 0]
-        data = encode_cdp2(values, codec="bitlength")
+        data = encode_cdp2(values, codec=mode)
         assert _decode(data).tolist() == values
 
-    def test_round_trips_beyond_one_word(self) -> None:
+    @pytest.mark.parametrize("mode", _BITLENGTH_MODES)
+    def test_round_trips_beyond_one_word(self, mode: str) -> None:
         rng = np.random.default_rng(7)
         values = rng.integers(-(2**20), 2**20, size=300).tolist()
-        data = encode_cdp2(values, codec="bitlength")
+        data = encode_cdp2(values, codec=mode)
         assert _decode(data).tolist() == values
 
     @pytest.mark.parametrize("predictor", ["lag1", "stride1", "stripindex"])
@@ -109,6 +140,48 @@ class TestBitlengthCodec:
         values = list(range(0, 60, 3)) + [1000, 4, 1000, 4]
         data = encode_cdp2(values, codec="bitlength", predictor=predictor)
         assert _decode(data, predictor).tolist() == values
+
+    def test_unconsumed_code_text_raises(self) -> None:
+        # The [3, -2] fixed-mode golden consumes 24 bits; claiming 30 must fail.
+        data = b"\x02\x00\x00\x00\x01\x1e\x00\x00\x00\x00\xe8\x1c\x04"
+        with pytest.raises(RuntimeError, match="consumed 24 of 30 bits"):
+            _decode(data)
+
+    def test_run_overrunning_value_count_raises(self) -> None:
+        # The variable-mode golden's run of 3 against a claimed count of 2.
+        data = b"\x02\x00\x00\x00\x01\x2f\x00\x00\x00\x03\x00\x00\x80\x00\x00\x72\xb4"
+        with pytest.raises(RuntimeError, match="run overruns value count"):
+            _decode(data)
+
+
+class TestBitlengthRealFileGoldens:
+    """Packets extracted verbatim from Siemens-written JT 9.5 files.
+
+    These pin the decoder to real DM output independently of the synthetic
+    encoder in tests/_jt_builder.py, so a mirrored spec misreading in builder
+    and decoder cannot cancel out.
+    """
+
+    def test_constant_valences_packet(self) -> None:
+        # 2900 triangle valences, all 3, in 19 bits of code text.
+        data = bytes.fromhex("540b0000011300000000601b06")
+        assert _decode(data).tolist() == [3] * 2900
+
+    def test_constant_zero_packet(self) -> None:
+        # 2900 vertex group ids, all 0, in 15 bits.
+        data = bytes.fromhex("540b0000010f00000000000802")
+        assert _decode(data).tolist() == [0] * 2900
+
+    def test_short_constant_packet(self) -> None:
+        # Two attribute masks of 0b111 in 21 bits.
+        data = bytes.fromhex("02000000011500000000b82308")
+        assert _decode(data).tolist() == [7, 7]
+
+    def test_fixed_width_field_packet(self) -> None:
+        # 19 face degrees spanning 3..14: 21-bit header plus 19 4-bit fields.
+        data = bytes.fromhex("130000000161000000d5752b06541a181b25401d3000000000")
+        expected = [14, 13, 13, 6, 9, 6, 3, 6, 7, 13, 11, 9, 3, 6, 13, 11, 3, 7, 13]
+        assert _decode(data).tolist() == expected
 
 
 class TestArithmeticCodec:
@@ -140,9 +213,17 @@ class TestArithmeticCodec:
 
 
 class TestChopperCodec:
-    def test_zero_chop_bits_decodes_zeros(self) -> None:
-        data = b"\x05\x00\x00\x00" + b"\x04" + b"\x00"  # count 5, chopper, chop bits 0
-        assert _decode(data).tolist() == [0, 0, 0, 0, 0]
+    def test_zero_chop_bits_reads_nested_packet(self) -> None:
+        # chop bits 0 means no chopping happened: the values arrive in one
+        # nested packet instead of msb/lsb halves.
+        values = [12, -7, 0, 400, 3]
+        data = b"\x05\x00\x00\x00" + b"\x04" + b"\x00" + encode_cdp2(values)
+        assert _decode(data).tolist() == values
+
+    def test_zero_chop_bits_length_mismatch_raises(self) -> None:
+        data = b"\x05\x00\x00\x00" + b"\x04" + b"\x00" + encode_cdp2([1, 2])
+        with pytest.raises(RuntimeError, match="chopper field length mismatch"):
+            _decode(data)
 
     def test_chopped_msb_lsb_reassembly(self) -> None:
         # values = (msb << (span - chop)) | lsb, then + bias.
@@ -163,6 +244,169 @@ class TestChopperCodec:
         assert _decode(data).tolist() == expected
 
 
+def _decode3(data: bytes, predictor: str = "null", byte_order: str = "<") -> np.ndarray:
+    return codec.decode_int32_cdp3(ByteReader(data, byte_order=byte_order), predictor)
+
+
+class TestCdp3NullCodec:
+    @pytest.mark.parametrize("predictor", _PREDICTORS)
+    def test_round_trips_through_predictors(self, predictor: str) -> None:
+        values = [10, 12, 14, 16, 18, 20, 25, 33, 32, 31, 5, -6, 90, 91, 92, 93]
+        assert _decode3(encode_cdp3(values, predictor=predictor), predictor).tolist() == values
+
+    def test_empty_packet(self) -> None:
+        assert _decode3(encode_cdp3([])).tolist() == []
+
+
+class TestCdp3Chopper:
+    def test_fields_always_read_and_reassembled(self) -> None:
+        # Unlike Mk.2, the Mk.3 chopper stores bias and span even for
+        # chop_bits == 0; this golden exercises the ordinary chopped path.
+        msb = [1, 2, 3, 4, 5]
+        lsb = [0, 31, 7, 1, 16]
+        bias = -100
+        expected = [(m << 5 | v) + bias for m, v in zip(msb, lsb, strict=True)]
+        data = (
+            b"\x05\x00\x00\x00"
+            b"\x04"
+            b"\x03"  # chop bits
+            + (-100 & 0xFFFFFFFF).to_bytes(4, "little")
+            + b"\x08"  # span bits
+            + encode_cdp3(msb)
+            + encode_cdp3(lsb)
+        )
+        assert _decode3(data).tolist() == expected
+
+
+class TestCdp3RealFileGoldens:
+    """Packets extracted verbatim from JT 10.0 files written by DM 8.1.3.3.
+
+    They pin the Mk.3 decoder (nibbler headers, post-code-text probability
+    contexts, escape-driven out-of-band data, move-to-front) to real output.
+    """
+
+    def test_bitlength_fixed_constant(self) -> None:
+        # 448 triangle valences, all 3: nibbler-coded min == max, no fields.
+        data = bytes.fromhex("c0010000010b0000000000c018")
+        assert _decode3(data).tolist() == [3] * 448
+
+    def test_bitlength_variable(self) -> None:
+        data = bytes.fromhex("2700000001ab000000da659181c488a073039b9f8c8410ae8df9ffcd3b00008012")
+        expected = [
+            22,
+            23,
+            26,
+            28,
+            2,
+            2,
+            3,
+            1,
+            2,
+            3,
+            2,
+            7,
+            -1,
+            0,
+            0,
+            0,
+            -1,
+            -2,
+            -9,
+            1,
+            1,
+            1,
+            1,
+            -5,
+            -1,
+            -1,
+            -1,
+            -1,
+            -1,
+            -1,
+            -1,
+            -1,
+            -1,
+            -1,
+            -1,
+            -1,
+            -1,
+            2,
+            -4,
+        ]
+        assert _decode3(data).tolist() == expected
+
+    def test_arithmetic_with_out_of_band(self) -> None:
+        # 95 face degrees; the context carries an escape entry whose two
+        # occurrences pull from a nested out-of-band packet.
+        data = bytes.fromhex(
+            "5f00000003b200000089fa6584871bbd7a5d961c87321aadaad79c1085000000"
+            "40000418180000000440b29bc53804000000012000000000842002"
+        )
+        values = _decode3(data).tolist()
+        assert len(values) == 95
+        assert values[:17] == [6, 8, 7, 7, 7, 6, 6, 7, 6, 6, 5, 4, 6, 6, 6, 6, 7]
+        assert values[17] == 0 and values[24] == 0  # out-of-band escapes
+        assert values[-8:] == [6, 6, 6, 6, 6, 6, 5, 5]
+
+    def test_move_to_front(self) -> None:
+        data = bytes.fromhex(
+            "310000000509000000014f000000eb87ee0b042064f30000222331000000019e"
+            "0000004922c07824119224840448844992240124119348"
+        )
+        expected = [
+            68,
+            123,
+            68,
+            68,
+            68,
+            68,
+            68,
+            68,
+            68,
+            68,
+            68,
+            68,
+            127,
+            68,
+            68,
+            68,
+            68,
+            68,
+            55,
+            68,
+            68,
+            68,
+            34,
+            1,
+            1,
+            1,
+            9,
+            1,
+            36,
+            18,
+            18,
+            18,
+            18,
+            18,
+            18,
+            18,
+            18,
+            18,
+            18,
+            36,
+            18,
+            18,
+            18,
+            18,
+            9,
+            18,
+            18,
+            18,
+            18,
+        ]
+        assert _decode3(data).tolist() == expected
+
+
 class TestCdpErrors:
     def test_unsupported_codec_type(self) -> None:
         with pytest.raises(RuntimeError, match="unsupported JT CODEC type"):
@@ -176,6 +420,20 @@ class TestCdpErrors:
         data = encode_cdp2([1, 2, 3])
         with pytest.raises(RuntimeError, match="truncated JT data"):
             _decode(data[:-2])
+
+    def test_recursion_depth_capped(self) -> None:
+        # Nine nested zero-chop choppers exceed the depth-8 cap.
+        data = encode_cdp2([1])
+        for _ in range(9):
+            data = b"\x01\x00\x00\x00" + b"\x04" + b"\x00" + data
+        with pytest.raises(RuntimeError, match="recursion depth exceeded"):
+            _decode(data)
+
+    def test_deep_but_legal_recursion_decodes(self) -> None:
+        data = encode_cdp2([1])
+        for _ in range(7):
+            data = b"\x01\x00\x00\x00" + b"\x04" + b"\x00" + data
+        assert _decode(data).tolist() == [1]
 
 
 class TestDequantizeUniform:

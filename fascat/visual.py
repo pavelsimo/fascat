@@ -165,6 +165,87 @@ class LodSwitchPreviewReport:
 
 
 @dataclass(frozen=True)
+class TurntableOptions:
+    views: int = 8
+    elevations: tuple[float, ...] = (-30.0, 30.0)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "elevations", tuple(self.elevations))
+        if self.views < 1:
+            raise ValueError("turntable views must be greater than 0")
+        if not self.elevations:
+            raise ValueError("turntable elevations must not be empty")
+        if any(elevation < -90.0 or elevation > 90.0 for elevation in self.elevations):
+            raise ValueError("turntable elevations must be between -90 and 90")
+
+    def to_dict(self) -> dict[str, object]:
+        return {"views": self.views, "elevations": list(self.elevations)}
+
+
+@dataclass(frozen=True)
+class TurntableViewReport:
+    name: str
+    azimuth: float
+    elevation: float
+    preview: VisualPreviewReport
+    diff: VisualDiffReport | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "azimuth": self.azimuth,
+            "elevation": self.elevation,
+            "preview": self.preview.to_dict(),
+            "diff": self.diff.to_dict() if self.diff is not None else None,
+        }
+
+
+@dataclass(frozen=True)
+class TurntableReport:
+    directory: str
+    contact_sheet: str
+    views: list[TurntableViewReport] = field(default_factory=list)
+    diff_passed: bool | None = None
+    warnings: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "views", list(self.views))
+        object.__setattr__(self, "warnings", tuple(self.warnings))
+
+    def worst_diff_view(self) -> TurntableViewReport | None:
+        diffed = [view for view in self.views if view.diff is not None]
+        if not diffed:
+            return None
+        return max(diffed, key=lambda view: view.diff.mean_absolute_error if view.diff is not None else 0.0)
+
+    def to_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "directory": self.directory,
+            "contact_sheet": self.contact_sheet,
+            "views": [view.to_dict() for view in self.views],
+            "view_count": len(self.views),
+            "diff_passed": self.diff_passed,
+            "warnings": list(self.warnings),
+        }
+        if self.diff_passed is not None:
+            diffed = [view for view in self.views if view.diff is not None]
+            worst = self.worst_diff_view()
+            payload["diff"] = {
+                "passed": self.diff_passed,
+                "views_compared": len(diffed),
+                "views_failed": sum(1 for view in diffed if view.diff is not None and not view.diff.passed),
+                "max_mean_absolute_error": max(
+                    (view.diff.mean_absolute_error for view in diffed if view.diff is not None), default=0.0
+                ),
+                "max_changed_pixel_ratio": max(
+                    (view.diff.changed_pixel_ratio for view in diffed if view.diff is not None), default=0.0
+                ),
+                "worst_view": worst.name if worst is not None else None,
+            }
+        return payload
+
+
+@dataclass(frozen=True)
 class _RenderOccurrence:
     part: Part
     mesh: Mesh
@@ -192,6 +273,7 @@ def write_preview(
     options: VisualPreviewOptions | None = None,
     *,
     lod_level: int = 0,
+    view_angles: tuple[float, float] | None = None,
 ) -> VisualPreviewReport:
     opts = options or VisualPreviewOptions()
     if lod_level < 0:
@@ -215,7 +297,10 @@ def write_preview(
             warnings=tuple(warnings),
         )
 
-    image = _render_asset(asset, occurrences, opts)
+    basis = (
+        _camera_basis_from_angles(asset.up_axis, view_angles[0], view_angles[1]) if view_angles is not None else None
+    )
+    image = _render_asset(asset, occurrences, opts, basis=basis)
     image.save(output_path)
     fallback_source_occurrences = sum(1 for occurrence in occurrences if occurrence.fallback_source)
     if fallback_source_occurrences:
@@ -380,14 +465,126 @@ def write_output_lod_switch_previews(
     return write_lod_switch_previews(asset, directory, options)
 
 
-def _render_asset(asset: Asset, occurrences: list[_RenderOccurrence], options: VisualPreviewOptions) -> Image.Image:
+def write_turntable_previews(
+    asset: Asset,
+    directory: str | Path,
+    options: VisualPreviewOptions | None = None,
+    turntable: TurntableOptions | None = None,
+    *,
+    baseline_dir: str | Path | None = None,
+    diff_options: VisualDiffOptions | None = None,
+    lod_level: int = 0,
+) -> TurntableReport:
+    opts = options or VisualPreviewOptions()
+    table = turntable or TurntableOptions()
+    output_dir = Path(directory)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    azimuths = [index * 360.0 / table.views for index in range(table.views)]
+    views: list[TurntableViewReport] = []
+    warnings: list[str] = []
+    rows: list[list[tuple[Path, str]]] = []
+    for elevation in table.elevations:
+        row: list[tuple[Path, str]] = []
+        for azimuth in azimuths:
+            name = _turntable_view_name(azimuth, elevation)
+            preview = write_preview(
+                asset,
+                output_dir / f"{name}.png",
+                opts,
+                lod_level=lod_level,
+                view_angles=(azimuth, elevation),
+            )
+            warnings.extend(preview.warnings)
+            diff: VisualDiffReport | None = None
+            if baseline_dir is not None:
+                baseline_path = Path(baseline_dir) / f"{name}.png"
+                if baseline_path.exists():
+                    diff = compare_images(baseline_path, preview.path, diff_options)
+                else:
+                    warnings.append(f"turntable baseline image missing: {baseline_path}")
+                    diff = _missing_baseline_diff(baseline_path, preview, diff_options)
+            views.append(
+                TurntableViewReport(name=name, azimuth=azimuth, elevation=elevation, preview=preview, diff=diff)
+            )
+            row.append((Path(preview.path), name))
+        rows.append(row)
+    contact_sheet = output_dir / "turntable.png"
+    _write_contact_sheet_grid(rows, contact_sheet, opts)
+    diff_passed: bool | None = None
+    if baseline_dir is not None:
+        diff_passed = all(view.diff is not None and view.diff.passed for view in views)
+    return TurntableReport(
+        directory=str(output_dir),
+        contact_sheet=str(contact_sheet),
+        views=views,
+        diff_passed=diff_passed,
+        warnings=tuple(_dedupe(warnings)),
+    )
+
+
+def write_output_turntable_previews(
+    output_path: str | Path,
+    directory: str | Path,
+    options: VisualPreviewOptions | None = None,
+    turntable: TurntableOptions | None = None,
+    *,
+    baseline_dir: str | Path | None = None,
+    diff_options: VisualDiffOptions | None = None,
+    lod_level: int = 0,
+) -> TurntableReport:
+    asset = _asset_from_output_path(output_path)
+    return write_turntable_previews(
+        asset,
+        directory,
+        options,
+        turntable,
+        baseline_dir=baseline_dir,
+        diff_options=diff_options,
+        lod_level=lod_level,
+    )
+
+
+def _turntable_view_name(azimuth: float, elevation: float) -> str:
+    return f"az{azimuth:03.0f}_el{elevation:+03.0f}"
+
+
+def _missing_baseline_diff(
+    baseline_path: Path,
+    preview: VisualPreviewReport,
+    diff_options: VisualDiffOptions | None,
+) -> VisualDiffReport:
+    return VisualDiffReport(
+        baseline_path=str(baseline_path),
+        candidate_path=preview.path,
+        passed=False,
+        baseline_width=0,
+        baseline_height=0,
+        candidate_width=preview.width,
+        candidate_height=preview.height,
+        total_pixels=0,
+        changed_pixels=0,
+        changed_pixel_ratio=1.0,
+        mean_absolute_error=255.0,
+        max_absolute_error=255,
+        options=diff_options or VisualDiffOptions(),
+        warnings=("baseline image missing",),
+    )
+
+
+def _render_asset(
+    asset: Asset,
+    occurrences: list[_RenderOccurrence],
+    options: VisualPreviewOptions,
+    basis: _CameraBasis | None = None,
+) -> Image.Image:
     supersample = options.supersample
     width = options.width * supersample
     height = options.height * supersample
     padding = options.padding * supersample
     image = Image.new("RGBA", (width, height), options.background_color)
     all_points = np.vstack([occurrence.points for occurrence in occurrences if len(occurrence.points)])
-    basis = _camera_basis(asset.up_axis)
+    if basis is None:
+        basis = _camera_basis(asset.up_axis)
     projected = _project(all_points, basis)
     minimum = projected.min(axis=0)
     maximum = projected.max(axis=0)
@@ -496,6 +693,23 @@ def _transform_points(points: FloatArray, transform: FloatArray) -> FloatArray:
 def _camera_basis(up_axis: str) -> _CameraBasis:
     world_up = np.asarray([0.0, 1.0, 0.0] if up_axis == "Y" else [0.0, 0.0, 1.0], dtype=np.float64)
     view = _normalize(np.asarray([1.0, -1.2, 0.85], dtype=np.float64))
+    return _basis_from_view(world_up, view)
+
+
+def _camera_basis_from_angles(up_axis: str, azimuth: float, elevation: float) -> _CameraBasis:
+    world_up = np.asarray([0.0, 1.0, 0.0] if up_axis == "Y" else [0.0, 0.0, 1.0], dtype=np.float64)
+    azimuth_rad = float(np.radians(azimuth))
+    elevation_rad = float(np.radians(elevation))
+    planar = float(np.cos(elevation_rad))
+    if up_axis == "Y":
+        direction = [planar * np.cos(azimuth_rad), np.sin(elevation_rad), planar * np.sin(azimuth_rad)]
+    else:
+        direction = [planar * np.cos(azimuth_rad), planar * np.sin(azimuth_rad), np.sin(elevation_rad)]
+    view = _normalize(np.asarray(direction, dtype=np.float64))
+    return _basis_from_view(world_up, view)
+
+
+def _basis_from_view(world_up: FloatArray, view: FloatArray) -> _CameraBasis:
     right = np.cross(world_up, view)
     if float(np.linalg.norm(right)) < 1e-9:
         right = np.asarray([1.0, 0.0, 0.0], dtype=np.float64)
@@ -576,6 +790,24 @@ def _write_contact_sheet(items: list[tuple[Path, str]], path: Path, options: Vis
             image = source.convert("RGBA")
         sheet.paste(image, (index * options.width, label_height))
         draw.text((index * options.width + 8, 8), label, fill=(24, 27, 32, 255))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sheet.save(path)
+
+
+def _write_contact_sheet_grid(rows: list[list[tuple[Path, str]]], path: Path, options: VisualPreviewOptions) -> None:
+    label_height = 28
+    columns = max((len(row) for row in rows), default=0)
+    width = options.width * max(columns, 1)
+    height = (options.height + label_height) * max(len(rows), 1)
+    sheet = Image.new("RGBA", (width, height), options.background_color)
+    draw = ImageDraw.Draw(sheet, "RGBA")
+    for row_index, row in enumerate(rows):
+        offset_y = row_index * (options.height + label_height)
+        for column_index, (item_path, label) in enumerate(row):
+            with Image.open(item_path) as source:
+                image = source.convert("RGBA")
+            sheet.paste(image, (column_index * options.width, offset_y + label_height))
+            draw.text((column_index * options.width + 8, offset_y + 8), label, fill=(24, 27, 32, 255))
     path.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(path)
 

@@ -8,6 +8,7 @@ cannot be mirrored by a matching builder bug.
 from __future__ import annotations
 
 import lzma
+import math
 import struct
 import zlib
 from dataclasses import dataclass, field
@@ -146,7 +147,7 @@ def build_container(spec: ContainerSpec) -> bytes:
     placements: list[tuple[SegmentSpec, int, int]] = []
     for segment in spec.segments:
         offset = writer.tell()
-        _write_segment(writer, segment)
+        _write_segment(writer, segment, major)
         placements.append((segment, offset, writer.tell() - offset))
 
     writer.patch(toc_slot, writer.tell())
@@ -162,7 +163,7 @@ def build_container(spec: ContainerSpec) -> bytes:
     return bytes(writer.buffer)
 
 
-def _write_segment(writer: JtWriter, segment: SegmentSpec) -> None:
+def _write_segment(writer: JtWriter, segment: SegmentSpec, major: int = 9) -> None:
     writer.guid(segment.guid)
     writer.i32(segment.segment_type)
     length_slot = writer.reserve("i")
@@ -170,11 +171,14 @@ def _write_segment(writer: JtWriter, segment: SegmentSpec) -> None:
     if segment.segment_type in _SHAPE_SEGMENT_RANGE:
         writer.raw(segment.payload)
     else:
-        writer.i32(2)  # compression flag: compression block present
+        # JT 9 writes compression flag 2 (ZLIB block); JT 10 writes flag 3
+        # (LZMA block) with XZ-container payloads.
+        writer.i32(3 if major >= 10 else 2)
         if segment.compression == COMPRESSION_ZLIB:
             data = zlib.compress(segment.payload)
         elif segment.compression == COMPRESSION_LZMA:
-            data = lzma.compress(segment.payload, format=lzma.FORMAT_ALONE)
+            fmt = lzma.FORMAT_XZ if major >= 10 else lzma.FORMAT_ALONE
+            data = lzma.compress(segment.payload, format=fmt)
         else:
             data = segment.payload
         writer.i32(len(data) + 1)
@@ -183,9 +187,9 @@ def _write_segment(writer: JtWriter, segment: SegmentSpec) -> None:
     writer.patch(length_slot, writer.tell() - start)
 
 
-def build_jt8_bytes() -> bytes:
-    """A JT 8.1 header stub — just enough to trip the version gate."""
-    line = b"Version 8.1 JT".ljust(_VERSION_LINE_BYTES - 2) + b"\r\n"
+def build_jt7_bytes() -> bytes:
+    """A JT 7.0 header stub — just enough to trip the version gate."""
+    line = b"Version 7.0 JT".ljust(_VERSION_LINE_BYTES - 2) + b"\r\n"
     return line + bytes([0]) + bytes(28)
 
 
@@ -265,32 +269,75 @@ def pack_residuals(values: list[int], predictor: str) -> list[int]:
     return out
 
 
-def _bitlength_width(value: int) -> int:
-    """Smallest multiple-of-2 field width whose signed range holds `value`."""
-    width = 0
-    while not (width and -(1 << (width - 1)) <= value < 1 << (width - 1)) and width < 34:
-        if width == 0 and value == 0:
-            break
-        width += 2
-    return width
+def _signed_bitsize(value: int) -> int:
+    """Spec bitsize(): smallest signed field width that holds `value` (0 -> 1)."""
+    magnitude = value if value >= 0 else ~value
+    return magnitude.bit_length() + 1
 
 
-def _encode_bitlength_codetext(residuals: list[int]) -> BitWriter:
+def _encode_bitlength_fixed(residuals: list[int]) -> BitWriter:
+    """BitLengthCodec2 fixed-width mode: signed min/max header, then offset fields."""
     writer = BitWriter()
-    width = 0
-    for value in residuals:
-        needed = _bitlength_width(value)
-        if needed == width:
-            writer.write_bit(0)
-        else:
-            writer.write_bit(1)
-            direction = 1 if needed > width else 0
-            for _ in range(abs(needed - width) // 2):
-                writer.write_bit(direction)
-            writer.write_bit(direction ^ 1)
-            width = needed
-        writer.write_signed(value, width)
+    writer.write_bit(0)
+    minimum = min(residuals)
+    maximum = max(residuals)
+    min_bits = _signed_bitsize(minimum)
+    max_bits = _signed_bitsize(maximum)
+    writer.write(min_bits, 6)
+    writer.write(max_bits, 6)
+    writer.write_signed(minimum, min_bits)
+    writer.write_signed(maximum, max_bits)
+    if maximum - minimum > 0:
+        width = (maximum - minimum).bit_length()
+        for value in residuals:
+            writer.write(value - minimum, width)
     return writer
+
+
+_VARIABLE_DELTA_BITS = 6
+_VARIABLE_RUN_BITS = 7
+
+
+def _encode_bitlength_variable(residuals: list[int]) -> BitWriter:
+    """BitLengthCodec2 variable-width mode: runs of signed fields around a mean."""
+    writer = BitWriter()
+    writer.write_bit(1)
+    mean = sorted(residuals)[len(residuals) // 2]
+    writer.write_signed(mean, 32)
+    writer.write(_VARIABLE_DELTA_BITS, 3)
+    writer.write(_VARIABLE_RUN_BITS, 3)
+    saturate_low = -(1 << (_VARIABLE_DELTA_BITS - 1))
+    saturate_high = (1 << (_VARIABLE_DELTA_BITS - 1)) - 1
+    max_run = (1 << _VARIABLE_RUN_BITS) - 1
+    width = 0
+    position = 0
+    while position < len(residuals):
+        run = residuals[position : position + max_run]
+        target = max(_signed_bitsize(value - mean) for value in run)
+        delta = target - width
+        while delta >= saturate_high:
+            writer.write_signed(saturate_high, _VARIABLE_DELTA_BITS)
+            delta -= saturate_high
+        while delta <= saturate_low:
+            writer.write_signed(saturate_low, _VARIABLE_DELTA_BITS)
+            delta -= saturate_low
+        writer.write_signed(delta, _VARIABLE_DELTA_BITS)
+        width = target
+        writer.write(len(run), _VARIABLE_RUN_BITS)
+        for value in run:
+            writer.write_signed(value - mean, width)
+        position += len(run)
+    return writer
+
+
+def _encode_bitlength_codetext(residuals: list[int], mode: str = "bitlength") -> BitWriter:
+    fixed = _encode_bitlength_fixed(residuals)
+    if mode == "bitlength-fixed":
+        return fixed
+    variable = _encode_bitlength_variable(residuals)
+    if mode == "bitlength-variable":
+        return variable
+    return fixed if len(fixed.bits) <= len(variable.bits) else variable
 
 
 def _encode_arithmetic_codetext(
@@ -351,13 +398,12 @@ def encode_cdp2(
     residuals = pack_residuals(values, predictor)
     if codec == "null":
         writer.u8(0)
-        writer.i32(32 * len(residuals))
-        writer.i32(len(residuals))
+        writer.i32(4 * len(residuals))  # the Null CODEC length field counts bytes
         for value in residuals:
             writer.u32(value & 0xFFFFFFFF)
         return bytes(writer.buffer)
-    if codec == "bitlength":
-        bits = _encode_bitlength_codetext(residuals)
+    if codec in ("bitlength", "bitlength-fixed", "bitlength-variable"):
+        bits = _encode_bitlength_codetext(residuals, codec)
         writer.u8(1)
         _write_codetext(writer, bits)
         return bytes(writer.buffer)
@@ -407,10 +453,136 @@ def encode_cdp2(
 
 def _write_codetext(writer: JtWriter, bits: BitWriter) -> None:
     writer.i32(len(bits.bits))
+    for word in bits.to_words():
+        writer.u32(word)
+
+
+def encode_cdp3(
+    values: list[int],
+    *,
+    predictor: str = "null",
+    byte_order: str = "<",
+) -> bytes:
+    """Encode an Int32 Compressed Data Packet Mk.3 (JT 10) with the Null CODEC.
+
+    Entropy-coded Mk.3 paths (bitlength, arithmetic, move-to-front, chopper)
+    are pinned by real-file golden packets in test_jt_codec.py instead of a
+    synthetic encoder.
+    """
+    writer = JtWriter(byte_order)
+    writer.i32(len(values))
+    if not values:
+        return bytes(writer.buffer)
+    residuals = pack_residuals(values, predictor)
+    writer.u8(0)
+    writer.i32(4 * len(residuals))  # the Null CODEC length field counts bytes
+    for value in residuals:
+        writer.u32(value & 0xFFFFFFFF)
+    return bytes(writer.buffer)
+
+
+# --- Int32 CDP Mk.1 encoding (JT 8, v8.1 reference section 8.1) ---
+
+
+def _encode_bitlength1(residuals: list[int]) -> BitWriter:
+    """Mk.1 adaptive-width bitlength: escalate the field width in 2-bit steps.
+
+    Widths only ever grow here (the decoder supports both directions); a width
+    change of k steps is coded as '1', the direction bit, k-1 repeats of the
+    direction bit, and one terminating complement bit.
+    """
+    writer = BitWriter()
+    width = 0
+    for value in residuals:
+        needed = 0 if value == 0 else _signed_bitsize(value)
+        if needed > width:
+            target = needed + (needed & 1)  # widths move in 2s from 0, so stay even
+            steps = (target - width) // 2
+            writer.write_bit(1)
+            for _ in range(steps):
+                writer.write_bit(1)
+            writer.write_bit(0)
+            width = target
+        else:
+            writer.write_bit(0)
+        if width:
+            writer.write_signed(value, width)
+    return writer
+
+
+def encode_cdp1(
+    values: list[int],
+    *,
+    codec: str = "bitlength",
+    predictor: str = "null",
+    byte_order: str = "<",
+) -> bytes:
+    """Encode an Int32 Compressed Data Packet Mk.1 (Null and Bitlength CODECs).
+
+    Huffman and arithmetic are decode-only, pinned by real-file golden vectors.
+    """
+    writer = JtWriter(byte_order)
+    residuals = pack_residuals([int(value) for value in values], predictor)
+    if codec == "null":
+        writer.u8(0)
+        writer.i32(len(residuals))  # the Mk.1 Null length field counts values
+        for value in residuals:
+            writer.i32(value)
+        return bytes(writer.buffer)
+    if codec != "bitlength":
+        raise ValueError(f"unsupported Mk.1 encoder codec {codec!r}")
+    bits = _encode_bitlength1(residuals)
+    writer.u8(1)
+    writer.i32(len(bits.bits))
+    writer.i32(len(residuals))
     words = bits.to_words()
     writer.i32(len(words))
     for word in words:
         writer.u32(word)
+    return bytes(writer.buffer)
+
+
+# --- Deering normal encoding (spec 8.2.4 / Appendix C 4 inverse) ---
+
+_DEERING_PSI_MAX = 0.615479709
+# (max axis, axis mapped to base[1], axis mapped to base[2]) -> sextant, the
+# inverse of the decoder's sextant permutation table.
+_DEERING_SEXTANT_BY_AXES = {
+    (0, 1, 2): 0,
+    (0, 2, 1): 5,
+    (2, 1, 0): 1,
+    (2, 0, 1): 2,
+    (1, 0, 2): 3,
+    (1, 2, 0): 4,
+}
+
+
+def encode_deering_normals(normals, bits: int) -> tuple[list[int], list[int], list[int], list[int]]:
+    """Quantize unit normals into (sextant, octant, theta, psi) code streams."""
+    bit_range = float(1 << bits)
+    sextants: list[int] = []
+    octants: list[int] = []
+    thetas: list[int] = []
+    psis: list[int] = []
+    for normal in np.asarray(normals, dtype=np.float64):
+        octant = (4 if normal[0] >= 0 else 0) | (2 if normal[1] >= 0 else 0) | (1 if normal[2] >= 0 else 0)
+        magnitudes = np.abs(normal)
+        max_axis = int(np.argmax(magnitudes))
+        rest = [axis for axis in range(3) if axis != max_axis]
+        # base[1] holds sin(psi), which the code range caps at sin(psi_max) ~=
+        # 0.577 -- route the smaller remaining component there.
+        axis1, axis2 = sorted(rest, key=lambda axis: magnitudes[axis])
+        sextant = _DEERING_SEXTANT_BY_AXES[(max_axis, axis1, axis2)]
+        psi = math.asin(min(float(magnitudes[axis1]), 1.0))
+        theta = math.atan2(float(magnitudes[axis2]), float(magnitudes[max_axis]))
+        theta_adjusted = bit_range * (1.0 - math.atan(math.sin(theta)) / _DEERING_PSI_MAX)
+        theta_code = max(round(theta_adjusted) - (sextant & 1), 0)
+        psi_code = min(round(psi * bit_range / _DEERING_PSI_MAX), int(bit_range))
+        sextants.append(sextant)
+        octants.append(octant)
+        thetas.append(theta_code)
+        psis.append(psi_code)
+    return sextants, octants, thetas, psis
 
 
 # --- LSG segment emission (JT 9.5 reference sections 7.1.3.2 / 7.2.1 / Appendix A) ---
@@ -436,6 +608,9 @@ FLOAT_ATOM_GUID = _lsg_guid(0x10DD1019, 0x2AC8, 0x11D1, 0x9B, 0x6B, 0x00, 0x80, 
 LATE_LOADED_ATOM_GUID = _lsg_guid(0xE0B05BE5, 0xFBBD, 0x11D1, 0xA3, 0xA7, 0x00, 0xAA, 0x00, 0xD1, 0x09, 0x54)
 
 TRISTRIP_SHAPE_LOD_ELEMENT_GUID = _lsg_guid(0x10DD10AB, 0x2AC8, 0x11D1, 0x9B, 0x6B, 0x00, 0x80, 0xC7, 0xBB, 0x59, 0x97)
+TOPOMESH_TOPO_COMPRESSED_LOD_GUID = _lsg_guid(
+    0xF830A5AD, 0xBE4C, 0x4FBC, 0x9B, 0x5F, 0xB9, 0x26, 0x92, 0x78, 0xD2, 0xE1
+)
 
 
 # --- Topology encoder + Shape LOD emission (spec 7.2.2.1.2.4-6 / Appendix E mirror) ---
@@ -828,19 +1003,32 @@ def build_tristrip_shape_lod_payload(
     """
     points = np.asarray(points, dtype=np.float32)
     triangle_list = [tuple(int(v) for v in triangle) for triangle in np.asarray(triangles)]
+    if version[0] < 9:
+        return _build_tristrip_shape_lod_payload_v8(
+            points,
+            triangle_list,
+            normals,
+            byte_order=byte_order,
+            quant_bits=quant_bits,
+        )
     groups = [0] * len(triangle_list) if face_groups is None else [int(g) for g in face_groups]
     source = _SourceDualMesh(triangle_list, len(points))
     encoder = _TopologyEncoder(source, groups)
     encoder.run()
+    if version[0] >= 10:
+        return _build_tristrip_shape_lod_payload_v10(
+            points,
+            encoder,
+            normals,
+            byte_order=byte_order,
+            quant_bits=quant_bits,
+            corrupt_topology_hash=corrupt_topology_hash,
+        )
 
     def cdp(values: list[int], predictor: str = "null") -> bytes:
         return encode_cdp2(values, codec=cdp_codec, predictor=predictor, byte_order=byte_order)
 
     writer = JtWriter(byte_order)
-    if version[0] < 10:
-        writer.i16(1)
-    else:
-        writer.u8(1)
 
     def version_field(target: JtWriter, value: int = 1) -> None:
         if version[0] < 10:
@@ -849,6 +1037,8 @@ def build_tristrip_shape_lod_payload(
             target.u8(value)
 
     bindings = 0x2 | (0x8 if normals is not None else 0)  # 3-component coords (+ normals)
+    version_field(writer)  # Base Shape LOD Data version
+    version_field(writer)  # Vertex Shape LOD Data version
     writer.u64(bindings)
     version_field(writer)  # TopoMesh LOD Data version
     writer.i32(1)  # vertex records object id
@@ -876,17 +1066,84 @@ def build_tristrip_shape_lod_payload(
     for _ in range(4):
         writer.u8(quant_bits)
     writer.i32(len(order))
+    writer.i32(len(order) if normals is not None else 0)  # number of vertex attributes
     _write_coordinate_array(writer, permuted_points, quant_bits, cdp_codec, byte_order)
     if normals is not None:
         permuted_normals = np.asarray(normals, dtype=np.float32)[order]
         _write_lossless_normal_array(writer, permuted_normals, cdp_codec, byte_order)
-    writer.i32(len(order) if normals is not None else 0)  # number of vertex attributes
 
     element = JtWriter(byte_order)
     element.i32(16 + 1 + 4 + len(writer.buffer))
     element.guid(TRISTRIP_SHAPE_LOD_ELEMENT_GUID)
     element.u8(4)  # Shape LOD base type
     element.i32(1)  # object id
+    element.raw(bytes(writer.buffer))
+    return bytes(element.buffer)
+
+
+def _build_tristrip_shape_lod_payload_v8(
+    points,
+    triangle_list: list[tuple[int, ...]],
+    normals,
+    *,
+    byte_order: str,
+    quant_bits: int,
+) -> bytes:
+    """JT 8 layout: plain tri-strips over lossy uniform-quantized coordinates.
+
+    One three-corner strip per triangle keeps the encoder trivial; the decoder
+    handles arbitrary strip lengths. The element header carries no object id.
+    """
+    quant_bits = quant_bits or 12
+    normal_bits = 10
+    writer = JtWriter(byte_order)
+    writer.i16(1)  # Vertex Shape LOD Data version
+    writer.i32(0x2 | (0x8 if normals is not None else 0))  # binding attributes
+    writer.raw(bytes(4))  # quantization parameters (restated below)
+    writer.i16(1)  # TriStripSet Shape LOD version
+    writer.i16(1)  # Vertex Based Shape Compressed Rep Data version
+    writer.u8(1 if normals is not None else 0)  # normal binding (per vertex)
+    writer.u8(0)  # texture-coordinate binding
+    writer.u8(0)  # color binding
+    writer.u8(quant_bits)  # bits per vertex
+    writer.u8(normal_bits)  # normal bits factor
+    writer.u8(0)  # bits per texture coordinate
+    writer.u8(0)  # bits per color
+
+    corners = [int(vertex) for triangle in triangle_list for vertex in triangle]
+    strip_offsets = list(range(0, len(corners) + 1, 3))
+    writer.raw(encode_cdp1(strip_offsets, predictor="stride1", byte_order=byte_order))
+
+    points = np.asarray(points, dtype=np.float64)
+    max_code = (1 << quant_bits) - 1
+    quantized_columns = []
+    for axis in range(3):
+        minimum = float(points[:, axis].min())
+        maximum = float(points[:, axis].max())
+        writer.f32(minimum)
+        writer.f32(maximum)
+        writer.u8(quant_bits)
+        if maximum == minimum:
+            codes = np.zeros(len(points), dtype=np.int64)
+        else:
+            codes = np.rint((points[:, axis] - minimum) * max_code / (maximum - minimum)).astype(np.int64)
+        quantized_columns.append([int(code) for code in codes])
+    writer.i32(len(points))
+    for column in quantized_columns:
+        writer.raw(encode_cdp1(column, predictor="lag1", byte_order=byte_order))
+
+    if normals is not None:
+        writer.u8(normal_bits)
+        writer.i32(len(points))
+        for stream in encode_deering_normals(normals, normal_bits):
+            writer.raw(encode_cdp1(stream, predictor="lag1", byte_order=byte_order))
+
+    writer.raw(encode_cdp1(corners, predictor="stripindex", byte_order=byte_order))
+
+    element = JtWriter(byte_order)
+    element.i32(16 + 1 + len(writer.buffer))  # JT 8 headers carry no object id
+    element.guid(TRISTRIP_SHAPE_LOD_ELEMENT_GUID)
+    element.u8(4)  # Shape LOD base type
     element.raw(bytes(writer.buffer))
     return bytes(element.buffer)
 
@@ -899,12 +1156,7 @@ def _topology_hash(encoder: _TopologyEncoder) -> int:
     value = _hash32_words([g & 0xFFFFFFFF for g in encoder.groups], value)
     value = _hash16_words([f & 0xFFFF for f in encoder.flags], value)
     for context in range(7):
-        masks = encoder.attr_masks[context]
-        words = []
-        for mask in masks:
-            words.append(mask & 0xFFFFFFFF)
-            words.append((mask >> 32) & 0xFFFFFFFF)
-        value = _hash32_words(words[: len(masks)], value)
+        value = _hash32_words([mask & 0x3FFFFFFF for mask in encoder.attr_masks[context]], value)
     masks8 = encoder.attr_masks[7]
     value = _hash32_words([m & 0x3FFFFFFF for m in masks8], value)
     value = _hash32_words([(m >> 30) & 0x3FFFFFFF for m in masks8], value)
@@ -913,6 +1165,143 @@ def _topology_hash(encoder: _TopologyEncoder) -> int:
     value = _hash32_words([s & 0xFFFFFFFF for s in encoder.split_faces], value)
     value = _hash32_words([p & 0xFFFFFFFF for p in encoder.split_positions], value)
     return value
+
+
+def _build_tristrip_shape_lod_payload_v10(
+    points,
+    encoder: _TopologyEncoder,
+    normals,
+    *,
+    byte_order: str,
+    quant_bits: int,
+    corrupt_topology_hash: bool,
+) -> bytes:
+    """JT 10 layout: the compressed LOD data sits in a nested logical element."""
+
+    def cdp(values: list[int], predictor: str = "null") -> bytes:
+        return encode_cdp3(values, predictor=predictor, byte_order=byte_order)
+
+    bindings = 0x2 | (0x8 if normals is not None else 0)
+    nested = JtWriter(byte_order)
+    nested.u8(1)  # TopoMesh LOD Data version
+    nested.u32(1)  # vertex records object id
+    nested.u8(1)  # TopoMesh Topologically Compressed LOD Data version
+    for context in range(8):
+        nested.raw(cdp(encoder.degrees[context]))
+    nested.raw(cdp(encoder.valences))
+    nested.raw(cdp(encoder.groups))
+    nested.raw(cdp(encoder.flags, "lag1"))
+    masks8 = encoder.attr_masks[7]
+    for context in range(7):
+        nested.raw(cdp([mask & 0xFFFFFFFF for mask in encoder.attr_masks[context]]))
+    nested.raw(cdp([mask & 0xFFFFFFFF for mask in masks8]))
+    nested.raw(cdp([(mask >> 32) & 0xFFFFFFFF for mask in masks8]))
+    nested.i32(0)  # high-degree attribute masks (none)
+    nested.raw(cdp(encoder.split_faces, "lag1"))
+    nested.raw(cdp(encoder.split_positions))
+    nested.u32(_topology_hash_v10(encoder) ^ (0xDEAD if corrupt_topology_hash else 0))
+
+    order = encoder.face_src  # dst face id -> src vertex id
+    permuted_points = points[order]
+    nested.u64(bindings)
+    for _ in range(4):
+        nested.u8(quant_bits)
+    nested.i32(len(order))
+    nested.i32(len(order) if normals is not None else 0)  # number of vertex attributes
+    _write_coordinate_array_v10(nested, permuted_points, quant_bits, byte_order)
+    if normals is not None:
+        permuted_normals = np.asarray(normals, dtype=np.float32)[order]
+        _write_lossless_normal_array_v10(nested, permuted_normals, byte_order)
+
+    body = JtWriter(byte_order)
+    body.u8(1)  # Base Shape LOD Data version
+    body.u8(1)  # Vertex Shape LOD Data version
+    body.u64(bindings)
+    body.i32(16 + 1 + 4 + len(nested.buffer))
+    body.guid(TOPOMESH_TOPO_COMPRESSED_LOD_GUID)
+    body.u8(9)  # TopoMesh Topologically Compressed LOD Data base type
+    body.i32(1)  # object id
+    body.raw(bytes(nested.buffer))
+
+    element = JtWriter(byte_order)
+    element.i32(16 + 1 + 4 + len(body.buffer))
+    element.guid(TRISTRIP_SHAPE_LOD_ELEMENT_GUID)
+    element.u8(4)  # Shape LOD base type
+    element.i32(1)  # object id
+    element.raw(bytes(body.buffer))
+    return bytes(element.buffer)
+
+
+def _topology_hash_v10(encoder: _TopologyEncoder) -> int:
+    value = 0
+    for context in range(8):
+        value = _hash32_words([d & 0xFFFFFFFF for d in encoder.degrees[context]], value)
+    value = _hash32_words([v & 0xFFFFFFFF for v in encoder.valences], value)
+    value = _hash32_words([g & 0xFFFFFFFF for g in encoder.groups], value)
+    value = _hash16_words([f & 0xFFFF for f in encoder.flags], value)
+    for context in range(7):
+        value = _hash32_words([m & 0xFFFFFFFF for m in encoder.attr_masks[context]], value)
+    masks8 = encoder.attr_masks[7]
+    value = _hash32_words([m & 0xFFFFFFFF for m in masks8], value)
+    value = _hash32_words([(m >> 32) & 0xFFFFFFFF for m in masks8], value)
+    value = _hash32_words([], value)  # high-degree masks
+    value = _hash32_words([s & 0xFFFFFFFF for s in encoder.split_faces], value)
+    value = _hash32_words([p & 0xFFFFFFFF for p in encoder.split_positions], value)
+    return value
+
+
+def _float_bit_patterns(column) -> list[int]:
+    """Raw IEEE-754 float32 bit patterns as signed int32 values."""
+    bits = np.ascontiguousarray(column, dtype="<f4").view("<u4").astype(np.int64)
+    return np.where(bits >= 1 << 31, bits - (1 << 32), bits).tolist()
+
+
+def _write_coordinate_array_v10(writer: JtWriter, points, quant_bits: int, byte_order: str) -> None:
+    writer.i32(len(points))
+    writer.u8(3)
+    hash_value = 0
+    if quant_bits == 0:
+        for _axis in range(3):
+            writer.f32(0.0)
+            writer.f32(0.0)
+            writer.u8(0)
+        for axis in range(3):
+            codes = _float_bit_patterns(points[:, axis])
+            writer.raw(encode_cdp3(codes, predictor="lag1", byte_order=byte_order))
+            hash_value = _hash32_words([c & 0xFFFFFFFF for c in codes], hash_value)
+    else:
+        max_code = (1 << quant_bits) - 1
+        ranges = []
+        for axis in range(3):
+            column = points[:, axis].astype(np.float64)
+            minimum, maximum = float(column.min()), float(column.max())
+            if maximum == minimum:
+                maximum = minimum + 1.0
+            ranges.append((minimum, maximum))
+        for minimum, maximum in ranges:
+            writer.f32(minimum)
+            writer.f32(maximum)
+            writer.u8(quant_bits)
+        for axis in range(3):
+            minimum, maximum = ranges[axis]
+            column = points[:, axis].astype(np.float64)
+            multiplier = max_code / (maximum - minimum)
+            codes = np.clip((column - minimum) * multiplier + 0.5, 0, max_code).astype(np.int64).tolist()
+            writer.raw(encode_cdp3(codes, predictor="lag1", byte_order=byte_order))
+            hash_value = _hash32_words([c & 0xFFFFFFFF for c in codes], hash_value)
+    writer.u32(hash_value)
+
+
+def _write_lossless_normal_array_v10(writer: JtWriter, normals, byte_order: str) -> None:
+    writer.i32(len(normals))
+    writer.u8(3)
+    writer.u8(0)  # quantization disabled: raw float bit patterns
+    hash_value = 0
+    for axis in range(3):
+        codes = _float_bit_patterns(normals[:, axis])
+        writer.raw(encode_cdp3(codes, byte_order=byte_order))
+        hash_value = _hash32_words([c & 0xFFFFFFFF for c in codes], hash_value)
+    writer.u32(hash_value)
 
 
 def _write_coordinate_array(writer: JtWriter, points, quant_bits: int, cdp_codec: str, byte_order: str) -> None:
@@ -992,6 +1381,8 @@ class LsgBuilder:
         return object_id
 
     def _version_field(self, writer: JtWriter, value: int = 1) -> None:
+        if self.version[0] < 9:
+            return  # JT 8 element bodies carry no per-element version fields
         if self.version[0] < 10:
             writer.i16(value)
         else:
@@ -1041,6 +1432,8 @@ class LsgBuilder:
         object_id = self.new_id() if object_id is None else object_id
         body = self._body()
         self._group_node_data(body, attribute_ids or [], child_ids)
+        if self.version[0] >= 10:
+            body.u8(1)  # Partition Node Element version (new in JT 10)
         body.i32(0)  # partition flags
         body.mbstring(file_name)
         self._element(self._graph, PARTITION_NODE_GUID, 0, object_id, bytes(body.buffer))
@@ -1128,12 +1521,39 @@ class LsgBuilder:
         body.u8(0)  # state flags
         body.u32(0)  # field inhibit flags
         self._version_field(body, 2)  # material version 2
-        body.u16(0)  # data flags
-        for color in (ambient, diffuse, specular, emission):
-            for component in color:
+        if self.version[0] < 9:
+            # JT 8 flag-driven channels (spec 7.2.1.1.2.2): a scalar
+            # (c, c, c, 1) channel collapses to one F32 behind its pattern
+            # bit; diffuse is always full RGBA and there is no reflectivity.
+            def _is_scalar(color: tuple[float, float, float, float]) -> bool:
+                return color[0] == color[1] == color[2] and color[3] == 1.0
+
+            data_flags = 0
+            for pattern_bit, color in ((0x0002, ambient), (0x0004, emission), (0x0008, specular)):
+                if _is_scalar(color):
+                    data_flags |= 0x0001 | pattern_bit
+            body.u16(data_flags)
+
+            def _channel(pattern_bit: int, color: tuple[float, float, float, float]) -> None:
+                if data_flags & 0x0001 and data_flags & pattern_bit:
+                    body.f32(color[0])
+                else:
+                    for component in color:
+                        body.f32(component)
+
+            _channel(0x0002, ambient)
+            for component in diffuse:
                 body.f32(component)
-        body.f32(shininess)
-        body.f32(reflectivity)
+            _channel(0x0008, specular)
+            _channel(0x0004, emission)
+            body.f32(shininess)
+        else:
+            body.u16(0)  # data flags
+            for color in (ambient, diffuse, specular, emission):
+                for component in color:
+                    body.f32(component)
+            body.f32(shininess)
+            body.f32(reflectivity)
         self._element(self._graph, MATERIAL_ATTRIBUTE_GUID, 3, object_id, bytes(body.buffer))
         return object_id
 
@@ -1155,7 +1575,10 @@ class LsgBuilder:
                 stored.append(value)
         body.u16(mask)
         for value in stored:
-            body.f32(value)
+            if self.version[0] >= 9:
+                body.f64(value)
+            else:
+                body.f32(value)
         self._element(self._graph, TRANSFORM_ATTRIBUTE_GUID, 3, object_id, bytes(body.buffer))
         return object_id
 
@@ -1202,7 +1625,8 @@ class LsgBuilder:
         self._version_field(body)
         body.guid(segment_guid)
         body.i32(segment_type)
-        body.i32(object_id)  # payload object id
+        if self.version[0] >= 9:
+            body.i32(object_id)  # payload object id (added in JT 9)
         body.i32(1)  # reserved, always >= 1
         self._element(self._atoms, LATE_LOADED_ATOM_GUID, 8, object_id, bytes(body.buffer))
         return object_id
@@ -1226,10 +1650,7 @@ class LsgBuilder:
         self._end_of_elements(writer)
         writer.raw(bytes(self._atoms.buffer))
         self._end_of_elements(writer)
-        if self.version[0] < 10:
-            writer.i16(1)  # property table version
-        else:
-            writer.u8(1)
+        writer.i16(1)  # property table version: I16 in both JT 9 and JT 10
         merged: dict[int, list[tuple[int, int]]] = {}
         for element_id, pairs in self._tables:
             merged.setdefault(element_id, []).extend(pairs)
@@ -1274,6 +1695,8 @@ def build_jt(
     cdp_codec: str = "null",
     brep_only: bool = False,
     external_ref: str | None = None,
+    attach_shape_refs: bool = True,
+    root_file_name: str = "",
     inject_unknown_element: bool = False,
     corrupt_shape: bool = False,
 ) -> bytes:
@@ -1310,7 +1733,8 @@ def build_jt(
             )
             segment_type = SEGMENT_SHAPE_LOD0 + min(lod_index, 9)
             segments.append(SegmentSpec(guid=segment_guid, segment_type=segment_type, payload=payload))
-            lsg.attach_late_loaded(shape_node, "JT_LLPROP_SHAPEDATA", segment_guid, segment_type)
+            if attach_shape_refs:
+                lsg.attach_late_loaded(shape_node, "JT_LLPROP_SHAPEDATA", segment_guid, segment_type)
             shape_node_ids.append(shape_node)
         if len(shape_node_ids) > 1:
             limits = [100.0 * (index + 1) for index in range(len(shape_node_ids) - 1)]
@@ -1334,7 +1758,7 @@ def build_jt(
     if external_ref is not None:
         root_children.append(lsg.add_partition([], file_name=external_ref))
     assembly = lsg.add_group(root_children)
-    root = lsg.add_partition([assembly])
+    root = lsg.add_partition([assembly], file_name=root_file_name)
     if units is not None:
         lsg.set_string_property(root, "JT_PROP_MEASUREMENT_UNITS", units)
     lsg_guid = make_guid(1)
@@ -1350,8 +1774,12 @@ def build_jt(
     return build_container(ContainerSpec(segments=segments, version=version, byte_order=byte_order, lsg_guid=lsg_guid))
 
 
-def build_jt10_stub() -> bytes:
-    """A JT 10 file whose container/LSG parse but whose shape decode is unsupported."""
+def build_jt10_mismatched_shape() -> bytes:
+    """A JT 10 file whose shape segment carries a JT 9.5-layout payload.
+
+    The container and LSG parse, but shape decode fails on the nested-element
+    GUID check, exercising the per-part skip path for JT 10 files.
+    """
     tetra_points = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
     tetra_faces = [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]
     lsg = LsgBuilder(byte_order="<", version=(10, 0))

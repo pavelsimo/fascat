@@ -284,8 +284,8 @@ def read_file_header(data: bytes) -> FileHeader:
     if match is None:
         raise RuntimeError("not a JT file: missing version header")
     version = (int(match.group(1)), int(match.group(2)))
-    if version[0] < 9:
-        raise RuntimeError(f"unsupported JT version {version[0]}.{version[1]}: fascat supports JT 9.x and 10.x")
+    if version[0] < 8:
+        raise RuntimeError(f"unsupported JT version {version[0]}.{version[1]}: fascat supports JT 8.x, 9.x, and 10.x")
     order_flag = data[JT_HEADER_VERSION_BYTES]
     if order_flag not in (0, 1):
         raise RuntimeError(f"not a JT file: invalid byte-order flag {order_flag}")
@@ -334,10 +334,11 @@ def load_segment(data: bytes, entry: TocEntry, *, header: FileHeader) -> bytes:
         return bytes(data[reader.tell() : end])
     # Logical Element Header ZLIB block: flag, compressed length (which counts
     # the algorithm byte), and algorithm are always present in these segments.
+    # JT 9 writes flag 2 (ZLIB block), JT 10 writes flag 3 (LZMA block).
     compression_flag = reader.i32()
     compressed_length = reader.i32()
     algorithm = reader.u8()
-    if compression_flag != 2 or algorithm == COMPRESSION_NONE:
+    if compression_flag not in (2, 3) or algorithm == COMPRESSION_NONE:
         return bytes(data[reader.tell() : end])
     payload = reader.read_bytes(compressed_length - 1)
     if algorithm == COMPRESSION_ZLIB:
@@ -348,9 +349,10 @@ def load_segment(data: bytes, entry: TocEntry, *, header: FileHeader) -> bytes:
 
 
 def _decompress_lzma(payload: bytes) -> bytes:
-    """Decompress an LZMA payload: 5-byte properties header followed by the stream."""
+    """Decompress an LZMA payload: XZ container (JT 10), .lzma stream, or raw LZMA1."""
     try:
-        return lzma.decompress(payload, format=lzma.FORMAT_ALONE)
+        # FORMAT_AUTO accepts both XZ containers and LZMA-alone streams.
+        return lzma.decompress(payload, format=lzma.FORMAT_AUTO)
     except lzma.LZMAError:
         pass
     if len(payload) < 5:

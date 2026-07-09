@@ -1,4 +1,4 @@
-"""JT 9.5 Shape LOD decode: topologically compressed tri-strip set meshes.
+"""JT Shape LOD decode: tri-strip set meshes across the 8/9/10 generations.
 
 JT 9 stores TriStripSet geometry as a topologically compressed dual mesh
 (sections 7.2.2.1.2.4-7.2.2.1.2.6 of the reference); the decoder below is a
@@ -6,6 +6,10 @@ faithful Python translation of the reference implementation in Appendix E
 (DualVFMesh / MeshCoderDriver / MeshCodec / MeshDecoder). Dual vertices are
 primal triangles, dual faces are primal (topological) vertices; visit order
 defines the vertex-coordinate and attribute-record numbering.
+
+JT 8 predates the dual-mesh coding: its Vertex Based Shape Compressed Rep
+Data stores plain tri-strips (strip-boundary offsets into a corner stream)
+over lossy-quantized coordinates and Deering-coded normals.
 """
 
 from __future__ import annotations
@@ -17,9 +21,14 @@ import numpy.typing as npt
 
 from fascat.io.jt import lsg as _lsg
 from fascat.io.jt.codec import (
+    PREDICTOR_LAG1,
+    PREDICTOR_STRIDE1,
+    PREDICTOR_STRIP_INDEX,
     combine_float_bits,
     decode_deering_normals,
+    decode_int32_cdp1,
     decode_int32_cdp2,
+    decode_int32_cdp3,
     dequantize_uniform,
     hash_float32_scalars,
     jt_hash16,
@@ -41,15 +50,29 @@ class DecodedShape:
 
 def decode_shape_lod(payload: bytes, *, version: tuple[int, int], byte_order: str) -> DecodedShape:
     """Decode a Shape LOD segment payload (element header included) into a triangle mesh."""
-    if version[0] >= 10:
-        raise RuntimeError("JT 10 mesh coding not yet supported")
     reader = ByteReader(payload, byte_order=byte_order)
     reader.i32()  # element length
     guid = reader.guid()
     if guid != _lsg.GUID_TRISTRIP_SET_SHAPE_LOD:
         raise RuntimeError(f"unsupported JT shape LOD element type: {guid.hex()}")
     reader.u8()  # object base type
+    if version[0] < 9:
+        # JT 8 element headers carry no object id, and the payload is plain
+        # tri-strips rather than a topologically compressed dual mesh.
+        return _read_shape_lod_v8(reader)
     reader.i32()  # object id
+    if version[0] >= 10:
+        symbols, coordinates, normal_records = _read_shape_lod_v10(reader)
+    else:
+        symbols, coordinates, normal_records = _read_shape_lod_v9(reader, version)
+    mesh = _TopologyDecoder(symbols).run()
+    return _extract_primal_mesh(mesh, coordinates, normal_records)
+
+
+def _read_shape_lod_v9(
+    reader: ByteReader, version: tuple[int, int]
+) -> tuple[_TopologicalSymbols, npt.NDArray[np.float64], npt.NDArray[np.float64] | None]:
+    _lsg._element_version(reader, version)  # Base Shape LOD Data version
     _lsg._element_version(reader, version)  # Vertex Shape LOD Data version
     reader.u64()  # vertex bindings (restated in the vertex records)
     _lsg._element_version(reader, version)  # TopoMesh LOD Data version
@@ -57,8 +80,106 @@ def decode_shape_lod(payload: bytes, *, version: tuple[int, int], byte_order: st
     _lsg._element_version(reader, version)  # Topologically Compressed LOD Data version
     symbols = _read_topological_symbols(reader)
     coordinates, normal_records = _read_vertex_records(reader)
-    mesh = _TopologyDecoder(symbols).run()
-    return _extract_primal_mesh(mesh, coordinates, normal_records)
+    return symbols, coordinates, normal_records
+
+
+def _read_shape_lod_v10(
+    reader: ByteReader,
+) -> tuple[_TopologicalSymbols, npt.NDArray[np.float64], npt.NDArray[np.float64] | None]:
+    """JT 10 walk: the compressed LOD data lives in a nested logical element."""
+    reader.u8()  # Base Shape LOD Data version
+    reader.u8()  # Vertex Shape LOD Data version
+    reader.u64()  # vertex bindings (restated in the vertex records)
+    reader.i32()  # nested element length
+    nested_guid = reader.guid()
+    if nested_guid != _lsg.GUID_TOPOMESH_TOPO_COMPRESSED_LOD:
+        raise RuntimeError(f"unsupported JT 10 shape LOD payload element: {nested_guid.hex()}")
+    reader.u8()  # object base type
+    reader.i32()  # object id
+    reader.u8()  # TopoMesh LOD Data version
+    reader.u32()  # vertex records object id
+    reader.u8()  # TopoMesh Topologically Compressed LOD Data version
+    symbols = _read_topological_symbols_v10(reader)
+    coordinates, normal_records = _read_vertex_records_v10(reader)
+    return symbols, coordinates, normal_records
+
+
+# --- JT 8 Vertex Based Shape Compressed Rep Data (v8.1 spec 7.2.2.1.2) ---
+
+
+def _read_shape_lod_v8(reader: ByteReader) -> DecodedShape:
+    """JT 8 walk: plain tri-strips over lossy-quantized vertex data.
+
+    Strips carry OpenGL semantics — triangle windows alternate winding —
+    verified against the decoded Deering normals of real JT 8 files.
+    """
+    reader.i16()  # Vertex Shape LOD Data version
+    reader.i32()  # binding attributes (rebound per channel below)
+    reader.skip(4)  # quantization parameters (restated below)
+    reader.i16()  # TriStripSet Shape LOD version
+    reader.i16()  # Vertex Based Shape Compressed Rep Data version
+    normal_binding = reader.u8()
+    texcoord_binding = reader.u8()
+    color_binding = reader.u8()
+    bits_per_vertex = reader.u8()
+    reader.u8()  # normal bits factor (the normal array restates its bit count)
+    reader.u8()  # bits per texture coordinate
+    reader.u8()  # bits per color
+    strip_offsets = decode_int32_cdp1(reader, PREDICTOR_STRIDE1)
+    if bits_per_vertex == 0:
+        raise RuntimeError("unsupported JT 8 shape data: lossless vertex coordinates")
+    if texcoord_binding or color_binding:
+        raise RuntimeError("unsupported JT 8 shape data: texture-coordinate or color channels")
+    quantizers = [(reader.f32(), reader.f32(), reader.u8()) for _ in range(3)]
+    vertex_count = reader.i32()
+    if vertex_count <= 0:
+        raise RuntimeError(f"corrupt JT data: JT 8 shape vertex count {vertex_count}")
+    columns = []
+    for axis, (minimum, maximum, quantized_bits) in enumerate(quantizers):
+        codes = decode_int32_cdp1(reader, PREDICTOR_LAG1)
+        if len(codes) != vertex_count:
+            raise RuntimeError("corrupt JT data: JT 8 coordinate array length mismatch")
+        if quantized_bits <= 0 or quantized_bits > 32 or codes.min() < 0 or codes.max() >= 1 << quantized_bits:
+            raise RuntimeError(f"corrupt JT data: JT 8 axis-{axis} codes outside their quantizer range")
+        columns.append(dequantize_uniform(codes, minimum, maximum, quantized_bits))
+    points = np.column_stack(columns)
+    normals = None
+    if normal_binding:
+        normal_bits = reader.u8()
+        reader.i32()  # normal count (matches the code arrays)
+        normal_codes = [decode_int32_cdp1(reader, PREDICTOR_LAG1) for _ in range(4)]
+        normals = decode_deering_normals(
+            normal_codes[0], normal_codes[1], normal_codes[2], normal_codes[3], normal_bits
+        )
+        if len(normals) != vertex_count:
+            raise RuntimeError("corrupt JT data: JT 8 normal array length mismatch")
+    corners = decode_int32_cdp1(reader, PREDICTOR_STRIP_INDEX)
+    if len(strip_offsets) < 2 or strip_offsets[0] != 0 or strip_offsets[-1] != len(corners):
+        raise RuntimeError("corrupt JT data: JT 8 strip offsets do not span the corner array")
+    if np.any(np.diff(strip_offsets) <= 0):
+        raise RuntimeError("corrupt JT data: JT 8 strip offsets are not increasing")
+    if corners.min() < 0 or corners.max() >= vertex_count:
+        raise RuntimeError("corrupt JT data: JT 8 corner index outside the vertex array")
+    faces, face_groups = _expand_tri_strips(strip_offsets, corners)
+    return DecodedShape(points=points, faces=faces, normals=normals, face_groups=face_groups)
+
+
+def _expand_tri_strips(
+    strip_offsets: npt.NDArray[np.int64], corners: npt.NDArray[np.int64]
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64]]:
+    """Expand strip windows to triangles: odd windows flip, degenerates drop."""
+    starts = strip_offsets[:-1]
+    ends = strip_offsets[1:]
+    counts = np.maximum(ends - starts - 2, 0)
+    total = int(counts.sum())
+    strip_ids = np.repeat(np.arange(len(counts), dtype=np.int64), counts)
+    window = np.arange(total, dtype=np.int64) - np.repeat(np.cumsum(counts) - counts, counts)
+    first = starts[strip_ids] + window
+    faces = np.column_stack([corners[first], corners[first + 1], corners[first + 2]])
+    odd = window % 2 == 1
+    faces[odd] = faces[odd][:, [0, 2, 1]]
+    keep = (faces[:, 0] != faces[:, 1]) & (faces[:, 1] != faces[:, 2]) & (faces[:, 0] != faces[:, 2])
+    return faces[keep], strip_ids[keep]
 
 
 # --- Topologically Compressed Rep Data (7.2.2.1.2.5) ---
@@ -113,6 +234,42 @@ def _read_topological_symbols(reader: ByteReader) -> _TopologicalSymbols:
     )
 
 
+def _read_topological_symbols_v10(reader: ByteReader) -> _TopologicalSymbols:
+    """JT 10 layout: as v9 except context-8 masks come as full 32-bit LSB/MSB halves."""
+    degrees = [decode_int32_cdp3(reader) for _ in range(8)]
+    valences = decode_int32_cdp3(reader)
+    groups = decode_int32_cdp3(reader)
+    flags = decode_int32_cdp3(reader, "lag1")
+    masks = [decode_int32_cdp3(reader) for _ in range(8)]
+    mask8_high = decode_int32_cdp3(reader)
+    large = reader.vec_u32()
+    split_faces = decode_int32_cdp3(reader, "lag1")
+    split_positions = decode_int32_cdp3(reader)
+    stored_hash = reader.u32()
+    computed = _composite_hash_v10(
+        degrees, valences, groups, flags, masks, mask8_high, large, split_faces, split_positions
+    )
+    if computed != stored_hash:
+        raise RuntimeError(
+            f"corrupt JT data: topology hash mismatch (stored {stored_hash:#010x}, computed {computed:#010x})"
+        )
+    if len(mask8_high) != len(masks[7]):
+        raise RuntimeError("corrupt JT data: context-8 attribute mask field length mismatch")
+    combined_mask8 = [
+        (int(low) & 0xFFFFFFFF) | (int(high) << 32) for low, high in zip(masks[7], mask8_high, strict=True)
+    ]
+    return _TopologicalSymbols(
+        degrees=[array.tolist() for array in degrees],
+        valences=valences.tolist(),
+        groups=groups.tolist(),
+        flags=flags.tolist(),
+        attr_masks=[array.tolist() for array in masks[:7]] + [combined_mask8],
+        attr_masks_large=large,
+        split_faces=split_faces.tolist(),
+        split_positions=split_positions.tolist(),
+    )
+
+
 def _masked_u32(values: npt.NDArray[np.int64]) -> npt.NDArray[np.uint32]:
     return (values & 0xFFFFFFFF).astype(np.uint32)
 
@@ -129,13 +286,7 @@ def _composite_hash(
     split_faces: npt.NDArray[np.int64],
     split_positions: npt.NDArray[np.int64],
 ) -> int:
-    """Composite topology hash, exactly as the 7.2.2.1.2.5 pseudocode computes it.
-
-    Note the reference casts the in-memory UInt64 attribute-mask arrays for
-    contexts 1-7 to UInt32 pointers while passing the mask *count* as the word
-    count, so only the first `count` 32-bit words of each 64-bit array are
-    hashed; that behavior is replicated bit-for-bit here.
-    """
+    """Composite topology hash, exactly as the 7.2.2.1.2.5 pseudocode computes it."""
     value = 0
     for context in range(8):
         value = jt_hash32(_masked_u32(degrees[context]), value)
@@ -143,12 +294,38 @@ def _composite_hash(
     value = jt_hash32(_masked_u32(groups), value)
     value = jt_hash16((flags & 0xFFFF).astype(np.uint16), value)
     for context in range(7):
-        as_u64 = (masks[context] & 0xFFFFFFFF).astype("<u8")
-        words = as_u64.view("<u4")[: len(masks[context])].astype(np.uint32)
-        value = jt_hash32(words, value)
+        value = jt_hash32(_masked_u32(masks[context]), value)
     value = jt_hash32(_masked_u32(masks[7] & 0x3FFFFFFF), value)
     value = jt_hash32(_masked_u32(mask8_mid & 0x3FFFFFFF), value)
     value = jt_hash32(_masked_u32(mask8_top & 0xF), value)
+    value = jt_hash32(large, value)
+    value = jt_hash32(_masked_u32(split_faces), value)
+    value = jt_hash32(_masked_u32(split_positions), value)
+    return value
+
+
+def _composite_hash_v10(
+    degrees: list[npt.NDArray[np.int64]],
+    valences: npt.NDArray[np.int64],
+    groups: npt.NDArray[np.int64],
+    flags: npt.NDArray[np.int64],
+    masks: list[npt.NDArray[np.int64]],
+    mask8_high: npt.NDArray[np.int64],
+    large: npt.NDArray[np.uint32],
+    split_faces: npt.NDArray[np.int64],
+    split_positions: npt.NDArray[np.int64],
+) -> int:
+    """JT 10 composite hash: context-8 halves hashed as full 32-bit arrays."""
+    value = 0
+    for context in range(8):
+        value = jt_hash32(_masked_u32(degrees[context]), value)
+    value = jt_hash32(_masked_u32(valences), value)
+    value = jt_hash32(_masked_u32(groups), value)
+    value = jt_hash16((flags & 0xFFFF).astype(np.uint16), value)
+    for context in range(7):
+        value = jt_hash32(_masked_u32(masks[context]), value)
+    value = jt_hash32(_masked_u32(masks[7]), value)
+    value = jt_hash32(_masked_u32(mask8_high), value)
     value = jt_hash32(large, value)
     value = jt_hash32(_masked_u32(split_faces), value)
     value = jt_hash32(_masked_u32(split_positions), value)
@@ -165,6 +342,7 @@ def _read_vertex_records(
     for _ in range(4):
         reader.u8()  # quantization parameters (restated per array)
     topological_vertices = reader.i32()
+    reader.i32()  # number of vertex attribute records
     if topological_vertices <= 0 or not bindings & _COORD_BINDING_MASK:
         raise RuntimeError("JT shape has no vertex coordinate data")
     coordinates = _read_coordinate_array(reader)
@@ -227,6 +405,86 @@ def _read_normal_array(reader: ByteReader) -> npt.NDArray[np.float64]:
         psis = decode_int32_cdp2(reader)
         for codes in (sextants, octants, thetas, psis):
             hash_value = jt_hash32(_masked_u32(codes), hash_value)
+        normals = decode_deering_normals(sextants, octants, thetas, psis, bits)
+    stored_hash = reader.u32()
+    if stored_hash != hash_value:
+        raise RuntimeError("corrupt JT data: vertex normal hash mismatch")
+    if len(normals) != count:
+        raise RuntimeError("corrupt JT data: vertex normal count mismatch")
+    return normals
+
+
+def _float_bits_to_f64(codes: npt.NDArray[np.int64]) -> npt.NDArray[np.float64]:
+    """Reinterpret raw IEEE-754 float32 bit patterns (JT 10 lossless arrays)."""
+    return (codes & 0xFFFFFFFF).astype(np.uint32).view(np.float32).astype(np.float64)
+
+
+def _read_vertex_records_v10(
+    reader: ByteReader,
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64] | None]:
+    bindings = reader.u64()
+    for _ in range(4):
+        reader.u8()  # quantization parameters (restated per array)
+    topological_vertices = reader.i32()
+    reader.i32()  # number of vertex attribute records
+    if topological_vertices <= 0 or not bindings & _COORD_BINDING_MASK:
+        raise RuntimeError("JT shape has no vertex coordinate data")
+    coordinates = _read_coordinate_array_v10(reader)
+    if len(coordinates) != topological_vertices:
+        raise RuntimeError("corrupt JT data: vertex coordinate count mismatch")
+    normal_records = _read_normal_array_v10(reader) if bindings & _NORMAL_BINDING_MASK else None
+    return coordinates, normal_records
+
+
+def _read_coordinate_array_v10(reader: ByteReader) -> npt.NDArray[np.float64]:
+    count = reader.i32()
+    components = reader.u8()
+    if count < 0 or components < 3:
+        raise RuntimeError("corrupt JT data: invalid vertex coordinate array")
+    quantizers = [(reader.f32(), reader.f32(), reader.u8()) for _ in range(3)]
+    bits = quantizers[0][2]
+    columns: list[npt.NDArray[np.float64]] = []
+    hash_value = 0
+    for component in range(components):
+        codes = decode_int32_cdp3(reader, "lag1")
+        hash_value = jt_hash32(_masked_u32(codes), hash_value)
+        if bits == 0:
+            # Lossless: the codes are raw float32 bit patterns.
+            columns.append(_float_bits_to_f64(codes))
+        else:
+            minimum, maximum, component_bits = quantizers[min(component, 2)]
+            columns.append(dequantize_uniform(codes, minimum, maximum, component_bits))
+    stored_hash = reader.u32()
+    if stored_hash != hash_value:
+        raise RuntimeError("corrupt JT data: vertex coordinate hash mismatch")
+    if any(len(column) != count for column in columns):
+        raise RuntimeError("corrupt JT data: vertex coordinate column length mismatch")
+    return np.stack(columns[:3], axis=1)
+
+
+def _read_normal_array_v10(reader: ByteReader) -> npt.NDArray[np.float64]:
+    count = reader.i32()
+    components = reader.u8()
+    bits = reader.u8()
+    if count < 0 or components < 3:
+        raise RuntimeError("corrupt JT data: invalid vertex normal array")
+    hash_value = 0
+    if bits == 0:
+        columns = []
+        for _ in range(components):
+            codes = decode_int32_cdp3(reader)
+            hash_value = jt_hash32(_masked_u32(codes), hash_value)
+            columns.append(_float_bits_to_f64(codes))
+        normals = np.stack(columns[:3], axis=1)
+    else:
+        # One packed Deering code stream: [sextant:3][octant:3][theta:bits][psi:bits].
+        codes = decode_int32_cdp3(reader)
+        hash_value = jt_hash32(_masked_u32(codes), hash_value)
+        mask = (1 << bits) - 1
+        sextants = (codes >> (2 * bits + 3)) & 7
+        octants = (codes >> (2 * bits)) & 7
+        thetas = (codes >> bits) & mask
+        psis = codes & mask
         normals = decode_deering_normals(sextants, octants, thetas, psis, bits)
     stored_hash = reader.u32()
     if stored_hash != hash_value:

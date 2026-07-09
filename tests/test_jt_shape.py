@@ -84,7 +84,7 @@ class TestTopologicalRoundTrip:
         assert shape.faces.shape == (12, 3)
         assert _canonical(shape.points, shape.faces) == _canonical(_CUBE_POINTS, _CUBE_FACES)
 
-    @pytest.mark.parametrize("codec", ["bitlength", "arithmetic"])
+    @pytest.mark.parametrize("codec", ["bitlength", "bitlength-fixed", "bitlength-variable", "arithmetic"])
     def test_cube_with_entropy_codecs(self, codec: str) -> None:
         payload = build_tristrip_shape_lod_payload(_CUBE_POINTS, _CUBE_FACES, cdp_codec=codec)
         shape = _decode(payload)
@@ -142,12 +142,41 @@ class TestTopologicalRoundTrip:
         assert _canonical(shape.points, shape.faces) == _canonical(points, faces)
 
 
-class TestShapeErrors:
-    def test_jt10_not_supported(self) -> None:
+class TestJt10Decode:
+    def test_round_trips_tetrahedron(self) -> None:
+        payload = build_tristrip_shape_lod_payload(_TETRA_POINTS, _TETRA_FACES, version=(10, 0))
+        shape = _decode(payload, version=(10, 0))
+        assert len(shape.faces) == 4
+        assert _canonical(shape.points, shape.faces) == _canonical(_TETRA_POINTS, _TETRA_FACES)
+
+    def test_round_trips_quantized_coordinates(self) -> None:
+        payload = build_tristrip_shape_lod_payload(_CUBE_POINTS, _CUBE_FACES, version=(10, 0), quant_bits=14)
+        shape = _decode(payload, version=(10, 0))
+        assert len(shape.faces) == 12
+        assert _canonical(shape.points, shape.faces, decimals=3) == _canonical(_CUBE_POINTS, _CUBE_FACES, decimals=3)
+
+    def test_round_trips_normals(self) -> None:
+        normals = _TETRA_POINTS - _TETRA_POINTS.mean(axis=0)
+        normals /= np.linalg.norm(normals, axis=1, keepdims=True)
+        payload = build_tristrip_shape_lod_payload(_TETRA_POINTS, _TETRA_FACES, normals=normals, version=(10, 0))
+        shape = _decode(payload, version=(10, 0))
+        assert shape.normals is not None
+        assert np.allclose(np.linalg.norm(shape.normals, axis=1), 1.0, atol=1e-6)
+
+    def test_corrupt_topology_hash_raises(self) -> None:
+        payload = build_tristrip_shape_lod_payload(
+            _TETRA_POINTS, _TETRA_FACES, version=(10, 0), corrupt_topology_hash=True
+        )
+        with pytest.raises(RuntimeError, match="topology hash mismatch"):
+            _decode(payload, version=(10, 0))
+
+    def test_v9_payload_under_v10_version_rejected(self) -> None:
         payload = build_tristrip_shape_lod_payload(_TETRA_POINTS, _TETRA_FACES)
-        with pytest.raises(RuntimeError, match="JT 10 mesh coding not yet supported"):
+        with pytest.raises(RuntimeError, match="unsupported JT 10 shape LOD payload element"):
             _decode(payload, version=(10, 5))
 
+
+class TestShapeErrors:
     def test_topology_hash_mismatch(self) -> None:
         payload = build_tristrip_shape_lod_payload(_TETRA_POINTS, _TETRA_FACES, corrupt_topology_hash=True)
         with pytest.raises(RuntimeError, match="topology hash mismatch"):

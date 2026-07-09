@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from fascat.analysis import analyze_output
@@ -11,6 +12,7 @@ from fascat.asset import Asset, Node, Part
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.visual import (
+    TurntableOptions,
     VisualDiffOptions,
     VisualPreviewOptions,
     compare_images,
@@ -18,6 +20,7 @@ from fascat.visual import (
     write_lod_switch_previews,
     write_output_lod_switch_previews,
     write_preview,
+    write_turntable_previews,
 )
 
 
@@ -118,6 +121,134 @@ def test_output_lod_preview_reads_fascat_gltf_lod_metadata(tmp_path: Path) -> No
     assert [preview.triangles for preview in report.previews] == [2, 1]
     payload = json.loads(json.dumps(report.to_dict()))
     assert payload["levels"] == 2
+
+
+def test_write_turntable_previews_writes_expected_views(tmp_path: Path) -> None:
+    asset = _asset_with_lod()
+
+    report = write_turntable_previews(
+        asset,
+        tmp_path / "turntable",
+        VisualPreviewOptions(width=96, height=96, supersample=1),
+        TurntableOptions(views=4, elevations=(30.0,)),
+    )
+
+    assert [view.name for view in report.views] == ["az000_el+30", "az090_el+30", "az180_el+30", "az270_el+30"]
+    assert [view.azimuth for view in report.views] == [0.0, 90.0, 180.0, 270.0]
+    assert all(view.elevation == 30.0 for view in report.views)
+    assert report.diff_passed is None
+    for view in report.views:
+        assert Path(view.preview.path).exists()
+    with Image.open(report.contact_sheet) as sheet:
+        assert sheet.size == (384, 124)
+
+
+def test_turntable_views_differ_across_azimuths(tmp_path: Path) -> None:
+    asset = _asset_with_lod()
+
+    report = write_turntable_previews(
+        asset,
+        tmp_path / "turntable",
+        VisualPreviewOptions(width=96, height=96, supersample=1),
+        TurntableOptions(views=4, elevations=(30.0,)),
+    )
+
+    images = []
+    for view in report.views:
+        with Image.open(view.preview.path) as image:
+            images.append(np.asarray(image.convert("RGBA")))
+    assert any(not np.array_equal(images[0], other) for other in images[1:])
+
+
+def test_write_turntable_previews_diff_passes_for_identical_asset(tmp_path: Path) -> None:
+    asset = _asset_with_lod()
+    options = VisualPreviewOptions(width=96, height=96, supersample=1)
+    turntable = TurntableOptions(views=2, elevations=(30.0,))
+    write_turntable_previews(asset, tmp_path / "baseline", options, turntable)
+
+    report = write_turntable_previews(
+        asset,
+        tmp_path / "candidate",
+        options,
+        turntable,
+        baseline_dir=tmp_path / "baseline",
+    )
+
+    assert report.diff_passed is True
+    assert all(view.diff is not None and view.diff.passed for view in report.views)
+    payload = report.to_dict()
+    diff_summary = payload["diff"]
+    assert isinstance(diff_summary, dict)
+    assert diff_summary["views_compared"] == 2
+    assert diff_summary["views_failed"] == 0
+
+
+def test_write_turntable_previews_diff_fails_for_changed_asset(tmp_path: Path) -> None:
+    options = VisualPreviewOptions(width=96, height=96, supersample=1)
+    turntable = TurntableOptions(views=2, elevations=(30.0,))
+    write_turntable_previews(_asset_with_lod(), tmp_path / "baseline", options, turntable)
+
+    report = write_turntable_previews(
+        _asset_single_triangle(),
+        tmp_path / "candidate",
+        options,
+        turntable,
+        baseline_dir=tmp_path / "baseline",
+    )
+
+    assert report.diff_passed is False
+    payload = report.to_dict()
+    diff_summary = payload["diff"]
+    assert isinstance(diff_summary, dict)
+    assert diff_summary["views_failed"] > 0
+    assert diff_summary["worst_view"] in [view.name for view in report.views]
+
+
+def test_write_turntable_previews_reports_missing_baseline_view(tmp_path: Path) -> None:
+    asset = _asset_with_lod()
+    options = VisualPreviewOptions(width=96, height=96, supersample=1)
+    turntable = TurntableOptions(views=2, elevations=(30.0,))
+    baseline = write_turntable_previews(asset, tmp_path / "baseline", options, turntable)
+    Path(baseline.views[0].preview.path).unlink()
+
+    report = write_turntable_previews(
+        asset,
+        tmp_path / "candidate",
+        options,
+        turntable,
+        baseline_dir=tmp_path / "baseline",
+    )
+
+    assert report.diff_passed is False
+    missing = report.views[0].diff
+    assert missing is not None
+    assert missing.passed is False
+    assert "baseline image missing" in missing.warnings[0]
+    assert any("turntable baseline image missing" in warning for warning in report.warnings)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"views": 0},
+        {"elevations": ()},
+        {"elevations": (91.0,)},
+        {"elevations": (-91.0,)},
+    ],
+)
+def test_turntable_options_validation(kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        TurntableOptions(**kwargs)  # type: ignore[arg-type]
+
+
+def _asset_single_triangle() -> Asset:
+    points = np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=float)
+    mesh = Mesh(points=points, faces=np.asarray([[0, 1, 2]], dtype=int))
+    return Asset(
+        root=Node(id="root", name="Root", children=[Node(id="part_node", name="Part", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh)},
+        materials={},
+    )
 
 
 def _asset_with_lod(*, scale: float = 1.0) -> Asset:

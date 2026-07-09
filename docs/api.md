@@ -112,7 +112,7 @@ Core pipeline calls:
 | `fc.read_step_many(paths, options=None, continue_on_error=False)` | `paths` is an ordered list of `.step` / `.stp` files. | Import explicit multi-root STEP members into deterministic per-file namespaces, prefix member warnings, and preserve each member as a top-level root. |
 | `fc.read_iges(path, options=None)` | `path` ends in `.igs` or `.iges`. `options` is `IgesReadOptions`. | Import IGES geometry through the same OCP/XDE hierarchy, transform, color, and material path used by STEP. |
 | `fc.read_brep(path, options=None)` | `path` ends in `.brep`. `options` is `BrepReadOptions`. | Import a native OpenCASCADE BREP file as one root occurrence and one source-shape part. |
-| `fc.read_jt(path, options=None)` | `path` ends in `.jt`. `options` is `JtReadOptions` (adds `lod_selection="finest"\|"all"`). | Import JT 9.x pre-tessellated LOD meshes, assembly hierarchy, instances, materials, and properties with a pure-Python reader; parts are mesh-only (`source_shape` is `None`). |
+| `fc.read_jt(path, options=None)` | `path` ends in `.jt`. `options` is `JtReadOptions` (adds `lod_selection="finest"\|"all"`). | Import JT 8.x/9.x/10.x pre-tessellated LOD meshes, assembly hierarchy, instances, materials, and properties with a pure-Python reader; parts are mesh-only (`source_shape` is `None`). |
 | `asset.tessellate(options=None, *, where=None, **kwargs)` | Keyword args mirror `TessellationOptions`. `where` optionally scopes the operation with a `Filter`. | Convert source BREP geometry into meshes. |
 | `asset.repair(options=None, *, where=None, **kwargs)` | Keyword args mirror `RepairOptions`. `where` optionally scopes selected parts. | Clean mesh-level issues after tessellation. |
 | `asset.merge_vertices(options=None, *, where=None, **kwargs)` | Keyword args mirror `MergeVerticesOptions`. `where` optionally scopes selected parts. | Merge exact or tolerance-close vertices with attribute and material-boundary protection. |
@@ -1477,6 +1477,12 @@ from fascat import validation
 preview = validation.write_preview(asset, "preview.png")
 comparison = validation.write_before_after_previews(before_asset, after_asset, "visual-review/")
 lod_contact_sheet = validation.write_lod_switch_previews(asset_with_lods, "lod-previews/")
+turntable = validation.write_turntable_previews(
+    asset,
+    "turntable-views/",
+    turntable=validation.TurntableOptions(views=8, elevations=(-30.0, 30.0)),
+    baseline_dir="reference-views/",
+)
 diff = validation.compare_images("baseline.png", "preview.png", validation.VisualDiffOptions(pixel_tolerance=2))
 suite = validation.write_runtime_parity_suite("runtime-parity/")
 captures = validation.capture_runtime_parity_suite(
@@ -1490,7 +1496,12 @@ captures = validation.capture_runtime_parity_suite(
 
 The preview renderer is a local orthographic software renderer: it writes PNGs, uses
 material base colors, respects node transforms, and can substitute each part's LOD
-mesh into an LOD-switching contact sheet. It is repeatable for a fixed Python,
+mesh into an LOD-switching contact sheet. `write_turntable_previews()` (and its
+file-path counterpart `write_output_turntable_previews()`) renders a grid of azimuth
+× elevation views with deterministic names such as `az045_el+30.png` plus a
+`turntable.png` contact sheet, and can diff every view against a same-named baseline
+directory in one call. Framing auto-fits each view, so turntable diffs detect
+silhouette and shading changes rather than absolute size changes. It is repeatable for a fixed Python,
 Pillow, and platform stack, but antialiasing and resampling can vary across
 platform builds, so CI baselines should compare with explicit thresholds.
 `compare_images()` is a general image-diff

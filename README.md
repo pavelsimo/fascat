@@ -10,7 +10,8 @@
   <a href="https://deepwiki.com/pavelsimo/fascat"><img src="https://img.shields.io/badge/DeepWiki-0088cc?style=flat-square&logoColor=white" alt="DeepWiki"></a>
 </p>
 
-Fascat is a Python library and CLI for converting CAD data into RT3D assets.
+Fascat is a Python library and CLI for converting STEP, IGES, OpenCASCADE
+BREP, and JT CAD into realtime-ready OpenUSD, glTF, OBJ, STL, and FBX assets.
 
 ```mermaid
 flowchart TD
@@ -54,6 +55,9 @@ fascat convert motor.step motor.usdc --profile realtime-desktop
 fascat convert motor.step motor.glb --profile virtual-reality
 fascat convert motor.step motor.glb --profile mixed-reality
 
+# Convert JT 8.x/9.x/10.x tessellation to GLB and import all stored JT LODs
+fascat convert assembly.jt assembly.glb --jt-lod-selection all
+
 # Tune tessellation, UVs, optimization, and LODs
 fascat convert motor.step motor.usdc \
   --sag 0.1 \
@@ -73,6 +77,9 @@ fascat convert motor.step motor.usda --debug --report report.json
 # Validate generated output
 fascat validate motor.usdc
 fascat validate motor.glb
+
+# Render multi-angle turntable previews of the result
+fascat validate motor.glb --turntable-dir views/
 ```
 
 ## Commands
@@ -80,8 +87,8 @@ fascat validate motor.glb
 | Command | Description |
 |---------|-------------|
 | `fascat inspect input.step` | Inspect a CAD assembly before conversion |
-| `fascat convert input.step [output.usdc]` | Convert STEP, IGES, BREP, or JT CAD into OpenUSD or glTF |
-| `fascat validate output.usdc` | Validate generated USD or glTF output |
+| `fascat convert input.step [output.usdc]` | Convert STEP, IGES, BREP, or JT CAD into OpenUSD, glTF, OBJ, STL, or FBX |
+| `fascat validate output.usdc` | Validate generated USD, glTF, OBJ, STL, or FBX output |
 | `fascat help [command]` | Show top-level or command-specific help |
 | `fascat version` | Print version and exit |
 
@@ -108,6 +115,28 @@ asset.write_gltf("motor.glb")
 
 Keyword arguments mirror each operation's `*Options` dataclass; pass a prebuilt
 options object instead when you prefer (`asset.repair(fc.RepairOptions(tolerance=0.05))`).
+
+## Agentic Skill
+
+[`skills/cad-to-rt3d`](skills/cad-to-rt3d/SKILL.md) is an agentic skill that
+automates the whole CAD → RT3D tuning loop: it converts with a target profile, validates geometry
+quality, renders the result from multiple turntable angles, compares each view
+against a high-fidelity reference conversion, and adjusts fascat flags
+iteration by iteration until the asset passes both deterministic gates
+(topology, triangle and file-size budgets — checked by
+[`scripts/gates.py`](skills/cad-to-rt3d/scripts/gates.py)) and a visual
+inspection of the renders.
+
+Open this repository in your coding agent (or copy the skill folder into your
+own project) and ask, for example:
+
+> Use the cad-to-rt3d skill to convert motor.step for realtime-web.
+
+Every iteration's settings, reports, and renders are kept in a
+`<output>.fascat-work/` directory, so the tuning history stays auditable. The
+turntable rendering it relies on is plain `fascat validate --turntable-dir` —
+see the [CLI reference](https://pavelsimo.github.io/fascat/reference.html) for
+the flags.
 
 ## Docs
 

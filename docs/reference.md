@@ -108,6 +108,7 @@ All `--json` payloads are one JSON object on stdout. Optional sections are omitt
 | `visual_preview` | object | Present with `--visual-preview` |
 | `visual_diff` | object | Present with `--visual-baseline` |
 | `lod_preview` | object | Present with `--lod-preview-dir` |
+| `turntable` | object | Present with `--turntable-dir`; includes per-view previews and a `diff` summary with `--turntable-baseline-dir` |
 | `error` | string | Present only on failure |
 
 ### `runtime-fixtures`
@@ -144,6 +145,7 @@ settings), and `workflow_summary` (preparation stages mapped to run/skipped stat
 | `fascat validate output.glb --runtime-engine unity --runtime-engine-preview preview.png` | Request a Unity or Unreal harness-rendered preview PNG and report render status |
 | `fascat validate output.glb --runtime-engine unity --runtime-engine-preview preview.png --runtime-engine-baseline baseline.png` | Fail validation when an engine preview drifts beyond configured image-diff thresholds |
 | `fascat validate output.glb --visual-preview preview.png` | Write a stable software-rendered PNG preview for visual review |
+| `fascat validate output.glb --turntable-dir views/` | Write multi-angle turntable preview PNGs and a contact sheet for visual review |
 | `fascat runtime-fixtures runtime-parity/` | Write bundled browser/Unity/Unreal material, lighting, KTX2/Basis fallback, and LOD-profile parity GLBs, software baselines, and a manifest |
 | `fascat runtime-fixtures runtime-parity/ --capture unity --promote-goldens` | Capture runtime parity previews and optionally promote rendered outputs into target golden directories |
 | `fascat runtime-fixtures runtime-parity/ --capture unity --require-goldens` | Compare captures against existing `goldens/<target>/<fixture>.png` files and fail when required target goldens are missing |
@@ -168,7 +170,7 @@ all listed formats are implemented.
 | STL `.stl` | Not imported | Supported | Mesh-only manufacturing or inspection output |
 | FBX `.fbx` | Not imported | Supported | ASCII FBX DCC and engine handoff output |
 | Parasolid `.x_t`, `.x_b` | Not supported | Not supported | Native-kernel CAD import candidate, not in scope yet |
-| JT `.jt` | Supported (JT 9.x tessellation) | Not emitted as CAD | Pure-Python import of pre-tessellated JT 9 LOD meshes, assembly structure, and materials |
+| JT `.jt` | Supported (JT 8.x/9.x/10.x tessellation) | Not emitted as CAD | Pure-Python import of pre-tessellated JT 8/9/10 LOD meshes, assembly structure, and materials |
 | CATIA, NX, SolidWorks, Inventor | Not supported | Not supported | Native CAD coverage is deferred |
 | IFC, 3MF, QIF | Not supported | Not supported | Adjacent workflow formats, deferred unless a user need changes priority |
 
@@ -193,16 +195,17 @@ glTF/USD marker meshes with simple vector text glyphs.
 colors, and materials. **BREP** import creates one root occurrence and one part,
 keeping the native source shape for tessellation and healing.
 
-**JT** import is a pure-Python reader (no OCP dependency) for JT 9.x files. It
-decodes pre-tessellated LOD meshes (topologically compressed tri-strip sets),
-assembly hierarchy, instances, transforms, materials, and properties; parts are
-mesh-only (`source_shape` is `None`) and reuse the imported tessellation. Only
-the finest LOD is imported by default (`--jt-lod-selection all` also fills
+**JT** import is a pure-Python reader (no OCP dependency) for JT 8.x, 9.x, and
+10.x files. It decodes pre-tessellated LOD meshes (plain tri-strips in JT 8,
+topologically compressed tri-strip sets in JT 9/10), assembly hierarchy,
+instances, transforms, materials, and properties; parts are mesh-only
+(`source_shape` is `None`) and reuse the imported tessellation. Only the
+finest LOD is imported by default (`--jt-lod-selection all` also fills
 `Part.lod_meshes`). Units come from the `JT_PROP_MEASUREMENT_UNITS` property
-(millimetres assumed when absent); JT declares no up axis, so the NX/Teamcenter
-Z-up right-handed convention is assumed — override with the standard
-`--source-*`/`--target-*` flags. Embedded precise B-rep (Parasolid XT), PMI,
-textures, JT 8.x input, JT 10 mesh coding, JT via stdin, and external
+(millimetres assumed when absent); JT declares no up axis, so the
+NX/Teamcenter Z-up right-handed convention is assumed — override with the
+standard `--source-*`/`--target-*` flags. Embedded precise B-rep (Parasolid
+XT), PMI, textures, JT 7 and older input, JT via stdin, and external
 (shattered) partition references are not supported; unsupported versions and
 B-rep-only files fail with explicit errors, and external references import as
 placeholder nodes with warnings.
@@ -458,6 +461,7 @@ placeholder nodes with warnings.
 [Python API page](api.html#validation)):
 
 - `--visual-preview` / `--lod-preview-dir` — software-rendered PNGs of the output mesh and per-LOD contact sheet.
+- `--turntable-dir` — software-rendered turntable PNGs from `--turntable-views` azimuths at each `--turntable-elevations` elevation, plus a `turntable.png` contact sheet grid. `--turntable-baseline-dir` diffs each view against a same-named baseline PNG using the `--visual-diff-*` thresholds and fails validation when any view drifts. Framing auto-fits each view, so diffs catch silhouette and shading changes rather than absolute size changes.
 - `--runtime-browser` / `--runtime-browser-preview` — headless Chromium WebGL load/FPS measurement and screenshots for supported glTF/GLB primitives.
 - `--runtime-engine unity|unreal` (+ `--runtime-engine-preview` / `--runtime-engine-baseline`) — packaged or custom engine-harness load metrics and rendered previews. Set `FASCAT_UNITY`/`UNITY_EDITOR`/`FASCAT_UNREAL`/`UNREAL_EDITOR` or `--runtime-engine-command` if the executable isn't on PATH.
 - `fascat runtime-fixtures DIR` — bundled parity GLBs with software baselines and a manifest; `--capture`, `--promote-goldens`, `--require-goldens`, and `--check-goldens` manage target golden comparison.
@@ -604,7 +608,7 @@ above and on the [Python API page](api.html) document each field.
 
 | Capability | Status | Report step | Next step |
 |------------|--------|-------------|-----------|
-| CAD import (hierarchy, names, transforms, colors, metadata, PMI, variants) | Implemented for STEP/IGES; BREP as a single part; JT 9.x as pre-tessellated mesh parts; multi-root and master-file external references supported | `import` (decisions, loaded representations, PMI semantic graph, design-variant records, `external_reference_graph`) | Full AP242 conditional/effectivity geometry evaluation; full PMI semantic + graphical coverage; richer external-reference transforms |
+| CAD import (hierarchy, names, transforms, colors, metadata, PMI, variants) | Implemented for STEP/IGES; BREP as a single part; JT 8.x/9.x/10.x as pre-tessellated mesh parts; multi-root and master-file external references supported | `import` (decisions, loaded representations, PMI semantic graph, design-variant records, `external_reference_graph`) | Full AP242 conditional/effectivity geometry evaluation; full PMI semantic + graphical coverage; richer external-reference transforms |
 | BREP healing | Partial | `heal_brep` (open shells, edges, slivers, same-domain/overlap cleanup status) | Sliver-face removal and deeper face/wire repair |
 | Tessellation | Implemented | `tessellate` (tolerance policy, detail-adaptive criteria, quality metrics and advisories) | Conformal CAD UV solving; deeper curvature-targeted profiles |
 | Mesh repair | Implemented for core cleanup | `repair`, plus standalone `merge_vertices` / `delete_degenerate_polygons` reports | T-junction sewing, boundary-gap stitching, non-manifold cracking, viewer/open-shell orientation backends |
@@ -638,6 +642,13 @@ above and on the [Python API page](api.html) document each field.
 | `--visual-diff-mean-threshold` | `0.0` | Maximum allowed mean absolute error for the visual baseline diff |
 | `--visual-diff-changed-pixel-ratio` | `0.0` | Maximum allowed ratio of changed visual diff pixels |
 | `--lod-preview-dir` | unset | Write LOD switching preview PNGs and `lod-switching.png` into a directory |
+| `--turntable-dir` | unset | Write multi-angle turntable preview PNGs and `turntable.png` into a directory |
+| `--turntable-views` | `8` | Number of turntable azimuth views per elevation |
+| `--turntable-elevations` | `-30,30` | Comma-separated turntable camera elevations in degrees (each between -90 and 90) |
+| `--turntable-baseline-dir` | unset | Compare each turntable view against same-named PNGs in this directory with the `--visual-diff-*` thresholds and fail validation on drift |
+| `--turntable-width` | `512` | Turntable preview image width in pixels |
+| `--turntable-height` | `512` | Turntable preview image height in pixels |
+| `--turntable-supersample` | `2` | Turntable preview supersampling factor |
 | `--runtime-browser` | `false` | For glTF/GLB, run optional headless browser/WebGL load and FPS measurement |
 | `--runtime-browser-command` | unset | Browser executable for `--runtime-browser` or `--runtime-browser-preview`; otherwise `FASCAT_BROWSER` or common Chromium/Chrome names are used |
 | `--runtime-duration` | `2.0` | Browser FPS measurement duration in seconds |
@@ -668,6 +679,7 @@ fascat validate motor.glb \
   --visual-preview preview.png \
   --visual-baseline baseline.png \
   --lod-preview-dir preview-lods/ \
+  --turntable-dir preview-views/ \
   --runtime-browser \
   --report report.json
 ```

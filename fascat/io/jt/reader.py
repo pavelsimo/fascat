@@ -220,6 +220,7 @@ class _Traverser:
         self.materials: dict[str, Material] = {}
         self._part_by_object: dict[int, str | None] = {}
         self._shape_cache: dict[bytes, DecodedShape] = {}
+        self._implicit_shape_refs = self._build_implicit_shape_refs()
         self._saw_brep_refs = False
         self._imported_lod_meshes = 0
 
@@ -290,9 +291,21 @@ class _Traverser:
         for attribute_id in lsg_node.attribute_ids:
             jt_transform = self._graph.transforms.get(attribute_id)
             if jt_transform is not None:
+                matrix = jt_transform.matrix
+                if (
+                    not np.all(np.isfinite(matrix))
+                    or np.abs(matrix).max() > 1e12
+                    or not np.array_equal(matrix[:, 3], (0.0, 0.0, 0.0, 1.0))
+                ):
+                    self._warnings.append(
+                        f"JT transform on node '{name}' has non-finite, implausibly large, or "
+                        "non-affine values; geometry placement may be wrong"
+                    )
                 # JT stores row-vector matrices (p' = pAM); fascat uses column vectors.
-                node.transform = np.ascontiguousarray(jt_transform.matrix.T)
+                node.transform = np.ascontiguousarray(matrix.T)
         if lsg_node.kind == "partition" and lsg_node.file_name:
+            node.metadata["partition_file"] = lsg_node.file_name
+        if lsg_node.kind == "partition" and lsg_node.file_name and not lsg_node.child_ids:
             node.metadata["external_reference"] = lsg_node.file_name
             self._warnings.append(
                 f"JT external partition reference '{lsg_node.file_name}' is not resolved; placeholder node emitted"
@@ -345,7 +358,24 @@ class _Traverser:
                 refs.append(ref)
             elif ref.segment_type in BREP_SEGMENT_TYPES:
                 self._saw_brep_refs = True
+        if not refs:
+            refs.extend(self._implicit_shape_refs.get(object_id, []))
         return sorted(refs, key=lambda ref: ref.segment_type)
+
+    def _build_implicit_shape_refs(self) -> dict[int, list[_lsg.LateLoadedRef]]:
+        """Map monolithic shape nodes to shape segments when no late-loaded refs exist."""
+        shape_node_ids = [
+            object_id
+            for object_id, node in self._graph.nodes.items()
+            if node.kind in _lsg.SHAPE_NODE_KINDS and not self._graph.late_loaded.get(object_id)
+        ]
+        shape_entries = [entry for entry in self._toc.entries if entry.segment_type in SHAPE_SEGMENT_TYPES]
+        if len(shape_node_ids) != len(shape_entries):
+            return {}
+        return {
+            object_id: [_lsg.LateLoadedRef(entry.guid, entry.segment_type, object_id)]
+            for object_id, entry in zip(shape_node_ids, shape_entries, strict=True)
+        }
 
     def _part_for_shape(self, object_id: int, refs: list[_lsg.LateLoadedRef], name: str) -> str | None:
         if object_id in self._part_by_object:

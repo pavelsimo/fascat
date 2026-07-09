@@ -54,6 +54,7 @@ GUID_LATE_LOADED_PROPERTY_ATOM = _guid(0xE0B05BE5, 0xFBBD, 0x11D1, 0xA3, 0xA7, 0
 GUID_VECTOR4F_PROPERTY_ATOM = _guid(0x2E7DB4BE, 0xC71A, 0x4B18, 0x9D, 0x07, 0xC7, 0x22, 0x7E, 0x9F, 0xEF, 0x76)
 
 GUID_TRISTRIP_SET_SHAPE_LOD = _guid(0x10DD10AB, 0x2AC8, 0x11D1, 0x9B, 0x6B, 0x00, 0x80, 0xC7, 0xBB, 0x59, 0x97)
+GUID_TOPOMESH_TOPO_COMPRESSED_LOD = _guid(0xF830A5AD, 0xBE4C, 0x4FBC, 0x9B, 0x5F, 0xB9, 0x26, 0x92, 0x78, 0xD2, 0xE1)
 GUID_POLYLINE_SET_SHAPE_LOD = _guid(0x10DD10A1, 0x2AC8, 0x11D1, 0x9B, 0x6B, 0x00, 0x80, 0xC7, 0xBB, 0x59, 0x97)
 GUID_POINT_SET_SHAPE_LOD = _guid(0x98134716, 0x0011, 0x0818, 0x19, 0x98, 0x08, 0x00, 0x09, 0x83, 0x5D, 0x5A)
 GUID_VERTEX_SHAPE_LOD = _guid(0x10DD10B0, 0x2AC8, 0x11D1, 0x9B, 0x6B, 0x00, 0x80, 0xC7, 0xBB, 0x59, 0x97)
@@ -134,7 +135,9 @@ def parse_lsg(payload: bytes, *, version: tuple[int, int], byte_order: str) -> L
 
 
 def _element_version(reader: ByteReader, version: tuple[int, int]) -> int:
-    """In-element version fields are I16 in JT 9 and U8 in JT 10."""
+    """In-element version fields are absent in JT 8, I16 in JT 9, U8 in JT 10."""
+    if version[0] < 9:
+        return 0
     return reader.i16() if version[0] < 10 else reader.u8()
 
 
@@ -175,6 +178,8 @@ def _parse_node(reader: ByteReader, version: tuple[int, int], guid: bytes, objec
         return LsgNode(object_id, "group", attributes, children)
     if guid == GUID_PARTITION_NODE:
         attributes, children = _parse_group_node_data(reader, version)
+        if version[0] >= 10:
+            reader.u8()  # Partition Node Element version (new in JT 10)
         reader.i32()  # partition flags
         file_name = reader.mbstring()
         return LsgNode(object_id, "partition", attributes, children, file_name=file_name or None)
@@ -253,7 +258,9 @@ def _rgba(reader: ByteReader) -> tuple[float, float, float, float]:
 def _parse_material(reader: ByteReader, version: tuple[int, int], object_id: int) -> JtMaterial:
     _parse_base_attribute_data(reader, version)
     material_version = _element_version(reader, version)
-    reader.u16()  # data flags (blending factors, vertex-color override)
+    data_flags = reader.u16()
+    if version[0] < 9:
+        return _parse_material_channels_v8(reader, object_id, data_flags)
     ambient = _rgba(reader)
     diffuse = _rgba(reader)
     specular = _rgba(reader)
@@ -263,15 +270,44 @@ def _parse_material(reader: ByteReader, version: tuple[int, int], object_id: int
     return JtMaterial(object_id, ambient, diffuse, specular, emission, shininess, reflectivity)
 
 
+def _parse_material_channels_v8(reader: ByteReader, object_id: int, data_flags: int) -> JtMaterial:
+    # JT 8 (spec 7.2.1.1.2.2): when data-flag bit 0x0001 is set, the pattern
+    # bits mark ambient (0x0002), emission (0x0004), and specular (0x0008)
+    # channels stored as a single common F32 meaning (c, c, c, 1.0); diffuse is
+    # always full RGBA. JT 8 has no reflectivity field.
+    patterns_valid = bool(data_flags & 0x0001)
+
+    def channel(pattern_bit: int) -> tuple[float, float, float, float]:
+        if patterns_valid and data_flags & pattern_bit:
+            common = reader.f32()
+            return (common, common, common, 1.0)
+        return _rgba(reader)
+
+    ambient = channel(0x0002)
+    diffuse = _rgba(reader)
+    specular = channel(0x0008)
+    emission = channel(0x0004)
+    shininess = reader.f32()
+    return JtMaterial(object_id, ambient, diffuse, specular, emission, shininess, None)
+
+
 def _parse_transform(reader: ByteReader, version: tuple[int, int], object_id: int) -> JtTransform:
     _parse_base_attribute_data(reader, version)
     _element_version(reader, version)
     mask = reader.u16()
+    # Stored element values are F64 from JT 9 on (F32 in JT 8); the v9.5 Rev-A
+    # prose is ambiguous but real Siemens 9.5/10 files store F64.
+    read_value = reader.f64 if version[0] >= 9 else reader.f32
     matrix = np.identity(4, dtype=np.float64)
     for index in range(16):
         if mask & 0x8000:
-            matrix[index // 4, index % 4] = reader.f32()
+            matrix[index // 4, index % 4] = read_value()
         mask = (mask << 1) & 0xFFFF
+    # Real files (notably F32-era JT 8) carry rounding noise in the projective
+    # column, which must be exactly (0, 0, 0, 1) for downstream exporters to
+    # emit TRS-decomposable matrices.
+    if np.all(np.abs(matrix[:, 3] - (0.0, 0.0, 0.0, 1.0)) < 1e-6):
+        matrix[:, 3] = (0.0, 0.0, 0.0, 1.0)
     return JtTransform(object_id, matrix)
 
 
@@ -324,7 +360,8 @@ def _parse_property_atom(reader: ByteReader, version: tuple[int, int], guid: byt
         _element_version(reader, version)
         segment_id = reader.guid()
         segment_type = reader.i32()
-        payload_object_id = reader.i32()
+        # The payload object id field was added in JT 9.
+        payload_object_id = reader.i32() if version[0] >= 9 else -1
         return LateLoadedRef(segment_id, segment_type, payload_object_id)
     if guid == GUID_VECTOR4F_PROPERTY_ATOM:
         _element_version(reader, version)
@@ -340,7 +377,7 @@ class ObjectRef:
 def _parse_property_table(reader: ByteReader, version: tuple[int, int], lsg: Lsg) -> None:
     if reader.remaining() < 6:
         return  # tolerate files without a property table
-    _element_version(reader, version)
+    reader.i16()  # property table version: I16 in both JT 9 and JT 10 (spec 6.3)
     table_count = reader.i32()
     for _ in range(table_count):
         element_id = reader.i32()

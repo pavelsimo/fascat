@@ -34,6 +34,9 @@ from fascat.runtime_fixtures import (
 from fascat.size_ladder import GltfSizeLadderReport, GltfSizeLadderVariant, measure_gltf_size_ladder
 from fascat.visual import (
     LodSwitchPreviewReport,
+    TurntableOptions,
+    TurntableReport,
+    TurntableViewReport,
     VisualComparisonReport,
     VisualDiffOptions,
     VisualDiffReport,
@@ -44,7 +47,9 @@ from fascat.visual import (
     write_lod_switch_previews,
     write_output_lod_switch_previews,
     write_output_preview,
+    write_output_turntable_previews,
     write_preview,
+    write_turntable_previews,
 )
 
 __all__ = [
@@ -63,6 +68,9 @@ __all__ = [
     "RuntimeParityGolden",
     "RuntimeParityGoldenCoverageReport",
     "RuntimeParitySuiteReport",
+    "TurntableOptions",
+    "TurntableReport",
+    "TurntableViewReport",
     "VisualComparisonReport",
     "VisualDiffOptions",
     "VisualDiffReport",
@@ -80,6 +88,8 @@ __all__ = [
     "write_lod_switch_previews",
     "write_output_lod_switch_previews",
     "write_output_preview",
+    "write_output_turntable_previews",
     "write_preview",
     "write_runtime_parity_suite",
+    "write_turntable_previews",
 ]

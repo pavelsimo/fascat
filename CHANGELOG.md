@@ -8,7 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- import JT (ISO 14306) files: a pure-Python, clean-room JT 9.x reader (`fc.read_jt`, `JtReadOptions`) covering pre-tessellated LOD meshes (topologically compressed tri-strip sets), assembly hierarchy, instances, transforms, materials, and properties, plus a `--jt-lod-selection finest|all` convert flag; JT 8.x and JT 10 mesh coding fail with clear errors
+- import JT (ISO 14306) files: a pure-Python, clean-room JT 8.x/9.x/10.x reader (`fc.read_jt`, `JtReadOptions`) covering pre-tessellated LOD meshes (plain tri-strips in JT 8, topologically compressed tri-strip sets in JT 9/10), assembly hierarchy, instances, transforms, materials, and properties, plus a `--jt-lod-selection finest|all` convert flag; JT 7 and older fail with a clear error
+- render multi-angle turntable previews from `fascat validate` (`--turntable-dir`, `--turntable-views`, `--turntable-elevations`, `--turntable-width/height/supersample`) with per-view baseline diffing via `--turntable-baseline-dir`; Python API `validation.write_turntable_previews` / `write_output_turntable_previews`
+- add a `skills/cad-to-rt3d` Claude Code skill that automates the CAD-to-RT3D convert/validate loop with deterministic gate checking (`skills/cad-to-rt3d/scripts/gates.py`) and turntable-based visual comparison against a high-quality reference conversion
 
 ## [0.4.0] - 2026-06-13
 

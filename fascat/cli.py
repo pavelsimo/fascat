@@ -2365,6 +2365,8 @@ def cmd_convert(
   fascat validate motor.glb
   fascat validate motor.glb --geometry-quality --report report.json
   fascat validate motor.glb --visual-preview preview.png --lod-preview-dir previews/
+  fascat validate motor.glb --turntable-dir views/ --turntable-views 8 --turntable-elevations -30,30
+  fascat validate motor.glb --turntable-dir views/ --turntable-baseline-dir reference-views/
   fascat validate motor.glb --filter 'material=painted' --geometry-quality
   fascat --json validate motor.usda
   cat motor.usdc | fascat validate -
@@ -2491,6 +2493,37 @@ def cmd_validate(
         Path | None,
         typer.Option("--lod-preview-dir", help="Write LOD switching preview PNGs and a contact sheet."),
     ] = None,
+    turntable_dir: Annotated[
+        Path | None,
+        typer.Option("--turntable-dir", help="Write multi-angle turntable preview PNGs and a contact sheet."),
+    ] = None,
+    turntable_views: Annotated[
+        int,
+        typer.Option("--turntable-views", help="Number of turntable azimuth views per elevation."),
+    ] = 8,
+    turntable_elevations: Annotated[
+        str,
+        typer.Option("--turntable-elevations", help="Comma-separated turntable camera elevations in degrees."),
+    ] = "-30,30",
+    turntable_baseline_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--turntable-baseline-dir",
+            help="Compare each turntable view against same-named PNGs in this directory.",
+        ),
+    ] = None,
+    turntable_width: Annotated[
+        int,
+        typer.Option("--turntable-width", help="Turntable preview image width in pixels."),
+    ] = 512,
+    turntable_height: Annotated[
+        int,
+        typer.Option("--turntable-height", help="Turntable preview image height in pixels."),
+    ] = 512,
+    turntable_supersample: Annotated[
+        int,
+        typer.Option("--turntable-supersample", help="Turntable preview supersampling factor."),
+    ] = 2,
     filters: Annotated[
         list[str] | None,
         typer.Option("--filter", help="Scope validation-time analysis with selectors such as path=*/Fasteners/*."),
@@ -2513,10 +2546,13 @@ def cmd_validate(
         write_browser_render_preview,
     )
     from fascat.visual import (
+        TurntableOptions,
         VisualDiffOptions,
+        VisualPreviewOptions,
         compare_images,
         write_output_lod_switch_previews,
         write_output_preview,
+        write_output_turntable_previews,
     )
 
     """Validate a generated USD, glTF, OBJ, or STL file."""
@@ -2554,6 +2590,13 @@ def cmd_validate(
         "visual_diff_mean_threshold": visual_diff_mean_threshold,
         "visual_diff_changed_pixel_ratio": visual_diff_changed_pixel_ratio,
         "lod_preview_dir": str(lod_preview_dir) if lod_preview_dir else None,
+        "turntable_dir": str(turntable_dir) if turntable_dir else None,
+        "turntable_views": turntable_views,
+        "turntable_elevations": turntable_elevations,
+        "turntable_baseline_dir": str(turntable_baseline_dir) if turntable_baseline_dir else None,
+        "turntable_width": turntable_width,
+        "turntable_height": turntable_height,
+        "turntable_supersample": turntable_supersample,
         "analysis_options": analyze_options.to_dict() if should_analyze else None,
         "filters": filters or [],
         "exclude_filters": exclude_filters or [],
@@ -2577,6 +2620,25 @@ def cmd_validate(
         _fail(ctx, payload, "--visual-diff-changed-pixel-ratio must be between 0 and 1.", code=2)
     if visual_baseline is not None and visual_preview is None:
         _fail(ctx, payload, "--visual-baseline requires --visual-preview.", code=2)
+    if turntable_views < 1:
+        _fail(ctx, payload, "--turntable-views must be greater than 0.", code=2)
+    parsed_turntable_elevations: tuple[float, ...] = ()
+    try:
+        parsed_turntable_elevations = tuple(
+            float(value.strip()) for value in turntable_elevations.split(",") if value.strip()
+        )
+    except ValueError:
+        _fail(ctx, payload, "--turntable-elevations must be comma-separated numbers.", code=2)
+    if not parsed_turntable_elevations:
+        _fail(ctx, payload, "--turntable-elevations must contain at least one value.", code=2)
+    if any(value < -90.0 or value > 90.0 for value in parsed_turntable_elevations):
+        _fail(ctx, payload, "--turntable-elevations values must be between -90 and 90.", code=2)
+    if turntable_baseline_dir is not None and turntable_dir is None:
+        _fail(ctx, payload, "--turntable-baseline-dir requires --turntable-dir.", code=2)
+    if turntable_width <= 0 or turntable_height <= 0:
+        _fail(ctx, payload, "--turntable-width and --turntable-height must be greater than 0.", code=2)
+    if turntable_supersample < 1:
+        _fail(ctx, payload, "--turntable-supersample must be greater than 0.", code=2)
     if runtime_engine_preview is not None and runtime_engine is None:
         _fail(ctx, payload, "--runtime-engine-preview requires --runtime-engine.", code=2)
     if runtime_engine_baseline is not None and runtime_engine_preview is None:
@@ -2586,6 +2648,7 @@ def cmd_validate(
         or runtime_browser_preview is not None
         or runtime_engine_preview is not None
         or lod_preview_dir is not None
+        or turntable_dir is not None
     ):
         _fail(ctx, payload, "Visual preview validation requires a file path, not stdin.", code=2)
     if state.dry_run:
@@ -2676,6 +2739,26 @@ def cmd_validate(
         lod_preview_report = (
             write_output_lod_switch_previews(output_path, lod_preview_dir) if lod_preview_dir is not None else None
         )
+        turntable_report = (
+            write_output_turntable_previews(
+                output_path,
+                turntable_dir,
+                VisualPreviewOptions(
+                    width=turntable_width,
+                    height=turntable_height,
+                    supersample=turntable_supersample,
+                ),
+                TurntableOptions(views=turntable_views, elevations=parsed_turntable_elevations),
+                baseline_dir=turntable_baseline_dir,
+                diff_options=VisualDiffOptions(
+                    pixel_tolerance=visual_diff_pixel_tolerance,
+                    max_mean_absolute_error=visual_diff_mean_threshold,
+                    max_changed_pixel_ratio=visual_diff_changed_pixel_ratio,
+                ),
+            )
+            if turntable_dir is not None
+            else None
+        )
     except Exception as exc:
         _fail(ctx, payload, str(exc))
         raise AssertionError("unreachable") from exc
@@ -2700,6 +2783,8 @@ def cmd_validate(
         json_payload["runtime_engine_diff_error"] = runtime_engine_diff_error
     if lod_preview_report is not None:
         json_payload["lod_preview"] = lod_preview_report.to_dict()
+    if turntable_report is not None:
+        json_payload["turntable"] = turntable_report.to_dict()
     message = f"{output_path}: valid {_export_label(output_path)}, {_format_stats(stats)}."
     if report is not None:
         message = f"{message} Wrote report {report}."
@@ -2737,6 +2822,16 @@ def cmd_validate(
         message = f"{message} Engine preview diff failed: {runtime_engine_diff_error}."
     if lod_preview_report is not None:
         message = f"{message} Wrote LOD previews {lod_preview_report.directory}."
+    if turntable_report is not None:
+        message = (
+            f"{message} Wrote turntable previews {turntable_report.directory} ({len(turntable_report.views)} views)."
+        )
+        if turntable_report.diff_passed is True:
+            message = f"{message} Turntable diff passed."
+        elif turntable_report.diff_passed is False:
+            worst = turntable_report.worst_diff_view()
+            worst_label = f" (worst view {worst.name})" if worst is not None else ""
+            message = f"{message} Turntable diff failed{worst_label}."
     if analysis is not None and "selection" in analysis.summary:
         selection = cast(dict[str, Any], analysis.summary["selection"])
         message = f"{message} Matched {_format_stats(cast(dict[str, int], selection['stats']))}."
@@ -2751,6 +2846,9 @@ def cmd_validate(
     if runtime_engine_diff_error is not None or (
         runtime_engine_diff_report is not None and not runtime_engine_diff_report.passed
     ):
+        _emit(ctx, json_payload, message)
+        raise typer.Exit(1)
+    if turntable_report is not None and turntable_report.diff_passed is False:
         _emit(ctx, json_payload, message)
         raise typer.Exit(1)
     _emit(
