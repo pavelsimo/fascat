@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-09
+
 ### Added
 - import JT (ISO 14306) files: a pure-Python, clean-room JT 8.x/9.x/10.x reader (`fc.read_jt`, `JtReadOptions`) covering pre-tessellated LOD meshes (plain tri-strips in JT 8, topologically compressed tri-strip sets in JT 9/10), assembly hierarchy, instances, transforms, materials, and properties, plus a `--jt-lod-selection finest|all` convert flag; JT 7 and older fail with a clear error
 - render multi-angle turntable previews from `fascat validate` (`--turntable-dir`, `--turntable-views`, `--turntable-elevations`, `--turntable-width/height/supersample`) with per-view baseline diffing via `--turntable-baseline-dir`; Python API `validation.write_turntable_previews` / `write_output_turntable_previews`
@@ -153,7 +155,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - improve CLI behavior for help, color handling, quiet mode, backend failures, and validation errors
 - keep asset, mesh, material, report, and node models isolated from caller-owned mutable inputs
 
-[Unreleased]: https://github.com/pavelsimo/fascat/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/pavelsimo/fascat/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/pavelsimo/fascat/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/pavelsimo/fascat/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/pavelsimo/fascat/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/pavelsimo/fascat/compare/v0.1.0...v0.2.0

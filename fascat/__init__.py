@@ -6,7 +6,7 @@ name pulls in its home module on first attribute access.
 
 from typing import TYPE_CHECKING, Any
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 if TYPE_CHECKING:  # static names for type checkers and IDEs; never executed at runtime
     from fascat import options, profiles, validation  # noqa: F401
