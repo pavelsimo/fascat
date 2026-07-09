@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="fascat.png" alt="fascat" width="100%">
+  <img src="fascat.png" alt="fascat" width="640">
 </p>
 
 <p align="center">
