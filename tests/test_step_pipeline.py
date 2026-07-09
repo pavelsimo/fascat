@@ -116,7 +116,8 @@ def test_generated_step_assembly_preserves_repeated_occurrences_and_transforms_i
     assert len(instance_prims) == 2
     assert len(translated_instances) == 1
     assert all(prim.IsInstance() for prim in instance_prims)
-    assert np.allclose(np.asarray(transform_ops[0].Get())[:3, 3], [10.0, 0.0, 0.0])
+    # Gf.Matrix4d is row-vector: translation lives in the last row.
+    assert np.allclose(np.asarray(transform_ops[0].Get())[3, :3], [10.0, 0.0, 0.0])
 
 
 def test_step_ids_include_source_identity(tmp_path: Path) -> None:

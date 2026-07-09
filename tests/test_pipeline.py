@@ -30,6 +30,7 @@ from fascat.options import (
     StageOptions,
     StepReadOptions,
     TessellationOptions,
+    UsdExportOptions,
 )
 from fascat.pipeline import convert
 from fascat.pipeline_file import PipelineSpec
@@ -2014,6 +2015,44 @@ def test_convert_accepts_profile_name_overrides(monkeypatch, tmp_path: Path) -> 
     assert profile["optimize"]["target_triangles"] == 50_000  # type: ignore[index]
     assert profile["lods"] is None  # type: ignore[index]
     assert budget_step.options["max_triangles"] == 50_000
+
+
+@pytest.mark.parametrize(
+    ("profile", "usd_options", "expected_layout"),
+    [
+        ("realtime-web", None, "flat"),
+        ("realtime-desktop", None, "instanced"),
+        ("realtime-web", UsdExportOptions(layout="instanced"), "instanced"),
+        ("realtime-desktop", UsdExportOptions(layout="flat"), "flat"),
+    ],
+)
+def test_convert_resolves_usd_layout_from_profile(  # type: ignore[no-untyped-def]
+    monkeypatch,
+    tmp_path: Path,
+    profile: str,
+    usd_options: UsdExportOptions | None,
+    expected_layout: str,
+) -> None:
+    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
+    captured: dict[str, UsdExportOptions | None] = {}
+
+    def _capture_write(_asset: Asset, _path: object, *, debug: bool = False, options: object = None) -> None:
+        captured["options"] = options  # type: ignore[assignment]
+
+    monkeypatch.setattr(pipeline, "_write_usd", _capture_write)
+
+    converted = convert(
+        "input.step",
+        tmp_path / "output.usdc",
+        profile=profile,
+        usd_options=usd_options,
+        validate_output=False,
+    )
+
+    assert captured["options"] is not None
+    assert captured["options"].layout == expected_layout
+    write_step = next(step for step in converted.report.steps if step.name == "write")
+    assert write_step.options["layout"] == expected_layout
 
 
 def test_convert_rejects_profile_overrides_for_profile_objects(tmp_path: Path) -> None:

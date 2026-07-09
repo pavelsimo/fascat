@@ -137,7 +137,8 @@ def test_step_assembly_round_trip_preserves_instance_transforms(tmp_path: Path) 
     instance_prims = [prim for prim in Usd.PrimRange(stage.GetDefaultPrim()) if prim.IsInstanceable()]
     assert len(instance_prims) == 2
     translated = [ops[0].Get() for prim in instance_prims if (ops := UsdGeom.Xformable(prim).GetOrderedXformOps())]
-    assert any(np.allclose(np.asarray(value)[:3, 3], [10.0, 0.0, 0.0]) for value in translated)
+    # Gf.Matrix4d is row-vector: translation lives in the last row.
+    assert any(np.allclose(np.asarray(value)[3, :3], [10.0, 0.0, 0.0]) for value in translated)
 
     assert converted.part_count == 1
     assert converted.occurrence_count == 2

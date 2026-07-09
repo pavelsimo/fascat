@@ -560,6 +560,7 @@ def test_size_adaptive_tessellation_requires_bands() -> None:
         (lambda: fc.GltfExportOptions(jpeg_quality=101), "jpeg_quality"),
         (lambda: fc.GltfExportOptions(file_size_budget_mb=0), "file_size_budget_mb"),
         (lambda: fc.UsdExportOptions(package="zip"), "package"),
+        (lambda: fc.UsdExportOptions(layout="stacked"), "layout"),
         (lambda: ObjExportOptions(file_size_budget_mb=0), "file_size_budget_mb"),
         (lambda: StlExportOptions(file_size_budget_mb=0), "file_size_budget_mb"),
         (lambda: FbxExportOptions(file_size_budget_mb=0), "file_size_budget_mb"),

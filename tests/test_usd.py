@@ -458,10 +458,17 @@ def _connected_source(shader: object, input_name: str) -> tuple[str, str]:
 
 def test_usd_export_authors_uv0_normals_and_original_names(tmp_path: Path) -> None:
     mesh = cube_mesh()
-    transform = np.eye(4, dtype=float)
-    transform[0, 0] = 2.0
-    transform[1, 1] = 3.0
-    transform[2, 2] = 4.0
+    # Non-symmetric transform (rotation + translation) so a transposed
+    # authoring convention cannot pass by accident.
+    transform = np.array(
+        [
+            [0.0, -1.0, 0.0, 10.0],
+            [1.0, 0.0, 0.0, 20.0],
+            [0.0, 0.0, 1.0, 30.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=float,
+    )
     root = Node(
         id="root",
         name="root",
@@ -484,7 +491,13 @@ def test_usd_export_authors_uv0_normals_and_original_names(tmp_path: Path) -> No
     assert xform_prim.GetCustomDataByKey("fascat:nodeId") == "node"
     xform_ops = UsdGeom.Xformable(xform_prim).GetOrderedXformOps()
     assert len(xform_ops) == 1
-    assert np.allclose(np.asarray(xform_ops[0].Get()), transform)
+    # Gf.Matrix4d is row-vector, fascat is column-vector: authored transposed.
+    assert np.allclose(np.asarray(xform_ops[0].Get()), transform.T)
+
+    mesh_world = UsdGeom.XformCache().GetLocalToWorldTransform(stage.GetPrimAtPath("/Scene/_123_motor_housing/Mesh"))
+    point = np.array([1.0, 2.0, 3.0, 1.0])
+    expected = transform @ point
+    assert np.allclose(np.asarray(mesh_world.Transform((1.0, 2.0, 3.0))), expected[:3])
 
     mesh_prim = stage.GetPrimAtPath("/Scene/_123_motor_housing/Mesh")
     usd_mesh = UsdGeom.Mesh(mesh_prim)
@@ -498,6 +511,47 @@ def test_usd_export_authors_uv0_normals_and_original_names(tmp_path: Path) -> No
     assert st
     assert st.GetInterpolation() == UsdGeom.Tokens.vertex
     assert len(st.Get()) == mesh.vertex_count
+
+
+def test_usd_export_authors_root_space_normalization_on_scene(tmp_path: Path) -> None:
+    mesh = cube_mesh()
+    # mm -> m scale combined with a Z-up -> Y-up rotation, as produced by
+    # the importers' space normalization on the root node.
+    root_transform = np.array(
+        [
+            [0.001, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.001, 0.0],
+            [0.0, -0.001, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=float,
+    )
+    node_transform = np.eye(4, dtype=float)
+    node_transform[:3, 3] = (100.0, 200.0, 300.0)
+    root = Node(
+        id="root",
+        name="root",
+        transform=root_transform,
+        children=[Node(id="node", name="housing", part_id="part", transform=node_transform)],
+    )
+    asset = Asset(
+        root=root,
+        parts={"part": Part(id="part", name="housing", mesh=mesh)},
+        materials={},
+    )
+    output = tmp_path / "root_space.usda"
+
+    write_usd(asset, output)
+
+    stage = Usd.Stage.Open(str(output))
+    assert stage is not None
+    scene_ops = UsdGeom.Xformable(stage.GetPrimAtPath("/Scene")).GetOrderedXformOps()
+    assert len(scene_ops) == 1
+    assert np.allclose(np.asarray(scene_ops[0].Get()), root_transform.T)
+
+    mesh_world = UsdGeom.XformCache().GetLocalToWorldTransform(stage.GetPrimAtPath("/Scene/housing/Mesh"))
+    expected = root_transform @ node_transform @ np.array([1.0, 1.0, 1.0, 1.0])
+    assert np.allclose(np.asarray(mesh_world.Transform((1.0, 1.0, 1.0))), expected[:3])
 
 
 def test_usd_export_preserves_original_names_on_sanitized_prototypes_and_materials(tmp_path: Path) -> None:
@@ -633,6 +687,138 @@ def test_usd_export_marks_repeated_parts_instanceable_across_assemblies(tmp_path
     assert stage is not None
     assert stage.GetPrimAtPath("/Scene/Group_A/Cube").IsInstanceable()
     assert stage.GetPrimAtPath("/Scene/Group_B/Cube").IsInstanceable()
+
+
+def _world_mesh_centroids(stage: Usd.Stage) -> np.ndarray:
+    cache = UsdGeom.XformCache()
+    centroids = []
+    predicate = Usd.TraverseInstanceProxies(Usd.PrimAllPrimsPredicate)
+    for prim in Usd.PrimRange(stage.GetDefaultPrim(), predicate):
+        if not prim.IsA(UsdGeom.Mesh):
+            continue
+        points = np.asarray(UsdGeom.Mesh(prim).GetPointsAttr().Get(), dtype=float)
+        # Gf.Matrix4d is row-vector: world = homogeneous points @ matrix.
+        matrix = np.asarray(cache.GetLocalToWorldTransform(prim), dtype=float)
+        world = np.hstack((points, np.ones((len(points), 1)))) @ matrix
+        centroids.append(world[:, :3].mean(axis=0))
+    return np.asarray(sorted(centroids, key=tuple))
+
+
+def test_usd_export_flat_layout_authors_inline_meshes_without_composition(tmp_path: Path) -> None:
+    mesh = cube_mesh()
+    root = Node(
+        id="root",
+        name="root",
+        children=[
+            Node(id="n1", name="Cube A", part_id="cube"),
+            Node(id="n2", name="Cube B", part_id="cube"),
+        ],
+    )
+    material = Material(id="red", name="Red", base_color=(1.0, 0.0, 0.0, 1.0))
+    asset = Asset(
+        root=root,
+        parts={
+            "cube": Part(id="cube", name="Cube", mesh=mesh, material_ids=["red"], lod_meshes=[mesh.simplify(ratio=0.5)])
+        },
+        materials={"red": material},
+    )
+    flat_output = tmp_path / "flat.usda"
+    instanced_output = tmp_path / "instanced.usda"
+
+    write_usd(asset, flat_output, options=UsdExportOptions(layout="flat"))
+    write_usd(asset, instanced_output, options=UsdExportOptions(layout="instanced"))
+
+    stage = Usd.Stage.Open(str(flat_output))
+    assert stage is not None
+    assert not stage.GetPrimAtPath("/__Prototypes")
+    for prim in Usd.PrimRange(stage.GetPseudoRoot()):
+        assert not prim.GetVariantSets().GetNames()
+        assert not prim.IsInstanceable()
+        assert not prim.HasAuthoredReferences()
+    for name in ("Cube_A", "Cube_B"):
+        occurrence = stage.GetPrimAtPath(f"/Scene/{name}")
+        assert occurrence.GetCustomDataByKey("fascat:partId") == "cube"
+        mesh_prim = stage.GetPrimAtPath(f"/Scene/{name}/Mesh")
+        assert mesh_prim.IsA(UsdGeom.Mesh)
+        # Inline meshes carry the full-detail lod0 geometry, not a decimated LOD.
+        assert len(UsdGeom.Mesh(mesh_prim).GetFaceVertexCountsAttr().Get()) == mesh.triangle_count
+        assert "MaterialBindingAPI" in mesh_prim.GetAppliedSchemas()
+        assert UsdGeom.Mesh(mesh_prim).GetDisplayColorAttr().Get()[0] == (1.0, 0.0, 0.0)
+    assert validate_usd(flat_output) == validate_usd(instanced_output)
+
+
+def test_usd_export_flat_and_instanced_world_centroids_match(tmp_path: Path) -> None:
+    mesh = cube_mesh()
+    root_transform = np.array(
+        [
+            [0.001, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.001, 0.0],
+            [0.0, -0.001, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=float,
+    )
+    rotated = np.array(
+        [
+            [0.0, -1.0, 0.0, 100.0],
+            [1.0, 0.0, 0.0, 200.0],
+            [0.0, 0.0, 1.0, 300.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=float,
+    )
+    translated = np.eye(4, dtype=float)
+    translated[:3, 3] = (-50.0, 25.0, 75.0)
+    root = Node(
+        id="root",
+        name="root",
+        transform=root_transform,
+        children=[
+            Node(id="n1", name="Cube A", part_id="cube", transform=rotated),
+            Node(id="n2", name="Cube B", part_id="cube", transform=translated),
+        ],
+    )
+    asset = Asset(
+        root=root,
+        parts={"cube": Part(id="cube", name="Cube", mesh=mesh, lod_meshes=[mesh.simplify(ratio=0.5)])},
+        materials={},
+    )
+    flat_output = tmp_path / "flat.usda"
+    instanced_output = tmp_path / "instanced.usda"
+
+    write_usd(asset, flat_output, options=UsdExportOptions(layout="flat"))
+    write_usd(asset, instanced_output, options=UsdExportOptions(layout="instanced"))
+
+    flat_stage = Usd.Stage.Open(str(flat_output))
+    instanced_stage = Usd.Stage.Open(str(instanced_output))
+    assert flat_stage is not None and instanced_stage is not None
+    flat_centroids = _world_mesh_centroids(flat_stage)
+    instanced_centroids = _world_mesh_centroids(instanced_stage)
+    assert flat_centroids.shape == instanced_centroids.shape == (2, 3)
+    assert np.allclose(flat_centroids, instanced_centroids, atol=1e-6)
+
+
+def test_usd_export_default_auto_layout_authors_instanced_composition(tmp_path: Path) -> None:
+    mesh = cube_mesh()
+    root = Node(
+        id="root",
+        name="root",
+        children=[Node(id="n1", name="Cube", part_id="cube")],
+    )
+    asset = Asset(
+        root=root,
+        parts={"cube": Part(id="cube", name="Cube", mesh=mesh, lod_meshes=[mesh.simplify(ratio=0.5)])},
+        materials={},
+    )
+    output = tmp_path / "auto.usda"
+
+    assert UsdExportOptions().layout == "auto"
+    write_usd(asset, output)
+
+    stage = Usd.Stage.Open(str(output))
+    assert stage is not None
+    assert stage.GetPrimAtPath("/__Prototypes/cube_lod0/Mesh")
+    assert stage.GetPrimAtPath("/Scene/Cube").GetVariantSets().GetVariantSet("lod").GetVariantSelection() == "lod0"
 
 
 def test_usd_export_authors_face_material_subsets(tmp_path: Path) -> None:

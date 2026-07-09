@@ -1262,11 +1262,7 @@ class Asset:
         from fascat.io._atomic import preflight_output_path
 
         if Path(path).suffix.lower() == ".usdz" and (options is None or options.package != "usdz"):
-            opts = UsdExportOptions(
-                package="usdz",
-                file_size_budget_mb=None if options is None else options.file_size_budget_mb,
-                metadata=UsdExportOptions().metadata if options is None else options.metadata,
-            )
+            opts = dataclass_replace(options or UsdExportOptions(), package="usdz")
         else:
             opts = options or UsdExportOptions()
         before = self._report_stats()

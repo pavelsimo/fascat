@@ -549,6 +549,7 @@ def test_asset_write_usd_records_report_step(monkeypatch: pytest.MonkeyPatch, tm
         "debug": True,
         "dry_run": False,
         "package": "default",
+        "layout": "auto",
         "file_size_budget_mb": None,
         "metadata": {"mode": "full", "pmi": "metadata"},
     }

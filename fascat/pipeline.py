@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -65,6 +65,7 @@ from fascat.options import (
     TessellationOptions,
     TextureProcessOptions,
     UsdExportOptions,
+    UsdLayoutMode,
     gltf_export_preset_texture_options,
     resolve_gltf_export_options,
 )
@@ -259,6 +260,8 @@ def convert(
             asset = asset.lods(lod_options, where=where)
             if progress is not None:
                 progress("lods", asset.stats())
+    if output_format == "usd":
+        usd_options = _with_usd_layout(usd_options, selected)
     write_before = _report_stats(asset)
     write_options: dict[str, object] = _write_options(
         output_format,
@@ -1747,11 +1750,18 @@ def _with_usd_metadata(
 ) -> UsdExportOptions:
     if options is None:
         return UsdExportOptions(metadata=metadata)
-    return UsdExportOptions(
-        package=options.package,
-        file_size_budget_mb=options.file_size_budget_mb,
-        metadata=metadata,
-    )
+    return replace(options, metadata=metadata)
+
+
+def _with_usd_layout(options: UsdExportOptions | None, profile: ConversionProfile) -> UsdExportOptions:
+    opts = options or UsdExportOptions()
+    if opts.layout != "auto":
+        return opts
+    # Simple web viewers (e.g. three.js USDLoader) do not resolve internal
+    # references, variant sets, or instancing, so the web profile inlines
+    # meshes instead of the prototype/variant layout.
+    layout: UsdLayoutMode = "flat" if profile.name == "realtime-web" else "instanced"
+    return replace(opts, layout=layout)
 
 
 def write_usd(
@@ -1862,11 +1872,7 @@ def _usd_options_for_path(path: str | Path, options: UsdExportOptions | None) ->
         return UsdExportOptions(package="usdz")
     if options.package == "usdz":
         return options
-    return UsdExportOptions(
-        package="usdz",
-        file_size_budget_mb=options.file_size_budget_mb,
-        metadata=options.metadata,
-    )
+    return replace(options, package="usdz")
 
 
 def _write_options(

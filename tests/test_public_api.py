@@ -271,6 +271,7 @@ def test_functional_write_usd_records_report_step(monkeypatch, tmp_path: Path) -
         "debug": True,
         "dry_run": False,
         "package": "default",
+        "layout": "auto",
         "file_size_budget_mb": None,
         "metadata": {"mode": "full", "pmi": "metadata"},
     }

@@ -389,6 +389,7 @@ placeholder nodes with warnings.
 | `--png-compression` | `6` | PNG fallback compression level, 0 through 9 |
 | `--jpeg-quality` | `85` | JPEG fallback quality, 0 through 100 |
 | `--package` | `default` | USD package mode: `default` or packaged `.usdz` |
+| `--usd-layout` | `auto` | USD scene layout: `auto` (`flat` for the `realtime-web` profile, `instanced` otherwise), `instanced` (prototypes, internal references, LOD variants, instancing), or `flat` (inline meshes per occurrence for viewers without USD composition support) |
 | `--file-size-budget-mb` | unset | Warn in reports when output exceeds this size |
 | `--size-ladder` | `false` | Measure baseline, optimized, compressed, and requested temporary GLB sizes in a `gltf_size_ladder` report |
 | `--obj-materials / --no-obj-materials` | `true` | Write OBJ material assignments |

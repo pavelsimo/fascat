@@ -563,6 +563,13 @@ def test_convert_dry_run_accepts_material_staging_mode() -> None:
     assert '"materials": "display"' in result.output
 
 
+def test_convert_dry_run_accepts_usd_layout() -> None:
+    result = runner.invoke(app, ["--json", "--dry-run", "convert", "input.step", "--usd-layout", "flat"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["usd_layout"] == "flat"
+
+
 def test_convert_dry_run_accepts_uv1_copy_mode() -> None:
     result = runner.invoke(app, ["--json", "--dry-run", "convert", "input.step", "--uv1", "copy-uv0"])
     assert result.exit_code == 0, result.output

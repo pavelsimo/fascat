@@ -102,6 +102,7 @@ TextureFallbackFormat = Literal["auto", "png", "jpeg"]
 MaterialLibraryColorSpace = Literal["auto", "linear", "srgb255"]
 GltfExportPreset = Literal["desktop", "web", "mobile", "vr", "ar"]
 UsdPackageMode = Literal["default", "usdz"]
+UsdLayoutMode = Literal["auto", "instanced", "flat"]
 MetadataExportMode = Literal["none", "summary", "full"]
 PmiExportMode = Literal["none", "summary", "metadata", "metadata_and_visuals", "full"]
 ConstructionCurvePolicy = Literal["preserve_metadata", "delete", "tessellate_tubes"]
@@ -1269,12 +1270,15 @@ def gltf_export_preset_texture_options(options: GltfExportOptions | None) -> Tex
 @dataclass(frozen=True, repr=False)
 class UsdExportOptions(OptionsRepr):
     package: UsdPackageMode = "default"
+    layout: UsdLayoutMode = "auto"
     file_size_budget_mb: float | None = None
     metadata: MetadataExportOptions = field(default_factory=MetadataExportOptions)
 
     def __post_init__(self) -> None:
         if self.package not in {"default", "usdz"}:
             raise ValueError("package must be one of: default, usdz")
+        if self.layout not in {"auto", "instanced", "flat"}:
+            raise ValueError("layout must be one of: auto, instanced, flat")
         if self.file_size_budget_mb is not None and self.file_size_budget_mb <= 0.0:
             raise ValueError("file_size_budget_mb must be greater than 0 when set")
 

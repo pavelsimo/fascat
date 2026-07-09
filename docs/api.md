@@ -1312,6 +1312,7 @@ Export option parameters:
 | `GltfExportOptions` | `size_ladder` | Add a measured `gltf_size_ladder` report comparing temporary baseline, optimized, compressed, and requested GLB variants. |
 | `GltfExportOptions` | `metadata` | `MetadataExportOptions` controlling metadata and PMI in `extras.fascat`. |
 | `UsdExportOptions` | `package` | `default` writes normal USD. `usdz` writes a packaged `.usdz` file. |
+| `UsdExportOptions` | `layout` | `instanced` authors prototypes with internal references, LOD variant sets, and instancing; `flat` inlines each occurrence's full-detail mesh for viewers without USD composition support (e.g. three.js `USDLoader`); `auto` (default) resolves to `flat` for the `realtime-web` profile and `instanced` otherwise. |
 | `UsdExportOptions` | `file_size_budget_mb` | Add report warnings when the output exceeds this size. |
 | `UsdExportOptions` | `metadata` | `MetadataExportOptions` controlling USD custom data and PMI prims. |
 | `ObjExportOptions` | `materials` | Write OBJ `usemtl` assignments when material data exists. |

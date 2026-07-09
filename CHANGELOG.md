@@ -11,6 +11,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - import JT (ISO 14306) files: a pure-Python, clean-room JT 8.x/9.x/10.x reader (`fc.read_jt`, `JtReadOptions`) covering pre-tessellated LOD meshes (plain tri-strips in JT 8, topologically compressed tri-strip sets in JT 9/10), assembly hierarchy, instances, transforms, materials, and properties, plus a `--jt-lod-selection finest|all` convert flag; JT 7 and older fail with a clear error
 - render multi-angle turntable previews from `fascat validate` (`--turntable-dir`, `--turntable-views`, `--turntable-elevations`, `--turntable-width/height/supersample`) with per-view baseline diffing via `--turntable-baseline-dir`; Python API `validation.write_turntable_previews` / `write_output_turntable_previews`
 - add a `skills/cad-to-rt3d` Claude Code skill that automates the CAD-to-RT3D convert/validate loop with deterministic gate checking (`skills/cad-to-rt3d/scripts/gates.py`) and turntable-based visual comparison against a high-quality reference conversion
+- add a flat USD authoring layout (`--usd-layout`, `UsdExportOptions.layout`) that inlines each occurrence's mesh without prototypes, internal references, LOD variants, or instanceable prims, for viewers without USD composition support (e.g. three.js `USDLoader`); `auto` defaults to flat for the `realtime-web` profile
+- expose ambient occlusion strategy controls for conversion workflows and profiles
+- accept typed `where` filters for asset selection
+- allow conversion profiles to apply first-class operation overrides before per-command flags
+- add consistent Asset API aliases, convenience predicates, and trimesh interoperability helpers
+- add dry-run preflight checks for write/export paths
+- expose a public `fascat` error hierarchy for catching import, export, mesh, filter, and backend failures
+
+### Changed
+- refine production conversion defaults for tessellation, staging, LOD generation, and profile-driven conversions
+- improve conversion performance across STEP parsing, OCCT tessellation, mesh topology checks, UV metrics, ambient occlusion, self-intersection analysis, material processing, and file writers
+- reduce CLI startup overhead by deferring heavyweight import/export backends until commands need them
+- rename the optional UV dependency extra to `unwrap`
+- tighten visual diff defaults for preview and runtime validation comparisons
+- report LOD retry provenance, tiny LOD ratio warnings, texture downsampling warnings, and large ASCII STL warnings in conversion diagnostics
+- make material-library color space handling explicit in CLI, pipeline, and profile configuration
+
+### Fixed
+- author USD node transforms in row-vector convention (fascat matrices are column-vector), fixing rotations and translations that were transposed away in exported stages, and author the root space-normalization transform on `/Scene` instead of dropping it
+- honor `--json` when printing version output
+- validate USD metadata and UV payloads, glTF SNORM8 normals, and empty glTF accessor edge cases before accepting exports
+- preflight `gltf-transform` availability before runtime validation
+- preserve baked emissive provenance and deduplicate material texture slots during STEP material import
+- report mirrored STEP transforms, external reference cycles, and PMI semantic graph guard conditions instead of emitting misleading import state
+- remove stale multi-file warnings and validate filter pattern values before applying conversions
+- make flatten tolerances explicit and bound hierarchy merge behavior to avoid unbounded scene operations
+
+### Security
+- cap browser screenshot payloads, material library zip archives, and material library JSON nesting during validation and import
+- reject truncated KTX2 material payloads before decoding sidecar textures
 
 ## [0.4.0] - 2026-06-13
 

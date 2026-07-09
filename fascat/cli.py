@@ -359,6 +359,12 @@ class UsdPackage(str, Enum):
     USDZ = "usdz"
 
 
+class UsdLayout(str, Enum):
+    AUTO = "auto"
+    INSTANCED = "instanced"
+    FLAT = "flat"
+
+
 class MetadataMode(str, Enum):
     NONE = "none"
     SUMMARY = "summary"
@@ -1511,6 +1517,15 @@ def cmd_convert(
         UsdPackage,
         typer.Option("--package", help="USD package mode: default or usdz."),
     ] = UsdPackage.DEFAULT,
+    usd_layout: Annotated[
+        UsdLayout,
+        typer.Option(
+            "--usd-layout",
+            help="USD scene layout: auto (flat for realtime-web, instanced otherwise), "
+            "instanced (prototypes, internal references, LOD variants), or flat "
+            "(inline meshes per occurrence for maximum viewer compatibility).",
+        ),
+    ] = UsdLayout.AUTO,
     file_size_budget_mb: Annotated[
         float | None,
         typer.Option("--file-size-budget-mb", help="Warn in reports when output exceeds this size."),
@@ -1734,6 +1749,7 @@ def cmd_convert(
         "png_compression": png_compression,
         "jpeg_quality": jpeg_quality,
         "package": package.value,
+        "usd_layout": usd_layout.value,
         "file_size_budget_mb": file_size_budget_mb,
         "size_ladder": size_ladder,
         "obj_materials": obj_materials,
@@ -2273,6 +2289,7 @@ def cmd_convert(
         )
         usd_options = UsdExportOptions(
             package=cast(Any, usd_package),
+            layout=cast(Any, usd_layout.value),
             file_size_budget_mb=file_size_budget_mb,
             metadata=export_metadata,
         )
