@@ -200,7 +200,7 @@ keeping the native source shape for tessellation and healing.
 topologically compressed tri-strip sets in JT 9/10), assembly hierarchy,
 instances, transforms, materials, and properties; parts are mesh-only
 (`source_shape` is `None`) and reuse the imported tessellation. Only the
-finest LOD is imported by default (`--jt-lod-selection all` also fills
+finest LOD is imported by default (`--lod-selection all` also fills
 `Part.lod_meshes`). Units come from the `JT_PROP_MEASUREMENT_UNITS` property
 (millimetres assumed when absent); JT declares no up axis, so the
 NX/Teamcenter Z-up right-handed convention is assumed — override with the
@@ -218,7 +218,8 @@ placeholder nodes with warnings.
 | `--target-device-profile` | unset | TOML or JSON target-device budget overlay for the selected profile |
 | `--pipeline` | unset | TOML pipeline file with named filters and ordered conversion steps |
 | `--input` | unset | Additional STEP root input for explicit multi-root conversion; may be passed more than once |
-| `--jt-lod-selection` | `finest` | JT inputs: import only the finest LOD or all stored LODs (`finest`, `all`) |
+| `--lod-selection` | `finest` | Import only the finest stored LOD or all stored LODs (`finest`, `all`); currently supported by JT |
+| `--jt-lod-selection` | unset | Deprecated compatibility alias for `--lod-selection`; conflicting values are rejected |
 | `--stdout-format` | `usda` | Output format used only when the output path is `-`: `usda`, `usdc`, `usdz`, `gltf`, `glb`, `obj`, `stl`, or `fbx` |
 | `--sag` | profile value | Absolute CAD tessellation sag tolerance; overrides the profile's relative sag ratio when set |
 | `--sag-ratio` | profile value | Relative CAD tessellation sag ratio; realtime profiles default to `0.0002` |
@@ -245,6 +246,7 @@ placeholder nodes with warnings.
 | `--max-sliver-area` | `1e-4` | Area threshold for sliver-face reporting |
 | `--fail-on-open-shells` | `false` | Fail if healed BREP still contains open shells |
 | `--lods` | profile value | Comma-separated LOD ratios, for example `0.5,0.25,0.1` |
+| `--lod-source` | `auto` for profiles | Choose `imported`, `generated`, or `auto`; explicit `--lods` implies `generated` unless set |
 | `--lod-mode` | `variants` | LOD output mode: `variants`, `extras`, or `separate` |
 | `--lod-engine-profile` | `generic` | Engine-specific LOD export profile: `generic`, `unity`, or `unreal` |
 | `--lod-screen-coverage` | unset | Screen coverage values for generated LODs |

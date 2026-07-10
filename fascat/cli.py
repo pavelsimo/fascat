@@ -207,6 +207,12 @@ class JtLodSelectionMode(str, Enum):
     ALL = "all"
 
 
+class LODSourceMode(str, Enum):
+    IMPORTED = "imported"
+    GENERATED = "generated"
+    AUTO = "auto"
+
+
 class UV0Mode(str, Enum):
     NONE = "none"
     BOX = "box"
@@ -860,6 +866,10 @@ def cmd_convert(
         str | None,
         typer.Option("--lods", help="Comma-separated LOD ratios, for example 0.5,0.25,0.1."),
     ] = None,
+    lod_source: Annotated[
+        LODSourceMode | None,
+        typer.Option("--lod-source", help="LOD chain policy: imported, generated, or auto."),
+    ] = None,
     lod_mode: Annotated[
         LODMode,
         typer.Option("--lod-mode", help="LOD output mode: variants, extras, or separate."),
@@ -1088,13 +1098,17 @@ def cmd_convert(
             help="Resolve quoted external STEP references from a master STEP file.",
         ),
     ] = False,
+    lod_selection: Annotated[
+        JtLodSelectionMode | None,
+        typer.Option("--lod-selection", help="Import the finest stored LOD or all stored LODs."),
+    ] = None,
     jt_lod_selection: Annotated[
-        JtLodSelectionMode,
+        JtLodSelectionMode | None,
         typer.Option(
             "--jt-lod-selection",
-            help="JT inputs: import only the finest LOD (finest) or all stored LODs (all).",
+            help="Deprecated alias for --lod-selection.",
         ),
-    ] = JtLodSelectionMode.FINEST,
+    ] = None,
     material_libraries: Annotated[
         list[Path] | None,
         typer.Option(
@@ -1612,6 +1626,9 @@ def cmd_convert(
         "max_sliver_area": max_sliver_area,
         "fail_on_open_shells": fail_on_open_shells,
         "lods": None,
+        "lod_source": None if lod_source is None else lod_source.value,
+        "lod_selection": None if lod_selection is None else lod_selection.value,
+        "jt_lod_selection": None if jt_lod_selection is None else jt_lod_selection.value,
         "lod_mode": lod_mode.value,
         "lod_engine_profile": lod_engine_profile.value,
         "lod_per_part_budget": lod_per_part_budget,
@@ -1779,6 +1796,11 @@ def cmd_convert(
             None if pipeline_spec.export_metadata is None else pipeline_spec.export_metadata.to_dict()
         )
     lod_values = _parse_lods(lods, ctx, payload)
+    if lod_selection is not None and jt_lod_selection is not None and lod_selection != jt_lod_selection:
+        _fail(ctx, payload, "--lod-selection and --jt-lod-selection must not conflict.", code=2)
+    effective_lod_selection = lod_selection or jt_lod_selection or JtLodSelectionMode.FINEST
+    if lod_source == LODSourceMode.IMPORTED and lod_values is not None:
+        _fail(ctx, payload, "--lod-source imported cannot be combined with --lods.", code=2)
     bake_maps = _parse_bake_maps(bake, ctx, payload)
     enabled_hole_types = _parse_hole_types(hole_types, ctx, payload)
     cleanup_attributes = _parse_decimate_cleanup_attributes(decimate_cleanup_attributes, ctx, payload)
@@ -2118,7 +2140,9 @@ def cmd_convert(
         if import_options is not None and input_path.suffix.lower() in JT_SUFFIXES:
             from fascat.options import JtReadOptions
 
-            import_options = JtReadOptions(**cast(Any, import_options.to_dict()), lod_selection=jt_lod_selection.value)
+            import_options = JtReadOptions(
+                **cast(Any, import_options.to_dict()), lod_selection=effective_lod_selection.value
+            )
         export_metadata = (
             pipeline_spec.export_metadata
             if pipeline_spec is not None and pipeline_spec.export_metadata is not None
@@ -2264,6 +2288,7 @@ def cmd_convert(
             lod_tiny_part_screen_size,
             validate_lods,
             jobs,
+            (lod_source or (LODSourceMode.GENERATED if lod_values is not None else LODSourceMode.AUTO)).value,
         )
         usd_package = "usdz" if (package == UsdPackage.USDZ or effective_output_suffix == ".usdz") else "default"
         gltf_options = GltfExportOptions(
@@ -3325,6 +3350,7 @@ def _lod_options_for_cli(
     lod_tiny_part_screen_size: float,
     validate_lods: bool,
     jobs: int,
+    lod_source: str,
 ) -> LODOptions | None:
     ratios = tuple(lod_values) if lod_values is not None else None
     if ratios is None and profile_lods is not None:
@@ -3343,6 +3369,7 @@ def _lod_options_for_cli(
         tiny_part_screen_size=lod_tiny_part_screen_size,
         validate=validate_lods,
         jobs=jobs,
+        source=cast(Any, lod_source),
     )
 
 

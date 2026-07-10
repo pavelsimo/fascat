@@ -4,6 +4,7 @@ import json
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from itertools import pairwise
 
 import numpy as np
 
@@ -63,6 +64,30 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
     culling_changed_levels = 0
     part_ids = [part.id for part in result.parts.values() if selected_part_ids is None or part.id in selected_part_ids]
 
+    generate_part_ids: list[str] = []
+    for part_id in part_ids:
+        part = result.parts[part_id]
+        if options.source == "generated" or not part.lod_meshes:
+            if options.source != "imported":
+                generate_part_ids.append(part_id)
+            continue
+        if options.source == "auto" and not _usable_imported_chain(part):
+            result.report.add_warning(
+                f"Imported LOD chain is invalid for part {part.name}; generating a fallback chain"
+            )
+            generate_part_ids.append(part_id)
+            continue
+        _apply_imported_coverage(part, options, result)
+        part.metadata["lod_status"] = "retained_imported"
+        part.metadata["lod_source"] = "imported"
+        if part.mesh is not None:
+            source_vertices += part.mesh.vertex_count
+            source_triangles += part.mesh.triangle_count
+            source_mesh_bytes += _mesh_payload_bytes(part.mesh)
+        added_vertices += sum(mesh.vertex_count for mesh in part.lod_meshes)
+        added_triangles += sum(mesh.triangle_count for mesh in part.lod_meshes)
+        added_mesh_bytes += sum(_mesh_payload_bytes(mesh) for mesh in part.lod_meshes)
+
     payloads = [
         _LodBuildPayload(
             part=result.parts[part_id].copy(keep_source=False),
@@ -72,7 +97,7 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
             level_policy_advisories=level_policy_advisories,
             part_occurrences=occurrence_counts.get(part_id, 0),
         )
-        for part_id in part_ids
+        for part_id in generate_part_ids
     ]
 
     for built in parallel_map(payloads, _lod_build_worker, jobs=options.jobs, executor="process"):
@@ -102,6 +127,7 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
     result.metadata["lod_mode"] = options.mode
     result.metadata["lod_export_mode"] = export_mode
     result.metadata["lod_engine_profile"] = options.engine_profile
+    result.metadata["lod_source_policy"] = options.source
     result.metadata["lod_far_lod_bake"] = str(options.far_lod_bake).lower()
     result.metadata["lod_scene_far_proxy"] = (
         "created" if scene_proxy is not None else "no_meshes" if options.scene_far_proxy else "not_requested"
@@ -139,6 +165,31 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
     if options.validate:
         _validate_lods(result, selected_part_ids=selected_part_ids)
     return result
+
+
+def _usable_imported_chain(part: Part) -> bool:
+    if part.mesh is None or not part.lod_meshes:
+        return False
+    counts = [part.mesh.triangle_count, *(mesh.triangle_count for mesh in part.lod_meshes)]
+    return all(current > following for current, following in pairwise(counts))
+
+
+def _apply_imported_coverage(part: Part, options: LODOptions, asset: Asset) -> None:
+    if options.screen_coverage is None:
+        return
+    if len(options.screen_coverage) != len(part.lod_meshes):
+        asset.report.add_warning(
+            f"LOD screen coverage was not applied to imported chain for part {part.name}: "
+            f"expected {len(part.lod_meshes)} values, received {len(options.screen_coverage)}"
+        )
+        part.metadata.pop("lod_screen_coverage", None)
+        for mesh in part.lod_meshes:
+            mesh.metadata.pop("lod_screen_coverage", None)
+        return
+    values = tuple(float(value) for value in options.screen_coverage)
+    part.metadata["lod_screen_coverage"] = ",".join(f"{value:.9g}" for value in values)
+    for mesh, coverage in zip(part.lod_meshes, values, strict=True):
+        mesh.metadata["lod_screen_coverage"] = f"{coverage:.9g}"
 
 
 @dataclass(frozen=True)

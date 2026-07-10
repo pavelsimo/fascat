@@ -868,6 +868,46 @@ def test_convert_jt_lod_selection_flag(tmp_path: Path) -> None:
     assert import_step["options"]["lod_summary"]["imported_lod_meshes"] == 1
 
 
+def test_convert_generic_lod_selection_flag(tmp_path: Path) -> None:
+    from tests._jt_builder import SyntheticPart, build_jt
+
+    points = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]]
+    faces = [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]
+    source = tmp_path / "model.jt"
+    source.write_bytes(
+        build_jt([SyntheticPart(name="part", points=points, triangles=faces, lod_meshes=[(points, faces)])])
+    )
+    report_path = tmp_path / "report.json"
+
+    result = runner.invoke(
+        app,
+        ["convert", str(source), str(tmp_path / "model.glb"), "--lod-selection", "all", "--report", str(report_path)],
+    )
+
+    assert result.exit_code == 0, result.output
+    report = json.loads(report_path.read_text())
+    imported = next(step for step in report["steps"] if step["name"] == "import")
+    assert imported["options"]["lod_summary"]["lod_selection"] == "all"
+
+
+def test_convert_rejects_conflicting_lod_selection_flags() -> None:
+    result = runner.invoke(
+        app,
+        ["--dry-run", "convert", "model.jt", "out.glb", "--lod-selection", "all", "--jt-lod-selection", "finest"],
+    )
+    assert result.exit_code == 2
+    assert "must not conflict" in result.output
+
+
+def test_convert_rejects_imported_source_with_explicit_lods() -> None:
+    result = runner.invoke(
+        app,
+        ["--dry-run", "convert", "model.jt", "out.glb", "--lod-source", "imported", "--lods", "0.5"],
+    )
+    assert result.exit_code == 2
+    assert "cannot be combined" in result.output
+
+
 def test_convert_dry_run_accepts_extra_step_inputs() -> None:
     result = runner.invoke(
         app,
