@@ -4,8 +4,10 @@ from pathlib import Path
 
 import pytest
 
+import fascat as fc
+import fascat.io.brep as brep_io
 from fascat.errors import FascatIOError
-from fascat.io.brep import read_brep
+from fascat.io.brep import read_brep, read_brep_bytes
 from fascat.options import BrepReadOptions
 
 pytestmark = pytest.mark.requires_ocp
@@ -46,3 +48,19 @@ def test_read_brep_rejects_non_brep_extension(tmp_path: Path) -> None:
         read_brep(source)
 
     assert isinstance(error.value.__cause__, ValueError)
+
+
+def test_read_brep_bytes_always_uses_brep_suffix(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen_paths: list[Path] = []
+
+    def fake_read_brep_path(path: Path, *, source_identity: str, options: BrepReadOptions) -> fc.Asset:
+        assert source_identity == "input.step"
+        assert path.suffix == ".brep"
+        seen_paths.append(path)
+        return fc.Asset(root=fc.Node(id="root", name="Root"))
+
+    monkeypatch.setattr(brep_io, "_read_brep_path", fake_read_brep_path)
+
+    read_brep_bytes(b"BREP", name="input.step")
+
+    assert seen_paths and not seen_paths[0].exists()

@@ -7,11 +7,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from fascat.asset import Asset, Node, Part
+from fascat.asset import Asset, Part
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.ops.parallel import parallel_map
-from fascat.options import LODOptions
+from fascat.options import LODGeneratorOptions, LODOptions
 
 _RECOMMENDED_MAX_LOD_LEVELS = 4
 _CLOSE_VIEW_LOD1_MIN_RATIO = 0.4
@@ -19,6 +19,63 @@ _CLOSE_VIEW_LOD2_MIN_RATIO = 0.2
 _FAR_LOD_RATIO_THRESHOLD = 0.15
 _FAR_LOD_SCREEN_COVERAGE_THRESHOLD = 0.1
 _MIN_RECOMMENDED_LOD_RATIO = 0.01
+
+
+def run_lod_generators_asset(
+    asset: Asset,
+    options: LODGeneratorOptions,
+    *,
+    selected_part_ids: set[str] | None = None,
+) -> Asset:
+    ratios = tuple(level.target_ratio for level in options.levels)
+    screen_coverage = tuple(level.screen_coverage for level in options.levels)
+    switch_distance_overrides = tuple(level.switch_distance_override for level in options.levels)
+    result = build_lods(
+        asset,
+        LODOptions(
+            ratios=ratios,
+            screen_coverage=screen_coverage,
+            switch_distance_overrides=switch_distance_overrides,
+            jobs=options.jobs,
+        ),
+        selected_part_ids=selected_part_ids,
+    )
+    coverage = ",".join(f"{level.screen_coverage:.9g}" for level in options.levels)
+    for part in result.parts.values():
+        if selected_part_ids is not None and part.id not in selected_part_ids:
+            continue
+        if part.lod_meshes:
+            part.metadata = {
+                **part.metadata,
+                "lod_generator_preset": options.preset,
+                "lod_screen_coverage": coverage,
+                "lod_output": options.output,
+            }
+    result.metadata["lod_generator_preset"] = options.preset
+    result.metadata["lod_generator_output"] = options.output
+    if options.validate:
+        _validate_lod_monotonicity(result, selected_part_ids=selected_part_ids, allow=options.allow_non_monotonic)
+    return result
+
+
+def _validate_lod_monotonicity(
+    asset: Asset,
+    *,
+    selected_part_ids: set[str] | None,
+    allow: bool,
+) -> None:
+    for part in asset.parts.values():
+        if selected_part_ids is not None and part.id not in selected_part_ids:
+            continue
+        if part.mesh is None or not part.lod_meshes:
+            continue
+        counts = [part.mesh.triangle_count, *[mesh.triangle_count for mesh in part.lod_meshes]]
+        if counts != sorted(counts, reverse=True):
+            message = f"LOD triangles are not monotonic for part {part.id}"
+            if allow:
+                asset.report.add_warning(message)
+            else:
+                raise ValueError(message)
 
 
 @dataclass(frozen=True)
@@ -442,17 +499,11 @@ def _build_scene_far_proxy(
 
 def _world_part_occurrences(asset: Asset, selected_part_ids: set[str] | None) -> list[tuple[Part, np.ndarray]]:
     occurrences: list[tuple[Part, np.ndarray]] = []
-
-    def walk(node: Node, world: np.ndarray) -> None:
-        current = world @ node.transform
+    for node, current in asset.root._walk_world(np.eye(4, dtype=np.float64)):
         if node.part_id is not None and (selected_part_ids is None or node.part_id in selected_part_ids):
             part = asset.parts.get(node.part_id)
             if part is not None:
                 occurrences.append((part, current))
-        for child in node.children:
-            walk(child, current)
-
-    walk(asset.root, np.eye(4, dtype=np.float64))
     return occurrences
 
 

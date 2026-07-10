@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 import fascat.asset as asset_module
-import fascat.ops.actions as actions_module
+import fascat.ops.decimate as decimate_module
 import fascat.ops.lod as lod_module
 import fascat.ops.optimize as optimize_module
 import fascat.ops.stage as stage_module
@@ -69,7 +69,7 @@ def test_part_operations_pass_requested_jobs(monkeypatch: pytest.MonkeyPatch) ->
         return [worker(item) for item in items]
 
     monkeypatch.setattr(asset_module, "parallel_map", fake_parallel_map)
-    monkeypatch.setattr(actions_module, "parallel_map", fake_parallel_map)
+    monkeypatch.setattr(decimate_module, "parallel_map", fake_parallel_map)
     monkeypatch.setattr(lod_module, "parallel_map", fake_parallel_map)
     monkeypatch.setattr(optimize_module, "parallel_map", fake_parallel_map)
     monkeypatch.setattr(stage_module, "parallel_map", fake_parallel_map)
@@ -167,7 +167,7 @@ def test_part_ops_payloads_exclude_source_shape(monkeypatch: pytest.MonkeyPatch,
                 pickle.dumps(item)
         return [worker(item) for item in items]
 
-    for module in (asset_module, actions_module, lod_module, optimize_module, stage_module):
+    for module in (asset_module, decimate_module, lod_module, optimize_module, stage_module):
         monkeypatch.setattr(module, "parallel_map", asserting_parallel_map)
 
     source = _strip_asset()

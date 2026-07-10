@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from typing_extensions import Unpack
 
@@ -13,31 +13,15 @@ from fascat.export_report import referenced_materials
 from fascat.export_report import stats_with_file_size as _stats_with_file_size
 from fascat.filter import Filter
 from fascat.io._atomic import preflight_output_path
-from fascat.io._suffixes import (
-    BREP_SUFFIXES,
-    FBX_SUFFIXES,
-    GLTF_SUFFIXES,
-    IGES_SUFFIXES,
-    JT_SUFFIXES,
-    OBJ_SUFFIXES,
-    STL_SUFFIXES,
-    USD_SUFFIXES,
+from fascat.io._registry import (
+    EXPORTERS,
+    ExportFormat,
+    ExportOptions,
+    export_format_for_path,
+    reader_for_suffix,
 )
 from fascat.io._suffixes import CAD_SUFFIXES as _CAD_SUFFIXES
-from fascat.io.brep import read_brep
-from fascat.io.fbx import validate_fbx
-from fascat.io.fbx import write_fbx_with_validation_stats as _write_fbx
-from fascat.io.gltf import runtime_dependency_report, validate_gltf
-from fascat.io.gltf import write_gltf_with_validation as _write_gltf
-from fascat.io.iges import read_iges
-from fascat.io.jt import read_jt
-from fascat.io.obj import validate_obj
-from fascat.io.obj import write_obj_with_validation_stats as _write_obj
-from fascat.io.step import read_step, read_step_many
-from fascat.io.stl import validate_stl
-from fascat.io.stl import write_stl_with_validation_stats as _write_stl
-from fascat.io.usd import validate_usd
-from fascat.io.usd import write_usd_with_validation_stats as _write_usd
+from fascat.io.gltf import runtime_dependency_report
 from fascat.options import (
     AnalyzeOptions,
     BakeMaterialOptions,
@@ -77,7 +61,6 @@ if TYPE_CHECKING:
     from fascat.analysis import AnalysisReport
 
 CAD_SUFFIXES = _CAD_SUFFIXES
-ExportFormat = Literal["usd", "gltf", "obj", "stl", "fbx"]
 InputPath = str | Path | Sequence[str | Path]
 _LOAD_ESTIMATE_BYTES_PER_MS = 50_000
 _LOAD_ESTIMATE_VERTEX_BYTES = 32
@@ -97,6 +80,25 @@ class _TextureSummary:
     material: Any
     resolution: int
     map_count: int
+
+
+@dataclass(frozen=True)
+class _ExportOptionsBundle:
+    usd: UsdExportOptions | None = None
+    gltf: GltfExportOptions | None = None
+    obj: ObjExportOptions | None = None
+    stl: StlExportOptions | None = None
+    fbx: FbxExportOptions | None = None
+
+    def for_format(self, output_format: ExportFormat) -> ExportOptions | None:
+        values: dict[ExportFormat, ExportOptions | None] = {
+            "usd": self.usd,
+            "gltf": self.gltf,
+            "obj": self.obj,
+            "stl": self.stl,
+            "fbx": self.fbx,
+        }
+        return values[output_format]
 
 
 def convert(
@@ -262,22 +264,23 @@ def convert(
                 progress("lods", asset.stats())
     if output_format == "usd":
         usd_options = _with_usd_layout(usd_options, selected)
+    export_options = _ExportOptionsBundle(
+        usd=usd_options,
+        gltf=gltf_options,
+        obj=obj_options,
+        stl=stl_options,
+        fbx=fbx_options,
+    )
     write_before = _report_stats(asset)
     write_options: dict[str, object] = _write_options(
         output_format,
         debug=debug,
-        gltf_options=gltf_options,
-        usd_options=usd_options,
-        obj_options=obj_options,
-        stl_options=stl_options,
-        fbx_options=fbx_options,
+        options=export_options,
     )
     if output_format == "gltf":
         write_options["runtime_dependencies"] = runtime_dependency_report(asset, gltf_options)
     _add_texture_export_policy_report(asset, selected, output_format, gltf_options=gltf_options)
-    file_size_budget = _file_size_budget(
-        output_format, gltf_options, usd_options, obj_options, stl_options, fbx_options
-    )
+    file_size_budget = _file_size_budget(output_format, export_options)
     write_timer = timed_step()
     written_validation_stats: dict[str, int] | None = None
     try:
@@ -287,11 +290,7 @@ def convert(
                 output_path,
                 output_format,
                 debug=debug,
-                gltf_options=gltf_options,
-                usd_options=usd_options,
-                obj_options=obj_options,
-                stl_options=stl_options,
-                fbx_options=fbx_options,
+                options=export_options,
             )
     except (KeyboardInterrupt, Exception) as exc:
         _record_failed_step(
@@ -401,22 +400,15 @@ def _profile_from_value(
 
 def _read_input(path: InputPath, *, options: StepReadOptions | None = None) -> Asset:
     if not isinstance(path, (str, Path)):
+        from fascat.io.step import read_step_many
+
         paths = [Path(item) for item in path]
         suffixes = {item.suffix.lower() for item in paths}
         if not suffixes <= {".step", ".stp"}:
             names = ", ".join(sorted(suffix or "<none>" for suffix in suffixes))
             raise ValueError(f"multi-file CAD import currently supports only STEP inputs; got: {names}")
         return read_step_many(paths, options=options)
-    suffix = Path(path).suffix.lower()
-    if suffix in {".step", ".stp"}:
-        return read_step(path, options=options) if options is not None else read_step(path)
-    if suffix in IGES_SUFFIXES:
-        return read_iges(path, options=options)
-    if suffix in BREP_SUFFIXES:
-        return read_brep(path, options=options)
-    if suffix in JT_SUFFIXES:
-        return read_jt(path, options=options)
-    raise ValueError(f"unsupported CAD extension: {suffix or '<none>'}")
+    return reader_for_suffix(Path(path).suffix.lower()).read(path, options=options)
 
 
 def _add_preflight_report(
@@ -1706,21 +1698,10 @@ def _metadata_positive_int(value: object) -> int | None:
 
 def _file_size_budget(
     output_format: ExportFormat,
-    gltf_options: GltfExportOptions | None,
-    usd_options: UsdExportOptions | None,
-    obj_options: ObjExportOptions | None,
-    stl_options: StlExportOptions | None,
-    fbx_options: FbxExportOptions | None,
+    options: _ExportOptionsBundle,
 ) -> float | None:
-    if output_format == "gltf":
-        return None if gltf_options is None else gltf_options.file_size_budget_mb
-    if output_format == "usd":
-        return None if usd_options is None else usd_options.file_size_budget_mb
-    if output_format == "obj":
-        return None if obj_options is None else obj_options.file_size_budget_mb
-    if output_format == "stl":
-        return None if stl_options is None else stl_options.file_size_budget_mb
-    return None if fbx_options is None else fbx_options.file_size_budget_mb
+    selected = options.for_format(output_format)
+    return None if selected is None else selected.file_size_budget_mb
 
 
 def _with_gltf_metadata(
@@ -1816,18 +1797,7 @@ def analyze(asset: Asset, *, options: AnalyzeOptions | None = None, where: Filte
 
 
 def _export_format(path: str | Path) -> ExportFormat:
-    suffix = Path(path).suffix.lower()
-    if suffix in USD_SUFFIXES or str(path) == "-":
-        return "usd"
-    if suffix in GLTF_SUFFIXES:
-        return "gltf"
-    if suffix in OBJ_SUFFIXES:
-        return "obj"
-    if suffix in STL_SUFFIXES:
-        return "stl"
-    if suffix in FBX_SUFFIXES:
-        return "fbx"
-    raise ValueError(f"unsupported export extension: {suffix or '<none>'}")
+    return export_format_for_path(path)
 
 
 def _write_output(
@@ -1836,69 +1806,31 @@ def _write_output(
     output_format: ExportFormat,
     *,
     debug: bool,
-    gltf_options: GltfExportOptions | None,
-    usd_options: UsdExportOptions | None,
-    obj_options: ObjExportOptions | None,
-    stl_options: StlExportOptions | None,
-    fbx_options: FbxExportOptions | None,
+    options: _ExportOptionsBundle,
 ) -> dict[str, int] | None:
-    if output_format == "usd":
-        return _write_usd(asset, path, debug=debug, options=_usd_options_for_path(path, usd_options))
-    if output_format == "gltf":
-        return _write_gltf(asset, path, options=gltf_options)
-    if output_format == "obj":
-        return _write_obj(asset, path, options=obj_options)
-    if output_format == "stl":
-        return _write_stl(asset, path, options=stl_options)
-    return _write_fbx(asset, path, options=fbx_options)
+    return EXPORTERS[output_format].write_with_stats(
+        asset,
+        path,
+        options.for_format(output_format),
+        debug=debug,
+    )
 
 
 def _validate_output(path: str | Path, output_format: ExportFormat) -> dict[str, int]:
-    if output_format == "usd":
-        return validate_usd(path)
-    if output_format == "gltf":
-        return validate_gltf(path)
-    if output_format == "obj":
-        return validate_obj(path)
-    if output_format == "stl":
-        return validate_stl(path)
-    return validate_fbx(path)
-
-
-def _usd_options_for_path(path: str | Path, options: UsdExportOptions | None) -> UsdExportOptions | None:
-    if Path(path).suffix.lower() != ".usdz":
-        return options
-    if options is None:
-        return UsdExportOptions(package="usdz")
-    if options.package == "usdz":
-        return options
-    return replace(options, package="usdz")
+    return EXPORTERS[output_format].validate(path)
 
 
 def _write_options(
     output_format: ExportFormat,
     *,
     debug: bool,
-    gltf_options: GltfExportOptions | None,
-    usd_options: UsdExportOptions | None,
-    obj_options: ObjExportOptions | None,
-    stl_options: StlExportOptions | None,
-    fbx_options: FbxExportOptions | None,
+    options: _ExportOptionsBundle,
 ) -> dict[str, object]:
-    if output_format == "usd":
-        return {"format": "OpenUSD", "debug": debug, **(usd_options or UsdExportOptions()).to_dict()}
-    if output_format == "gltf":
-        return {"format": "glTF", **(gltf_options or GltfExportOptions()).to_dict()}
-    if output_format == "obj":
-        return {"format": "OBJ", **(obj_options or ObjExportOptions()).to_dict()}
-    if output_format == "stl":
-        return {"format": "STL", **(stl_options or StlExportOptions()).to_dict()}
-    return {"format": "FBX", **(fbx_options or FbxExportOptions()).to_dict()}
+    spec = EXPORTERS[output_format]
+    selected = options.for_format(output_format) or spec.default_options()
+    extra = {"debug": debug} if output_format == "usd" else {}
+    return {"format": spec.label, **extra, **selected.to_dict()}
 
 
 def _validate_options(output_format: ExportFormat) -> dict[str, object]:
-    if output_format == "usd":
-        return {"backend": "usd-core"}
-    if output_format == "gltf":
-        return {"backend": "fascat-gltf"}
-    return {"backend": f"fascat-{output_format}"}
+    return {"backend": EXPORTERS[output_format].validation_backend}
