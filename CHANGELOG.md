@@ -7,8 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- unify imported and generated LOD handling across conversion workflows
+
 ### Changed
 - normalize in-memory STEP input names to supported lowercase `.step`/`.stp` temporary-file suffixes
+
+### Removed
+- remove Unity and Unreal runtime validation harnesses
+
+### Fixed
+- make meshopt optional for users who do not need mesh optimization
 
 ## [0.5.0] - 2026-07-09
 
