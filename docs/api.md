@@ -1507,23 +1507,11 @@ Pillow, and platform stack, but antialiasing and resampling can vary across
 platform builds, so CI baselines should compare with explicit thresholds.
 `compare_images()` is a general image-diff
 primitive that reports mean absolute error, max channel error, changed-pixel counts
-and ratio, and whether configured thresholds passed (the same thresholds gate engine
-preview baselines through `fascat validate`).
-
-For cross-renderer comparison, `write_runtime_parity_suite()` writes bundled GLB
-fixtures, software baseline PNGs, and a manifest. The generated manifest
-recommends regression-gating thresholds of 2 channel values of pixel tolerance,
-4.0 mean absolute error, and a 2% changed-pixel ratio unless callers pass
-explicit `diff_options`.
-`capture_runtime_parity_suite()` runs selected browser/engine targets, writes
-`runtime-parity-captures.json`, and can promote renders into `goldens/<target>/`.
-When a `goldens/<target>/<fixture>.png` exists, later captures compare against that
-golden instead of the software baseline; `require_goldens=True` fails CI if the
-golden corpus is incomplete.
+and ratio, and whether configured thresholds passed.
 
 ## Validation
 
-Direct write calls produce files but do not automatically reopen and validate them. Validate direct writes explicitly when you need the same safety as `fc.convert()`. `fc.validate_output` dispatches by suffix; per-format validators live on the io modules, and the runtime/visual/parity harness machinery lives in `fascat.validation` — one import surface for everything measurement-related.
+Direct write calls produce files but do not automatically reopen and validate them. Validate direct writes explicitly when you need the same safety as `fc.convert()`. `fc.validate_output` dispatches by suffix; per-format validators live on the io modules, and the runtime and visual preview machinery lives in `fascat.validation` — one import surface for everything measurement-related.
 
 ```python
 from fascat import validation
@@ -1543,17 +1531,6 @@ runtime = validation.measure_browser_runtime(
     options=validation.RuntimeBrowserOptions(duration_seconds=2.0),
 )
 
-unity_project = validation.copy_engine_runtime_harness("unity", "FascatUnityHarness")
-unity_runtime = validation.measure_engine_runtime(
-    "motor.glb",
-    options=validation.RuntimeEngineOptions(
-        engine="unity",
-        executable="Unity",
-        project=unity_project,
-        preview_path="motor-unity.png",
-    ),
-)
-
 preview = validation.write_output_preview("motor.glb", "motor-preview.png")
 browser_preview = validation.write_browser_render_preview("motor.glb", "motor-browser.png")
 ```
@@ -1569,34 +1546,10 @@ fascat validate motor.glb \
 fascat validate motor.glb --runtime-browser
 
 fascat validate motor.glb \
-  --runtime-engine unity
-
-fascat validate motor.glb \
-  --runtime-engine unity \
-  --runtime-engine-project FascatUnityHarness \
-  --runtime-engine-preview motor-unity.png
-
-fascat validate motor.glb \
   --runtime-browser-preview motor-browser.png \
   --visual-preview motor-preview.png \
   --lod-preview-dir lod-previews/
 
-fascat runtime-fixtures runtime-parity/
-
-fascat runtime-fixtures runtime-parity/ \
-  --capture browser \
-  --capture unity \
-  --unity-command Unity \
-  --promote-goldens
-
-fascat runtime-fixtures runtime-parity/ \
-  --capture unity \
-  --unity-command Unity \
-  --require-goldens
-
-fascat runtime-fixtures runtime-parity/ \
-  --check-goldens \
-  --require-goldens
 ```
 
 Validation-time geometry reports use the same filter selectors as conversion when an
@@ -1620,28 +1573,7 @@ and missing KTX2/Basis tooling falls back to `status="rendered_partial"`. Set
 `FASCAT_BROWSER` or `--runtime-browser-command` if the browser isn't on PATH; with no
 browser, the report is `status="unavailable"` rather than an estimate.
 
-**Engine (glTF/GLB).** `--runtime-engine unity|unreal` runs a packaged harness (copied
-to a temp dir) or a custom one via `--runtime-engine-project`; use
-`validation.copy_engine_runtime_harness(engine, path)` for a persistent project. It records
-load/parse time, frame count, memory, engine version, and mesh/triangle counts.
-`--runtime-engine-preview` requests a PNG and records `render_status`,
-`render_backend`, `render_time_ms`, and limitations; `--runtime-engine-baseline`
-diffs that render against a baseline with the `--visual-diff-*` thresholds. The Unity
-template (glTFast) renders a fixed camera loop with `measured_fps`; the Unreal
-commandlet rasterizes supported GLB geometry with `baseColorFactor` (falling back to
-a count-based placeholder). Set `FASCAT_UNITY`/`UNITY_EDITOR`/`FASCAT_UNREAL`/`UNREAL_EDITOR`
-or `--runtime-engine-command` if the executable isn't on PATH; missing executables or
-projects are reported unavailable.
-
-**Parity fixtures.** `fascat runtime-fixtures DIR` writes bundled material, texture,
-KTX2/Basis-fallback, lighting, and Unity/Unreal LOD-profile GLBs with software
-baselines and a manifest. `--capture browser|unity|unreal` renders captures into
-`runtime-parity-captures.json`; `--promote-goldens` copies them into
-`goldens/<target>/` (which then become comparison baselines); `--require-goldens`
-fails on missing goldens; `--check-goldens` audits coverage without rendering.
-
-> Full Unreal scene rendering, sparse accessors, and checked-in engine-specific
-> golden corpora remain open.
+> Sparse accessors remain open.
 
 ## Inspecting assets
 
