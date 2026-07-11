@@ -1786,6 +1786,12 @@ def cmd_convert(
     lod_values = _parse_lods(lods, ctx, payload)
     if lod_selection is not None and jt_lod_selection is not None and lod_selection != jt_lod_selection:
         _fail(ctx, payload, "--lod-selection and --jt-lod-selection must not conflict.", code=2)
+    if jt_lod_selection is not None:
+        err.print("warning: --jt-lod-selection is deprecated; use --lod-selection instead.", style="yellow")
+    if (lod_selection is not None or jt_lod_selection is not None) and all(
+        not _is_stdio(path) and path.suffix.lower() != ".jt" for path in input_paths
+    ):
+        err.print("warning: --lod-selection is ignored for non-JT inputs.", style="yellow")
     effective_lod_selection = lod_selection or jt_lod_selection or JtLodSelectionMode.FINEST
     if lod_source == LODSourceMode.IMPORTED and lod_values is not None:
         _fail(ctx, payload, "--lod-source imported cannot be combined with --lods.", code=2)

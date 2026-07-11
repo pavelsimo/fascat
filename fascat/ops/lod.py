@@ -57,6 +57,9 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
     added_vertices = 0
     added_triangles = 0
     added_mesh_bytes = 0
+    retained_vertices = 0
+    retained_triangles = 0
+    retained_mesh_bytes = 0
     omitted_tiny_parts = 0
     reused_instance_levels = 0
     material_merged_levels = 0
@@ -84,9 +87,18 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
             source_vertices += part.mesh.vertex_count
             source_triangles += part.mesh.triangle_count
             source_mesh_bytes += _mesh_payload_bytes(part.mesh)
-        added_vertices += sum(mesh.vertex_count for mesh in part.lod_meshes)
-        added_triangles += sum(mesh.triangle_count for mesh in part.lod_meshes)
-        added_mesh_bytes += sum(_mesh_payload_bytes(mesh) for mesh in part.lod_meshes)
+        part_retained_vertices = sum(mesh.vertex_count for mesh in part.lod_meshes)
+        part_retained_triangles = sum(mesh.triangle_count for mesh in part.lod_meshes)
+        part_retained_mesh_bytes = sum(_mesh_payload_bytes(mesh) for mesh in part.lod_meshes)
+        retained_vertices += part_retained_vertices
+        retained_triangles += part_retained_triangles
+        retained_mesh_bytes += part_retained_mesh_bytes
+        part.metadata["lod_retained_vertices"] = str(part_retained_vertices)
+        part.metadata["lod_retained_triangles"] = str(part_retained_triangles)
+        part.metadata["lod_retained_mesh_bytes"] = str(part_retained_mesh_bytes)
+        part.metadata["lod_added_vertices"] = "0"
+        part.metadata["lod_added_triangles"] = "0"
+        part.metadata["lod_added_mesh_bytes"] = "0"
 
     payloads = [
         _LodBuildPayload(
@@ -142,12 +154,19 @@ def build_lods(asset: Asset, options: LODOptions, *, selected_part_ids: set[str]
     result.metadata["lod_added_vertices"] = str(added_vertices)
     result.metadata["lod_added_triangles"] = str(added_triangles)
     result.metadata["lod_added_mesh_bytes"] = str(added_mesh_bytes)
-    result.metadata["lod_chain_vertices"] = str(source_vertices + added_vertices)
-    result.metadata["lod_chain_triangles"] = str(source_triangles + added_triangles)
-    result.metadata["lod_chain_mesh_bytes"] = str(source_mesh_bytes + added_mesh_bytes)
+    result.metadata["lod_retained_vertices"] = str(retained_vertices)
+    result.metadata["lod_retained_triangles"] = str(retained_triangles)
+    result.metadata["lod_retained_mesh_bytes"] = str(retained_mesh_bytes)
+    result.metadata["lod_chain_vertices"] = str(source_vertices + added_vertices + retained_vertices)
+    result.metadata["lod_chain_triangles"] = str(source_triangles + added_triangles + retained_triangles)
+    result.metadata["lod_chain_mesh_bytes"] = str(source_mesh_bytes + added_mesh_bytes + retained_mesh_bytes)
     result.metadata["lod_omitted_tiny_part_meshes"] = str(omitted_tiny_parts)
-    result.metadata["lod_triangle_multiplier"] = _ratio_text(source_triangles + added_triangles, source_triangles)
-    result.metadata["lod_mesh_byte_multiplier"] = _ratio_text(source_mesh_bytes + added_mesh_bytes, source_mesh_bytes)
+    result.metadata["lod_triangle_multiplier"] = _ratio_text(
+        source_triangles + added_triangles + retained_triangles, source_triangles
+    )
+    result.metadata["lod_mesh_byte_multiplier"] = _ratio_text(
+        source_mesh_bytes + added_mesh_bytes + retained_mesh_bytes, source_mesh_bytes
+    )
     result.metadata["lod_reused_instance_levels"] = str(reused_instance_levels)
     result.metadata["lod_material_merged_levels"] = str(material_merged_levels)
     result.metadata["lod_texture_baked_levels"] = str(texture_baked_levels)
@@ -182,9 +201,6 @@ def _apply_imported_coverage(part: Part, options: LODOptions, asset: Asset) -> N
             f"LOD screen coverage was not applied to imported chain for part {part.name}: "
             f"expected {len(part.lod_meshes)} values, received {len(options.screen_coverage)}"
         )
-        part.metadata.pop("lod_screen_coverage", None)
-        for mesh in part.lod_meshes:
-            mesh.metadata.pop("lod_screen_coverage", None)
         return
     values = tuple(float(value) for value in options.screen_coverage)
     part.metadata["lod_screen_coverage"] = ",".join(f"{value:.9g}" for value in values)
@@ -358,6 +374,9 @@ def _build_part_lods(
         "lod_added_vertices": str(part_lod_vertices),
         "lod_added_triangles": str(part_lod_triangles),
         "lod_added_mesh_bytes": str(part_lod_bytes),
+        "lod_retained_vertices": "0",
+        "lod_retained_triangles": "0",
+        "lod_retained_mesh_bytes": "0",
         "lod_chain_vertices": str(part_source_vertices + part_lod_vertices),
         "lod_chain_triangles": str(part_source_triangles + part_lod_triangles),
         "lod_chain_mesh_bytes": str(part_source_bytes + part_lod_bytes),

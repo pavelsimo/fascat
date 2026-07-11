@@ -26,6 +26,39 @@ def test_lods_auto_retains_valid_imported_chain_and_applies_matching_coverage() 
     assert result.parts["part"].metadata["lod_status"] == "retained_imported"
 
 
+def test_lods_retained_imported_chain_uses_distinct_report_counters() -> None:
+    result = _asset_with_imported_lod().lods(LODOptions((0.5,), source="auto"))
+    part = result.parts["part"]
+    retained = part.lod_meshes[0]
+    step = result.report.steps[-1]
+
+    assert result.metadata["lod_added_vertices"] == "0"
+    assert result.metadata["lod_added_triangles"] == "0"
+    assert result.metadata["lod_added_mesh_bytes"] == "0"
+    assert result.metadata["lod_retained_vertices"] == str(retained.vertex_count)
+    assert result.metadata["lod_retained_triangles"] == str(retained.triangle_count)
+    assert int(result.metadata["lod_retained_mesh_bytes"]) > 0
+    assert result.metadata["lod_chain_triangles"] == str(part.mesh.triangle_count + retained.triangle_count)
+    assert part.metadata["lod_added_triangles"] == "0"
+    assert part.metadata["lod_retained_triangles"] == str(retained.triangle_count)
+    assert step.after["lod_added_triangles"] == 0
+    assert step.after["lod_retained_triangles"] == retained.triangle_count
+
+
+def test_lods_imported_coverage_mismatch_preserves_existing_metadata() -> None:
+    asset = _asset_with_imported_lod()
+    part = asset.parts["part"]
+    part.metadata["lod_screen_coverage"] = "0.4"
+    part.lod_meshes[0].metadata["lod_screen_coverage"] = "0.4"
+
+    result = asset.lods(LODOptions((0.5, 0.25), source="auto", screen_coverage=(0.5, 0.25)))
+    retained = result.parts["part"]
+
+    assert retained.metadata["lod_screen_coverage"] == "0.4"
+    assert retained.lod_meshes[0].metadata["lod_screen_coverage"] == "0.4"
+    assert any("LOD screen coverage was not applied" in warning for warning in result.report.warnings)
+
+
 def test_lods_auto_replaces_invalid_imported_chain_with_diagnostic() -> None:
     result = _asset_with_imported_lod(valid=False).lods(LODOptions((0.5,), source="auto"))
     assert result.parts["part"].metadata["lod_ratios"] == "0.5"

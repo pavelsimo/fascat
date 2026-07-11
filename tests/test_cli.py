@@ -724,6 +724,7 @@ def test_convert_jt_lod_selection_flag(tmp_path: Path) -> None:
     assert import_step["options"]["format"] == "JT"
     assert import_step["options"]["lod_summary"]["lod_selection"] == "all"
     assert import_step["options"]["lod_summary"]["imported_lod_meshes"] == 1
+    assert "--jt-lod-selection is deprecated; use --lod-selection instead" in result.stderr
 
 
 def test_convert_generic_lod_selection_flag(tmp_path: Path) -> None:
@@ -746,6 +747,16 @@ def test_convert_generic_lod_selection_flag(tmp_path: Path) -> None:
     report = json.loads(report_path.read_text())
     imported = next(step for step in report["steps"] if step["name"] == "import")
     assert imported["options"]["lod_summary"]["lod_selection"] == "all"
+
+
+def test_convert_warns_when_lod_selection_is_ignored_for_non_jt_input() -> None:
+    result = runner.invoke(
+        app,
+        ["--dry-run", "convert", "model.step", "out.glb", "--lod-selection", "all"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "--lod-selection is ignored for non-JT inputs" in result.stderr
 
 
 def test_convert_rejects_conflicting_lod_selection_flags() -> None:

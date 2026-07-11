@@ -425,7 +425,7 @@ placeholder nodes with warnings.
 
 ### LODs
 
-- LOD reports separate source, added-LOD, and full-chain vertex/triangle counts and payload bytes, so the memory/size cost of extra levels is visible. Ratio LODs simplify progressively from the previous level while preserving each ratio against the source count.
+- LOD reports separate source, newly added, retained imported, and full-chain vertex/triangle counts and payload bytes, so the memory/size cost and origin of extra levels are visible. Ratio LODs simplify progressively from the previous level while preserving each ratio against the source count.
 - Chain advisories warn on more than four levels, over-aggressive LOD1/LOD2, and geometry-only far LODs that should bake to one mesh/material. Per-level metadata records simplification source, instance reuse, material merge, texture bake, culling-granularity changes, and resolved export representation.
 - `--lod-engine-profile unity` emits `MSFT_lod` variant nodes; `unreal` emits separate `_LOD#` scene nodes for tools that ignore `MSFT_lod`.
 
