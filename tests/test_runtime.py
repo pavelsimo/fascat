@@ -24,9 +24,20 @@ from fascat.runtime import (
     RuntimeBrowserRenderOptions,
     _preview_document_copy,
     _runtime_browser_render_html,
+    _write_meshopt_decoded_preview_asset,
     measure_browser_runtime,
     write_browser_render_preview,
 )
+
+
+def test_meshopt_preview_reports_optional_extra_when_backend_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setitem(sys.modules, "meshoptimizer", None)
+
+    with pytest.raises(RuntimeError, match=r'pip install "fascat\[meshopt\]"'):
+        _write_meshopt_decoded_preview_asset(tmp_path / "asset.gltf", tmp_path / "decoded.gltf")
 
 
 def test_browser_runtime_reports_unavailable_when_browser_is_missing(

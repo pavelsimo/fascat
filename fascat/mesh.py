@@ -2818,7 +2818,14 @@ class Mesh:
                 }
             mesh.validate()
             return mesh
-        except Exception:
+        except Exception as exc:
+            if isinstance(exc, ModuleNotFoundError) and exc.name == "meshoptimizer":
+                logger.warning(
+                    "meshoptimizer is not installed; falling back to fast-simplification "
+                    '(install it with pip install "fascat[meshopt]")'
+                )
+            else:
+                logger.warning("meshoptimizer simplify failed; falling back to fast-simplification", exc_info=True)
             try:
                 from fast_simplification import simplify
 
@@ -2916,8 +2923,14 @@ class Mesh:
                     face_groups[name] = remapped[remapped >= 0]
                 mesh.face_groups = face_groups
             return mesh
-        except Exception:
-            logger.warning("optimize_buffers failed; returning unoptimized copy", exc_info=True)
+        except Exception as exc:
+            if isinstance(exc, ModuleNotFoundError) and exc.name == "meshoptimizer":
+                logger.warning(
+                    "meshoptimizer is not installed; returning unoptimized copy "
+                    '(install it with pip install "fascat[meshopt]")'
+                )
+            else:
+                logger.warning("optimize_buffers failed; returning unoptimized copy", exc_info=True)
             return self.copy()
 
     def feature_preservation_counts(

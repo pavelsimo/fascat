@@ -849,7 +849,7 @@ def _write_meshopt_decoded_preview_asset(asset_path: Path, output_path: Path) ->
     try:
         import meshoptimizer
     except ImportError as exc:
-        raise RuntimeError("meshoptimizer is not installed") from exc
+        raise RuntimeError('meshoptimizer is not installed; install it with pip install "fascat[meshopt]"') from exc
 
     source_document, buffers = _read_gltf_json_and_buffers_for_preview(asset_path)
     document = _preview_document_copy(source_document, images=True, buffer_views=True, extension_lists=True)
