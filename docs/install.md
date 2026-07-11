@@ -15,6 +15,19 @@ pipx install fascat
 pip install fascat
 ```
 
+The base installation does not require a C++ compiler on Windows.
+
+## glTF Meshopt Compression
+
+```bash
+pip install 'fascat[meshopt]'
+```
+
+The `meshopt` extra enables `EXT_meshopt_compression` export. Its
+`meshoptimizer` backend is built from C++ source, so Windows users installing
+this extra need Microsoft C++ Build Tools. Ordinary glTF/GLB export works
+without it.
+
 ## KTX2 Preview Decode
 
 ```bash

@@ -7,7 +7,6 @@ from ._app import CliState, app, main
 from ._cmd_inspect import cmd_inspect
 from ._cmd_convert import cmd_convert
 from ._cmd_validate import cmd_validate
-from ._cmd_fixtures import cmd_runtime_fixtures
 from ._cmd_meta import cmd_help, cmd_version
 # isort: on
 
@@ -27,6 +26,7 @@ from ._enums import (
     LODEngineProfile,
     LODMode,
     LODPreset,
+    LODSourceMode,
     MaterialLibraryColorSpaceMode,
     MaterialMode,
     MaterialPipelineMode,
@@ -41,8 +41,6 @@ from ._enums import (
     PmiMode,
     Profile,
     ReplaceMode,
-    RuntimeEngineMode,
-    RuntimeParityCaptureMode,
     StdoutFormat,
     UnwrapMethod,
     UsdLayout,
@@ -58,13 +56,12 @@ __all__ = [
     "Profile",
     "ExportPreset",
     "StdoutFormat",
-    "RuntimeEngineMode",
-    "RuntimeParityCaptureMode",
     "AxisMode",
     "HandednessMode",
     "ConstructionCurvePolicyMode",
     "MaterialLibraryColorSpaceMode",
     "JtLodSelectionMode",
+    "LODSourceMode",
     "UV0Mode",
     "UV1Mode",
     "UnwrapMethod",
@@ -97,7 +94,6 @@ __all__ = [
     "cmd_inspect",
     "cmd_convert",
     "cmd_validate",
-    "cmd_runtime_fixtures",
     "cmd_version",
     "cmd_help",
     "app",

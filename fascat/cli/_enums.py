@@ -32,17 +32,6 @@ class StdoutFormat(str, Enum):
     FBX = "fbx"
 
 
-class RuntimeEngineMode(str, Enum):
-    UNITY = "unity"
-    UNREAL = "unreal"
-
-
-class RuntimeParityCaptureMode(str, Enum):
-    BROWSER = "browser"
-    UNITY = "unity"
-    UNREAL = "unreal"
-
-
 class AxisMode(str, Enum):
     Y = "Y"
     Z = "Z"
@@ -68,6 +57,12 @@ class MaterialLibraryColorSpaceMode(str, Enum):
 class JtLodSelectionMode(str, Enum):
     FINEST = "finest"
     ALL = "all"
+
+
+class LODSourceMode(str, Enum):
+    IMPORTED = "imported"
+    GENERATED = "generated"
+    AUTO = "auto"
 
 
 class UV0Mode(str, Enum):

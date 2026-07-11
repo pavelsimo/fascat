@@ -1854,6 +1854,39 @@ def test_optimize_buffers_logs_fallback_warning(
     assert "optimize_buffers failed; returning unoptimized copy" in caplog.text
 
 
+def test_optimize_buffers_warns_when_meshoptimizer_is_missing(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "meshoptimizer", None)
+    mesh = valid_triangle()
+
+    with caplog.at_level(logging.WARNING, logger="fascat"):
+        optimized = mesh.optimize_buffers()
+
+    assert optimized.to_dict() == mesh.to_dict()
+    assert "meshoptimizer is not installed; returning unoptimized copy" in caplog.text
+    assert 'pip install "fascat[meshopt]"' in caplog.text
+
+
+def test_simplify_warns_when_meshoptimizer_is_missing(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "meshoptimizer", None)
+    mesh = Mesh(
+        points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [2, 1, 3]], dtype=int),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="fascat"):
+        simplified = mesh.simplify(target_triangles=1)
+
+    simplified.validate()
+    assert "meshoptimizer is not installed; falling back to fast-simplification" in caplog.text
+    assert 'pip install "fascat[meshopt]"' in caplog.text
+
+
 def test_simplify_preserves_material_indices() -> None:
     mesh = Mesh(
         points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),

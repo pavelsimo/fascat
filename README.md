@@ -33,6 +33,13 @@ pipx install fascat
 pip install fascat
 ```
 
+The base install does not require a C++ compiler. To enable optional glTF
+`EXT_meshopt_compression` export, install the meshopt backend separately:
+
+```bash
+pip install "fascat[meshopt]"
+```
+
 ## Quick Start
 
 ```bash
@@ -56,7 +63,7 @@ fascat convert motor.step motor.glb --profile virtual-reality
 fascat convert motor.step motor.glb --profile mixed-reality
 
 # Convert JT 8.x/9.x/10.x tessellation to GLB and import all stored JT LODs
-fascat convert assembly.jt assembly.glb --jt-lod-selection all
+fascat convert assembly.jt assembly.glb --lod-selection all
 
 # Tune tessellation, UVs, optimization, and LODs
 fascat convert motor.step motor.usdc \
@@ -67,6 +74,9 @@ fascat convert motor.step motor.usdc \
   --materials display \
   --uv1 box \
   --lods 0.5,0.25,0.1
+
+# Keep valid stored LODs and generate only missing or invalid fallbacks
+fascat convert assembly.jt assembly.glb --lod-selection all --lod-source auto
 
 # Preview a conversion without writing files
 fascat convert motor.step motor.usdc --dry-run

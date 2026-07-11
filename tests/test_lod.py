@@ -19,6 +19,67 @@ def test_lod_unique_ids_preserve_first_suffix_start() -> None:
     assert lod_module._unique_id("proxy", {"proxy": object(), "proxy_1": object()}) == "proxy_2"
 
 
+def _asset_with_imported_lod(*, valid: bool = True) -> Asset:
+    points = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0]], dtype=float)
+    base = Mesh(points=points, faces=np.array([[0, 1, 2], [0, 1, 3], [1, 3, 4]], dtype=int))
+    lod_faces = [[0, 1, 2], [0, 1, 3]] if valid else [[0, 1, 2], [0, 1, 3], [1, 3, 4]]
+    lod = Mesh(points=points, faces=np.array(lod_faces, dtype=int), metadata={"lod_source": "imported"})
+    part = Part(id="part", name="Part", mesh=base, lod_meshes=[lod])
+    return Asset(root=Node(id="root", name="root", part_id="part"), parts={"part": part})
+
+
+def test_lods_auto_retains_valid_imported_chain_and_applies_matching_coverage() -> None:
+    result = _asset_with_imported_lod().lods(LODOptions((0.5,), source="auto", screen_coverage=(0.25,)))
+    assert result.parts["part"].lod_meshes[0].triangle_count == 2
+    assert result.parts["part"].lod_meshes[0].metadata["lod_screen_coverage"] == "0.25"
+    assert result.parts["part"].metadata["lod_status"] == "retained_imported"
+
+
+def test_lods_retained_imported_chain_uses_distinct_report_counters() -> None:
+    result = _asset_with_imported_lod().lods(LODOptions((0.5,), source="auto"))
+    part = result.parts["part"]
+    retained = part.lod_meshes[0]
+    step = result.report.steps[-1]
+
+    assert result.metadata["lod_added_vertices"] == "0"
+    assert result.metadata["lod_added_triangles"] == "0"
+    assert result.metadata["lod_added_mesh_bytes"] == "0"
+    assert result.metadata["lod_retained_vertices"] == str(retained.vertex_count)
+    assert result.metadata["lod_retained_triangles"] == str(retained.triangle_count)
+    assert int(result.metadata["lod_retained_mesh_bytes"]) > 0
+    assert result.metadata["lod_chain_triangles"] == str(part.mesh.triangle_count + retained.triangle_count)
+    assert part.metadata["lod_added_triangles"] == "0"
+    assert part.metadata["lod_retained_triangles"] == str(retained.triangle_count)
+    assert step.after["lod_added_triangles"] == 0
+    assert step.after["lod_retained_triangles"] == retained.triangle_count
+
+
+def test_lods_imported_coverage_mismatch_preserves_existing_metadata() -> None:
+    asset = _asset_with_imported_lod()
+    part = asset.parts["part"]
+    part.metadata["lod_screen_coverage"] = "0.4"
+    part.lod_meshes[0].metadata["lod_screen_coverage"] = "0.4"
+
+    result = asset.lods(LODOptions((0.5, 0.25), source="auto", screen_coverage=(0.5, 0.25)))
+    retained = result.parts["part"]
+
+    assert retained.metadata["lod_screen_coverage"] == "0.4"
+    assert retained.lod_meshes[0].metadata["lod_screen_coverage"] == "0.4"
+    assert any("LOD screen coverage was not applied" in warning for warning in result.report.warnings)
+
+
+def test_lods_auto_replaces_invalid_imported_chain_with_diagnostic() -> None:
+    result = _asset_with_imported_lod(valid=False).lods(LODOptions((0.5,), source="auto"))
+    assert result.parts["part"].metadata["lod_ratios"] == "0.5"
+    assert any("Imported LOD chain is invalid" in warning for warning in result.report.warnings)
+
+
+def test_lods_imported_retains_chain_without_generation() -> None:
+    result = _asset_with_imported_lod(valid=False).lods(LODOptions((0.5,), source="imported"))
+    assert result.parts["part"].lod_meshes[0].triangle_count == 3
+    assert result.metadata["lod_generated_parts"] == "0"
+
+
 def test_lods_are_monotonic() -> None:
     points = np.array(
         [

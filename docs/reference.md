@@ -103,26 +103,10 @@ All `--json` payloads are one JSON object on stdout. Optional sections are omitt
 | `analysis` | object | Present with geometry quality checks, reports, or filters |
 | `runtime_browser` | object | Present with `--runtime-browser` |
 | `runtime_browser_preview` | object | Present with `--runtime-browser-preview` |
-| `runtime_engine` | object | Present with `--runtime-engine` |
-| `runtime_engine_diff` | object | Present when engine preview baseline comparison runs |
 | `visual_preview` | object | Present with `--visual-preview` |
 | `visual_diff` | object | Present with `--visual-baseline` |
 | `lod_preview` | object | Present with `--lod-preview-dir` |
 | `turntable` | object | Present with `--turntable-dir`; includes per-view previews and a `diff` summary with `--turntable-baseline-dir` |
-| `error` | string | Present only on failure |
-
-### `runtime-fixtures`
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `command` | string | Always `runtime-fixtures` |
-| `output_dir` | string | Target suite directory |
-| `dry_run` | boolean | Whether files or captures were skipped |
-| `fixtures` | array | Fixture entries written or planned |
-| `manifest` | string | Manifest path when a suite is written |
-| `capture` | string or null | Requested capture target |
-| `captures` | array | Capture results when a runtime target is used |
-| `golden_coverage` | object | Golden-image coverage report when requested |
 | `error` | string | Present only on failure |
 
 Conversion reports wrap the run in four steps: `preflight` (before expensive work —
@@ -141,15 +125,8 @@ settings), and `workflow_summary` (preparation stages mapped to run/skipped stat
 | `fascat validate output.usdc` | Validate generated USD, glTF, OBJ, STL, or FBX output |
 | `fascat validate output.glb --runtime-browser` | Measure optional headless browser/WebGL load and FPS for glTF/GLB output |
 | `fascat validate output.glb --runtime-browser-preview preview.png` | Write a browser/WebGL-rendered glTF/GLB PNG preview |
-| `fascat validate output.glb --runtime-engine unity` | Measure optional Unity or Unreal harness load/parse metrics for glTF/GLB output |
-| `fascat validate output.glb --runtime-engine unity --runtime-engine-preview preview.png` | Request a Unity or Unreal harness-rendered preview PNG and report render status |
-| `fascat validate output.glb --runtime-engine unity --runtime-engine-preview preview.png --runtime-engine-baseline baseline.png` | Fail validation when an engine preview drifts beyond configured image-diff thresholds |
 | `fascat validate output.glb --visual-preview preview.png` | Write a stable software-rendered PNG preview for visual review |
 | `fascat validate output.glb --turntable-dir views/` | Write multi-angle turntable preview PNGs and a contact sheet for visual review |
-| `fascat runtime-fixtures runtime-parity/` | Write bundled browser/Unity/Unreal material, lighting, KTX2/Basis fallback, and LOD-profile parity GLBs, software baselines, and a manifest |
-| `fascat runtime-fixtures runtime-parity/ --capture unity --promote-goldens` | Capture runtime parity previews and optionally promote rendered outputs into target golden directories |
-| `fascat runtime-fixtures runtime-parity/ --capture unity --require-goldens` | Compare captures against existing `goldens/<target>/<fixture>.png` files and fail when required target goldens are missing |
-| `fascat runtime-fixtures runtime-parity/ --check-goldens --require-goldens` | Audit checked-in target golden PNG coverage without rendering and fail on missing, invalid, or wrong-size goldens |
 | `fascat help [command]` | Show top-level or command-specific help |
 | `fascat version` | Print version and exit |
 
@@ -200,7 +177,7 @@ keeping the native source shape for tessellation and healing.
 topologically compressed tri-strip sets in JT 9/10), assembly hierarchy,
 instances, transforms, materials, and properties; parts are mesh-only
 (`source_shape` is `None`) and reuse the imported tessellation. Only the
-finest LOD is imported by default (`--jt-lod-selection all` also fills
+finest LOD is imported by default (`--lod-selection all` also fills
 `Part.lod_meshes`). Units come from the `JT_PROP_MEASUREMENT_UNITS` property
 (millimetres assumed when absent); JT declares no up axis, so the
 NX/Teamcenter Z-up right-handed convention is assumed — override with the
@@ -218,7 +195,8 @@ placeholder nodes with warnings.
 | `--target-device-profile` | unset | TOML or JSON target-device budget overlay for the selected profile |
 | `--pipeline` | unset | TOML pipeline file with named filters and ordered conversion steps |
 | `--input` | unset | Additional STEP root input for explicit multi-root conversion; may be passed more than once |
-| `--jt-lod-selection` | `finest` | JT inputs: import only the finest LOD or all stored LODs (`finest`, `all`) |
+| `--lod-selection` | `finest` | Import only the finest stored LOD or all stored LODs (`finest`, `all`); currently supported by JT |
+| `--jt-lod-selection` | unset | Deprecated compatibility alias for `--lod-selection`; conflicting values are rejected |
 | `--stdout-format` | `usda` | Output format used only when the output path is `-`: `usda`, `usdc`, `usdz`, `gltf`, `glb`, `obj`, `stl`, or `fbx` |
 | `--sag` | profile value | Absolute CAD tessellation sag tolerance; overrides the profile's relative sag ratio when set |
 | `--sag-ratio` | profile value | Relative CAD tessellation sag ratio; realtime profiles default to `0.0002` |
@@ -245,6 +223,7 @@ placeholder nodes with warnings.
 | `--max-sliver-area` | `1e-4` | Area threshold for sliver-face reporting |
 | `--fail-on-open-shells` | `false` | Fail if healed BREP still contains open shells |
 | `--lods` | profile value | Comma-separated LOD ratios, for example `0.5,0.25,0.1` |
+| `--lod-source` | `auto` for profiles | Choose `imported`, `generated`, or `auto`; explicit `--lods` implies `generated` unless set |
 | `--lod-mode` | `variants` | LOD output mode: `variants`, `extras`, or `separate` |
 | `--lod-engine-profile` | `generic` | Engine-specific LOD export profile: `generic`, `unity`, or `unreal` |
 | `--lod-screen-coverage` | unset | Screen coverage values for generated LODs |
@@ -446,7 +425,7 @@ placeholder nodes with warnings.
 
 ### LODs
 
-- LOD reports separate source, added-LOD, and full-chain vertex/triangle counts and payload bytes, so the memory/size cost of extra levels is visible. Ratio LODs simplify progressively from the previous level while preserving each ratio against the source count.
+- LOD reports separate source, newly added, retained imported, and full-chain vertex/triangle counts and payload bytes, so the memory/size cost and origin of extra levels are visible. Ratio LODs simplify progressively from the previous level while preserving each ratio against the source count.
 - Chain advisories warn on more than four levels, over-aggressive LOD1/LOD2, and geometry-only far LODs that should bake to one mesh/material. Per-level metadata records simplification source, instance reuse, material merge, texture bake, culling-granularity changes, and resolved export representation.
 - `--lod-engine-profile unity` emits `MSFT_lod` variant nodes; `unreal` emits separate `_LOD#` scene nodes for tools that ignore `MSFT_lod`.
 
@@ -464,8 +443,6 @@ placeholder nodes with warnings.
 - `--visual-preview` / `--lod-preview-dir` — software-rendered PNGs of the output mesh and per-LOD contact sheet.
 - `--turntable-dir` — software-rendered turntable PNGs from `--turntable-views` azimuths at each `--turntable-elevations` elevation, plus a `turntable.png` contact sheet grid. `--turntable-baseline-dir` diffs each view against a same-named baseline PNG using the `--visual-diff-*` thresholds and fails validation when any view drifts. Framing auto-fits each view, so diffs catch silhouette and shading changes rather than absolute size changes.
 - `--runtime-browser` / `--runtime-browser-preview` — headless Chromium WebGL load/FPS measurement and screenshots for supported glTF/GLB primitives.
-- `--runtime-engine unity|unreal` (+ `--runtime-engine-preview` / `--runtime-engine-baseline`) — packaged or custom engine-harness load metrics and rendered previews. Set `FASCAT_UNITY`/`UNITY_EDITOR`/`FASCAT_UNREAL`/`UNREAL_EDITOR` or `--runtime-engine-command` if the executable isn't on PATH.
-- `fascat runtime-fixtures DIR` — bundled parity GLBs with software baselines and a manifest; `--capture`, `--promote-goldens`, `--require-goldens`, and `--check-goldens` manage target golden comparison.
 
 ## Inspect flags
 
@@ -621,7 +598,7 @@ above and on the [Python API page](api.html) document each field.
 | LOD generation | Partial | `lods` with ratio or generator options; `run_lod_generators` compatibility alias (per-level counts, chain advisories, engine export mode) | Measured engine runtime validation of LOD profiles |
 | Instance reconstruction | Partial | `optimize_scene` (reconstructed counts, savings, draw-call breakdown) | Transform-aware matching; compressed size estimates |
 | Runtime compression | Implemented | `write` `runtime_dependencies` / `runtime_decision_matrix` (quantize, meshopt, Draco, KTX2/Basis) | Full renderer/material validation |
-| Export and budgets | Implemented for USD, USDZ, glTF/GLB, OBJ, STL | `write`, `gltf_size_ladder`, `texture_export_policy`, `profile_budget`; `validate` runtime/preview reports | Fallback-free KTX2/Basis decode; full Unreal scene rendering; engine golden corpora |
+| Export and budgets | Implemented for USD, USDZ, glTF/GLB, OBJ, STL | `write`, `gltf_size_ladder`, `texture_export_policy`, `profile_budget`; `validate` runtime/preview reports | Fallback-free KTX2/Basis decode |
 | PMI metadata export | Partial | `PmiAnnotation` metadata + `pmi_semantic_graph`; glTF `extras.fascat` / USD `customData`; markers when `metadata_and_visuals` | Full AP242 semantic + graphical presentation |
 
 ## Validate flags
@@ -654,12 +631,6 @@ above and on the [Python API page](api.html) document each field.
 | `--runtime-browser-command` | unset | Browser executable for `--runtime-browser` or `--runtime-browser-preview`; otherwise `FASCAT_BROWSER` or common Chromium/Chrome names are used |
 | `--runtime-duration` | `2.0` | Browser FPS measurement duration in seconds |
 | `--runtime-timeout` | `15.0` | Browser runtime validation timeout in seconds |
-| `--runtime-engine` | unset | Optional engine runtime harness to run: `unity` or `unreal` |
-| `--runtime-engine-command` | unset | Unity or Unreal executable for `--runtime-engine`; otherwise environment variables or common executable names are used |
-| `--runtime-engine-project` | unset | Optional Unity project folder or Unreal `.uproject` containing a custom Fascat runtime harness; omitted uses a packaged temporary harness |
-| `--runtime-engine-preview` | unset | Request a PNG preview from a Unity/Unreal runtime harness |
-| `--runtime-engine-baseline` | unset | Compare `--runtime-engine-preview` against a baseline PNG with the `--visual-diff-*` thresholds |
-| `--runtime-engine-timeout` | `120.0` | Unity/Unreal runtime harness timeout in seconds |
 | `--filter` | unset | Scope validation-time geometry analysis with an assembly selector |
 | `--exclude-filter` | unset | Exclude selector matches from validation-time analysis |
 | `--report` | unset | Write validation and geometry quality report as JSON |

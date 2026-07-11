@@ -6,7 +6,6 @@ from typing import Annotated, Any, cast
 import typer
 
 from ._app import DOCS_URL, _state, app
-from ._enums import RuntimeEngineMode
 from ._io_helpers import _validate_and_analyze_output_for_cli
 from ._output import _emit, _export_label, _fail, _format_stats, _is_stdio, _require_existing_file
 from ._params import _analysis_requested, _analyze_options, _parse_filter_options, _validate_export_output
@@ -83,39 +82,6 @@ def cmd_validate(
         float,
         typer.Option("--runtime-timeout", help="Browser runtime validation timeout in seconds."),
     ] = 15.0,
-    runtime_engine: Annotated[
-        RuntimeEngineMode | None,
-        typer.Option("--runtime-engine", help="Run optional Unity or Unreal runtime harness measurement."),
-    ] = None,
-    runtime_engine_command: Annotated[
-        str | None,
-        typer.Option("--runtime-engine-command", help="Unity or Unreal executable for --runtime-engine."),
-    ] = None,
-    runtime_engine_project: Annotated[
-        Path | None,
-        typer.Option(
-            "--runtime-engine-project",
-            help="Custom Unity project folder or Unreal .uproject with Fascat harness.",
-        ),
-    ] = None,
-    runtime_engine_preview: Annotated[
-        Path | None,
-        typer.Option(
-            "--runtime-engine-preview",
-            help="Preview PNG path requested from a Unity/Unreal runtime harness.",
-        ),
-    ] = None,
-    runtime_engine_baseline: Annotated[
-        Path | None,
-        typer.Option(
-            "--runtime-engine-baseline",
-            help="Compare --runtime-engine-preview against this baseline PNG.",
-        ),
-    ] = None,
-    runtime_engine_timeout: Annotated[
-        float,
-        typer.Option("--runtime-engine-timeout", help="Unity/Unreal runtime harness timeout in seconds."),
-    ] = 120.0,
     visual_preview: Annotated[
         Path | None,
         typer.Option("--visual-preview", help="Write a stable software preview PNG during validation."),
@@ -194,9 +160,7 @@ def cmd_validate(
     from fascat.runtime import (
         RuntimeBrowserOptions,
         RuntimeBrowserRenderOptions,
-        RuntimeEngineOptions,
         measure_browser_runtime,
-        measure_engine_runtime,
         write_browser_render_preview,
     )
     from fascat.visual import (
@@ -231,12 +195,6 @@ def cmd_validate(
         "runtime_browser_command": runtime_browser_command,
         "runtime_duration": runtime_duration,
         "runtime_timeout": runtime_timeout,
-        "runtime_engine": None if runtime_engine is None else runtime_engine.value,
-        "runtime_engine_command": runtime_engine_command,
-        "runtime_engine_project": str(runtime_engine_project) if runtime_engine_project else None,
-        "runtime_engine_preview": str(runtime_engine_preview) if runtime_engine_preview else None,
-        "runtime_engine_baseline": str(runtime_engine_baseline) if runtime_engine_baseline else None,
-        "runtime_engine_timeout": runtime_engine_timeout,
         "visual_preview": str(visual_preview) if visual_preview else None,
         "runtime_browser_preview": str(runtime_browser_preview) if runtime_browser_preview else None,
         "visual_baseline": str(visual_baseline) if visual_baseline else None,
@@ -264,8 +222,6 @@ def cmd_validate(
         _fail(ctx, payload, "--runtime-duration must be greater than 0.", code=2)
     if runtime_timeout <= 0.0:
         _fail(ctx, payload, "--runtime-timeout must be greater than 0.", code=2)
-    if runtime_engine_timeout <= 0.0:
-        _fail(ctx, payload, "--runtime-engine-timeout must be greater than 0.", code=2)
     if visual_diff_pixel_tolerance < 0 or visual_diff_pixel_tolerance > 255:
         _fail(ctx, payload, "--visual-diff-pixel-tolerance must be between 0 and 255.", code=2)
     if visual_diff_mean_threshold < 0.0 or visual_diff_mean_threshold > 255.0:
@@ -293,14 +249,9 @@ def cmd_validate(
         _fail(ctx, payload, "--turntable-width and --turntable-height must be greater than 0.", code=2)
     if turntable_supersample < 1:
         _fail(ctx, payload, "--turntable-supersample must be greater than 0.", code=2)
-    if runtime_engine_preview is not None and runtime_engine is None:
-        _fail(ctx, payload, "--runtime-engine-preview requires --runtime-engine.", code=2)
-    if runtime_engine_baseline is not None and runtime_engine_preview is None:
-        _fail(ctx, payload, "--runtime-engine-baseline requires --runtime-engine-preview.", code=2)
     if _is_stdio(output_path) and (
         visual_preview is not None
         or runtime_browser_preview is not None
-        or runtime_engine_preview is not None
         or lod_preview_dir is not None
         or turntable_dir is not None
     ):
@@ -326,20 +277,6 @@ def cmd_validate(
                 ),
             )
             if runtime_browser
-            else None
-        )
-        runtime_engine_report = (
-            measure_engine_runtime(
-                output_path,
-                RuntimeEngineOptions(
-                    engine=cast(Any, runtime_engine.value),
-                    executable=runtime_engine_command,
-                    project=runtime_engine_project,
-                    preview_path=runtime_engine_preview,
-                    timeout_seconds=runtime_engine_timeout,
-                ),
-            )
-            if runtime_engine is not None
             else None
         )
         runtime_browser_preview_report = (
@@ -370,26 +307,6 @@ def cmd_validate(
             if visual_baseline is not None and visual_preview is not None
             else None
         )
-        runtime_engine_diff_report = None
-        runtime_engine_diff_error = None
-        if runtime_engine_baseline is not None:
-            if runtime_engine_report is None:
-                runtime_engine_diff_error = "--runtime-engine-baseline requires --runtime-engine."
-            elif runtime_engine_report.render_status != "rendered" or runtime_engine_report.preview_path is None:
-                runtime_engine_diff_error = (
-                    "runtime engine baseline requires a rendered engine preview"
-                    f"; render_status={runtime_engine_report.render_status}"
-                )
-            else:
-                runtime_engine_diff_report = compare_images(
-                    runtime_engine_baseline,
-                    runtime_engine_report.preview_path,
-                    VisualDiffOptions(
-                        pixel_tolerance=visual_diff_pixel_tolerance,
-                        max_mean_absolute_error=visual_diff_mean_threshold,
-                        max_changed_pixel_ratio=visual_diff_changed_pixel_ratio,
-                    ),
-                )
         lod_preview_report = (
             write_output_lod_switch_previews(output_path, lod_preview_dir) if lod_preview_dir is not None else None
         )
@@ -423,18 +340,12 @@ def cmd_validate(
         json_payload["analysis"] = analysis.to_dict()
     if runtime_report is not None:
         json_payload["runtime_browser"] = runtime_report.to_dict()
-    if runtime_engine_report is not None:
-        json_payload["runtime_engine"] = runtime_engine_report.to_dict()
     if runtime_browser_preview_report is not None:
         json_payload["runtime_browser_preview"] = runtime_browser_preview_report.to_dict()
     if visual_preview_report is not None:
         json_payload["visual_preview"] = visual_preview_report.to_dict()
     if visual_diff_report is not None:
         json_payload["visual_diff"] = visual_diff_report.to_dict()
-    if runtime_engine_diff_report is not None:
-        json_payload["runtime_engine_diff"] = runtime_engine_diff_report.to_dict()
-    if runtime_engine_diff_error is not None:
-        json_payload["runtime_engine_diff_error"] = runtime_engine_diff_error
     if lod_preview_report is not None:
         json_payload["lod_preview"] = lod_preview_report.to_dict()
     if turntable_report is not None:
@@ -454,26 +365,8 @@ def cmd_validate(
                 f"{message} Browser preview {runtime_browser_preview_report.status}: "
                 f"{runtime_browser_preview_report.error}."
             )
-    if runtime_engine_report is not None and runtime_engine_report.preview_path is not None:
-        if runtime_engine_report.render_status in {"rendered", "rendered_partial"}:
-            message = f"{message} Wrote engine preview {runtime_engine_report.preview_path}."
-            if runtime_engine_report.render_status == "rendered_partial":
-                detail = runtime_engine_report.render_error or "; ".join(runtime_engine_report.render_limitations)
-                message = f"{message} Engine preview partial: {detail}."
-        else:
-            message = (
-                f"{message} Engine preview {runtime_engine_report.render_status}: {runtime_engine_report.render_error}."
-            )
     if visual_diff_report is not None:
         message = f"{message} Visual diff passed." if visual_diff_report.passed else f"{message} Visual diff failed."
-    if runtime_engine_diff_report is not None:
-        message = (
-            f"{message} Engine preview diff passed."
-            if runtime_engine_diff_report.passed
-            else f"{message} Engine preview diff failed."
-        )
-    if runtime_engine_diff_error is not None:
-        message = f"{message} Engine preview diff failed: {runtime_engine_diff_error}."
     if lod_preview_report is not None:
         message = f"{message} Wrote LOD previews {lod_preview_report.directory}."
     if turntable_report is not None:
@@ -495,11 +388,6 @@ def cmd_validate(
         else:
             message = f"{message} Browser runtime {runtime_report.status}: {runtime_report.error}."
     if visual_diff_report is not None and not visual_diff_report.passed:
-        _emit(ctx, json_payload, message)
-        raise typer.Exit(1)
-    if runtime_engine_diff_error is not None or (
-        runtime_engine_diff_report is not None and not runtime_engine_diff_report.passed
-    ):
         _emit(ctx, json_payload, message)
         raise typer.Exit(1)
     if turntable_report is not None and turntable_report.diff_passed is False:

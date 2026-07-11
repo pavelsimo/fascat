@@ -16,7 +16,7 @@ from fascat import __version__
 DOCS_URL = "https://pavelsimo.github.io/fascat"
 ISSUES_URL = "https://github.com/pavelsimo/fascat/issues"
 rich_utils.MAX_WIDTH = 120
-COMMAND_NAMES = ("inspect", "convert", "validate", "runtime-fixtures", "version", "help")
+COMMAND_NAMES = ("inspect", "convert", "validate", "version", "help")
 GLOBAL_FLAG_ALIASES = {
     "--json",
     "--dry-run",
@@ -37,7 +37,6 @@ TOP_LEVEL_EPILOG = f"""Examples:
   fascat convert source.brep source.glb --profile realtime-web
   fascat convert motor.step motor.glb --profile virtual-reality
   fascat --json validate motor.usdc
-  fascat runtime-fixtures runtime-parity/
 
 Docs: {DOCS_URL}
 Issues: {ISSUES_URL}"""

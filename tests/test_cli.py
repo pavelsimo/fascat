@@ -24,7 +24,6 @@ def test_cli_package_registers_public_commands_once_in_help_order() -> None:
         "inspect",
         "convert",
         "validate",
-        "runtime-fixtures",
         "version",
         "help",
     ]
@@ -40,7 +39,6 @@ def test_cli_package_registers_public_commands_once_in_help_order() -> None:
         "cmd_inspect",
         "cmd_convert",
         "cmd_validate",
-        "cmd_runtime_fixtures",
         "cmd_version",
         "cmd_help",
     } <= set(cli.__all__)

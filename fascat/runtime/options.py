@@ -1,10 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from pathlib import Path
-from typing import Literal
-
-RuntimeEngineName = Literal["unity", "unreal"]
 
 
 @dataclass(frozen=True)
@@ -128,83 +124,5 @@ class RuntimeBrowserRenderReport:
             "unsupported_extensions": list(self.unsupported_extensions),
             "decoded_extensions": list(self.decoded_extensions),
             "preview_limitations": list(self.preview_limitations),
-            "error": self.error,
-        }
-
-
-@dataclass(frozen=True)
-class RuntimeEngineOptions:
-    engine: RuntimeEngineName
-    executable: str | None = None
-    project: str | Path | None = None
-    preview_path: str | Path | None = None
-    timeout_seconds: float = 120.0
-    extra_args: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        if self.engine not in {"unity", "unreal"}:
-            raise ValueError("runtime engine must be one of: unity, unreal")
-        if self.timeout_seconds <= 0.0:
-            raise ValueError("runtime engine timeout_seconds must be greater than 0")
-        if isinstance(self.extra_args, str) or not isinstance(self.extra_args, tuple):
-            raise ValueError("runtime engine extra_args must be a tuple of strings")
-        if any(not isinstance(item, str) or not item for item in self.extra_args):
-            raise ValueError("runtime engine extra_args values must be non-empty strings")
-
-    def to_dict(self) -> dict[str, object]:
-        data = asdict(self)
-        if self.project is not None:
-            data["project"] = str(self.project)
-        if self.preview_path is not None:
-            data["preview_path"] = str(self.preview_path)
-        return data
-
-
-@dataclass(frozen=True)
-class RuntimeEngineReport:
-    path: str
-    status: str
-    engine: RuntimeEngineName
-    executable: str | None
-    project: str | None
-    engine_version: str | None
-    load_time_ms: int | None
-    measured_fps: float | None
-    frame_count: int
-    measurement_duration_ms: int | None
-    memory_bytes: int | None
-    meshes: int
-    triangles: int
-    preview_path: str | None = None
-    render_status: str = "not_requested"
-    render_time_ms: int | None = None
-    rendered_frames: int = 0
-    render_backend: str = "none"
-    render_limitations: tuple[str, ...] = ()
-    render_error: str | None = None
-    error: str | None = None
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "path": self.path,
-            "status": self.status,
-            "engine": self.engine,
-            "executable": self.executable,
-            "project": self.project,
-            "engine_version": self.engine_version,
-            "load_time_ms": self.load_time_ms,
-            "measured_fps": self.measured_fps,
-            "frame_count": self.frame_count,
-            "measurement_duration_ms": self.measurement_duration_ms,
-            "memory_bytes": self.memory_bytes,
-            "meshes": self.meshes,
-            "triangles": self.triangles,
-            "preview_path": self.preview_path,
-            "render_status": self.render_status,
-            "render_time_ms": self.render_time_ms,
-            "rendered_frames": self.rendered_frames,
-            "render_backend": self.render_backend,
-            "render_limitations": list(self.render_limitations),
-            "render_error": self.render_error,
             "error": self.error,
         }

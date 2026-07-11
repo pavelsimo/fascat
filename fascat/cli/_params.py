@@ -255,6 +255,7 @@ def _lod_options_for_cli(
     lod_tiny_part_screen_size: float,
     validate_lods: bool,
     jobs: int,
+    lod_source: str,
 ) -> LODOptions | None:
     ratios = tuple(lod_values) if lod_values is not None else None
     if ratios is None and profile_lods is not None:
@@ -273,6 +274,7 @@ def _lod_options_for_cli(
         tiny_part_screen_size=lod_tiny_part_screen_size,
         validate=validate_lods,
         jobs=jobs,
+        source=cast(Any, lod_source),
     )
 
 

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
+from dataclasses import replace as dataclass_replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -162,6 +163,8 @@ def convert(
         planned_stage = stage or selected.stage
         planned_optimize = optimize if optimize is not None else selected.optimize
         planned_lods = lods if lods is not None else selected.lods
+        if lods is None and planned_lods is not None:
+            planned_lods = dataclass_replace(planned_lods, source="auto")
     _add_preflight_report(
         asset,
         output_format,
@@ -1731,7 +1734,7 @@ def _with_usd_metadata(
 ) -> UsdExportOptions:
     if options is None:
         return UsdExportOptions(metadata=metadata)
-    return replace(options, metadata=metadata)
+    return dataclass_replace(options, metadata=metadata)
 
 
 def _with_usd_layout(options: UsdExportOptions | None, profile: ConversionProfile) -> UsdExportOptions:
@@ -1742,7 +1745,7 @@ def _with_usd_layout(options: UsdExportOptions | None, profile: ConversionProfil
     # references, variant sets, or instancing, so the web profile inlines
     # meshes instead of the prototype/variant layout.
     layout: UsdLayoutMode = "flat" if profile.name == "realtime-web" else "instanced"
-    return replace(opts, layout=layout)
+    return dataclass_replace(opts, layout=layout)
 
 
 def write_usd(
