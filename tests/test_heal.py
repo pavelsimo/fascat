@@ -493,7 +493,6 @@ def test_heal_brep_reports_unsupported_sliver_face_removal(monkeypatch) -> None:
 def test_convert_runs_heal_brep_before_tessellation(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     import fascat.ops.heal as heal
     import fascat.ops.tessellate as tessellate
-    import fascat.pipeline as pipeline
 
     calls: list[str] = []
     mesh = Mesh(
@@ -524,10 +523,10 @@ def test_convert_runs_heal_brep_before_tessellation(monkeypatch, tmp_path: Path)
         result.parts["selected"].mesh = mesh
         return result
 
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: asset)
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: asset)
     monkeypatch.setattr(heal, "heal_shape", fake_heal_shape)
     monkeypatch.setattr(tessellate, "tessellate_asset", fake_tessellate_asset)
-    monkeypatch.setattr(pipeline, "_write_gltf", lambda _asset, _path, *, options=None: None)
+    monkeypatch.setattr("fascat.io.gltf.write_gltf_with_validation", lambda _asset, _path, *, options=None: None)
 
     converted = convert(
         "input.step",

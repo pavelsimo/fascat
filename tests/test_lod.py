@@ -5,9 +5,18 @@ import json
 import numpy as np
 import pytest
 
+import fascat.ops.lod as lod_module
 from fascat.asset import Asset, Node, Part
 from fascat.mesh import Mesh
-from fascat.options import LODOptions
+from fascat.options import LODGeneratorOptions, LODLevel, LODOptions
+
+from ._actions_helpers import _cube_mesh
+
+
+def test_lod_unique_ids_preserve_first_suffix_start() -> None:
+    assert lod_module._unique_id("proxy", {}) == "proxy"
+    assert lod_module._unique_id("proxy", {"proxy": object()}) == "proxy_1"
+    assert lod_module._unique_id("proxy", {"proxy": object(), "proxy_1": object()}) == "proxy_2"
 
 
 def _asset_with_imported_lod(*, valid: bool = True) -> Asset:
@@ -617,3 +626,86 @@ def _triangle_mesh() -> Mesh:
         points=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=float),
         faces=np.array([[0, 1, 2]], dtype=int),
     )
+
+
+def test_run_lod_generators_records_screen_coverage_metadata() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="cube", name="Cube", part_id="cube")]),
+        parts={"cube": Part(id="cube", name="Cube", mesh=_cube_mesh())},
+    )
+
+    with_lods = asset.run_lod_generators(
+        LODGeneratorOptions(
+            preset="vr",
+            levels=(LODLevel(screen_coverage=0.5, target_ratio=0.5), LODLevel(0.2, 0.25)),
+            validate=True,
+        )
+    )
+
+    assert len(with_lods.parts["cube"].lod_meshes) == 2
+    assert with_lods.parts["cube"].metadata["lod_screen_coverage"] == "0.5,0.2"
+    assert with_lods.parts["cube"].lod_meshes[0].metadata["lod_screen_coverage"] == "0.5"
+    assert with_lods.parts["cube"].lod_meshes[1].metadata["lod_screen_coverage"] == "0.2"
+    assert with_lods.report.steps[-1].name == "run_lod_generators"
+
+
+def test_run_lod_generators_propagates_switch_distance_override() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="cube", name="Cube", part_id="cube")]),
+        parts={"cube": Part(id="cube", name="Cube", mesh=_cube_mesh())},
+    )
+
+    with_lods = asset.run_lod_generators(
+        LODGeneratorOptions(levels=(LODLevel(screen_coverage=0.5, target_ratio=0.5, switch_distance_override=30.0),))
+    )
+    lod = with_lods.parts["cube"].lod_meshes[0]
+
+    assert lod.metadata["lod_switch_distance"] == "30"
+    assert lod.metadata["lod_switch_distance_source"] == "override"
+    assert with_lods.parts["cube"].metadata["lod_level_switch_distance_sources"] == "override"
+    assert with_lods.report.steps[-1].options["levels"][0]["switch_distance_override"] == 30.0
+
+
+def test_lods_accepts_generator_options_as_primary_entry_point() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="cube", name="Cube", part_id="cube")]),
+        parts={"cube": Part(id="cube", name="Cube", mesh=_cube_mesh())},
+    )
+
+    with_lods = asset.lods(
+        LODGeneratorOptions(
+            preset="vr",
+            levels=(LODLevel(screen_coverage=0.5, target_ratio=0.5),),
+            validate=True,
+        )
+    )
+
+    assert len(with_lods.parts["cube"].lod_meshes) == 1
+    assert with_lods.parts["cube"].metadata["lod_screen_coverage"] == "0.5"
+    assert with_lods.report.steps[-1].name == "run_lod_generators"
+
+
+def test_lods_rejects_generator_options_with_ratio_kwargs() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="cube", name="Cube", part_id="cube")]),
+        parts={"cube": Part(id="cube", name="Cube", mesh=_cube_mesh())},
+    )
+
+    with pytest.raises(TypeError, match="LOD generator options"):
+        asset.lods(LODGeneratorOptions(), ratios=(0.5,))
+
+
+def test_run_lod_generators_warns_for_untessellated_parts() -> None:
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="empty", name="Untessellated", part_id="empty")]),
+        parts={"empty": Part(id="empty", name="Untessellated", mesh=None)},
+    )
+
+    with_lods = asset.run_lod_generators(LODGeneratorOptions(levels=(LODLevel(screen_coverage=0.5, target_ratio=0.5),)))
+    warnings = with_lods.report.steps[-1].warnings
+
+    assert with_lods.parts["empty"].metadata["lod_status"] == "skipped_no_mesh"
+    assert with_lods.metadata["lod_skipped_no_mesh_parts"] == "1"
+    assert with_lods.report.steps[-1].name == "run_lod_generators"
+    assert any("LOD generation skipped part without tessellated mesh" in warning for warning in warnings)
+    assert any("matched no tessellated mesh-bearing parts" in warning for warning in warnings)

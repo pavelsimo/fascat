@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +16,17 @@ _TETRA_POINTS = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0,
 _TETRA_FACES = [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]
 
 _LOCAL_FIXTURES = sorted(Path(__file__).parent.glob("fixtures/local/*.jt"))
+
+
+def test_importing_jt_does_not_load_step_or_ocp() -> None:
+    script = """
+import sys
+from fascat.io.jt import read_jt
+assert not any(name == 'fascat.io.step' or name.startswith('fascat.io.step.') for name in sys.modules)
+assert not any(name == 'OCP' or name.startswith('OCP.') for name in sys.modules)
+assert callable(read_jt)
+"""
+    subprocess.run([sys.executable, "-c", script], check=True)
 
 
 def _tetra_part(**overrides: object) -> SyntheticPart:

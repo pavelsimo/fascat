@@ -9,6 +9,7 @@ from fascat.asset import Asset, Node, Part
 from fascat.export_report import referenced_materials
 from fascat.io._atomic import atomic_outputs
 from fascat.io._errors import wrap_io_errors
+from fascat.io._geometry import face_normals, transform_normals, transform_points
 from fascat.io._suffixes import OBJ_SUFFIXES
 from fascat.material import Material
 from fascat.mesh import Mesh
@@ -60,7 +61,7 @@ def _write_obj(
         if opts.preserve_groups:
             chunks.append(f"g {name}\n")
             chunks.append(f"o {name}\n")
-        points = _transform_points(mesh.points, occurrence.world_transform)
+        points = transform_points(mesh.points, occurrence.world_transform)
         written_vertices += int(points.shape[0])
         written_triangles += mesh.triangle_count
         chunks.append(_format_prefixed_rows("v", points))
@@ -109,21 +110,10 @@ class _Occurrence:
 
 def _occurrences(asset: Asset) -> list[_Occurrence]:
     occurrences: list[_Occurrence] = []
-
-    def walk(node: Node, world: np.ndarray) -> None:
-        current = world @ node.transform
+    for node, current in asset.root.walk_world(np.eye(4, dtype=np.float64)):
         if node.part_id is not None:
             occurrences.append(_Occurrence(node, node.part_id, current))
-        for child in node.children:
-            walk(child, current)
-
-    walk(asset.root, np.eye(4, dtype=np.float64))
     return occurrences
-
-
-def _transform_points(points: np.ndarray, transform: np.ndarray) -> np.ndarray:
-    homogeneous = np.column_stack([points, np.ones(points.shape[0], dtype=np.float64)])
-    return np.asarray((transform @ homogeneous.T).T[:, :3], dtype=np.float64)
 
 
 class _ObjNormals:
@@ -134,34 +124,8 @@ class _ObjNormals:
 
 def _occurrence_normals(mesh: Mesh, points: np.ndarray, transform: np.ndarray) -> _ObjNormals:
     if mesh.normals is not None:
-        return _ObjNormals(_transform_normals(mesh.normals, transform), per_face=False)
-    return _ObjNormals(_face_normals(points, mesh.faces), per_face=True)
-
-
-def _transform_normals(normals: np.ndarray, transform: np.ndarray) -> np.ndarray:
-    linear = np.asarray(transform[:3, :3], dtype=np.float64)
-    try:
-        normal_matrix = np.linalg.inv(linear).T
-    except np.linalg.LinAlgError:
-        normal_matrix = linear
-    return _normalize_rows(normals @ normal_matrix.T)
-
-
-def _face_normals(points: np.ndarray, faces: np.ndarray) -> np.ndarray:
-    if faces.size == 0:
-        return np.empty((0, 3), dtype=np.float64)
-    triangles = points[faces]
-    normals = np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])
-    return _normalize_rows(normals)
-
-
-def _normalize_rows(values: np.ndarray) -> np.ndarray:
-    lengths = np.linalg.norm(values, axis=1)
-    result = np.zeros_like(values, dtype=np.float64)
-    nonzero = lengths > 0.0
-    result[nonzero] = values[nonzero] / lengths[nonzero, None]
-    result[~nonzero] = np.array([0.0, 0.0, 1.0], dtype=np.float64)
-    return result
+        return _ObjNormals(transform_normals(mesh.normals, transform), per_face=False)
+    return _ObjNormals(face_normals(points, mesh.faces), per_face=True)
 
 
 def _smoothing_directive(mesh: Mesh, per_face_normals: bool) -> str:

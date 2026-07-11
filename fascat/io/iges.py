@@ -1,14 +1,20 @@
 from __future__ import annotations
 
-import tempfile
-from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
 
 from fascat.asset import Asset, Node, Part
-from fascat.io import step as _step
+from fascat.io import _import_base as _base
 from fascat.io._errors import wrap_io_errors
+from fascat.io._reader_utils import (
+    coerce_read_options,
+    patch_bytes_source,
+    read_via_temporary_file,
+)
 from fascat.io._suffixes import IGES_SUFFIXES
+from fascat.io.step import materials as _materials
+from fascat.io.step import textures as _textures
+from fascat.io.step import xde as _xde
 from fascat.material import Material
 from fascat.options import IgesReadOptions, StepReadOptions
 from fascat.report import Report, timed_step
@@ -29,24 +35,14 @@ def read_iges_bytes(
     options: IgesReadOptions | StepReadOptions | None = None,
 ) -> Asset:
     suffix = Path(name).suffix.lower()
-    temp_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(suffix=suffix if suffix in IGES_SUFFIXES else ".igs", delete=False) as handle:
-            temp_path = Path(handle.name)
-            handle.write(data)
-            handle.flush()
-        assert temp_path is not None
-        asset = _read_iges_path(temp_path, source_identity=name, options=_coerce_options(options))
-    finally:
-        if temp_path is not None:
-            with suppress(FileNotFoundError):
-                temp_path.unlink()
-    asset.source_path = None
-    asset.report.source_path = None
-    asset.root.metadata["source"] = name
-    if asset.metadata:
-        asset.metadata["source"] = name
-        asset.metadata["source_identity"] = name
+    asset = read_via_temporary_file(
+        data,
+        suffix=suffix if suffix in IGES_SUFFIXES else ".igs",
+        source_identity=name,
+        options=_coerce_options(options),
+        reader=_read_iges_path,
+    )
+    patch_bytes_source(asset, name)
     return asset
 
 
@@ -56,13 +52,13 @@ def _read_iges_path(source: Path, *, source_identity: str, options: IgesReadOpti
     if source.suffix.lower() not in IGES_SUFFIXES:
         raise ValueError(f"unsupported IGES extension: {source.suffix or '<none>'}")
 
-    cleanup = _step._ImportCleanupStats()
+    cleanup = _base._ImportCleanupStats()
     with timed_step() as timer:
         document, shape_tool, color_tool, vis_material_tool = _read_xde_document(source, options)
-        space = _step._space_normalization("millimetre", 0.001, options)
-        free_labels = _step._free_shape_labels(shape_tool)
+        space = _base._space_normalization("millimetre", 0.001, options)
+        free_labels = _xde._free_shape_labels(shape_tool)
         root = Node(
-            id=_step._stable_id("node", f"{source_identity}:root"),
+            id=_base._stable_id("node", f"{source_identity}:root"),
             name=source.stem,
             transform=space.transform,
             metadata={
@@ -72,11 +68,11 @@ def _read_iges_path(source: Path, *, source_identity: str, options: IgesReadOpti
             },
         )
         parts: dict[str, Part] = {}
-        part_index: _step._PartIndex = {}
+        part_index: _base._PartIndex = {}
         materials: dict[str, Material] = {}
         for index, label in enumerate(free_labels, start=1):
             root.children.append(
-                _step._build_node(
+                _xde._build_node(
                     label,
                     f"root/{index}",
                     source_identity,
@@ -90,10 +86,12 @@ def _read_iges_path(source: Path, *, source_identity: str, options: IgesReadOpti
                     cleanup,
                 )
             )
-        source_textures = _step._extract_source_textures(source, source_identity, options)
-        texture_binding_summary = _step._attach_source_textures_to_materials(materials, source_textures.images)
-        material_libraries = _step._extract_material_libraries(source, source_identity, options)
-        material_library_binding_summary = _step._apply_material_libraries_to_materials(materials, material_libraries)
+        source_textures = _textures._extract_source_textures(source, source_identity, options)
+        texture_binding_summary = _textures._attach_source_textures_to_materials(materials, source_textures.images)
+        material_libraries = _materials._extract_material_libraries(source, source_identity, options)
+        material_library_binding_summary = _materials._apply_material_libraries_to_materials(
+            materials, material_libraries
+        )
         images = {**source_textures.images, **material_libraries.images}
 
     report = Report(source_path=str(source))
@@ -111,7 +109,7 @@ def _read_iges_path(source: Path, *, source_identity: str, options: IgesReadOpti
         report=report,
     )
     asset.report.input_stats = asset.stats()
-    loaded_representations = _step._loaded_representation_report(asset)
+    loaded_representations = _base._loaded_representation_report(asset)
     if asset.metadata:
         asset.metadata["import_representation_summary"] = loaded_representations["summary"]
         asset.metadata["source_texture_import"] = source_textures.summary
@@ -127,7 +125,7 @@ def _read_iges_path(source: Path, *, source_identity: str, options: IgesReadOpti
             "format": "IGES",
             "backend": "OCP",
             "read_options": options.to_dict(),
-            "metadata_count": _step._metadata_count(asset),
+            "metadata_count": _base._metadata_count(asset),
             "cleanup": cleanup.to_dict(),
             "space_normalization": space.metadata(),
             "source_textures": source_textures.summary,
@@ -179,14 +177,14 @@ def _asset_metadata(
     source: Path,
     source_identity: str,
     options: IgesReadOptions,
-    cleanup: _step._ImportCleanupStats,
-    space: _step._SpaceNormalization,
+    cleanup: _base._ImportCleanupStats,
+    space: _base._SpaceNormalization,
 ) -> dict[str, object]:
-    metadata = _step._asset_metadata(
+    metadata = _base._asset_metadata(
         source,
         source_identity,
         options,
-        _step._StepHeaderInfo(),
+        _base.CadHeaderInfo(),
         cleanup,
         space,
         source_texture_summary=None,
@@ -198,8 +196,4 @@ def _asset_metadata(
 
 
 def _coerce_options(options: IgesReadOptions | StepReadOptions | None) -> IgesReadOptions:
-    if options is None:
-        return IgesReadOptions()
-    if isinstance(options, IgesReadOptions):
-        return options
-    return IgesReadOptions(**cast(Any, options.to_dict()))
+    return coerce_read_options(options, IgesReadOptions)

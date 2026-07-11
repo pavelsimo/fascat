@@ -204,14 +204,18 @@ def test_asset_operations_return_new_assets_without_mutating_originals() -> None
 
 
 @pytest.mark.parametrize(
-    "input_name,reader_name",
-    [("input.igs", "read_iges"), ("input.brep", "read_brep"), ("input.jt", "read_jt")],
+    "input_name,reader_target",
+    [
+        ("input.igs", "fascat.io.iges.read_iges"),
+        ("input.brep", "fascat.io.brep.read_brep"),
+        ("input.jt", "fascat.io.jt.read_jt"),
+    ],
 )
 def test_convert_dispatches_non_step_cad_readers(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     input_name: str,
-    reader_name: str,
+    reader_target: str,
 ) -> None:
     captured: dict[str, object] = {}
 
@@ -220,7 +224,7 @@ def test_convert_dispatches_non_step_cad_readers(
         captured["options"] = options
         return _triangle_asset()
 
-    monkeypatch.setattr(pipeline, reader_name, fake_reader)
+    monkeypatch.setattr(reader_target, fake_reader)
 
     converted = convert(
         input_name,
@@ -721,20 +725,19 @@ def test_convert_preflights_output_path_before_reading_input(tmp_path: Path, mon
 
 
 def test_convert_report_includes_timed_write_and_validate_steps(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
     asset = _triangle_asset()
     written: dict[str, object] = {}
 
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: asset)
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: asset)
 
     def fake_write_usd(asset: Asset, path: str | Path, *, debug: bool = False, options: object = None) -> None:
         written["path"] = str(path)
         written["debug"] = debug
         written["triangles"] = asset.triangle_count
 
-    monkeypatch.setattr(pipeline, "_write_usd", fake_write_usd)
-    monkeypatch.setattr(pipeline, "validate_usd", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
+    monkeypatch.setattr("fascat.io.usd.write_usd_with_validation_stats", fake_write_usd)
+    monkeypatch.setattr("fascat.io.usd.validate_usd", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
 
     converted = convert(
         "input.step",
@@ -768,9 +771,11 @@ def test_convert_accepts_explicit_multi_step_input_sequence(monkeypatch, tmp_pat
         captured["options"] = options
         return _triangle_asset()
 
-    monkeypatch.setattr(pipeline, "read_step_many", fake_read_step_many)
-    monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False, options=None: None)
-    monkeypatch.setattr(pipeline, "validate_usd", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
+    monkeypatch.setattr("fascat.io.step.read_step_many", fake_read_step_many)
+    monkeypatch.setattr(
+        "fascat.io.usd.write_usd_with_validation_stats", lambda _asset, _path, *, debug=False, options=None: None
+    )
+    monkeypatch.setattr("fascat.io.usd.validate_usd", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
 
     imported = convert(
         [tmp_path / "body.step", tmp_path / "fasteners.stp"],
@@ -786,7 +791,6 @@ def test_convert_accepts_explicit_multi_step_input_sequence(monkeypatch, tmp_pat
 
 
 def test_convert_can_run_toml_pipeline_steps(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
     asset = _triangle_asset()
     pipeline_file = tmp_path / "pipeline.toml"
@@ -809,13 +813,13 @@ mode = "bounding_box"
     )
     captured: dict[str, Asset] = {}
 
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: asset)
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: asset)
 
     def fake_write_usd(written_asset: Asset, _path: str | Path, *, debug: bool = False, options: object = None) -> None:
         captured["asset"] = written_asset
 
-    monkeypatch.setattr(pipeline, "_write_usd", fake_write_usd)
-    monkeypatch.setattr(pipeline, "validate_usd", lambda _path: {"meshes": 1, "points": 8, "triangles": 12})
+    monkeypatch.setattr("fascat.io.usd.write_usd_with_validation_stats", fake_write_usd)
+    monkeypatch.setattr("fascat.io.usd.validate_usd", lambda _path: {"meshes": 1, "points": 8, "triangles": 12})
 
     converted = convert("input.step", tmp_path / "output.usdc", pipeline=PipelineSpec.from_file(pipeline_file))
 
@@ -1117,18 +1121,17 @@ def test_pipeline_stage_normal_controls_are_parsed() -> None:
 
 
 def test_pipeline_advisories_are_added_to_convert_report(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
     captured: dict[str, Asset] = {}
     spec = PipelineSpec.from_dict({"steps": [{"op": "decimate", "target_ratio": 0.9}, {"op": "repair"}]})
 
-    monkeypatch.setattr(pipeline, "read_step", lambda _path, *, options=None: _triangle_asset())
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path, *, options=None: _triangle_asset())
 
     def fake_write_usd(written_asset: Asset, _path: str | Path, *, debug: bool = False, options: object = None) -> None:
         captured["asset"] = written_asset
 
-    monkeypatch.setattr(pipeline, "_write_usd", fake_write_usd)
-    monkeypatch.setattr(pipeline, "validate_usd", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
+    monkeypatch.setattr("fascat.io.usd.write_usd_with_validation_stats", fake_write_usd)
+    monkeypatch.setattr("fascat.io.usd.validate_usd", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
 
     converted = convert("input.step", tmp_path / "output.usdc", pipeline=spec)
 
@@ -1137,10 +1140,9 @@ def test_pipeline_advisories_are_added_to_convert_report(monkeypatch, tmp_path: 
 
 
 def test_convert_report_includes_preflight_checklist(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
-    monkeypatch.setattr(pipeline, "_write_gltf", lambda _asset, _path, *, options=None: None)
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr("fascat.io.gltf.write_gltf_with_validation", lambda _asset, _path, *, options=None: None)
 
     converted = convert(
         "input.step",
@@ -1166,10 +1168,11 @@ def test_convert_report_includes_preflight_checklist(monkeypatch, tmp_path: Path
 
 
 def test_convert_report_includes_workflow_summary(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
-    monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False, options=None: None)
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr(
+        "fascat.io.usd.write_usd_with_validation_stats", lambda _asset, _path, *, debug=False, options=None: None
+    )
 
     converted = convert(
         "input.step",
@@ -1255,7 +1258,6 @@ def test_convert_pipeline_file_can_set_import_and_export_metadata(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    import fascat.pipeline as pipeline
 
     pipeline_file = tmp_path / "metadata-pipeline.toml"
     pipeline_file.write_text(
@@ -1301,9 +1303,9 @@ op = "repair"
     def fake_write_gltf(_asset: Asset, _path: str | Path, *, options: object = None) -> None:
         captured["export_options"] = options
 
-    monkeypatch.setattr(pipeline, "read_step", fake_read_step)
-    monkeypatch.setattr(pipeline, "_write_gltf", fake_write_gltf)
-    monkeypatch.setattr(pipeline, "validate_gltf", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
+    monkeypatch.setattr("fascat.io.step.read_step", fake_read_step)
+    monkeypatch.setattr("fascat.io.gltf.write_gltf_with_validation", fake_write_gltf)
+    monkeypatch.setattr("fascat.io.gltf.validate_gltf", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
 
     converted = convert("input.step", tmp_path / "output.glb", pipeline=PipelineSpec.from_file(pipeline_file))
 
@@ -1339,19 +1341,18 @@ op = "repair"
 
 
 def test_convert_dispatches_gltf_writer_and_validator(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
     asset = _triangle_asset()
     written: dict[str, object] = {}
 
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: asset)
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: asset)
 
     def fake_write_gltf(asset: Asset, path: str | Path, *, options: object = None) -> None:
         written["path"] = str(path)
         written["triangles"] = asset.triangle_count
 
-    monkeypatch.setattr(pipeline, "_write_gltf", fake_write_gltf)
-    monkeypatch.setattr(pipeline, "validate_gltf", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
+    monkeypatch.setattr("fascat.io.gltf.write_gltf_with_validation", fake_write_gltf)
+    monkeypatch.setattr("fascat.io.gltf.validate_gltf", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
 
     converted = convert(
         "input.step",
@@ -1392,16 +1393,50 @@ def test_convert_dispatches_gltf_writer_and_validator(monkeypatch, tmp_path: Pat
     assert steps["validate"].after["validated_triangles"] == 1
 
 
+def test_usdz_write_normalizes_backend_options_without_changing_reported_options(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    asset = _triangle_asset()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: asset)
+
+    def fake_write_usd(
+        _asset: Asset,
+        _path: str | Path,
+        *,
+        debug: bool = False,
+        options: object = None,
+    ) -> None:
+        captured["debug"] = debug
+        captured["options"] = options
+
+    monkeypatch.setattr("fascat.io.usd.write_usd_with_validation_stats", fake_write_usd)
+
+    converted = convert(
+        "input.step",
+        tmp_path / "output.usdz",
+        profile=_test_profile(),
+        validate_output=False,
+    )
+
+    backend_options = captured["options"]
+    assert isinstance(backend_options, UsdExportOptions)
+    assert backend_options.package == "usdz"
+    write_step = next(step for step in converted.report.steps if step.name == "write")
+    assert write_step.options["package"] == "default"
+
+
 def test_convert_applies_gltf_export_preset_to_write_and_texture_cleanup(
     monkeypatch,
     tmp_path: Path,
 ) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
     asset = _triangle_asset()
     written: dict[str, object] = {}
 
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: asset)
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: asset)
 
     def fake_write_gltf(
         written_asset: Asset,
@@ -1416,7 +1451,7 @@ def test_convert_applies_gltf_export_preset_to_write_and_texture_cleanup(
         ]
         return {"meshes": 1, "points": 3, "triangles": 1}
 
-    monkeypatch.setattr(pipeline, "_write_gltf", fake_write_gltf)
+    monkeypatch.setattr("fascat.io.gltf.write_gltf_with_validation", fake_write_gltf)
 
     converted = convert(
         "input.step",
@@ -1446,18 +1481,17 @@ def test_convert_applies_gltf_export_preset_to_write_and_texture_cleanup(
 
 
 def test_convert_reuses_gltf_writer_validation_stats(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
     asset = _triangle_asset()
 
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: asset)
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: asset)
 
     def fake_write_gltf(_asset: Asset, path: str | Path, *, options: object = None) -> dict[str, int]:
         Path(path).write_bytes(b"not parsed by this test")
         return {"meshes": 2, "points": 6, "triangles": 2}
 
-    monkeypatch.setattr(pipeline, "_write_gltf", fake_write_gltf)
-    monkeypatch.setattr(pipeline, "validate_gltf", lambda _path: pytest.fail("validation should stay in memory"))
+    monkeypatch.setattr("fascat.io.gltf.write_gltf_with_validation", fake_write_gltf)
+    monkeypatch.setattr("fascat.io.gltf.validate_gltf", lambda _path: pytest.fail("validation should stay in memory"))
 
     converted = convert(
         "input.step",
@@ -1472,9 +1506,8 @@ def test_convert_reuses_gltf_writer_validation_stats(monkeypatch, tmp_path: Path
 
 
 def test_convert_reuses_usd_writer_validation_stats(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: _triangle_asset())
 
     def fake_write_usd(
         _asset: Asset,
@@ -1486,8 +1519,8 @@ def test_convert_reuses_usd_writer_validation_stats(monkeypatch, tmp_path: Path)
         Path(path).write_text("#usda 1.0\n", encoding="utf-8")
         return {"meshes": 3, "points": 9, "triangles": 3}
 
-    monkeypatch.setattr(pipeline, "_write_usd", fake_write_usd)
-    monkeypatch.setattr(pipeline, "validate_usd", lambda _path: pytest.fail("validation should stay in memory"))
+    monkeypatch.setattr("fascat.io.usd.write_usd_with_validation_stats", fake_write_usd)
+    monkeypatch.setattr("fascat.io.usd.validate_usd", lambda _path: pytest.fail("validation should stay in memory"))
 
     converted = convert(
         "input.step",
@@ -1502,16 +1535,15 @@ def test_convert_reuses_usd_writer_validation_stats(monkeypatch, tmp_path: Path)
 
 
 def test_convert_reuses_obj_writer_validation_stats(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: _triangle_asset())
 
     def fake_write_obj(_asset: Asset, path: str | Path, *, options: object = None) -> dict[str, int]:
         Path(path).write_text("# not parsed by this test\n", encoding="utf-8")
         return {"meshes": 1, "points": 9, "triangles": 3}
 
-    monkeypatch.setattr(pipeline, "_write_obj", fake_write_obj)
-    monkeypatch.setattr(pipeline, "validate_obj", lambda _path: pytest.fail("validation should stay in memory"))
+    monkeypatch.setattr("fascat.io.obj.write_obj_with_validation_stats", fake_write_obj)
+    monkeypatch.setattr("fascat.io.obj.validate_obj", lambda _path: pytest.fail("validation should stay in memory"))
 
     converted = convert(
         "input.step",
@@ -1526,16 +1558,15 @@ def test_convert_reuses_obj_writer_validation_stats(monkeypatch, tmp_path: Path)
 
 
 def test_convert_reuses_stl_writer_validation_stats(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: _triangle_asset())
 
     def fake_write_stl(_asset: Asset, path: str | Path, *, options: object = None) -> dict[str, int]:
         Path(path).write_bytes(b"not parsed by this test")
         return {"meshes": 1, "points": 12, "triangles": 4}
 
-    monkeypatch.setattr(pipeline, "_write_stl", fake_write_stl)
-    monkeypatch.setattr(pipeline, "validate_stl", lambda _path: pytest.fail("validation should stay in memory"))
+    monkeypatch.setattr("fascat.io.stl.write_stl_with_validation_stats", fake_write_stl)
+    monkeypatch.setattr("fascat.io.stl.validate_stl", lambda _path: pytest.fail("validation should stay in memory"))
 
     converted = convert(
         "input.step",
@@ -1550,16 +1581,15 @@ def test_convert_reuses_stl_writer_validation_stats(monkeypatch, tmp_path: Path)
 
 
 def test_convert_reuses_fbx_writer_validation_stats(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: _triangle_asset())
 
     def fake_write_fbx(_asset: Asset, path: str | Path, *, options: object = None) -> dict[str, int]:
         Path(path).write_text("; not parsed by this test\n", encoding="utf-8")
         return {"meshes": 1, "points": 15, "triangles": 5}
 
-    monkeypatch.setattr(pipeline, "_write_fbx", fake_write_fbx)
-    monkeypatch.setattr(pipeline, "validate_fbx", lambda _path: pytest.fail("validation should stay in memory"))
+    monkeypatch.setattr("fascat.io.fbx.write_fbx_with_validation_stats", fake_write_fbx)
+    monkeypatch.setattr("fascat.io.fbx.validate_fbx", lambda _path: pytest.fail("validation should stay in memory"))
 
     converted = convert(
         "input.step",
@@ -1575,11 +1605,12 @@ def test_convert_reuses_fbx_writer_validation_stats(monkeypatch, tmp_path: Path)
 
 
 def test_convert_report_output_stats_include_lod_totals(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
-    monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False, options=None: None)
-    monkeypatch.setattr(pipeline, "validate_usd", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr(
+        "fascat.io.usd.write_usd_with_validation_stats", lambda _asset, _path, *, debug=False, options=None: None
+    )
+    monkeypatch.setattr("fascat.io.usd.validate_usd", lambda _path: {"meshes": 1, "points": 3, "triangles": 1})
 
     converted = convert(
         "input.step",
@@ -1596,7 +1627,6 @@ def test_convert_report_output_stats_include_lod_totals(monkeypatch, tmp_path: P
 
 
 def test_convert_report_checks_profile_budget(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
     profile = ConversionProfile(
         name="strict",
@@ -1627,8 +1657,10 @@ def test_convert_report_checks_profile_budget(monkeypatch, tmp_path: Path) -> No
         base_color=(1.0, 1.0, 1.0, 1.0),
         metadata={"baked_texture_resolution": "2048", "baked_maps": "base_color,opacity,normal"},
     )
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: source)
-    monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False, options=None: None)
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: source)
+    monkeypatch.setattr(
+        "fascat.io.usd.write_usd_with_validation_stats", lambda _asset, _path, *, debug=False, options=None: None
+    )
 
     converted = convert("input.step", tmp_path / "output.usdc", profile=profile, validate_output=False)
     budget_step = converted.report.steps[-1]
@@ -1740,7 +1772,6 @@ def test_profile_budget_reuses_texture_summaries(monkeypatch: pytest.MonkeyPatch
 
 
 def test_convert_reports_texture_export_policy_before_write(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
     profile = ConversionProfile(
         name="texture-cap",
@@ -1765,8 +1796,8 @@ def test_convert_reports_texture_export_policy_before_write(monkeypatch, tmp_pat
         base_color=(1.0, 0.0, 0.0, 1.0),
         metadata={"baked_texture_resolution": "4096", "baked_maps": "base_color"},
     )
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: source)
-    monkeypatch.setattr(pipeline, "_write_gltf", lambda _asset, _path, *, options=None: None)
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: source)
+    monkeypatch.setattr("fascat.io.gltf.write_gltf_with_validation", lambda _asset, _path, *, options=None: None)
 
     converted = convert(
         "input.step",
@@ -1862,7 +1893,6 @@ def test_texture_export_policy_reuses_summary_entries(monkeypatch: pytest.Monkey
 
 
 def test_convert_reports_alpha_risk_for_explicit_jpeg_texture_fallback(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
     source = _triangle_asset()
     source.parts["part"].material_ids = ["glass"]
@@ -1873,8 +1903,8 @@ def test_convert_reports_alpha_risk_for_explicit_jpeg_texture_fallback(monkeypat
         opacity=0.35,
         metadata={"baked_texture_resolution": "512", "baked_maps": "base_color,opacity"},
     )
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: source)
-    monkeypatch.setattr(pipeline, "_write_gltf", lambda _asset, _path, *, options=None: None)
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: source)
+    monkeypatch.setattr("fascat.io.gltf.write_gltf_with_validation", lambda _asset, _path, *, options=None: None)
 
     converted = convert(
         "input.step",
@@ -1899,7 +1929,6 @@ def test_convert_reports_alpha_risk_for_explicit_jpeg_texture_fallback(monkeypat
 
 
 def test_convert_report_checks_profile_runtime_caps(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
     profile = ConversionProfile(
         name="web-cap",
@@ -1913,8 +1942,8 @@ def test_convert_report_checks_profile_runtime_caps(monkeypatch, tmp_path: Path)
             supported_runtime_extensions=("KHR_mesh_quantization",),
         ),
     )
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
-    monkeypatch.setattr(pipeline, "_write_gltf", lambda _asset, _path, *, options=None: None)
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr("fascat.io.gltf.write_gltf_with_validation", lambda _asset, _path, *, options=None: None)
 
     converted = convert(
         "input.step",
@@ -1942,10 +1971,11 @@ def test_convert_report_checks_profile_runtime_caps(monkeypatch, tmp_path: Path)
 
 
 def test_convert_report_records_workflow_recipe(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
-    monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False, options=None: None)
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr(
+        "fascat.io.usd.write_usd_with_validation_stats", lambda _asset, _path, *, debug=False, options=None: None
+    )
 
     converted = convert(
         "input.step",
@@ -1970,10 +2000,11 @@ def test_convert_report_records_workflow_recipe(monkeypatch, tmp_path: Path) -> 
 
 
 def test_convert_report_finishes_when_validation_is_disabled(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
-    monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False, options=None: None)
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr(
+        "fascat.io.usd.write_usd_with_validation_stats", lambda _asset, _path, *, debug=False, options=None: None
+    )
 
     converted = convert(
         "input.step",
@@ -1990,10 +2021,11 @@ def test_convert_report_finishes_when_validation_is_disabled(monkeypatch, tmp_pa
 
 
 def test_convert_accepts_profile_name_overrides(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
-    monkeypatch.setattr(pipeline, "_write_usd", lambda _asset, _path, *, debug=False, options=None: None)
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr(
+        "fascat.io.usd.write_usd_with_validation_stats", lambda _asset, _path, *, debug=False, options=None: None
+    )
 
     converted = convert(
         "input.step",
@@ -2033,13 +2065,13 @@ def test_convert_resolves_usd_layout_from_profile(  # type: ignore[no-untyped-de
     usd_options: UsdExportOptions | None,
     expected_layout: str,
 ) -> None:
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: _triangle_asset())
     captured: dict[str, UsdExportOptions | None] = {}
 
     def _capture_write(_asset: Asset, _path: object, *, debug: bool = False, options: object = None) -> None:
         captured["options"] = options  # type: ignore[assignment]
 
-    monkeypatch.setattr(pipeline, "_write_usd", _capture_write)
+    monkeypatch.setattr("fascat.io.usd.write_usd_with_validation_stats", _capture_write)
 
     converted = convert(
         "input.step",
@@ -2067,16 +2099,15 @@ def test_convert_rejects_profile_overrides_for_profile_objects(tmp_path: Path) -
 
 
 def test_convert_report_records_write_failure(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
     captured: dict[str, Asset] = {}
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: _triangle_asset())
 
     def fail_write_usd(asset: Asset, _path: str | Path, *, debug: bool = False, options: object = None) -> None:
         captured["asset"] = asset
         raise RuntimeError("disk full")
 
-    monkeypatch.setattr(pipeline, "_write_usd", fail_write_usd)
+    monkeypatch.setattr("fascat.io.usd.write_usd_with_validation_stats", fail_write_usd)
 
     with pytest.raises(RuntimeError, match="disk full") as error:
         convert("input.step", tmp_path / "output.usdc", profile=_test_profile())
@@ -2092,16 +2123,15 @@ def test_convert_report_records_write_failure(monkeypatch, tmp_path: Path) -> No
 
 
 def test_convert_report_records_validation_failure(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
     captured: dict[str, Asset] = {}
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: _triangle_asset())
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: _triangle_asset())
 
     def fake_write_usd(asset: Asset, _path: str | Path, *, debug: bool = False, options: object = None) -> None:
         captured["asset"] = asset
 
-    monkeypatch.setattr(pipeline, "_write_usd", fake_write_usd)
-    monkeypatch.setattr(pipeline, "validate_usd", lambda _path: (_ for _ in ()).throw(RuntimeError("invalid usd")))
+    monkeypatch.setattr("fascat.io.usd.write_usd_with_validation_stats", fake_write_usd)
+    monkeypatch.setattr("fascat.io.usd.validate_usd", lambda _path: (_ for _ in ()).throw(RuntimeError("invalid usd")))
 
     with pytest.raises(RuntimeError, match="invalid usd") as error:
         convert("input.step", tmp_path / "output.usdc", profile=_test_profile())
@@ -2131,15 +2161,14 @@ def test_operation_report_step_captures_warnings() -> None:
 
 
 def test_convert_records_failed_write_step_on_interrupt(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    import fascat.pipeline as pipeline
 
     asset = _triangle_asset()
-    monkeypatch.setattr(pipeline, "read_step", lambda _path: asset)
+    monkeypatch.setattr("fascat.io.step.read_step", lambda _path: asset)
 
     def interrupt_write(*_args: object, **_kwargs: object) -> None:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(pipeline, "_write_usd", interrupt_write)
+    monkeypatch.setattr("fascat.io.usd.write_usd_with_validation_stats", interrupt_write)
 
     with pytest.raises(KeyboardInterrupt) as excinfo:
         convert("input.step", tmp_path / "output.usdc", profile=_test_profile())

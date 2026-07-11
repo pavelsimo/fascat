@@ -8,7 +8,6 @@ and flow through the mesh-reuse pipeline path without OCP.
 
 from __future__ import annotations
 
-import hashlib
 import math
 from pathlib import Path
 from typing import Any, cast
@@ -16,8 +15,9 @@ from typing import Any, cast
 import numpy as np
 
 from fascat.asset import Asset, Node, Part
-from fascat.io import step as _step
+from fascat.io import _import_base as _base
 from fascat.io._errors import wrap_io_errors
+from fascat.io._reader_utils import coerce_read_options, patch_bytes_source
 from fascat.io._suffixes import JT_SUFFIXES
 from fascat.io.jt import lsg as _lsg
 from fascat.io.jt.container import (
@@ -71,25 +71,16 @@ def read_jt_bytes(
     options: JtReadOptions | StepReadOptions | None = None,
 ) -> Asset:
     asset = _read_jt_data(data, source=Path(name), source_identity=name, options=_coerce_options(options))
-    asset.source_path = None
-    asset.report.source_path = None
-    asset.root.metadata["source"] = name
-    if asset.metadata:
-        asset.metadata["source"] = name
-        asset.metadata["source_identity"] = name
+    patch_bytes_source(asset, name)
     return asset
 
 
 def _coerce_options(options: JtReadOptions | StepReadOptions | None) -> JtReadOptions:
-    if options is None:
-        return JtReadOptions()
-    if isinstance(options, JtReadOptions):
-        return options
-    return JtReadOptions(**cast(Any, options.to_dict()))
+    return coerce_read_options(options, JtReadOptions)
 
 
 def _read_jt_data(data: bytes, *, source: Path, source_identity: str, options: JtReadOptions) -> Asset:
-    cleanup = _step._ImportCleanupStats()
+    cleanup = _base._ImportCleanupStats()
     warnings: list[str] = []
     with timed_step() as timer:
         header = read_file_header(data)
@@ -105,7 +96,7 @@ def _read_jt_data(data: bytes, *, source: Path, source_identity: str, options: J
             byte_order=header.byte_order,
         )
         unit_name, meters_per_unit = _resolve_units(graph, warnings)
-        space = _step._space_normalization(unit_name, meters_per_unit, options)
+        space = _base._space_normalization(unit_name, meters_per_unit, options)
         traverser = _Traverser(data, header, toc, graph, options, source_identity, warnings)
         root = traverser.build_root(source.stem, space)
         if not traverser.parts:
@@ -125,7 +116,7 @@ def _read_jt_data(data: bytes, *, source: Path, source_identity: str, options: J
         report=report,
     )
     asset.report.input_stats = asset.stats()
-    loaded_representations = _step._loaded_representation_report(asset)
+    loaded_representations = _base._loaded_representation_report(asset)
     if asset.metadata:
         asset.metadata["import_representation_summary"] = loaded_representations["summary"]
     for warning in warnings:
@@ -137,7 +128,7 @@ def _read_jt_data(data: bytes, *, source: Path, source_identity: str, options: J
             "backend": "pure-python",
             "jt_version": f"{header.version[0]}.{header.version[1]}",
             "read_options": options.to_dict(),
-            "metadata_count": _step._metadata_count(asset),
+            "metadata_count": _base._metadata_count(asset),
             "cleanup": cleanup.to_dict(),
             "space_normalization": space.metadata(),
             "lod_summary": traverser.lod_summary(),
@@ -156,10 +147,10 @@ def _asset_metadata(
     source: Path,
     source_identity: str,
     options: JtReadOptions,
-    cleanup: _step._ImportCleanupStats,
-    space: _step._SpaceNormalization,
+    cleanup: _base._ImportCleanupStats,
+    space: _base._SpaceNormalization,
 ) -> dict[str, object]:
-    metadata = _step._asset_metadata(source, source_identity, options, _step._StepHeaderInfo(), cleanup, space)
+    metadata = _base._asset_metadata(source, source_identity, options, _base.CadHeaderInfo(), cleanup, space)
     if metadata:
         metadata["format"] = "JT"
     return metadata
@@ -187,8 +178,7 @@ def _resolve_units(graph: _lsg.Lsg, warnings: list[str]) -> tuple[str, float]:
 
 
 def _stable_id(prefix: str, value: str) -> str:
-    digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
-    return f"{prefix}_{digest}"
+    return _base._stable_id(prefix, value)
 
 
 def _material_id(color: tuple[float, float, float, float]) -> str:
@@ -231,7 +221,7 @@ class _Traverser:
             "parts_with_lods": sum(1 for part in self.parts.values() if part.lod_meshes),
         }
 
-    def build_root(self, default_name: str, space: _step._SpaceNormalization) -> Node:
+    def build_root(self, default_name: str, space: _base._SpaceNormalization) -> Node:
         root_id = self._find_root_id()
         metadata: dict[str, object] = {
             "source": self._source_identity,

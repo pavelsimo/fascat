@@ -4,8 +4,10 @@ from pathlib import Path
 
 import pytest
 
+import fascat as fc
+import fascat.io.iges as iges_io
 from fascat.errors import FascatIOError
-from fascat.io.iges import read_iges
+from fascat.io.iges import read_iges, read_iges_bytes
 from fascat.options import IgesReadOptions
 
 pytestmark = pytest.mark.requires_ocp
@@ -46,3 +48,24 @@ def test_read_iges_rejects_non_iges_extension(tmp_path: Path) -> None:
         read_iges(source)
 
     assert isinstance(error.value.__cause__, ValueError)
+
+
+@pytest.mark.parametrize(("name", "suffix"), [("input.iges", ".iges"), ("input.step", ".igs")])
+def test_read_iges_bytes_uses_format_suffix(
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    suffix: str,
+) -> None:
+    seen_paths: list[Path] = []
+
+    def fake_read_iges_path(path: Path, *, source_identity: str, options: IgesReadOptions) -> fc.Asset:
+        assert source_identity == name
+        assert path.suffix == suffix
+        seen_paths.append(path)
+        return fc.Asset(root=fc.Node(id="root", name="Root"))
+
+    monkeypatch.setattr(iges_io, "_read_iges_path", fake_read_iges_path)
+
+    read_iges_bytes(b"IGES", name=name)
+
+    assert seen_paths and not seen_paths[0].exists()

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from dataclasses import replace as dataclass_replace
 from pathlib import Path
@@ -170,6 +170,13 @@ class Node:
         for child in self.children:
             nodes.extend(child.walk())
         return nodes
+
+    def walk_world(self, parent_transform: Transform | None = None) -> Iterator[tuple[Node, Transform]]:
+        """Yield (node, world_transform) pairs in depth-first order."""
+        current = self.transform.copy() if parent_transform is None else parent_transform @ self.transform
+        yield self, current.copy()
+        for child in self.children:
+            yield from child.walk_world(current)
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable assembly-node representation."""
@@ -1043,24 +1050,20 @@ class Asset:
         **kwargs: Unpack[BakeMaterialsKwargs],
     ) -> Asset:
         """Return a new asset with selected material properties baked to atlas resources."""
-        from fascat.ops.actions import bake_materials_asset
+        from fascat.ops.bake import bake_materials_asset
 
         opts = _make_options(BakeMaterialOptions, options, kwargs)
-        scope = self._operation_scope(where)
-        before = _hierarchy_report_stats(self)
-        warning_count = len(self.report.warnings)
-        with timed_step() as timer:
-            asset = bake_materials_asset(scope.asset, opts, selected_part_ids=scope.selected_part_ids)
-        step_warnings = asset.report.warnings[warning_count:]
-        asset.report.add_step(
+        return self._run_scoped_op(
             "bake_materials",
-            options=_options_with_scope(opts.to_dict(), scope),
-            before=before,
-            after=_hierarchy_report_stats(asset),
-            duration=timer.duration,
-            warnings=step_warnings,
+            lambda scope: bake_materials_asset(
+                scope.asset,
+                opts,
+                selected_part_ids=scope.selected_part_ids,
+            ),
+            lambda _scope: opts.to_dict(),
+            where=where,
+            after_stats=_hierarchy_report_stats,
         )
-        return asset
 
     def process_textures(
         self,
@@ -1094,25 +1097,23 @@ class Asset:
         **kwargs: Unpack[DecimateKwargs],
     ) -> Asset:
         """Return a new asset with selected meshes decimated by target or quality budget."""
-        from fascat.ops.actions import decimate_asset, decimation_target_strategy
+        from fascat.ops.decimate import decimate_asset, decimation_target_strategy
 
         opts = _make_options(DecimateOptions, options, kwargs)
-        scope = self._operation_scope(where)
-        before = _hierarchy_report_stats(self)
-        warning_count = len(self.report.warnings)
-        target_strategy = decimation_target_strategy(scope.asset, opts, selected_part_ids=scope.selected_part_ids)
-        with timed_step() as timer:
-            asset = decimate_asset(scope.asset, opts, selected_part_ids=scope.selected_part_ids)
-        step_warnings = asset.report.warnings[warning_count:]
-        asset.report.add_step(
+        return self._run_scoped_op(
             "decimate",
-            options=_options_with_scope({**opts.to_dict(), "target_strategy": target_strategy}, scope),
-            before=before,
-            after=_decimation_report_stats(asset),
-            duration=timer.duration,
-            warnings=step_warnings,
+            lambda scope: decimate_asset(scope.asset, opts, selected_part_ids=scope.selected_part_ids),
+            lambda scope: {
+                **opts.to_dict(),
+                "target_strategy": decimation_target_strategy(
+                    scope.asset,
+                    opts,
+                    selected_part_ids=scope.selected_part_ids,
+                ),
+            },
+            where=where,
+            after_stats=_decimation_report_stats,
         )
-        return asset
 
     def remove_holes(
         self,
@@ -1122,24 +1123,16 @@ class Asset:
         **kwargs: Unpack[RemoveHolesKwargs],
     ) -> Asset:
         """Return a new asset with selected mesh holes filled or removed."""
-        from fascat.ops.actions import remove_holes_asset
+        from fascat.ops.holes import remove_holes_asset
 
         opts = _make_options(RemoveHolesOptions, options, kwargs)
-        scope = self._operation_scope(where)
-        before = _hierarchy_report_stats(self)
-        warning_count = len(self.report.warnings)
-        with timed_step() as timer:
-            asset = remove_holes_asset(scope.asset, opts, selected_part_ids=scope.selected_part_ids)
-        step_warnings = asset.report.warnings[warning_count:]
-        asset.report.add_step(
+        return self._run_scoped_op(
             "remove_holes",
-            options=_options_with_scope(opts.to_dict(), scope),
-            before=before,
-            after=_hierarchy_report_stats(asset),
-            duration=timer.duration,
-            warnings=step_warnings,
+            lambda scope: remove_holes_asset(scope.asset, opts, selected_part_ids=scope.selected_part_ids),
+            lambda _scope: opts.to_dict(),
+            where=where,
+            after_stats=_hierarchy_report_stats,
         )
-        return asset
 
     def remove_occluded(
         self,
@@ -1149,29 +1142,25 @@ class Asset:
         **kwargs: Unpack[RemoveOccludedKwargs],
     ) -> Asset:
         """Return a new asset with selected occluded geometry removed."""
-        from fascat.ops.actions import remove_occluded_asset
+        from fascat.ops.occlusion import remove_occluded_asset
 
         opts = _make_options(RemoveOccludedOptions, options, kwargs)
-        scope = self._operation_scope(where)
-        selected_node_ids = (
-            scope.selection.node_ids
-            if scope.selection is not None
-            else {node.id for node in scope.asset._hierarchy_nodes() if node.part_id is not None}
-        )
-        before = _hierarchy_report_stats(self)
-        warning_count = len(self.report.warnings)
-        with timed_step() as timer:
-            asset = remove_occluded_asset(scope.asset, opts, selected_node_ids=selected_node_ids)
-        step_warnings = asset.report.warnings[warning_count:]
-        asset.report.add_step(
+
+        def run(scope: _OperationScope) -> Asset:
+            selected_node_ids = (
+                scope.selection.node_ids
+                if scope.selection is not None
+                else {node.id for node in scope.asset._hierarchy_nodes() if node.part_id is not None}
+            )
+            return remove_occluded_asset(scope.asset, opts, selected_node_ids=selected_node_ids)
+
+        return self._run_scoped_op(
             "remove_occluded",
-            options=_options_with_scope(opts.to_dict(), scope),
-            before=before,
-            after=_hierarchy_report_stats(asset),
-            duration=timer.duration,
-            warnings=step_warnings,
+            run,
+            lambda _scope: opts.to_dict(),
+            where=where,
+            after_stats=_hierarchy_report_stats,
         )
-        return asset
 
     def run_lod_generators(
         self,
@@ -1181,24 +1170,20 @@ class Asset:
         **kwargs: Unpack[RunLodGeneratorsKwargs],
     ) -> Asset:
         """Return a new asset with screen-coverage LOD generator output."""
-        from fascat.ops.actions import run_lod_generators_asset
+        from fascat.ops.lod import run_lod_generators_asset
 
         opts = _make_options(LODGeneratorOptions, options, kwargs)
-        scope = self._operation_scope(where)
-        before = _hierarchy_report_stats(self)
-        warning_count = len(self.report.warnings)
-        with timed_step() as timer:
-            asset = run_lod_generators_asset(scope.asset, opts, selected_part_ids=scope.selected_part_ids)
-        step_warnings = asset.report.warnings[warning_count:]
-        asset.report.add_step(
+        return self._run_scoped_op(
             "run_lod_generators",
-            options=_options_with_scope(opts.to_dict(), scope),
-            before=before,
-            after=_lod_report_stats(asset),
-            duration=timer.duration,
-            warnings=step_warnings,
+            lambda scope: run_lod_generators_asset(
+                scope.asset,
+                opts,
+                selected_part_ids=scope.selected_part_ids,
+            ),
+            lambda _scope: opts.to_dict(),
+            where=where,
+            after_stats=_lod_report_stats,
         )
-        return asset
 
     def heal_brep(
         self,
@@ -1471,6 +1456,31 @@ class Asset:
             "report": self.report.to_dict(),
         }
 
+    def _run_scoped_op(
+        self,
+        step_name: str,
+        run: Callable[[_OperationScope], Asset],
+        step_options: Callable[[_OperationScope], dict[str, object]],
+        *,
+        where: WhereFilter,
+        after_stats: Callable[[Asset], dict[str, int]],
+    ) -> Asset:
+        scope = self._operation_scope(where)
+        before = _hierarchy_report_stats(self)
+        warning_count = len(self.report.warnings)
+        options = _options_with_scope(step_options(scope), scope)
+        with timed_step() as timer:
+            asset = run(scope)
+        asset.report.add_step(
+            step_name,
+            options=options,
+            before=before,
+            after=after_stats(asset),
+            duration=timer.duration,
+            warnings=asset.report.warnings[warning_count:],
+        )
+        return asset
+
     def _operation_scope(self, where: WhereFilter) -> _OperationScope:
         selector = Filter.from_value(where)
         if selector is None:
@@ -1524,11 +1534,7 @@ def _options_with_scope(options: dict[str, object], scope: _OperationScope) -> d
 
 
 def _node_world_transforms(node: Node, parent_transform: Transform | None = None) -> list[tuple[Node, Transform]]:
-    current = node.transform.copy() if parent_transform is None else parent_transform @ node.transform
-    nodes = [(node, current)]
-    for child in node.children:
-        nodes.extend(_node_world_transforms(child, current))
-    return nodes
+    return list(node.walk_world(parent_transform))
 
 
 def _trimesh_occurrence_metadata(*, node: Node, part: Part, lod_index: int | None) -> dict[str, object]:
@@ -2080,6 +2086,7 @@ def _decimation_report_stats(asset: Asset) -> dict[str, int]:
 
 
 def _unique_part_id(parts: dict[str, Part], base: str) -> str:
+    # Intentionally not ops._ids.unique_id: importing ops here creates an asset<->ops cycle.
     candidate = f"{base}_selected"
     suffix = 2
     while candidate in parts:

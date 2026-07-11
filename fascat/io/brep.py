@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-import hashlib
-import tempfile
-from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
 
 from fascat._ocp import shape_fingerprint as _shape_fingerprint
 from fascat.asset import Asset, Node, Part
-from fascat.io import step as _step
+from fascat.io import _import_base as _base
 from fascat.io._errors import wrap_io_errors
+from fascat.io._reader_utils import (
+    coerce_read_options,
+    patch_bytes_source,
+    read_via_temporary_file,
+)
 from fascat.io._suffixes import BREP_SUFFIXES
+from fascat.io.step import xde as _xde
 from fascat.material import Material
 from fascat.options import BrepReadOptions, StepReadOptions
 from fascat.report import Report, timed_step
@@ -32,24 +35,14 @@ def read_brep_bytes(
     name: str = "stdin.brep",
     options: BrepReadOptions | StepReadOptions | None = None,
 ) -> Asset:
-    temp_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".brep", delete=False) as handle:
-            temp_path = Path(handle.name)
-            handle.write(data)
-            handle.flush()
-        assert temp_path is not None
-        asset = _read_brep_path(temp_path, source_identity=name, options=_coerce_options(options))
-    finally:
-        if temp_path is not None:
-            with suppress(FileNotFoundError):
-                temp_path.unlink()
-    asset.source_path = None
-    asset.report.source_path = None
-    asset.root.metadata["source"] = name
-    if asset.metadata:
-        asset.metadata["source"] = name
-        asset.metadata["source_identity"] = name
+    asset = read_via_temporary_file(
+        data,
+        suffix=".brep",
+        source_identity=name,
+        options=_coerce_options(options),
+        reader=_read_brep_path,
+    )
+    patch_bytes_source(asset, name)
     return asset
 
 
@@ -59,13 +52,13 @@ def _read_brep_path(source: Path, *, source_identity: str, options: BrepReadOpti
     if source.suffix.lower() not in BREP_SUFFIXES:
         raise ValueError(f"unsupported BREP extension: {source.suffix or '<none>'}")
 
-    cleanup = _step._ImportCleanupStats()
+    cleanup = _base._ImportCleanupStats()
     with timed_step() as timer:
         shape = _read_shape(source)
-        topology = _step._shape_topology_counts(shape)
-        representation = _step._loaded_representation(topology)
+        topology = _xde._shape_topology_counts(shape)
+        representation = _base._loaded_representation(topology)
         cleanup.record_loaded(representation)
-        space = _step._space_normalization("millimetre", 0.001, options)
+        space = _base._space_normalization("millimetre", 0.001, options)
         material_id = _material_id(_DEFAULT_MATERIAL_COLOR)
         shape_hash = _shape_fingerprint(shape)
         part_id = _stable_id("part", f"{source_identity}:{shape_hash}")
@@ -127,7 +120,7 @@ def _read_brep_path(source: Path, *, source_identity: str, options: BrepReadOpti
         report=report,
     )
     asset.report.input_stats = asset.stats()
-    loaded_representations = _step._loaded_representation_report(asset)
+    loaded_representations = _base._loaded_representation_report(asset)
     if asset.metadata:
         asset.metadata["import_representation_summary"] = loaded_representations["summary"]
     asset.report.add_step(
@@ -136,7 +129,7 @@ def _read_brep_path(source: Path, *, source_identity: str, options: BrepReadOpti
             "format": "BREP",
             "backend": "OCP",
             "read_options": options.to_dict(),
-            "metadata_count": _step._metadata_count(asset),
+            "metadata_count": _base._metadata_count(asset),
             "cleanup": cleanup.to_dict(),
             "space_normalization": space.metadata(),
             "loaded_representations": loaded_representations,
@@ -167,14 +160,14 @@ def _asset_metadata(
     source: Path,
     source_identity: str,
     options: BrepReadOptions,
-    cleanup: _step._ImportCleanupStats,
-    space: _step._SpaceNormalization,
+    cleanup: _base._ImportCleanupStats,
+    space: _base._SpaceNormalization,
 ) -> dict[str, object]:
-    metadata = _step._asset_metadata(
+    metadata = _base._asset_metadata(
         source,
         source_identity,
         options,
-        _step._StepHeaderInfo(),
+        _base.CadHeaderInfo(),
         cleanup,
         space,
     )
@@ -184,11 +177,7 @@ def _asset_metadata(
 
 
 def _coerce_options(options: BrepReadOptions | StepReadOptions | None) -> BrepReadOptions:
-    if options is None:
-        return BrepReadOptions()
-    if isinstance(options, BrepReadOptions):
-        return options
-    return BrepReadOptions(**cast(Any, options.to_dict()))
+    return coerce_read_options(options, BrepReadOptions)
 
 
 def _material_id(color: tuple[float, float, float, float]) -> str:
@@ -197,5 +186,4 @@ def _material_id(color: tuple[float, float, float, float]) -> str:
 
 
 def _stable_id(prefix: str, value: str) -> str:
-    digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
-    return f"{prefix}_{digest}"
+    return _base._stable_id(prefix, value)

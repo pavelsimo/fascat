@@ -11,13 +11,13 @@ from fascat.asset import Asset, Node, Part
 from fascat.export_report import referenced_materials
 from fascat.io._atomic import atomic_output
 from fascat.io._errors import wrap_io_errors
+from fascat.io._geometry import face_normals
 from fascat.io._suffixes import FBX_SUFFIXES
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.options import FbxExportOptions
 
 FloatArray = NDArray[np.float64]
-IntArray = NDArray[np.int64]
 
 
 @dataclass(frozen=True)
@@ -230,9 +230,7 @@ def _geometry_object(object_id: int, part: Part, mesh: Mesh, options: FbxExportO
 
 
 def _normal_layer(mesh: Mesh) -> list[str]:
-    values = (
-        mesh.normals[mesh.faces] if mesh.normals is not None else _face_normals(mesh.points, mesh.faces)[:, None, :]
-    )
+    values = mesh.normals[mesh.faces] if mesh.normals is not None else face_normals(mesh.points, mesh.faces)[:, None, :]
     if mesh.normals is None:
         values = np.repeat(values, 3, axis=1)
     flat = values.reshape((-1, 3))
@@ -372,19 +370,6 @@ def _matrix_to_euler_xyz(matrix: FloatArray) -> FloatArray:
         x = np.arctan2(matrix[2, 1], matrix[1, 1])
         z = 0.0
     return np.degrees(np.array([x, y, z], dtype=np.float64))
-
-
-def _face_normals(points: FloatArray, faces: IntArray) -> FloatArray:
-    if faces.size == 0:
-        return np.empty((0, 3), dtype=np.float64)
-    triangles = points[faces]
-    normals = np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])
-    lengths = np.linalg.norm(normals, axis=1)
-    valid = lengths > 0.0
-    result = np.zeros_like(normals, dtype=np.float64)
-    result[valid] = normals[valid] / lengths[valid, None]
-    result[~valid] = np.array([0.0, 0.0, 1.0], dtype=np.float64)
-    return result
 
 
 def _array(values: FloatArray) -> str:

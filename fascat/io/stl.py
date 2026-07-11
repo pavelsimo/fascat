@@ -7,9 +7,10 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
-from fascat.asset import Asset, Node
+from fascat.asset import Asset
 from fascat.io._atomic import atomic_output
 from fascat.io._errors import wrap_io_errors
+from fascat.io._geometry import normalize_rows, transform_points
 from fascat.io._suffixes import STL_SUFFIXES
 from fascat.options import StlExportOptions
 
@@ -76,18 +77,12 @@ def validate_stl(path: str | Path) -> dict[str, int]:
 
 def _triangles(asset: Asset) -> FloatArray:
     chunks: list[FloatArray] = []
-
-    def walk(node: Node, world: FloatArray) -> None:
-        current = world @ node.transform
+    for node, current in asset.root.walk_world(np.eye(4, dtype=np.float64)):
         if node.part_id is not None and node.part_id in asset.parts:
             mesh = asset.parts[node.part_id].mesh
             if mesh is not None:
-                points = _transform_points(mesh.points, current)
+                points = transform_points(mesh.points, current)
                 chunks.append(points[mesh.faces].astype(np.float64))
-        for child in node.children:
-            walk(child, current)
-
-    walk(asset.root, np.eye(4, dtype=np.float64))
     if not chunks:
         return np.empty((0, 3, 3), dtype=np.float64)
     return np.concatenate(chunks, axis=0)
@@ -133,13 +128,4 @@ def _normals(triangles: FloatArray) -> FloatArray:
     if triangles.shape[0] == 0:
         return np.empty((0, 3), dtype=np.float64)
     normals = np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])
-    lengths = np.linalg.norm(normals, axis=1)
-    valid = lengths > 0.0
-    result = np.zeros_like(normals, dtype=np.float64)
-    result[valid] = normals[valid] / lengths[valid, None]
-    return result
-
-
-def _transform_points(points: FloatArray, transform: FloatArray) -> FloatArray:
-    homogeneous = np.column_stack([points, np.ones(points.shape[0], dtype=np.float64)])
-    return np.asarray((transform @ homogeneous.T).T[:, :3], dtype=np.float64)
+    return normalize_rows(normals, degenerate=None)

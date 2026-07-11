@@ -226,9 +226,10 @@ def test_scoped_optimize_only_changes_matching_parts(monkeypatch) -> None:  # ty
 
 
 def test_cli_inspect_filter_reports_matches(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    import fascat.cli as cli
-
-    monkeypatch.setattr(cli, "_read_cad_for_cli", lambda _path, _ctx, _payload, **_kwargs: _asset())
+    monkeypatch.setattr(
+        "fascat.cli._io_helpers._read_cad_for_cli",
+        lambda _path, _ctx, _payload, **_kwargs: _asset(),
+    )
 
     result = runner.invoke(
         app,
