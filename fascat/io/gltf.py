@@ -1518,7 +1518,9 @@ def _apply_meshopt_compression(document: dict[str, Any], binary: BinaryPayload) 
     try:
         import meshoptimizer
     except ImportError as exc:
-        raise RuntimeError("glTF meshopt compression requires meshoptimizer") from exc
+        raise RuntimeError(
+            'glTF meshopt compression requires the optional backend; install it with pip install "fascat[meshopt]"'
+        ) from exc
 
     payload = binary if isinstance(binary, bytearray) else bytearray(binary)
     accessors_by_view = _accessors_by_buffer_view(document)

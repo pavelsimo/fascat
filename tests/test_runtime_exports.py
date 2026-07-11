@@ -112,6 +112,7 @@ def test_asset_write_gltf_records_size_ladder_step(
 
 
 def test_gltf_export_options_write_meshopt_extension_and_file_budget(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    pytest.importorskip("meshoptimizer")
     asset = _asset()
     output = tmp_path / "triangle.gltf"
 

@@ -432,7 +432,6 @@ source = { editable = "." }
 dependencies = [
     { name = "cadquery-ocp" },
     { name = "fast-simplification" },
-    { name = "meshoptimizer" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pillow" },
@@ -447,6 +446,9 @@ dependencies = [
 [package.optional-dependencies]
 ktx2 = [
     { name = "alktx2", marker = "(python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'linux') or (python_full_version >= '3.11' and platform_machine == 'AMD64' and sys_platform == 'win32') or (python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'win32')" },
+]
+meshopt = [
+    { name = "meshoptimizer" },
 ]
 unwrap = [
     { name = "xatlas" },
@@ -465,7 +467,7 @@ requires-dist = [
     { name = "alktx2", marker = "(python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'ktx2') or (python_full_version >= '3.11' and platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'ktx2') or (python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'win32' and extra == 'ktx2')", specifier = ">=0.1.6" },
     { name = "cadquery-ocp", specifier = ">=7.7" },
     { name = "fast-simplification", specifier = ">=0.1" },
-    { name = "meshoptimizer", specifier = ">=0.2.30a0,<0.3" },
+    { name = "meshoptimizer", marker = "extra == 'meshopt'", specifier = ">=0.2.30a0,<0.3" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "pillow", specifier = ">=10.0" },
     { name = "rich", specifier = ">=13.0" },
@@ -476,7 +478,7 @@ requires-dist = [
     { name = "usd-core", specifier = ">=24.8" },
     { name = "xatlas", marker = "extra == 'unwrap'", specifier = ">=0.0.9" },
 ]
-provides-extras = ["ktx2", "unwrap"]
+provides-extras = ["ktx2", "meshopt", "unwrap"]
 
 [package.metadata.requires-dev]
 dev = [

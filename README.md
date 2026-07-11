@@ -33,6 +33,13 @@ pipx install fascat
 pip install fascat
 ```
 
+The base install does not require a C++ compiler. To enable optional glTF
+`EXT_meshopt_compression` export, install the meshopt backend separately:
+
+```bash
+pip install "fascat[meshopt]"
+```
+
 ## Quick Start
 
 ```bash

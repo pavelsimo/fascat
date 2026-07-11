@@ -24,9 +24,20 @@ from fascat.runtime import (
     RuntimeBrowserRenderOptions,
     _preview_document_copy,
     _runtime_browser_render_html,
+    _write_meshopt_decoded_preview_asset,
     measure_browser_runtime,
     write_browser_render_preview,
 )
+
+
+def test_meshopt_preview_reports_optional_extra_when_backend_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setitem(sys.modules, "meshoptimizer", None)
+
+    with pytest.raises(RuntimeError, match=r'pip install "fascat\[meshopt\]"'):
+        _write_meshopt_decoded_preview_asset(tmp_path / "asset.gltf", tmp_path / "decoded.gltf")
 
 
 def test_browser_runtime_reports_unavailable_when_browser_is_missing(
@@ -360,6 +371,7 @@ def test_browser_render_preview_decodes_meshopt_only_buffer_views(
     monkeypatch,  # type: ignore[no-untyped-def]
     tmp_path: Path,
 ) -> None:
+    pytest.importorskip("meshoptimizer")
     output = tmp_path / "asset.gltf"
     preview = tmp_path / "browser-preview.png"
     _asset().write_gltf(output, options=GltfExportOptions(meshopt=True))
@@ -643,6 +655,15 @@ def test_ktx2_python_decoder_is_extra_only() -> None:
     assert "sys_platform == 'linux'" in extra_ktx2
     assert "sys_platform == 'win32'" in extra_ktx2
     assert "platform_machine" in extra_ktx2
+
+
+def test_meshoptimizer_is_extra_only() -> None:
+    metadata = tomli.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    dependencies = metadata["project"]["dependencies"]
+    extras = metadata["project"]["optional-dependencies"]["meshopt"]
+
+    assert not any(item.startswith("meshoptimizer") for item in dependencies)
+    assert any(item.startswith("meshoptimizer") for item in extras)
 
 
 def test_browser_render_preview_harness_samples_base_color_textures(tmp_path: Path) -> None:
