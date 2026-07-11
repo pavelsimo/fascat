@@ -150,7 +150,7 @@ def _asset_metadata(
     cleanup: _base._ImportCleanupStats,
     space: _base._SpaceNormalization,
 ) -> dict[str, object]:
-    metadata = _base._asset_metadata(source, source_identity, options, _base._StepHeaderInfo(), cleanup, space)
+    metadata = _base._asset_metadata(source, source_identity, options, _base.CadHeaderInfo(), cleanup, space)
     if metadata:
         metadata["format"] = "JT"
     return metadata

@@ -47,7 +47,7 @@ _MIRRORED_TRANSFORM_DETERMINANT_EPSILON = 1e-12
 
 
 @dataclass(frozen=True)
-class _StepHeaderInfo:
+class CadHeaderInfo:
     schema: str = ""
     pmi_present: bool = False
 
@@ -302,7 +302,7 @@ def _asset_metadata(
     source: Path,
     source_identity: str,
     options: StepReadOptions,
-    header_info: _StepHeaderInfo,
+    header_info: CadHeaderInfo,
     cleanup: _ImportCleanupStats,
     space: _SpaceNormalization,
     pmi_count: int = 0,

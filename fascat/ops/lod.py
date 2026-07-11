@@ -499,7 +499,7 @@ def _build_scene_far_proxy(
 
 def _world_part_occurrences(asset: Asset, selected_part_ids: set[str] | None) -> list[tuple[Part, np.ndarray]]:
     occurrences: list[tuple[Part, np.ndarray]] = []
-    for node, current in asset.root._walk_world(np.eye(4, dtype=np.float64)):
+    for node, current in asset.root.walk_world(np.eye(4, dtype=np.float64)):
         if node.part_id is not None and (selected_part_ids is None or node.part_id in selected_part_ids):
             part = asset.parts.get(node.part_id)
             if part is not None:

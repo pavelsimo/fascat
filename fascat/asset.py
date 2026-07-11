@@ -171,11 +171,12 @@ class Node:
             nodes.extend(child.walk())
         return nodes
 
-    def _walk_world(self, parent_transform: Transform | None = None) -> Iterator[tuple[Node, Transform]]:
+    def walk_world(self, parent_transform: Transform | None = None) -> Iterator[tuple[Node, Transform]]:
+        """Yield (node, world_transform) pairs in depth-first order."""
         current = self.transform.copy() if parent_transform is None else parent_transform @ self.transform
         yield self, current.copy()
         for child in self.children:
-            yield from child._walk_world(current)
+            yield from child.walk_world(current)
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable assembly-node representation."""
@@ -1533,7 +1534,7 @@ def _options_with_scope(options: dict[str, object], scope: _OperationScope) -> d
 
 
 def _node_world_transforms(node: Node, parent_transform: Transform | None = None) -> list[tuple[Node, Transform]]:
-    return list(node._walk_world(parent_transform))
+    return list(node.walk_world(parent_transform))
 
 
 def _trimesh_occurrence_metadata(*, node: Node, part: Part, lod_index: int | None) -> dict[str, object]:
@@ -2082,6 +2083,7 @@ def _decimation_report_stats(asset: Asset) -> dict[str, int]:
 
 
 def _unique_part_id(parts: dict[str, Part], base: str) -> str:
+    # Intentionally not ops._ids.unique_id: importing ops here creates an asset<->ops cycle.
     candidate = f"{base}_selected"
     suffix = 2
     while candidate in parts:

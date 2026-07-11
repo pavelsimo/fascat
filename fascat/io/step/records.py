@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from fascat.io._import_base import _StepHeaderInfo
+from fascat.io._import_base import CadHeaderInfo
 
 _MAX_STEP_SCAN_BYTES = 64 * 1024 * 1024
 
@@ -48,7 +48,7 @@ def _ensure_loadable_file_size(path: Path, limit: int, label: str) -> None:
         raise ValueError(f"{label} is too large: {path} ({size} bytes exceeds {limit} byte limit)")
 
 
-def _step_header_info(source: Path) -> _StepHeaderInfo:
+def _step_header_info(source: Path) -> CadHeaderInfo:
     with source.open("r", encoding="utf-8", errors="ignore") as handle:
         text = handle.read(131_072)
     header = text.split("ENDSEC;", 1)[0]
@@ -58,7 +58,7 @@ def _step_header_info(source: Path) -> _StepHeaderInfo:
     pmi_present = "AP242" in schema.upper() and (
         "PRODUCT MANUFACTURING INFORMATION" in upper_header or "PMI" in upper_header
     )
-    return _StepHeaderInfo(schema=schema, pmi_present=pmi_present)
+    return CadHeaderInfo(schema=schema, pmi_present=pmi_present)
 
 
 def _iter_step_records(text: str) -> list[_StepRecord]:

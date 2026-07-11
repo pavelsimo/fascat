@@ -5,6 +5,7 @@ from typing import Any, cast
 
 from fascat.asset import Asset, Node, Part
 from fascat.io._import_base import (
+    CadHeaderInfo,
     _annotate_mirrored_transforms,
     _asset_metadata,
     _construction_curve_policy,
@@ -17,7 +18,6 @@ from fascat.io._import_base import (
     _space_normalization,
     _SpaceNormalization,
     _stable_id,
-    _StepHeaderInfo,
 )
 from fascat.io._suffixes import STEP_SUFFIXES as _STEP_SUFFIXES
 from fascat.io.step.materials import (
@@ -208,7 +208,7 @@ def _read_step_path(source: Path, *, source_identity: str, options: StepReadOpti
     return asset
 
 
-def _unsupported_pmi_count(options: StepReadOptions, header_info: _StepHeaderInfo, *, pmi_count: int) -> int:
+def _unsupported_pmi_count(options: StepReadOptions, header_info: CadHeaderInfo, *, pmi_count: int) -> int:
     if not options.pmi or not header_info.pmi_present or pmi_count:
         return 0
     return 1
@@ -216,7 +216,7 @@ def _unsupported_pmi_count(options: StepReadOptions, header_info: _StepHeaderInf
 
 def _import_warnings(
     options: StepReadOptions,
-    header_info: _StepHeaderInfo,
+    header_info: CadHeaderInfo,
     unsupported_pmi_count: int,
     *,
     design_variant_count: int = 0,
@@ -242,7 +242,7 @@ def _import_warnings(
 
 def _import_decisions(
     options: StepReadOptions,
-    header_info: _StepHeaderInfo,
+    header_info: CadHeaderInfo,
     *,
     pmi_count: int,
     unsupported_pmi_count: int,
@@ -423,7 +423,7 @@ def _import_decision(
 
 def _pmi_import_decision(
     options: StepReadOptions,
-    header_info: _StepHeaderInfo,
+    header_info: CadHeaderInfo,
     pmi_count: int,
     unsupported_pmi_count: int,
     semantic_graph_summary: dict[str, int],

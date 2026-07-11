@@ -6,6 +6,7 @@ from pathlib import Path
 from fascat.asset import Asset
 from fascat.io._errors import wrap_io_errors
 from fascat.io._reader_utils import patch_bytes_source, read_via_temporary_file
+from fascat.io._suffixes import STEP_SUFFIXES
 from fascat.io.step import multifile, single
 from fascat.options import StepReadOptions
 
@@ -33,10 +34,10 @@ def read_step_many(
 
 @wrap_io_errors("read STEP bytes")
 def read_step_bytes(data: bytes, *, name: str = "stdin.step", options: StepReadOptions | None = None) -> Asset:
-    suffix = Path(name).suffix or ".step"
+    suffix = Path(name).suffix.lower()
     asset = read_via_temporary_file(
         data,
-        suffix=suffix,
+        suffix=suffix if suffix in STEP_SUFFIXES else ".step",
         source_identity=name,
         options=options or StepReadOptions(),
         reader=single._read_step_path,

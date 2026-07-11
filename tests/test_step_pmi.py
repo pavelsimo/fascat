@@ -6,9 +6,9 @@ import pytest
 
 import fascat as fc
 from fascat.io._import_base import (
+    CadHeaderInfo,
     _ImportCleanupStats,
     _space_normalization,
-    _StepHeaderInfo,
 )
 from fascat.io.step import pmi as step_pmi
 from fascat.io.step.pmi import (
@@ -345,7 +345,7 @@ def test_step_import_decisions_report_extracted_typed_pmi() -> None:
 
     decisions = _import_decisions(
         StepReadOptions(pmi=True),
-        _StepHeaderInfo(schema="AP242", pmi_present=True),
+        CadHeaderInfo(schema="AP242", pmi_present=True),
         pmi_count=2,
         unsupported_pmi_count=0,
         cleanup=_ImportCleanupStats(),

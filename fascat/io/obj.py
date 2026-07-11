@@ -110,7 +110,7 @@ class _Occurrence:
 
 def _occurrences(asset: Asset) -> list[_Occurrence]:
     occurrences: list[_Occurrence] = []
-    for node, current in asset.root._walk_world(np.eye(4, dtype=np.float64)):
+    for node, current in asset.root.walk_world(np.eye(4, dtype=np.float64)):
         if node.part_id is not None:
             occurrences.append(_Occurrence(node, node.part_id, current))
     return occurrences

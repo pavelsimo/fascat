@@ -6,9 +6,9 @@ import pytest
 
 import fascat as fc
 from fascat.io._import_base import (
+    CadHeaderInfo,
     _ImportCleanupStats,
     _space_normalization,
-    _StepHeaderInfo,
 )
 from fascat.io.step import variants as step_variants
 from fascat.io.step.single import (
@@ -3816,7 +3816,7 @@ def test_step_import_decisions_report_detected_design_variants() -> None:
 
     decisions = _import_decisions(
         StepReadOptions(design_variants=True),
-        _StepHeaderInfo(schema="AP242", pmi_present=False),
+        CadHeaderInfo(schema="AP242", pmi_present=False),
         pmi_count=0,
         unsupported_pmi_count=0,
         cleanup=_ImportCleanupStats(),

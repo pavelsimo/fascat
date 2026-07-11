@@ -8,10 +8,10 @@ import fascat as fc
 import fascat.io.step as step_io
 from fascat.errors import FascatIOError
 from fascat.io._import_base import (
+    CadHeaderInfo,
     _ImportCleanupStats,
     _ShapeTopologyCounts,
     _space_normalization,
-    _StepHeaderInfo,
 )
 from fascat.io.step import single as step_single
 from fascat.io.step.single import (
@@ -38,7 +38,10 @@ def test_read_step_bytes_closes_and_removes_temporary_file(monkeypatch: pytest.M
     assert seen_paths and not seen_paths[0].exists()
 
 
-@pytest.mark.parametrize(("name", "suffix"), [("input.stp", ".stp"), ("input", ".step")])
+@pytest.mark.parametrize(
+    ("name", "suffix"),
+    [("input.stp", ".stp"), ("input.STEP", ".step"), ("input.txt", ".step"), ("input", ".step")],
+)
 def test_read_step_bytes_preserves_temporary_suffix(
     monkeypatch: pytest.MonkeyPatch,
     name: str,
@@ -76,12 +79,13 @@ def test_read_step_bytes_removes_temporary_file_when_reader_fails(monkeypatch: p
 
 def test_step_package_exports_only_public_readers() -> None:
     assert step_io.__all__ == ["read_step", "read_step_bytes", "read_step_many"]
+    assert step_io._StepHeaderInfo is CadHeaderInfo
 
 
 def test_step_import_warnings_report_unsupported_import_intent() -> None:
     warnings = _import_warnings(
         StepReadOptions(design_variants=True, multi_file=True),
-        _StepHeaderInfo(schema="AP242", pmi_present=True),
+        CadHeaderInfo(schema="AP242", pmi_present=True),
         unsupported_pmi_count=1,
     )
 
@@ -117,7 +121,7 @@ def test_step_import_decisions_report_requested_effective_states() -> None:
             delete_free_vertices=True,
             delete_lines=True,
         ),
-        _StepHeaderInfo(schema="AP242", pmi_present=True),
+        CadHeaderInfo(schema="AP242", pmi_present=True),
         pmi_count=0,
         unsupported_pmi_count=1,
         cleanup=cleanup,

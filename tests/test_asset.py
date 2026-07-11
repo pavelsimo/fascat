@@ -122,7 +122,7 @@ def test_node_walk_world_includes_root_in_depth_first_order() -> None:
         ],
     )
 
-    walked = list(root._walk_world())
+    walked = list(root.walk_world())
 
     assert [node.id for node, _world in walked] == ["root", "left", "grandchild", "right"]
     assert all(world.shape == (4, 4) for _node, world in walked)
@@ -154,7 +154,7 @@ def test_node_walk_world_composes_noncommutative_nested_transforms() -> None:
         ],
     )
 
-    worlds = {node.id: world for node, world in root._walk_world()}
+    worlds = {node.id: world for node, world in root.walk_world()}
 
     assert np.allclose(worlds["root"], rotate)
     assert np.allclose(worlds["child"], rotate @ translate)
@@ -171,7 +171,7 @@ def test_node_walk_world_preserves_mirrored_transform_determinants() -> None:
         children=[Node(id="child", name="Child", transform=np.diag([1.0, -1.0, 1.0, 1.0]))],
     )
 
-    worlds = {node.id: world for node, world in root._walk_world()}
+    worlds = {node.id: world for node, world in root.walk_world()}
 
     assert np.linalg.det(worlds["root"][:3, :3]) == pytest.approx(-1.0)
     assert np.linalg.det(worlds["child"][:3, :3]) == pytest.approx(1.0)
@@ -185,7 +185,7 @@ def test_node_walk_world_returns_independent_matrices() -> None:
         name="Root",
         children=[Node(id="child", name="Child", transform=child_transform)],
     )
-    iterator = root._walk_world()
+    iterator = root.walk_world()
 
     _root_node, root_world = next(iterator)
     root_world[0, 3] = 99.0

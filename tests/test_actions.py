@@ -23,7 +23,7 @@ def test_action_unique_ids_preserve_second_suffix_start() -> None:
     assert unique_id({"resource", "resource_2"}, "resource") == "resource_3"
 
 
-def test_node_private_world_walk_is_depth_first_composed_and_independent() -> None:
+def test_node_world_walk_is_depth_first_composed_and_independent() -> None:
     root_transform = np.eye(4, dtype=np.float64)
     root_transform[0, 3] = 3.0
     rotation = np.asarray(
@@ -51,7 +51,7 @@ def test_node_private_world_walk_is_depth_first_composed_and_independent() -> No
         ],
     )
 
-    walked = list(root._walk_world())
+    walked = list(root.walk_world())
     assert [node.id for node, _world in walked] == ["root", "branch", "mirrored", "sibling"]
     assert np.allclose(walked[0][1], root_transform)
     assert np.allclose(walked[1][1], root_transform @ rotation)

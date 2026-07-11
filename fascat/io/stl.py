@@ -77,7 +77,7 @@ def validate_stl(path: str | Path) -> dict[str, int]:
 
 def _triangles(asset: Asset) -> FloatArray:
     chunks: list[FloatArray] = []
-    for node, current in asset.root._walk_world(np.eye(4, dtype=np.float64)):
+    for node, current in asset.root.walk_world(np.eye(4, dtype=np.float64)):
         if node.part_id is not None and node.part_id in asset.parts:
             mesh = asset.parts[node.part_id].mesh
             if mesh is not None:

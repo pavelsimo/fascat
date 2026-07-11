@@ -10,6 +10,7 @@ import pytest
 
 import fascat as fc
 from fascat.io._import_base import (
+    CadHeaderInfo,
     _annotate_mirrored_transforms,
     _cleanup_action,
     _ImportCleanupStats,
@@ -18,7 +19,6 @@ from fascat.io._import_base import (
     _mirrored_transform_warnings,
     _ShapeTopologyCounts,
     _space_normalization,
-    _StepHeaderInfo,
 )
 from fascat.io.step.materials import (
     _color_material_spec,
@@ -766,7 +766,7 @@ def test_step_mirrored_transform_decision_and_warning_report_risk() -> None:
     summary = {"local_mirrored_nodes": 1, "world_mirrored_nodes": 1, "mirrored_part_occurrences": 1}
     decisions = _import_decisions(
         StepReadOptions(),
-        _StepHeaderInfo(schema=None, pmi_present=False),
+        CadHeaderInfo(schema=None, pmi_present=False),
         pmi_count=0,
         unsupported_pmi_count=0,
         cleanup=_ImportCleanupStats(),

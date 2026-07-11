@@ -753,7 +753,7 @@ def _compact_material_slots(part: Part, mesh: Mesh) -> None:
 
 def _world_occurrences(asset: Asset) -> list[_WorldOccurrence]:
     occurrences: list[_WorldOccurrence] = []
-    for node, current in asset.root._walk_world(np.eye(4, dtype=np.float64)):
+    for node, current in asset.root.walk_world(np.eye(4, dtype=np.float64)):
         if node.part_id is not None and node.part_id in asset.parts:
             part = asset.parts[node.part_id]
             if part.mesh is not None:

@@ -167,7 +167,7 @@ def _asset_metadata(
         source,
         source_identity,
         options,
-        _base._StepHeaderInfo(),
+        _base.CadHeaderInfo(),
         cleanup,
         space,
     )
