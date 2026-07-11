@@ -646,6 +646,7 @@ class LODOptions(OptionsRepr):
     engine_profile: LODEngineProfile = "generic"
     far_lod_bake: bool = False
     scene_far_proxy: bool = False
+    source: Literal["imported", "generated", "auto"] = "generated"
     validate: bool = False
     jobs: int = field(default_factory=default_jobs)
 
@@ -662,6 +663,8 @@ class LODOptions(OptionsRepr):
             raise ValueError("LOD mode must be one of: variants, extras, separate")
         if self.engine_profile not in {"generic", "unity", "unreal"}:
             raise ValueError("engine_profile must be one of: generic, unity, unreal")
+        if self.source not in {"imported", "generated", "auto"}:
+            raise ValueError("source must be one of: imported, generated, auto")
         if self.screen_coverage is not None:
             screen_coverage = tuple(float(value) for value in self.screen_coverage)
             object.__setattr__(self, "screen_coverage", screen_coverage)
@@ -698,6 +701,7 @@ class LODOptions(OptionsRepr):
             "tiny_part_screen_size": self.tiny_part_screen_size,
             "engine_profile": self.engine_profile,
             "far_lod_bake": self.far_lod_bake,
+            "source": self.source,
             "scene_far_proxy": self.scene_far_proxy,
             "validate": self.validate,
             "jobs": self.jobs,
@@ -1637,6 +1641,7 @@ class LodsKwargs(TypedDict, total=False):
     engine_profile: LODEngineProfile
     far_lod_bake: bool
     scene_far_proxy: bool
+    source: Literal["imported", "generated", "auto"]
     validate: bool
     jobs: int
 

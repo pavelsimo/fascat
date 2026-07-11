@@ -1072,7 +1072,7 @@ Optimization action parameters:
 | `LODLevel` | `screen_coverage` | Screen fraction at which this LOD becomes appropriate. |
 | `LODLevel` | `target_ratio` | Fraction of source triangles to keep for this LOD. |
 | `LODLevel` | `switch_distance_override` | Explicit switch distance for this level when using `run_lod_generators()`. |
-| `LODOptions` / `LODGeneratorOptions` | report metadata | LOD steps record `lod_source_*`, `lod_added_*`, and `lod_chain_*` counts for vertices, triangles, and estimated mesh payload bytes, plus per-level vertex/triangle counts, simplification source, omitted tiny-part LOD counts, instance-reuse counts, material-merge counts, texture-bake counts, culling-granularity change counts, scene-far-proxy counts, resolved export mode, and LOD chain advisory counts/codes. |
+| `LODOptions` / `LODGeneratorOptions` | report metadata | LOD steps record `lod_source_*`, newly generated `lod_added_*`, imported `lod_retained_*`, and full `lod_chain_*` counts for vertices, triangles, and estimated mesh payload bytes, plus per-level vertex/triangle counts, simplification source, omitted tiny-part LOD counts, instance-reuse counts, material-merge counts, texture-bake counts, culling-granularity change counts, scene-far-proxy counts, resolved export mode, and LOD chain advisory counts/codes. |
 
 Switch distances are derived from each part's bounding-box diagonal unless an override is supplied:
 `generic = diagonal / screen_coverage`, `unity = diagonal / (2 * screen_coverage)`, and
