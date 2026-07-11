@@ -107,6 +107,15 @@ def test_meshopt_compression_reuses_mutable_binary_payload(monkeypatch: pytest.M
     assert document["bufferViews"][0]["extensions"]["EXT_meshopt_compression"]["byteOffset"] == 8
 
 
+def test_meshopt_compression_reports_optional_extra_when_backend_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "meshoptimizer", None)
+
+    with pytest.raises(RuntimeError, match=r'pip install "fascat\[meshopt\]"'):
+        _apply_meshopt_compression({}, b"")
+
+
 def _read_glb(path: Path) -> tuple[dict[str, Any], bytes]:
     payload = path.read_bytes()
     magic, version, length = struct.unpack_from("<4sII", payload, 0)

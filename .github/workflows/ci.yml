@@ -70,14 +70,43 @@ jobs:
       - name: Install Python ${{ matrix.python }}
         run: uv python install ${{ matrix.python }}
 
-      - name: Install dependencies
+      - name: Install dependencies with optional backends
+        if: runner.os != 'Windows'
         run: uv sync --dev --all-extras
+
+      - name: Install dependencies without meshopt on Windows
+        if: runner.os == 'Windows'
+        run: uv sync --dev --extra ktx2 --extra unwrap
 
       - name: Test
         run: uv run pytest
 
       - name: Build
         run: uv build
+
+  windows-base-install:
+    name: Windows base install without C++ build tools
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Fetch source
+        shell: bash
+        env:
+          SOURCE_TARBALL: https://github.com/${{ github.repository }}/archive/${{ github.sha }}.tar.gz
+        run: |
+          curl -L --fail --retry 3 --retry-delay 5 -o source.tar.gz "$SOURCE_TARBALL"
+          tar -xzf source.tar.gz --strip-components=1
+          rm source.tar.gz
+
+      - name: Build wheel
+        run: py -m pip wheel --no-deps --wheel-dir dist .
+
+      - name: Install base wheel
+        shell: pwsh
+        run: py -m pip install (Get-ChildItem dist/fascat-*.whl)
+
+      - name: Verify installation
+        run: py -m fascat --version
 
   core:
     name: Core without CAD/USD backends
