@@ -72,7 +72,7 @@ if TYPE_CHECKING:
 DOCS_URL = "https://pavelsimo.github.io/fascat"
 ISSUES_URL = "https://github.com/pavelsimo/fascat/issues"
 rich_utils.MAX_WIDTH = 120
-COMMAND_NAMES = ("inspect", "convert", "validate", "runtime-fixtures", "version", "help")
+COMMAND_NAMES = ("inspect", "convert", "validate", "version", "help")
 GLOBAL_FLAG_ALIASES = {
     "--json",
     "--dry-run",
@@ -93,7 +93,6 @@ TOP_LEVEL_EPILOG = f"""Examples:
   fascat convert source.brep source.glb --profile realtime-web
   fascat convert motor.step motor.glb --profile virtual-reality
   fascat --json validate motor.usdc
-  fascat runtime-fixtures runtime-parity/
 
 Docs: {DOCS_URL}
 Issues: {ISSUES_URL}"""
@@ -167,17 +166,6 @@ class StdoutFormat(str, Enum):
     OBJ = "obj"
     STL = "stl"
     FBX = "fbx"
-
-
-class RuntimeEngineMode(str, Enum):
-    UNITY = "unity"
-    UNREAL = "unreal"
-
-
-class RuntimeParityCaptureMode(str, Enum):
-    BROWSER = "browser"
-    UNITY = "unity"
-    UNREAL = "unreal"
 
 
 class AxisMode(str, Enum):
@@ -2446,39 +2434,6 @@ def cmd_validate(
         float,
         typer.Option("--runtime-timeout", help="Browser runtime validation timeout in seconds."),
     ] = 15.0,
-    runtime_engine: Annotated[
-        RuntimeEngineMode | None,
-        typer.Option("--runtime-engine", help="Run optional Unity or Unreal runtime harness measurement."),
-    ] = None,
-    runtime_engine_command: Annotated[
-        str | None,
-        typer.Option("--runtime-engine-command", help="Unity or Unreal executable for --runtime-engine."),
-    ] = None,
-    runtime_engine_project: Annotated[
-        Path | None,
-        typer.Option(
-            "--runtime-engine-project",
-            help="Custom Unity project folder or Unreal .uproject with Fascat harness.",
-        ),
-    ] = None,
-    runtime_engine_preview: Annotated[
-        Path | None,
-        typer.Option(
-            "--runtime-engine-preview",
-            help="Preview PNG path requested from a Unity/Unreal runtime harness.",
-        ),
-    ] = None,
-    runtime_engine_baseline: Annotated[
-        Path | None,
-        typer.Option(
-            "--runtime-engine-baseline",
-            help="Compare --runtime-engine-preview against this baseline PNG.",
-        ),
-    ] = None,
-    runtime_engine_timeout: Annotated[
-        float,
-        typer.Option("--runtime-engine-timeout", help="Unity/Unreal runtime harness timeout in seconds."),
-    ] = 120.0,
     visual_preview: Annotated[
         Path | None,
         typer.Option("--visual-preview", help="Write a stable software preview PNG during validation."),
@@ -2557,9 +2512,7 @@ def cmd_validate(
     from fascat.runtime import (
         RuntimeBrowserOptions,
         RuntimeBrowserRenderOptions,
-        RuntimeEngineOptions,
         measure_browser_runtime,
-        measure_engine_runtime,
         write_browser_render_preview,
     )
     from fascat.visual import (
@@ -2594,12 +2547,6 @@ def cmd_validate(
         "runtime_browser_command": runtime_browser_command,
         "runtime_duration": runtime_duration,
         "runtime_timeout": runtime_timeout,
-        "runtime_engine": None if runtime_engine is None else runtime_engine.value,
-        "runtime_engine_command": runtime_engine_command,
-        "runtime_engine_project": str(runtime_engine_project) if runtime_engine_project else None,
-        "runtime_engine_preview": str(runtime_engine_preview) if runtime_engine_preview else None,
-        "runtime_engine_baseline": str(runtime_engine_baseline) if runtime_engine_baseline else None,
-        "runtime_engine_timeout": runtime_engine_timeout,
         "visual_preview": str(visual_preview) if visual_preview else None,
         "runtime_browser_preview": str(runtime_browser_preview) if runtime_browser_preview else None,
         "visual_baseline": str(visual_baseline) if visual_baseline else None,
@@ -2627,8 +2574,6 @@ def cmd_validate(
         _fail(ctx, payload, "--runtime-duration must be greater than 0.", code=2)
     if runtime_timeout <= 0.0:
         _fail(ctx, payload, "--runtime-timeout must be greater than 0.", code=2)
-    if runtime_engine_timeout <= 0.0:
-        _fail(ctx, payload, "--runtime-engine-timeout must be greater than 0.", code=2)
     if visual_diff_pixel_tolerance < 0 or visual_diff_pixel_tolerance > 255:
         _fail(ctx, payload, "--visual-diff-pixel-tolerance must be between 0 and 255.", code=2)
     if visual_diff_mean_threshold < 0.0 or visual_diff_mean_threshold > 255.0:
@@ -2656,14 +2601,9 @@ def cmd_validate(
         _fail(ctx, payload, "--turntable-width and --turntable-height must be greater than 0.", code=2)
     if turntable_supersample < 1:
         _fail(ctx, payload, "--turntable-supersample must be greater than 0.", code=2)
-    if runtime_engine_preview is not None and runtime_engine is None:
-        _fail(ctx, payload, "--runtime-engine-preview requires --runtime-engine.", code=2)
-    if runtime_engine_baseline is not None and runtime_engine_preview is None:
-        _fail(ctx, payload, "--runtime-engine-baseline requires --runtime-engine-preview.", code=2)
     if _is_stdio(output_path) and (
         visual_preview is not None
         or runtime_browser_preview is not None
-        or runtime_engine_preview is not None
         or lod_preview_dir is not None
         or turntable_dir is not None
     ):
@@ -2689,20 +2629,6 @@ def cmd_validate(
                 ),
             )
             if runtime_browser
-            else None
-        )
-        runtime_engine_report = (
-            measure_engine_runtime(
-                output_path,
-                RuntimeEngineOptions(
-                    engine=cast(Any, runtime_engine.value),
-                    executable=runtime_engine_command,
-                    project=runtime_engine_project,
-                    preview_path=runtime_engine_preview,
-                    timeout_seconds=runtime_engine_timeout,
-                ),
-            )
-            if runtime_engine is not None
             else None
         )
         runtime_browser_preview_report = (
@@ -2733,26 +2659,6 @@ def cmd_validate(
             if visual_baseline is not None and visual_preview is not None
             else None
         )
-        runtime_engine_diff_report = None
-        runtime_engine_diff_error = None
-        if runtime_engine_baseline is not None:
-            if runtime_engine_report is None:
-                runtime_engine_diff_error = "--runtime-engine-baseline requires --runtime-engine."
-            elif runtime_engine_report.render_status != "rendered" or runtime_engine_report.preview_path is None:
-                runtime_engine_diff_error = (
-                    "runtime engine baseline requires a rendered engine preview"
-                    f"; render_status={runtime_engine_report.render_status}"
-                )
-            else:
-                runtime_engine_diff_report = compare_images(
-                    runtime_engine_baseline,
-                    runtime_engine_report.preview_path,
-                    VisualDiffOptions(
-                        pixel_tolerance=visual_diff_pixel_tolerance,
-                        max_mean_absolute_error=visual_diff_mean_threshold,
-                        max_changed_pixel_ratio=visual_diff_changed_pixel_ratio,
-                    ),
-                )
         lod_preview_report = (
             write_output_lod_switch_previews(output_path, lod_preview_dir) if lod_preview_dir is not None else None
         )
@@ -2786,18 +2692,12 @@ def cmd_validate(
         json_payload["analysis"] = analysis.to_dict()
     if runtime_report is not None:
         json_payload["runtime_browser"] = runtime_report.to_dict()
-    if runtime_engine_report is not None:
-        json_payload["runtime_engine"] = runtime_engine_report.to_dict()
     if runtime_browser_preview_report is not None:
         json_payload["runtime_browser_preview"] = runtime_browser_preview_report.to_dict()
     if visual_preview_report is not None:
         json_payload["visual_preview"] = visual_preview_report.to_dict()
     if visual_diff_report is not None:
         json_payload["visual_diff"] = visual_diff_report.to_dict()
-    if runtime_engine_diff_report is not None:
-        json_payload["runtime_engine_diff"] = runtime_engine_diff_report.to_dict()
-    if runtime_engine_diff_error is not None:
-        json_payload["runtime_engine_diff_error"] = runtime_engine_diff_error
     if lod_preview_report is not None:
         json_payload["lod_preview"] = lod_preview_report.to_dict()
     if turntable_report is not None:
@@ -2817,26 +2717,8 @@ def cmd_validate(
                 f"{message} Browser preview {runtime_browser_preview_report.status}: "
                 f"{runtime_browser_preview_report.error}."
             )
-    if runtime_engine_report is not None and runtime_engine_report.preview_path is not None:
-        if runtime_engine_report.render_status in {"rendered", "rendered_partial"}:
-            message = f"{message} Wrote engine preview {runtime_engine_report.preview_path}."
-            if runtime_engine_report.render_status == "rendered_partial":
-                detail = runtime_engine_report.render_error or "; ".join(runtime_engine_report.render_limitations)
-                message = f"{message} Engine preview partial: {detail}."
-        else:
-            message = (
-                f"{message} Engine preview {runtime_engine_report.render_status}: {runtime_engine_report.render_error}."
-            )
     if visual_diff_report is not None:
         message = f"{message} Visual diff passed." if visual_diff_report.passed else f"{message} Visual diff failed."
-    if runtime_engine_diff_report is not None:
-        message = (
-            f"{message} Engine preview diff passed."
-            if runtime_engine_diff_report.passed
-            else f"{message} Engine preview diff failed."
-        )
-    if runtime_engine_diff_error is not None:
-        message = f"{message} Engine preview diff failed: {runtime_engine_diff_error}."
     if lod_preview_report is not None:
         message = f"{message} Wrote LOD previews {lod_preview_report.directory}."
     if turntable_report is not None:
@@ -2860,160 +2742,9 @@ def cmd_validate(
     if visual_diff_report is not None and not visual_diff_report.passed:
         _emit(ctx, json_payload, message)
         raise typer.Exit(1)
-    if runtime_engine_diff_error is not None or (
-        runtime_engine_diff_report is not None and not runtime_engine_diff_report.passed
-    ):
-        _emit(ctx, json_payload, message)
-        raise typer.Exit(1)
     if turntable_report is not None and turntable_report.diff_passed is False:
         _emit(ctx, json_payload, message)
         raise typer.Exit(1)
-    _emit(
-        ctx,
-        json_payload,
-        message,
-    )
-
-
-@app.command(
-    "runtime-fixtures",
-    epilog=f"""Examples:
-  fascat runtime-fixtures runtime-parity/
-  fascat --json runtime-fixtures runtime-parity/
-
-Docs: {DOCS_URL}/reference.html""",
-)
-def cmd_runtime_fixtures(
-    ctx: typer.Context,
-    output_dir: Annotated[Path, typer.Argument(help="Directory to write runtime parity GLBs and baselines.")],
-    capture: Annotated[
-        list[RuntimeParityCaptureMode] | None,
-        typer.Option("--capture", help="Capture previews after writing fixtures: browser, unity, or unreal."),
-    ] = None,
-    runtime_browser_command: Annotated[
-        str | None,
-        typer.Option("--runtime-browser-command", help="Browser executable to use for --capture browser."),
-    ] = None,
-    unity_command: Annotated[
-        str | None,
-        typer.Option("--unity-command", help="Unity executable to use for --capture unity."),
-    ] = None,
-    unreal_command: Annotated[
-        str | None,
-        typer.Option("--unreal-command", help="Unreal executable to use for --capture unreal."),
-    ] = None,
-    unity_project: Annotated[
-        Path | None,
-        typer.Option("--unity-project", help="Optional Unity harness project for --capture unity."),
-    ] = None,
-    unreal_project: Annotated[
-        Path | None,
-        typer.Option("--unreal-project", help="Optional Unreal .uproject for --capture unreal."),
-    ] = None,
-    runtime_engine_timeout: Annotated[
-        float,
-        typer.Option("--runtime-engine-timeout", help="Unity/Unreal parity capture timeout in seconds."),
-    ] = 120.0,
-    promote_goldens: Annotated[
-        bool,
-        typer.Option(
-            "--promote-goldens/--no-promote-goldens",
-            help="Copy rendered parity captures into goldens/<target>/ for review or future baselines.",
-        ),
-    ] = False,
-    require_goldens: Annotated[
-        bool,
-        typer.Option(
-            "--require-goldens/--no-require-goldens",
-            help="Require existing goldens/<target>/<fixture>.png files for captured or checked parity targets.",
-        ),
-    ] = False,
-    check_goldens: Annotated[
-        bool,
-        typer.Option(
-            "--check-goldens/--no-check-goldens",
-            help="Audit existing goldens/<target>/<fixture>.png coverage after writing fixtures.",
-        ),
-    ] = False,
-) -> None:
-    from fascat.runtime_fixtures import (
-        audit_runtime_parity_goldens,
-        capture_runtime_parity_suite,
-        write_runtime_parity_suite,
-    )
-
-    """Write bundled runtime parity fixtures for browser, Unity, and Unreal preview checks."""
-    state = _state(ctx)
-    capture_targets = tuple(item.value for item in capture or [])
-    payload: dict[str, Any] = {
-        "command": "runtime-fixtures",
-        "output": str(output_dir),
-        "dry_run": state.dry_run,
-        "capture": list(capture_targets),
-        "runtime_browser_command": runtime_browser_command,
-        "unity_command": unity_command,
-        "unreal_command": unreal_command,
-        "unity_project": str(unity_project) if unity_project else None,
-        "unreal_project": str(unreal_project) if unreal_project else None,
-        "runtime_engine_timeout": runtime_engine_timeout,
-        "promote_goldens": promote_goldens,
-        "require_goldens": require_goldens,
-        "check_goldens": check_goldens,
-    }
-    if runtime_engine_timeout <= 0.0:
-        _fail(ctx, payload, "--runtime-engine-timeout must be greater than 0.", code=2)
-    if state.dry_run:
-        action = "write and capture" if capture_targets else "write"
-        _emit(ctx, payload, f"Would {action} runtime parity fixtures in {output_dir}.")
-        return
-
-    try:
-        suite = write_runtime_parity_suite(output_dir)
-        capture_report = (
-            capture_runtime_parity_suite(
-                output_dir,
-                targets=cast(Any, capture_targets),
-                browser_command=runtime_browser_command,
-                unity_command=unity_command,
-                unreal_command=unreal_command,
-                unity_project=unity_project,
-                unreal_project=unreal_project,
-                engine_timeout_seconds=runtime_engine_timeout,
-                promote_goldens=promote_goldens,
-                require_goldens=require_goldens,
-            )
-            if capture_targets
-            else None
-        )
-        golden_coverage = (
-            audit_runtime_parity_goldens(
-                output_dir,
-                targets=cast(Any, capture_targets or ("browser", "unity", "unreal")),
-            )
-            if check_goldens
-            else None
-        )
-    except Exception as exc:
-        _fail(ctx, payload, str(exc))
-        raise AssertionError("unreachable") from exc
-
-    json_payload = {**payload, "suite": suite.to_dict()}
-    if capture_report is not None:
-        json_payload["captures"] = capture_report.to_dict()
-        if require_goldens and not capture_report.passed:
-            _fail(ctx, json_payload, "runtime parity target captures failed required golden validation.")
-    if golden_coverage is not None:
-        json_payload["golden_coverage"] = golden_coverage.to_dict()
-        if require_goldens and not golden_coverage.passed:
-            _fail(ctx, json_payload, "runtime parity target goldens are missing or invalid.")
-    message = f"Wrote runtime parity fixtures to {suite.directory} ({len(suite.fixtures)} fixtures)."
-    if capture_report is not None:
-        message = f"{message} Captured {len(capture_report.captures)} preview(s)."
-    if golden_coverage is not None:
-        message = (
-            f"{message} Golden coverage: {golden_coverage.present_count} present, "
-            f"{golden_coverage.missing_count} missing, {golden_coverage.invalid_count} invalid."
-        )
     _emit(
         ctx,
         json_payload,
