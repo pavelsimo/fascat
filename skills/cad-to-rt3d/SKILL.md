@@ -35,9 +35,8 @@ Create a work directory next to the output and keep every iteration:
 ├── iter-1/ … iter-N/
 │   ├── convert.json              # fascat --json convert stdout
 │   ├── report.json               # fascat convert --report (budgets, warnings)
-│   ├── validate.json             # fascat --json validate stdout
-│   ├── turntable/                # this iteration's renders + diff vs reference
-│   └── gates.txt                 # gates.py output
+│   ├── validate.json             # fascat --json validate stdout (incl. gate results)
+│   └── turntable/                # this iteration's renders + diff vs reference
 └── summary.md                    # final report
 ```
 
@@ -89,7 +88,7 @@ fascat --json convert input.step output.glb \
   > work/iter-N/convert.json
 
 fascat --json validate output.glb \
-  --geometry-quality \
+  --strict-geometry --profile realtime-web \
   --turntable-dir work/iter-N/turntable \
   --turntable-views 8 --turntable-elevations -30,30 \
   --turntable-baseline-dir work/reference/turntable \
@@ -99,17 +98,16 @@ fascat --json validate output.glb \
   > work/iter-N/validate.json
 ```
 
-Validate exits 1 when the turntable diff fails — that is a gate result, not an
-error; still read the JSON. Then run the deterministic gate check:
+Validate evaluates every gate itself and exits 1 when any gate fails — that is
+a gate result, not an error; still read the JSON. The `gates` object in
+validate.json is the authoritative verdict (`overall`, `failed`, `evaluated`,
+and one entry per gate in `results`); the same PASS/FAIL/SKIP lines appear on
+stdout without `--json`. Add `--max-file-size-mb <budget>` when a file-size
+budget is known, and relax an individual geometry gate with an explicit
+`--max-*` flag (for example `--max-slivers 12`) when the source geometry
+forces it — explicit flags override `--strict-geometry` and `--profile`.
 
-```bash
-python skills/cad-to-rt3d/scripts/gates.py \
-  --validate-json work/iter-N/validate.json \
-  --convert-json work/iter-N/report.json \
-  --output output.glb | tee work/iter-N/gates.txt
-```
-
-**Visual inspection is mandatory every iteration**, even when gates.py passes.
+**Visual inspection is mandatory every iteration**, even when all gates pass.
 Read `work/iter-N/turntable/turntable.png` and compare the 2–3 views with the
 worst diff metrics (see `turntable.diff.worst_view` in validate.json) side by
 side with the same-named reference images. Look for:
@@ -122,15 +120,18 @@ side with the same-named reference images. Look for:
 
 ## Gates
 
-| Gate | Threshold | Source |
+All deterministic gates are evaluated by `fascat validate` itself; the results
+live in the `gates` object of validate.json.
+
+| Gate | Threshold | Set by |
 |------|-----------|--------|
-| Non-manifold edges | 0 | `analysis.summary.non_manifold_edges` |
-| Self-intersections | 0 | `analysis.summary.self_intersections` |
-| Open boundaries | 0 | `analysis.summary.open_boundaries` |
-| Sliver triangles | 0 (relax to a documented count if the source geometry forces them) | `analysis.summary.sliver_triangles` |
-| Triangles within profile budget | `profile_triangle_budget` from report.json | `stats.triangles` |
-| File size within budget | `file_size_budget_bytes` from report.json | on-disk size |
-| Turntable diff | all views pass | `turntable.diff_passed` |
+| `non_manifold_edges` | 0 | `--strict-geometry` |
+| `self_intersections` | 0 | `--strict-geometry` |
+| `open_boundaries` | 0 | `--strict-geometry` |
+| `sliver_triangles` | 0 (relax with an explicit `--max-slivers <count>` if the source geometry forces them) | `--strict-geometry` |
+| `triangles` | profile triangle budget | `--profile <name>` (override with `--max-triangles`) |
+| `file_size_bytes` | file-size budget in MiB | `--max-file-size-mb <budget>` (SKIP when unset) |
+| `turntable_diff` | all views pass | `--turntable-baseline-dir` |
 | Visual read | no artifacts from the list above | your eyes on the renders |
 
 ## Troubleshooting: symptom → flags

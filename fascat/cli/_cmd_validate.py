@@ -6,7 +6,16 @@ from typing import Annotated, Any, cast
 import typer
 
 from ._app import DOCS_URL, _state, app
-from ._io_helpers import _validate_and_analyze_output_for_cli
+from ._enums import Profile
+from ._gates import (
+    any_gate_failed,
+    evaluate_gates,
+    format_gate_lines,
+    gates_to_dict,
+    resolve_thresholds,
+    structural_gate,
+)
+from ._io_helpers import _validate_and_analyze_output_for_cli, by_name
 from ._output import _emit, _export_label, _fail, _format_stats, _is_stdio, _require_existing_file
 from ._params import _analysis_requested, _analyze_options, _parse_filter_options, _validate_export_output
 
@@ -21,6 +30,7 @@ from ._params import _analysis_requested, _analyze_options, _parse_filter_option
   fascat validate motor.glb --turntable-dir views/ --turntable-views 8 --turntable-elevations -30,30
   fascat validate motor.glb --turntable-dir views/ --turntable-baseline-dir reference-views/
   fascat validate motor.glb --filter 'material=painted' --geometry-quality
+  fascat validate motor.glb --strict-geometry --profile realtime-web --max-file-size-mb 25
   fascat --json validate motor.usda
   cat motor.usdc | fascat validate -
 
@@ -156,6 +166,38 @@ def cmd_validate(
         Path | None,
         typer.Option("--report", help="Write validation and geometry quality report as JSON."),
     ] = None,
+    max_non_manifold: Annotated[
+        int | None,
+        typer.Option("--max-non-manifold", help="Fail validation when non-manifold edges exceed this limit."),
+    ] = None,
+    max_self_intersections: Annotated[
+        int | None,
+        typer.Option("--max-self-intersections", help="Fail validation when self-intersections exceed this limit."),
+    ] = None,
+    max_slivers: Annotated[
+        int | None,
+        typer.Option("--max-slivers", help="Fail validation when sliver triangles exceed this limit."),
+    ] = None,
+    max_open_boundaries: Annotated[
+        int | None,
+        typer.Option("--max-open-boundaries", help="Fail validation when open boundaries exceed this limit."),
+    ] = None,
+    max_triangles: Annotated[
+        int | None,
+        typer.Option("--max-triangles", help="Fail validation when the triangle count exceeds this limit."),
+    ] = None,
+    max_file_size_mb: Annotated[
+        float | None,
+        typer.Option("--max-file-size-mb", help="Fail validation when the output file exceeds this size in MiB."),
+    ] = None,
+    profile: Annotated[
+        Profile | None,
+        typer.Option("--profile", help="Resolve triangle and file-size gate budgets from a conversion profile."),
+    ] = None,
+    strict_geometry: Annotated[
+        bool,
+        typer.Option("--strict-geometry", help="Shorthand for setting all four geometry gate limits to 0."),
+    ] = False,
 ) -> None:
     from fascat.runtime import (
         RuntimeBrowserOptions,
@@ -175,12 +217,35 @@ def cmd_validate(
 
     """Validate a generated USD, glTF, OBJ, or STL file."""
     state = _state(ctx)
+    gating_active = (
+        max_non_manifold is not None
+        or max_self_intersections is not None
+        or max_slivers is not None
+        or max_open_boundaries is not None
+        or max_triangles is not None
+        or max_file_size_mb is not None
+        or profile is not None
+        or strict_geometry
+    )
+    profile_options = by_name(profile.value) if profile is not None else None
+    profile_budget = profile_options.budget if profile_options is not None else None
+    thresholds = resolve_thresholds(
+        max_non_manifold=max_non_manifold,
+        max_self_intersections=max_self_intersections,
+        max_slivers=max_slivers,
+        max_open_boundaries=max_open_boundaries,
+        max_triangles=max_triangles,
+        max_file_size_mb=max_file_size_mb,
+        strict_geometry=strict_geometry,
+        profile_max_triangles=profile_budget.max_triangles if profile_budget is not None else None,
+        profile_requested=profile is not None,
+    )
     analyze_options = _analyze_options(
         geometry_quality=geometry_quality,
-        non_manifold_edges=non_manifold_edges,
-        open_boundaries=open_boundaries,
-        self_intersections=self_intersections,
-        sliver_triangles=sliver_triangles,
+        non_manifold_edges=non_manifold_edges or thresholds.max_non_manifold is not None,
+        open_boundaries=open_boundaries or thresholds.max_open_boundaries is not None,
+        self_intersections=self_intersections or thresholds.max_self_intersections is not None,
+        sliver_triangles=sliver_triangles or thresholds.max_slivers is not None,
         tiny_parts=tiny_parts,
         draw_call_estimate=draw_call_estimate,
         visual_risk=visual_risk,
@@ -213,11 +278,30 @@ def cmd_validate(
         "filters": filters or [],
         "exclude_filters": exclude_filters or [],
         "report": str(report) if report else None,
+        "max_non_manifold": max_non_manifold,
+        "max_self_intersections": max_self_intersections,
+        "max_slivers": max_slivers,
+        "max_open_boundaries": max_open_boundaries,
+        "max_triangles": max_triangles,
+        "max_file_size_mb": max_file_size_mb,
+        "profile": profile.value if profile is not None else None,
+        "strict_geometry": strict_geometry,
     }
     where = _parse_filter_options(filters, exclude_filters, ctx, payload)
     should_analyze = should_analyze or where is not None
     payload["analysis_options"] = analyze_options.to_dict() if should_analyze else None
     _validate_export_output(output_path, ctx, payload)
+    threshold_flags = {
+        "--max-non-manifold": max_non_manifold,
+        "--max-self-intersections": max_self_intersections,
+        "--max-slivers": max_slivers,
+        "--max-open-boundaries": max_open_boundaries,
+        "--max-triangles": max_triangles,
+        "--max-file-size-mb": max_file_size_mb,
+    }
+    for flag, value in threshold_flags.items():
+        if value is not None and value < 0:
+            _fail(ctx, payload, f"{flag} must be greater than or equal to 0.", code=2)
     if runtime_duration <= 0.0:
         _fail(ctx, payload, "--runtime-duration must be greater than 0.", code=2)
     if runtime_timeout <= 0.0:
@@ -331,6 +415,11 @@ def cmd_validate(
             else None
         )
     except Exception as exc:
+        if gating_active:
+            structural_results = [structural_gate(ok=False)]
+            payload["gates"] = gates_to_dict(structural_results)
+            if not state.json_output:
+                _emit(ctx, {}, "\n".join(format_gate_lines(structural_results)))
         _fail(ctx, payload, str(exc))
         raise AssertionError("unreachable") from exc
     if report is not None and analysis is not None:
@@ -387,14 +476,29 @@ def cmd_validate(
             message = f"{message} Browser runtime measured {runtime_report.measured_fps:.1f} FPS."
         else:
             message = f"{message} Browser runtime {runtime_report.status}: {runtime_report.error}."
-    if visual_diff_report is not None and not visual_diff_report.passed:
-        _emit(ctx, json_payload, message)
-        raise typer.Exit(1)
-    if turntable_report is not None and turntable_report.diff_passed is False:
-        _emit(ctx, json_payload, message)
-        raise typer.Exit(1)
+    file_size_bytes: int | None = None
+    if not _is_stdio(output_path):
+        try:
+            file_size_bytes = output_path.stat().st_size
+        except OSError:
+            file_size_bytes = None
+    gate_results = evaluate_gates(
+        thresholds,
+        summary=analysis.summary if analysis is not None else None,
+        triangles=stats.get("triangles"),
+        file_size_bytes=file_size_bytes,
+        visual_diff_passed=visual_diff_report.passed if visual_diff_report is not None else None,
+        turntable_views_failed=turntable_report.views_failed() if turntable_report is not None else None,
+        lod_monotonic=lod_preview_report.monotonic_triangles if lod_preview_report is not None else None,
+        include_report_gates=gating_active,
+    )
+    if gating_active:
+        json_payload["gates"] = gates_to_dict(gate_results)
+        message = message + "\n" + "\n".join(format_gate_lines(gate_results))
     _emit(
         ctx,
         json_payload,
         message,
     )
+    if any_gate_failed(gate_results):
+        raise typer.Exit(1)

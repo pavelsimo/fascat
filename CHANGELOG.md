@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- add self-asserting gate thresholds to `fascat validate` (`--max-non-manifold`, `--max-self-intersections`, `--max-slivers`, `--max-open-boundaries`, `--max-triangles`, `--max-file-size-mb`, `--profile`, `--strict-geometry`); each threshold flag computes its underlying metric, gates are reported as `PASS`/`FAIL`/`SKIP` lines plus an `OVERALL` line on stdout and a `gates` object in the JSON payload, and any failed gate exits 1
+
+### Removed
+- remove `skills/cad-to-rt3d/scripts/gates.py` and its redundant `profile_triangles_over_budget` gate; the `cad-to-rt3d` skill now reads gate results from `fascat validate` output instead of producing `gates.txt`
+
 ## [0.6.0] - 2026-07-11
 
 ### Added

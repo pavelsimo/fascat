@@ -28,6 +28,10 @@ def test_validate_help() -> None:
     assert "--non-manifold-edges" in plain(result.output)
     assert "--draw-call-estimate" in plain(result.output)
     assert "--report" in plain(result.output)
+    assert "--max-triangles" in plain(result.output)
+    assert "--max-file-size-mb" in plain(result.output)
+    assert "--strict-geometry" in plain(result.output)
+    assert "--profile" in plain(result.output)
 
 
 def test_validate_dry_run() -> None:
@@ -563,3 +567,253 @@ def test_validate_generated_usd(tmp_path: Path) -> None:
     stdin_result = runner.invoke(app, ["validate", "-"], input=output_file.read_text(encoding="utf-8"))
     assert stdin_result.exit_code == 0
     assert "valid USD" in compact(stdin_result.output)
+
+
+def _gate_results_by_name(payload: dict[str, object]) -> dict[str, dict[str, object]]:
+    gates = payload["gates"]
+    assert isinstance(gates, dict)
+    results = gates["results"]
+    assert isinstance(results, list)
+    return {result["gate"]: result for result in results}
+
+
+def test_validate_gates_pass_with_thresholds(tmp_path: Path) -> None:
+    output_file = tmp_path / "gated.glb"
+    _write_turntable_glb(output_file)
+
+    result = runner.invoke(
+        app,
+        ["--json", "validate", str(output_file), "--max-non-manifold", "0", "--max-triangles", "10"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["gates"]["overall"] == "PASS"
+    assert payload["gates"]["failed"] == 0
+    results = _gate_results_by_name(payload)
+    assert results["non_manifold_edges"]["status"] == "PASS"
+    assert results["triangles"] == {"gate": "triangles", "status": "PASS", "actual": 2, "op": "<=", "limit": 10}
+    assert payload["analysis"]["summary"]["non_manifold_edges"] == 0
+
+
+def test_validate_gates_fail_sets_exit_code(tmp_path: Path) -> None:
+    output_file = tmp_path / "gated.glb"
+    _write_turntable_glb(output_file, triangle_only=True)
+
+    result = runner.invoke(app, ["--json", "validate", str(output_file), "--max-open-boundaries", "0"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["gates"]["overall"] == "FAIL"
+    assert payload["gates"]["failed"] == 1
+    results = _gate_results_by_name(payload)
+    assert results["open_boundaries"]["status"] == "FAIL"
+    assert results["open_boundaries"]["actual"] == 1
+    assert results["open_boundaries"]["limit"] == 0
+
+
+def test_validate_gates_human_output(tmp_path: Path) -> None:
+    output_file = tmp_path / "gated.glb"
+    _write_turntable_glb(output_file, triangle_only=True)
+
+    result = runner.invoke(app, ["validate", str(output_file), "--max-open-boundaries", "0", "--max-triangles", "10"])
+
+    assert result.exit_code == 1
+    output = plain(result.output)
+    assert "PASS structural True == True" in output
+    assert "FAIL open_boundaries 1 <= 0" in output
+    assert "PASS triangles 1 <= 10" in output
+    assert "SKIP turntable_diff None == 0" in output
+    assert "OVERALL FAIL (1/3 evaluated gates failed)" in output
+
+
+def test_validate_strict_geometry_shorthand(tmp_path: Path) -> None:
+    output_file = tmp_path / "gated.glb"
+    _write_turntable_glb(output_file, triangle_only=True)
+
+    result = runner.invoke(app, ["--json", "validate", str(output_file), "--strict-geometry"])
+
+    assert result.exit_code == 1
+    results = _gate_results_by_name(json.loads(result.output))
+    assert results["non_manifold_edges"]["status"] == "PASS"
+    assert results["self_intersections"]["status"] == "PASS"
+    assert results["sliver_triangles"]["status"] == "PASS"
+    assert results["open_boundaries"]["status"] == "FAIL"
+
+
+def test_validate_strict_geometry_explicit_override(tmp_path: Path) -> None:
+    output_file = tmp_path / "gated.glb"
+    _write_turntable_glb(output_file, triangle_only=True)
+
+    result = runner.invoke(
+        app,
+        ["--json", "validate", str(output_file), "--strict-geometry", "--max-open-boundaries", "5"],
+    )
+
+    assert result.exit_code == 0, result.output
+    results = _gate_results_by_name(json.loads(result.output))
+    assert results["open_boundaries"] == {
+        "gate": "open_boundaries",
+        "status": "PASS",
+        "actual": 1,
+        "op": "<=",
+        "limit": 5,
+    }
+    assert results["non_manifold_edges"]["limit"] == 0
+
+
+def test_validate_gates_profile_triangle_budget(tmp_path: Path) -> None:
+    output_file = tmp_path / "gated.glb"
+    _write_turntable_glb(output_file)
+
+    result = runner.invoke(app, ["--json", "validate", str(output_file), "--profile", "realtime-web"])
+
+    assert result.exit_code == 0, result.output
+    results = _gate_results_by_name(json.loads(result.output))
+    assert results["triangles"]["status"] == "PASS"
+    assert isinstance(results["triangles"]["limit"], int)
+    assert results["file_size_bytes"]["status"] == "SKIP"
+    assert results["file_size_bytes"]["limit"] is None
+
+
+def test_validate_gates_profile_explicit_triangle_override(tmp_path: Path) -> None:
+    output_file = tmp_path / "gated.glb"
+    _write_turntable_glb(output_file)
+
+    result = runner.invoke(
+        app,
+        ["--json", "validate", str(output_file), "--profile", "realtime-web", "--max-triangles", "1"],
+    )
+
+    assert result.exit_code == 1
+    results = _gate_results_by_name(json.loads(result.output))
+    assert results["triangles"] == {"gate": "triangles", "status": "FAIL", "actual": 2, "op": "<=", "limit": 1}
+
+
+@pytest.mark.parametrize(
+    ("limit_mb", "expected_exit", "expected_status"),
+    [("100", 0, "PASS"), ("0.000001", 1, "FAIL")],
+)
+def test_validate_gates_file_size(tmp_path: Path, limit_mb: str, expected_exit: int, expected_status: str) -> None:
+    output_file = tmp_path / "gated.glb"
+    _write_turntable_glb(output_file)
+
+    result = runner.invoke(app, ["--json", "validate", str(output_file), "--max-file-size-mb", limit_mb])
+
+    assert result.exit_code == expected_exit
+    results = _gate_results_by_name(json.loads(result.output))
+    assert results["file_size_bytes"]["status"] == expected_status
+    assert results["file_size_bytes"]["actual"] == output_file.stat().st_size
+
+
+@pytest.mark.parametrize(
+    "flag",
+    [
+        "--max-non-manifold",
+        "--max-self-intersections",
+        "--max-slivers",
+        "--max-open-boundaries",
+        "--max-triangles",
+        "--max-file-size-mb",
+    ],
+)
+def test_validate_rejects_negative_gate_thresholds(tmp_path: Path, flag: str) -> None:
+    output_file = tmp_path / "gated.glb"
+    _write_turntable_glb(output_file)
+
+    result = runner.invoke(app, ["validate", str(output_file), flag, "-1"])
+
+    assert result.exit_code == 2
+    assert f"{flag} must be greater than or equal to 0." in result.output
+
+
+def test_validate_rejects_unknown_profile(tmp_path: Path) -> None:
+    output_file = tmp_path / "gated.glb"
+    _write_turntable_glb(output_file)
+
+    result = runner.invoke(app, ["validate", str(output_file), "--profile", "no-such-profile"])
+
+    assert result.exit_code == 2
+
+
+def test_validate_turntable_failure_appears_in_gates(tmp_path: Path) -> None:
+    baseline_file = tmp_path / "baseline.glb"
+    output_file = tmp_path / "turntable.glb"
+    baseline_dir = tmp_path / "baseline-views"
+    turntable_dir = tmp_path / "views"
+    _write_turntable_glb(baseline_file)
+    _write_turntable_glb(output_file, triangle_only=True)
+    common = ["--turntable-views", "2", "--turntable-elevations", "30", "--turntable-width", "96"]
+    common += ["--turntable-height", "96", "--turntable-supersample", "1"]
+    baseline_run = runner.invoke(
+        app, ["--json", "validate", str(baseline_file), "--turntable-dir", str(baseline_dir), *common]
+    )
+    assert baseline_run.exit_code == 0, baseline_run.output
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "validate",
+            str(output_file),
+            "--max-triangles",
+            "10",
+            "--turntable-dir",
+            str(turntable_dir),
+            "--turntable-baseline-dir",
+            str(baseline_dir),
+            *common,
+        ],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["gates"]["overall"] == "FAIL"
+    results = _gate_results_by_name(payload)
+    assert results["turntable_diff"]["status"] == "FAIL"
+    assert results["turntable_diff"]["actual"] == payload["turntable"]["diff"]["views_failed"]
+    assert results["triangles"]["status"] == "PASS"
+
+
+def test_validate_no_gates_without_assertion_flags(tmp_path: Path) -> None:
+    output_file = tmp_path / "plain.glb"
+    _write_turntable_glb(output_file)
+
+    result = runner.invoke(app, ["--json", "validate", str(output_file), "--geometry-quality"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert "gates" not in payload
+    assert "OVERALL" not in plain(result.output)
+
+
+def test_validate_structural_failure_reports_structural_gate(tmp_path: Path) -> None:
+    output_file = tmp_path / "broken.glb"
+    output_file.write_bytes(b"not a real glb")
+
+    result = runner.invoke(app, ["--json", "validate", str(output_file), "--max-triangles", "10"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert "error" in payload
+    assert payload["gates"]["overall"] == "FAIL"
+    results = _gate_results_by_name(payload)
+    assert results["structural"] == {
+        "gate": "structural",
+        "status": "FAIL",
+        "actual": False,
+        "op": "==",
+        "limit": True,
+    }
+
+
+def test_validate_structural_failure_human_gate_lines(tmp_path: Path) -> None:
+    output_file = tmp_path / "broken.glb"
+    output_file.write_bytes(b"not a real glb")
+
+    result = runner.invoke(app, ["validate", str(output_file), "--max-triangles", "10"])
+
+    assert result.exit_code == 1
+    output = plain(result.output)
+    assert "FAIL structural False == True" in output
+    assert "OVERALL FAIL (1/1 evaluated gates failed)" in output

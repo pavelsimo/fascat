@@ -107,6 +107,7 @@ All `--json` payloads are one JSON object on stdout. Optional sections are omitt
 | `visual_diff` | object | Present with `--visual-baseline` |
 | `lod_preview` | object | Present with `--lod-preview-dir` |
 | `turntable` | object | Present with `--turntable-dir`; includes per-view previews and a `diff` summary with `--turntable-baseline-dir` |
+| `gates` | object | Present when any gate threshold flag, `--strict-geometry`, or `--profile` is set; contains `overall`, `failed`, `evaluated`, and per-gate `results` entries with `gate`, `status` (`PASS`/`FAIL`/`SKIP`), `actual`, `op`, and `limit` |
 | `error` | string | Present only on failure |
 
 Conversion reports wrap the run in four steps: `preflight` (before expensive work —
@@ -634,6 +635,33 @@ above and on the [Python API page](api.html) document each field.
 | `--filter` | unset | Scope validation-time geometry analysis with an assembly selector |
 | `--exclude-filter` | unset | Exclude selector matches from validation-time analysis |
 | `--report` | unset | Write validation and geometry quality report as JSON |
+| `--max-non-manifold` | unset | Fail validation when non-manifold edges exceed this limit; implies `--non-manifold-edges` |
+| `--max-self-intersections` | unset | Fail validation when self-intersections exceed this limit; implies `--self-intersections` |
+| `--max-slivers` | unset | Fail validation when sliver triangles exceed this limit; implies `--sliver-triangles` |
+| `--max-open-boundaries` | unset | Fail validation when open boundaries exceed this limit; implies `--open-boundaries` |
+| `--max-triangles` | unset | Fail validation when the triangle count exceeds this limit |
+| `--max-file-size-mb` | unset | Fail validation when the on-disk output size exceeds this limit in MiB |
+| `--profile` | unset | Resolve triangle and file-size gate budgets from a conversion profile; explicit `--max-*` flags take precedence |
+| `--strict-geometry` | `false` | Shorthand for setting all four geometry gate limits to 0 |
+
+When any gate threshold flag, `--strict-geometry`, or `--profile` is set,
+validate evaluates the requested gates, prints one
+`PASS|FAIL|SKIP <gate> <actual> <op> <limit>` line per gate plus an `OVERALL`
+line on stdout, and exits 1 when any gate fails. Gates whose input is
+unavailable or inapplicable are reported as `SKIP` and never fail validation.
+Structural validity, visual diff, turntable diff, and LOD monotonicity are
+reported through the same gate mechanism.
+
+Gated example:
+
+```bash
+fascat --json validate motor.glb \
+  --strict-geometry \
+  --profile realtime-web \
+  --max-file-size-mb 25 \
+  --turntable-dir views/ \
+  --turntable-baseline-dir reference-views/
+```
 
 Example:
 

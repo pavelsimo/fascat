@@ -133,9 +133,8 @@ automates the whole CAD → RT3D tuning loop: it converts with a target profile,
 quality, renders the result from multiple turntable angles, compares each view
 against a high-fidelity reference conversion, and adjusts fascat flags
 iteration by iteration until the asset passes both deterministic gates
-(topology, triangle and file-size budgets — checked by
-[`scripts/gates.py`](skills/cad-to-rt3d/scripts/gates.py)) and a visual
-inspection of the renders.
+(topology, triangle and file-size budgets — asserted by `fascat validate`'s
+built-in gate thresholds) and a visual inspection of the renders.
 
 Open this repository in your coding agent (or copy the skill folder into your
 own project) and ask, for example:

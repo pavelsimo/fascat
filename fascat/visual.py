@@ -218,6 +218,11 @@ class TurntableReport:
             return None
         return max(diffed, key=lambda view: view.diff.mean_absolute_error if view.diff is not None else 0.0)
 
+    def views_failed(self) -> int | None:
+        if self.diff_passed is None:
+            return None
+        return sum(1 for view in self.views if view.diff is not None and not view.diff.passed)
+
     def to_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
             "directory": self.directory,
@@ -233,7 +238,7 @@ class TurntableReport:
             payload["diff"] = {
                 "passed": self.diff_passed,
                 "views_compared": len(diffed),
-                "views_failed": sum(1 for view in diffed if view.diff is not None and not view.diff.passed),
+                "views_failed": self.views_failed(),
                 "max_mean_absolute_error": max(
                     (view.diff.mean_absolute_error for view in diffed if view.diff is not None), default=0.0
                 ),
