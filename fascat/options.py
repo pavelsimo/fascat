@@ -1340,6 +1340,7 @@ class FbxExportOptions(OptionsRepr):
 class PlatformBudget(OptionsRepr):
     target_fps: int | None = None
     max_triangles: int | None = None
+    max_file_size_mb: float | None = None
     max_vertices: int | None = None
     max_vertices_per_mesh: int | None = None
     max_texture_resolution: int | None = None
@@ -1372,6 +1373,8 @@ class PlatformBudget(OptionsRepr):
             raise ValueError("target_fps must be greater than 0 when set")
         if self.max_triangles is not None and self.max_triangles <= 0:
             raise ValueError("max_triangles must be greater than 0 when set")
+        if self.max_file_size_mb is not None and self.max_file_size_mb <= 0.0:
+            raise ValueError("max_file_size_mb must be greater than 0 when set")
         if self.max_vertices is not None and self.max_vertices <= 0:
             raise ValueError("max_vertices must be greater than 0 when set")
         if self.max_vertices_per_mesh is not None and self.max_vertices_per_mesh <= 0:

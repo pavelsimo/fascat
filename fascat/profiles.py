@@ -28,6 +28,7 @@ _BUDGET_FILE_KEYS = frozenset(
     {
         "target_fps",
         "max_triangles",
+        "max_file_size_mb",
         "max_vertices",
         "max_vertices_per_mesh",
         "max_texture_resolution",
@@ -318,6 +319,7 @@ def realtime_desktop(
         budget=PlatformBudget(
             target_fps=60,
             max_triangles=max_triangles,
+            max_file_size_mb=200,
             max_vertices=max_triangles * 3,
             max_vertices_per_mesh=65_535,
             max_texture_resolution=4_096,
@@ -359,6 +361,7 @@ def realtime_web(
         budget=PlatformBudget(
             target_fps=60,
             max_triangles=max_triangles,
+            max_file_size_mb=50,
             max_vertices=max_triangles * 3,
             max_vertices_per_mesh=65_535,
             max_texture_resolution=2_048,
@@ -400,6 +403,7 @@ def realtime_mobile(
         budget=PlatformBudget(
             target_fps=60,
             max_triangles=max_triangles,
+            max_file_size_mb=50,
             max_vertices=max_triangles * 3,
             max_vertices_per_mesh=65_535,
             max_texture_resolution=2_048,
@@ -441,6 +445,7 @@ def virtual_reality(
         budget=PlatformBudget(
             target_fps=90,
             max_triangles=max_triangles,
+            max_file_size_mb=100,
             max_vertices=max_triangles * 3,
             max_vertices_per_mesh=65_535,
             max_texture_resolution=2_048,
@@ -483,6 +488,7 @@ def augmented_reality(
         budget=PlatformBudget(
             target_fps=60,
             max_triangles=max_triangles,
+            max_file_size_mb=25,
             max_vertices=max_triangles * 3,
             max_vertices_per_mesh=65_535,
             max_texture_resolution=1_024,
@@ -525,6 +531,7 @@ def mixed_reality(
         budget=PlatformBudget(
             target_fps=60,
             max_triangles=max_triangles,
+            max_file_size_mb=25,
             max_vertices=max_triangles * 3,
             max_vertices_per_mesh=65_535,
             max_texture_resolution=1_024,

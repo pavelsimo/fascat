@@ -238,6 +238,7 @@ def cmd_validate(
         max_file_size_mb=max_file_size_mb,
         strict_geometry=strict_geometry,
         profile_max_triangles=profile_budget.max_triangles if profile_budget is not None else None,
+        profile_max_file_size_mb=profile_budget.max_file_size_mb if profile_budget is not None else None,
         profile_requested=profile is not None,
     )
     analyze_options = _analyze_options(

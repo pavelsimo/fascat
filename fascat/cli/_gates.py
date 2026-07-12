@@ -56,6 +56,7 @@ def resolve_thresholds(
     max_file_size_mb: float | None,
     strict_geometry: bool,
     profile_max_triangles: int | None,
+    profile_max_file_size_mb: float | None,
     profile_requested: bool,
 ) -> GateThresholds:
     geometry_default = 0 if strict_geometry else None
@@ -65,7 +66,7 @@ def resolve_thresholds(
         max_slivers=max_slivers if max_slivers is not None else geometry_default,
         max_open_boundaries=max_open_boundaries if max_open_boundaries is not None else geometry_default,
         max_triangles=max_triangles if max_triangles is not None else profile_max_triangles,
-        max_file_size_mb=max_file_size_mb,
+        max_file_size_mb=(max_file_size_mb if max_file_size_mb is not None else profile_max_file_size_mb),
         triangles_requested=max_triangles is not None or profile_requested,
         file_size_requested=max_file_size_mb is not None or profile_requested,
     )
