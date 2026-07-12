@@ -1670,6 +1670,7 @@ def test_convert_report_checks_profile_budget(monkeypatch, tmp_path: Path) -> No
         "profile": "strict",
         "target_fps": 60,
         "max_triangles": 1,
+        "max_file_size_mb": None,
         "max_vertices": 2,
         "max_vertices_per_mesh": 2,
         "max_texture_resolution": 1024,

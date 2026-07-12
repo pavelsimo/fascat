@@ -50,6 +50,7 @@ def _sized_mesh(size: float) -> Mesh:
         "uv0",
         "lods",
         "target_fps",
+        "max_file_size_mb",
         "max_vertices_per_mesh",
         "max_texture_resolution",
         "max_texture_memory_mb",
@@ -77,6 +78,7 @@ def _sized_mesh(size: float) -> Mesh:
             None,
             None,
             None,
+            None,
         ),
         (
             profiles.realtime_desktop(),
@@ -87,6 +89,7 @@ def _sized_mesh(size: float) -> Mesh:
             "box",
             (0.5, 0.25, 0.1),
             60,
+            200,
             65_535,
             4_096,
             512,
@@ -105,6 +108,7 @@ def _sized_mesh(size: float) -> Mesh:
             "box",
             (0.5, 0.25),
             60,
+            50,
             65_535,
             2_048,
             128,
@@ -123,6 +127,7 @@ def _sized_mesh(size: float) -> Mesh:
             "box",
             (0.5, 0.25),
             60,
+            50,
             65_535,
             2_048,
             128,
@@ -141,6 +146,7 @@ def _sized_mesh(size: float) -> Mesh:
             "box",
             (0.5, 0.25, 0.125),
             90,
+            100,
             65_535,
             2_048,
             256,
@@ -159,6 +165,7 @@ def _sized_mesh(size: float) -> Mesh:
             "box",
             (0.5, 0.25),
             60,
+            25,
             65_535,
             1_024,
             64,
@@ -177,6 +184,7 @@ def _sized_mesh(size: float) -> Mesh:
             "box",
             (0.5, 0.25),
             60,
+            25,
             65_535,
             1_024,
             64,
@@ -197,6 +205,7 @@ def test_profiles_match_documented_default_table(
     uv0: str,
     lods: tuple[float, ...] | None,
     target_fps: int | None,
+    max_file_size_mb: float | None,
     max_vertices_per_mesh: int | None,
     max_texture_resolution: int | None,
     max_texture_memory_mb: int | None,
@@ -241,6 +250,7 @@ def test_profiles_match_documented_default_table(
     else:
         assert profile.budget is not None
         assert profile.budget.target_fps == target_fps
+        assert profile.budget.max_file_size_mb == max_file_size_mb
         assert profile.budget.max_triangles == target_triangles
         assert profile.budget.max_vertices == target_triangles * 3
         assert profile.budget.max_vertices_per_mesh == max_vertices_per_mesh
@@ -323,6 +333,7 @@ name = "factory-tablet-ar"
 [budget]
 target_fps = 60
 max_triangles = 42000
+max_file_size_mb = 12.5
 max_texture_resolution = 512
 supported_compression = ["meshopt"]
 supported_runtime_extensions = ["KHR_mesh_quantization", "EXT_meshopt_compression"]
@@ -340,6 +351,7 @@ unity_reference_triangles = [30000, 60000]
     assert profile.optimize.target_triangles == 42_000
     assert profile.budget is not None
     assert profile.budget.max_triangles == 42_000
+    assert profile.budget.max_file_size_mb == 12.5
     assert profile.budget.max_vertices == 126_000
     assert profile.budget.max_texture_resolution == 512
     assert profile.stage.atlas.enabled
@@ -359,6 +371,7 @@ def test_target_device_profile_from_json_overlays_base_budget(tmp_path: Path) ->
                 "name": "warehouse-headset",
                 "budget": {
                     "max_draw_calls": 80,
+                    "max_file_size_mb": 10,
                     "max_load_time_ms": 900,
                     "supported_compression": ["quantization"],
                     "supported_runtime_extensions": ["KHR_mesh_quantization"],
@@ -377,6 +390,7 @@ def test_target_device_profile_from_json_overlays_base_budget(tmp_path: Path) ->
     assert profile.budget.max_triangles == 75_000
     assert profile.budget.max_vertices == 225_000
     assert profile.budget.max_draw_calls == 80
+    assert profile.budget.max_file_size_mb == 10
     assert profile.budget.max_load_time_ms == 900
     assert profile.budget.supported_compression == ("quantization",)
     assert profile.budget.supported_runtime_extensions == ("KHR_mesh_quantization",)
@@ -462,6 +476,7 @@ def test_size_adaptive_tessellation_requires_bands() -> None:
         (lambda: fc.TessellationOptions(part_settings={"part": {"bad": True}}), "unsupported part_settings"),
         (lambda: fc.PlatformBudget(target_fps=0), "target_fps"),
         (lambda: fc.PlatformBudget(max_triangles=0), "max_triangles"),
+        (lambda: fc.PlatformBudget(max_file_size_mb=0), "max_file_size_mb"),
         (lambda: fc.PlatformBudget(max_vertices=0), "max_vertices"),
         (lambda: fc.PlatformBudget(max_vertices_per_mesh=0), "max_vertices_per_mesh"),
         (lambda: fc.PlatformBudget(max_texture_resolution=0), "max_texture_resolution"),

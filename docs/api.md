@@ -1344,15 +1344,15 @@ asset = fc.convert("motor.step", "motor.glb", profile=profile)
 
 Available profiles:
 
-| Profile | Use | Target FPS | Triangle budget | Per-mesh vertex budget | Texture resolution budget | Texture memory budget | Load-time budget | Draw-call budget | Unity reference range |
-|---------|-----|------------|-----------------|------------------------|---------------------------|-----------------------|------------------|------------------|-----------------------|
-| `inspect-only` | inspect STEP input without conversion | unset | unset | unset | unset | unset | unset | unset | unset |
-| `realtime-desktop` | higher-detail OpenUSD or glTF output | 60 | 1,000,000 | 65,535 | 4,096px | 512 MB | 2,000 ms | 2,000 | 10M-100M triangles, under 10,000 draw calls |
-| `realtime-web` | lower triangle budgets for web delivery | 60 | 250,000 | 65,535 | 2,048px | 128 MB | 3,000 ms | 500 | 100K-1M triangles, under 200 draw calls |
-| `realtime-mobile` | tighter mobile runtime budget for app-store builds | 60 | 150,000 | 65,535 | 2,048px | 128 MB | 2,500 ms | 250 | 100K-500K triangles, under 1,000 draw calls |
-| `virtual-reality` | balanced triangle budgets and LODs for VR runtimes | 90 | 500,000 | 65,535 | 2,048px | 256 MB | 1,500 ms | 250 | 500K-2M triangles, under 1,000 draw calls |
-| `augmented-reality` | stricter phone and tablet AR runtime budget | 60 | 100,000 | 65,535 | 1,024px | 64 MB | 1,500 ms | 150 | 50K-250K triangles, under 500 draw calls |
-| `mixed-reality` | stricter headset budget for mixed-reality runtimes | 60 | 75,000 | 65,535 | 1,024px | 64 MB | 1,200 ms | 100 | 50K-200K triangles, under 500 draw calls |
+| Profile | Use | Target FPS | Triangle budget | File-size budget | Per-mesh vertex budget | Texture resolution budget | Texture memory budget | Load-time budget | Draw-call budget | Unity reference range |
+|---------|-----|------------|-----------------|------------------|------------------------|---------------------------|-----------------------|------------------|------------------|-----------------------|
+| `inspect-only` | inspect STEP input without conversion | unset | unset | unset | unset | unset | unset | unset | unset | unset |
+| `realtime-desktop` | higher-detail OpenUSD or glTF output | 60 | 1,000,000 | 200 MiB | 65,535 | 4,096px | 512 MB | 2,000 ms | 2,000 | 10M-100M triangles, under 10,000 draw calls |
+| `realtime-web` | lower triangle budgets for web delivery | 60 | 250,000 | 50 MiB | 65,535 | 2,048px | 128 MB | 3,000 ms | 500 | 100K-1M triangles, under 200 draw calls |
+| `realtime-mobile` | tighter mobile runtime budget for app-store builds | 60 | 150,000 | 50 MiB | 65,535 | 2,048px | 128 MB | 2,500 ms | 250 | 100K-500K triangles, under 1,000 draw calls |
+| `virtual-reality` | balanced triangle budgets and LODs for VR runtimes | 90 | 500,000 | 100 MiB | 65,535 | 2,048px | 256 MB | 1,500 ms | 250 | 500K-2M triangles, under 1,000 draw calls |
+| `augmented-reality` | stricter phone and tablet AR runtime budget | 60 | 100,000 | 25 MiB | 65,535 | 1,024px | 64 MB | 1,500 ms | 150 | 50K-250K triangles, under 500 draw calls |
+| `mixed-reality` | stricter headset budget for mixed-reality runtimes | 60 | 75,000 | 25 MiB | 65,535 | 1,024px | 64 MB | 1,200 ms | 100 | 50K-200K triangles, under 500 draw calls |
 
 Pass either a profile name or a `ConversionProfile` from `fc.profiles`. Built-in
 profiles carry a `WorkflowRecipe` naming the target (`web-glb`, `mobile-glb`,
@@ -1361,11 +1361,13 @@ marks each stage `honored`, `disabled`, `metadata_only`, or `unsupported`.
 Realtime profiles default to relative tessellation with `sag_ratio=0.0002`; pass
 `tessellation_sag=...` when a target device profile needs an absolute tolerance.
 They also enable staging atlas metadata by default, with `atlas.max_size` matched
-to the profile's texture-resolution budget.
+to the profile's texture-resolution budget. Profile file-size budgets feed
+conversion reporting and `validate --profile`; explicit `file_size_budget_mb`
+export options and `validate --max-file-size-mb` take precedence.
 
 When the profile has a budget, conversion reports add:
 
-- **`profile_budget`** — target FPS plus triangle, vertex, per-mesh vertex, texture-resolution, texture-memory, load-time, and draw-call budgets, draw-call breakdown, compression/extension caps, and Unity reference ranges. Fascat's defaults are intentionally stricter than Unity's broad ranges. Load time is a deterministic estimate (file size, geometry/texture bytes, draw-call overhead), not a measured runtime.
+- **`profile_budget`** — target FPS plus file-size, triangle, vertex, per-mesh vertex, texture-resolution, texture-memory, load-time, and draw-call budgets, draw-call breakdown, compression/extension caps, and Unity reference ranges. Fascat's defaults are intentionally stricter than Unity's broad ranges. Load time is a deterministic estimate (file size, geometry/texture bytes, draw-call overhead), not a measured runtime.
 - **`texture_export_policy`** (when baked textures are referenced, before write) — source/referenced/unused texture-set and map counts, largest resolutions, estimated bytes, the profile's texture caps, resize candidates and estimated savings, KTX2/Basis request state, and PNG/JPEG fallback policy with transparency-loss warnings.
 
 Custom target-device profiles can overlay a budget on any built-in base profile:
@@ -1376,6 +1378,7 @@ name = "factory-tablet-ar"
 [budget]
 target_fps = 60
 max_triangles = 42000
+max_file_size_mb = 25
 max_texture_resolution = 512
 max_draw_calls = 120
 supported_compression = ["meshopt"]

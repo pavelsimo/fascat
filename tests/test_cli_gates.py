@@ -28,6 +28,7 @@ def test_resolve_thresholds_defaults_to_no_gates() -> None:
         max_file_size_mb=None,
         strict_geometry=False,
         profile_max_triangles=None,
+        profile_max_file_size_mb=None,
         profile_requested=False,
     )
     assert thresholds == GateThresholds()
@@ -43,6 +44,7 @@ def test_resolve_thresholds_strict_geometry_sets_zero_limits() -> None:
         max_file_size_mb=None,
         strict_geometry=True,
         profile_max_triangles=None,
+        profile_max_file_size_mb=None,
         profile_requested=False,
     )
     assert thresholds.max_non_manifold == 0
@@ -61,13 +63,14 @@ def test_resolve_thresholds_explicit_overrides_strict_geometry() -> None:
         max_file_size_mb=None,
         strict_geometry=True,
         profile_max_triangles=None,
+        profile_max_file_size_mb=None,
         profile_requested=False,
     )
     assert thresholds.max_slivers == 5
     assert thresholds.max_non_manifold == 0
 
 
-def test_resolve_thresholds_profile_supplies_triangle_budget() -> None:
+def test_resolve_thresholds_profile_supplies_budget() -> None:
     thresholds = resolve_thresholds(
         max_non_manifold=None,
         max_self_intersections=None,
@@ -77,11 +80,12 @@ def test_resolve_thresholds_profile_supplies_triangle_budget() -> None:
         max_file_size_mb=None,
         strict_geometry=False,
         profile_max_triangles=250_000,
+        profile_max_file_size_mb=50.0,
         profile_requested=True,
     )
     assert thresholds.max_triangles == 250_000
     assert thresholds.triangles_requested is True
-    assert thresholds.max_file_size_mb is None
+    assert thresholds.max_file_size_mb == 50.0
     assert thresholds.file_size_requested is True
 
 
@@ -92,12 +96,14 @@ def test_resolve_thresholds_explicit_overrides_profile_budget() -> None:
         max_slivers=None,
         max_open_boundaries=None,
         max_triangles=100,
-        max_file_size_mb=None,
+        max_file_size_mb=10.0,
         strict_geometry=False,
         profile_max_triangles=250_000,
+        profile_max_file_size_mb=50.0,
         profile_requested=True,
     )
     assert thresholds.max_triangles == 100
+    assert thresholds.max_file_size_mb == 10.0
 
 
 @pytest.mark.parametrize(

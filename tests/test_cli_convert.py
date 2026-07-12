@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -602,6 +603,56 @@ def test_convert_passes_extra_step_inputs_to_pipeline(monkeypatch: pytest.Monkey
 
     assert result.exit_code == 0, result.output
     assert captured["input_path"] == [input_a, input_b]
+
+
+@pytest.mark.parametrize(
+    ("suffix", "option_name"),
+    [
+        (".glb", "gltf_options"),
+        (".usda", "usd_options"),
+        (".obj", "obj_options"),
+        (".stl", "stl_options"),
+        (".fbx", "fbx_options"),
+    ],
+)
+@pytest.mark.parametrize(("arguments", "expected_mb"), [([], 50.0), (["--file-size-budget-mb", "7.5"], 7.5)])
+def test_convert_export_budget_inherits_profile_and_allows_explicit_override(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    suffix: str,
+    option_name: str,
+    arguments: list[str],
+    expected_mb: float,
+) -> None:
+    import fascat as fc
+    from fascat.cli import _io_helpers
+
+    input_file = tmp_path / "input.step"
+    output_file = tmp_path / f"output{suffix}"
+    input_file.write_text("ISO-10303-21;", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def fake_convert(_input_path: object, *_args: object, **kwargs: object) -> fc.Asset:
+        captured.update(kwargs)
+        return fc.Asset(root=fc.Node(id="root", name="root"))
+
+    monkeypatch.setattr(_io_helpers, "_convert_for_cli", fake_convert)
+
+    result = runner.invoke(
+        app,
+        [
+            "convert",
+            str(input_file),
+            str(output_file),
+            "--profile",
+            "realtime-web",
+            *arguments,
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    export_options = cast(Any, captured[option_name])
+    assert export_options.file_size_budget_mb == expected_mb
 
 
 def test_convert_passes_material_library_paths_to_import_options(

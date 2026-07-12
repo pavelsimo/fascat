@@ -1379,6 +1379,11 @@ def cmd_convert(
 
     profile_options = _profile_for_cli(profile, target_device_profile, ctx, payload)
     profile_options = dataclass_replace(profile_options, repair=dataclass_replace(profile_options.repair, jobs=jobs))
+    effective_file_size_budget_mb = (
+        file_size_budget_mb
+        if file_size_budget_mb is not None
+        else (None if profile_options.budget is None else profile_options.budget.max_file_size_mb)
+    )
     payload["profile"] = profile_options.name
     if target_device_profile is not None:
         payload["base_profile"] = profile.value
@@ -1707,29 +1712,33 @@ def cmd_convert(
             texture_fallback_format=cast(Any, texture_fallback_format),
             png_compression=png_compression,
             jpeg_quality=jpeg_quality,
-            file_size_budget_mb=file_size_budget_mb,
+            file_size_budget_mb=effective_file_size_budget_mb,
             size_ladder=size_ladder,
             metadata=export_metadata,
         )
         usd_options = UsdExportOptions(
             package=cast(Any, usd_package),
             layout=cast(Any, usd_layout.value),
-            file_size_budget_mb=file_size_budget_mb,
+            file_size_budget_mb=effective_file_size_budget_mb,
             metadata=export_metadata,
         )
         obj_options = ObjExportOptions(
             materials=obj_materials,
             write_mtl=write_mtl,
             preserve_groups=preserve_groups,
-            file_size_budget_mb=file_size_budget_mb,
+            file_size_budget_mb=effective_file_size_budget_mb,
         )
-        stl_options = StlExportOptions(binary=stl_binary, merge=stl_merge, file_size_budget_mb=file_size_budget_mb)
+        stl_options = StlExportOptions(
+            binary=stl_binary,
+            merge=stl_merge,
+            file_size_budget_mb=effective_file_size_budget_mb,
+        )
         fbx_options = FbxExportOptions(
             materials=fbx_materials,
             normals=fbx_normals,
             tangents=fbx_tangents,
             uvs=fbx_uvs,
-            file_size_budget_mb=file_size_budget_mb,
+            file_size_budget_mb=effective_file_size_budget_mb,
         )
         reporter = _stage_reporter(ctx, input_path, output_path)
         convert_input: Path | list[Path] = input_paths if len(input_paths) > 1 else input_path

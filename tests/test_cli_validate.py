@@ -662,7 +662,7 @@ def test_validate_strict_geometry_explicit_override(tmp_path: Path) -> None:
     assert results["non_manifold_edges"]["limit"] == 0
 
 
-def test_validate_gates_profile_triangle_budget(tmp_path: Path) -> None:
+def test_validate_gates_profile_budgets(tmp_path: Path) -> None:
     output_file = tmp_path / "gated.glb"
     _write_turntable_glb(output_file)
 
@@ -672,8 +672,21 @@ def test_validate_gates_profile_triangle_budget(tmp_path: Path) -> None:
     results = _gate_results_by_name(json.loads(result.output))
     assert results["triangles"]["status"] == "PASS"
     assert isinstance(results["triangles"]["limit"], int)
+    assert results["file_size_bytes"]["status"] == "PASS"
+    assert results["file_size_bytes"]["actual"] == output_file.stat().st_size
+    assert results["file_size_bytes"]["limit"] == 50 * 1024 * 1024
+
+
+def test_validate_gates_inspect_only_skips_profile_budgets(tmp_path: Path) -> None:
+    output_file = tmp_path / "gated.glb"
+    _write_turntable_glb(output_file)
+
+    result = runner.invoke(app, ["--json", "validate", str(output_file), "--profile", "inspect-only"])
+
+    assert result.exit_code == 0, result.output
+    results = _gate_results_by_name(json.loads(result.output))
+    assert results["triangles"]["status"] == "SKIP"
     assert results["file_size_bytes"]["status"] == "SKIP"
-    assert results["file_size_bytes"]["limit"] is None
 
 
 def test_validate_gates_profile_explicit_triangle_override(tmp_path: Path) -> None:
@@ -688,6 +701,21 @@ def test_validate_gates_profile_explicit_triangle_override(tmp_path: Path) -> No
     assert result.exit_code == 1
     results = _gate_results_by_name(json.loads(result.output))
     assert results["triangles"] == {"gate": "triangles", "status": "FAIL", "actual": 2, "op": "<=", "limit": 1}
+
+
+def test_validate_gates_profile_explicit_file_size_override(tmp_path: Path) -> None:
+    output_file = tmp_path / "gated.glb"
+    _write_turntable_glb(output_file)
+
+    result = runner.invoke(
+        app,
+        ["--json", "validate", str(output_file), "--profile", "realtime-web", "--max-file-size-mb", "0"],
+    )
+
+    assert result.exit_code == 1
+    results = _gate_results_by_name(json.loads(result.output))
+    assert results["file_size_bytes"]["status"] == "FAIL"
+    assert results["file_size_bytes"]["limit"] == 0
 
 
 @pytest.mark.parametrize(
