@@ -104,8 +104,15 @@ def test_nested_usd_instances_and_real_meshes_are_analyzed_once_per_occurrence(t
     stage.GetRootLayer().Export(str(output))
 
     _assert_occurrence_analysis_and_preview(output, 5, tmp_path)
-    with patch("fascat.analysis.Mesh", wraps=Mesh) as mesh_constructor:
+    decoded_paths: list[str] = []
+    get_points_attr = UsdGeom.Mesh.GetPointsAttr
+
+    def record_points_read(mesh: UsdGeom.Mesh) -> Usd.Attribute:
+        decoded_paths.append(str(mesh.GetPath()))
+        return get_points_attr(mesh)
+
+    with patch.object(UsdGeom.Mesh, "GetPointsAttr", new=record_points_read):
         loaded = _asset_from_usd(output)
-    assert mesh_constructor.call_count == 2
+    assert len(decoded_paths) == len(set(decoded_paths)) == 2
     assert len({node.id for node in loaded.root.children}) == 5
     assert len({node.part_id for node in loaded.root.children}) == 5
