@@ -107,7 +107,7 @@ All `--json` payloads are one JSON object on stdout. Optional sections are omitt
 | `visual_diff` | object | Present with `--visual-baseline` |
 | `lod_preview` | object | Present with `--lod-preview-dir` |
 | `turntable` | object | Present with `--turntable-dir`; includes per-view previews and a `diff` summary with `--turntable-baseline-dir` |
-| `gates` | object | Present when any gate threshold flag, `--strict-geometry`, or `--profile` is set; contains `overall`, `failed`, `evaluated`, and per-gate `results` entries with `gate`, `status` (`PASS`/`FAIL`/`SKIP`), `actual`, `op`, and `limit` |
+| `gates` | object | Present when any gate threshold flag, `--strict-geometry`, or `--profile` is set; contains `overall`, `failed`, `evaluated`, and per-gate `results` entries with `gate`, `status` (`PASS`/`FAIL`/`SKIP`), `actual`, `op`, and `limit`, plus optional `reason` and `actual_lower_bound` |
 | `error` | string | Present only on failure |
 
 Conversion reports wrap the run in four steps: `preflight` (before expensive work —
@@ -647,8 +647,16 @@ above and on the [Python API page](api.html) document each field.
 When any gate threshold flag, `--strict-geometry`, or `--profile` is set,
 validate evaluates the requested gates, prints one
 `PASS|FAIL|SKIP <gate> <actual> <op> <limit>` line per gate plus an `OVERALL`
-line on stdout, and exits 1 when any gate fails. Gates whose input is
-unavailable or inapplicable are reported as `SKIP` and never fail validation.
+line on stdout, and exits 1 when any gate fails. A requested limit with an
+unavailable measurement fails with `reason: "measurement unavailable"`, including
+geometry checks unsupported by the output format and file-size limits on stdin.
+A bounded self-intersection count is a lower bound: it fails if already above
+the limit, and also fails if the incomplete search cannot establish compliance.
+These results include `actual_lower_bound: true` and a `reason` in JSON; text
+prints `>=` before the count and appends the reason. These failures count in
+`failed` and `evaluated`, and make `overall` equal to `FAIL`.
+Optional report checks without inputs and profiles without a corresponding
+budget (such as `inspect-only`) remain `SKIP` and do not fail validation.
 Structural validity, visual diff, turntable diff, and LOD monotonicity are
 reported through the same gate mechanism.
 
