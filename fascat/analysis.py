@@ -235,10 +235,6 @@ def _mesh_quality_entry(
     include_tiny: bool,
     include_self_intersections: bool,
 ) -> _MeshQualityEntry:
-    metrics = mesh.quality_metrics(
-        skinny_aspect_ratio=options.sliver_aspect_ratio,
-        area_epsilon=options.degenerate_area_epsilon,
-    )
     bbox = _bounds_payload(mesh)
     totals = _QualityTotals()
     warnings: list[str] = []
@@ -251,17 +247,16 @@ def _mesh_quality_entry(
     }
 
     if include_topology:
-        totals.non_manifold_edges = int(metrics["non_manifold_edges"])
-        totals.boundary_edges = int(metrics["boundary_edges"])
+        _edges, counts = mesh._undirected_edges_and_counts()
+        totals.non_manifold_edges = int(np.count_nonzero(counts > 2))
+        totals.boundary_edges = int(np.count_nonzero(counts == 1))
         totals.open_boundaries = _open_boundary_count(mesh)
         values["non_manifold_edges"] = totals.non_manifold_edges
         values["boundary_edges"] = totals.boundary_edges
         values["open_boundaries"] = totals.open_boundaries
 
     if include_slivers:
-        totals.degenerate_triangles = int(metrics["degenerate_triangles"])
-        totals.sliver_triangles = int(metrics["skinny_triangles"])
-        totals.max_aspect_ratio = float(metrics["max_aspect_ratio"])
+        totals.degenerate_triangles, totals.sliver_triangles, totals.max_aspect_ratio = _sliver_metrics(mesh, options)
         values["degenerate_triangles"] = totals.degenerate_triangles
         values["sliver_triangles"] = totals.sliver_triangles
         values["max_aspect_ratio"] = totals.max_aspect_ratio
@@ -293,6 +288,23 @@ def _mesh_quality_entry(
             )
 
     return _MeshQualityEntry(values=values, totals=totals, warnings=warnings)
+
+
+def _sliver_metrics(mesh: Mesh, options: AnalyzeOptions) -> tuple[int, int, float]:
+    if mesh.triangle_count == 0:
+        return 0, 0, 0.0
+    lengths = mesh._triangle_edge_lengths()
+    minimum = lengths.min(axis=1)
+    maximum = lengths.max(axis=1)
+    aspects = np.divide(maximum, minimum, out=np.full(maximum.shape, np.inf), where=minimum > 0.0)
+    finite = aspects[np.isfinite(aspects)]
+    areas = mesh._triangle_areas()
+    epsilon = mesh._resolve_area_epsilon(options.degenerate_area_epsilon)
+    return (
+        int(np.count_nonzero(areas <= epsilon)),
+        int(np.count_nonzero(aspects > options.sliver_aspect_ratio)),
+        float(finite.max()) if finite.size else 0.0,
+    )
 
 
 def _bounds_payload(mesh: Mesh) -> dict[str, object]:
