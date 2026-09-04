@@ -2491,21 +2491,23 @@ def test_shared_mesh_cache_byte_budget_evicts_least_recently_used(
 ) -> None:
     value = {(1, 2): [np.arange(128), 17]} if nested else np.arange(128)
     name = "edge_faces_map"
-    mesh_module._store_global_cache_value(name, (0,), value)
+    # Zero occupies fewer bytes than positive integers on Python 3.10.
+    # Use equally sized tokens so two entries exactly fill the byte budget.
+    mesh_module._store_global_cache_value(name, (1,), value)
     entry_size = mesh_module._global_mesh_cache_bytes
     assert entry_size > 128 * 8
     mesh_module._clear_global_mesh_cache()
     monkeypatch.setattr(mesh_module, "_GLOBAL_MESH_CACHE_MAX_BYTES", entry_size * 2)
 
-    for index in range(2):
+    for index in range(1, 3):
         mesh_module._store_global_cache_value(name, (index,), value)
-    assert mesh_module._global_cache_value(name, (0,)) is not mesh_module._MISSING_CACHE_VALUE
-    mesh_module._store_global_cache_value(name, (2,), value)
+    assert mesh_module._global_cache_value(name, (1,)) is not mesh_module._MISSING_CACHE_VALUE
+    mesh_module._store_global_cache_value(name, (3,), value)
 
-    assert list(mesh_module._GLOBAL_MESH_CACHE) == [(name, (0,)), (name, (2,))]
+    assert list(mesh_module._GLOBAL_MESH_CACHE) == [(name, (1,)), (name, (3,))]
     assert mesh_module._global_mesh_cache_bytes == entry_size * 2
     # Replacing an entry must subtract its old size before adding the new size.
-    mesh_module._store_global_cache_value(name, (0,), 1)
+    mesh_module._store_global_cache_value(name, (1,), 1)
     assert mesh_module._global_mesh_cache_bytes < entry_size * 2
     assert mesh_module._global_mesh_cache_bytes == sum(size for size, _ in mesh_module._GLOBAL_MESH_CACHE.values())
 
