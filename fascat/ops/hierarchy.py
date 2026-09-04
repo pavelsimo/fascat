@@ -9,7 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from fascat.asset import Asset, Node, Part, identity_transform
-from fascat.mesh import Mesh
+from fascat.mesh import Mesh, MeshValidationError
 from fascat.metadata import Metadata
 from fascat.ops._arrays import remap_sliced_face_group, sliced_face_lookup
 from fascat.options import ExplodeOptions, MergeOptions, ReplaceOptions
@@ -355,66 +355,148 @@ def _merge_inputs(
     parent_world_transform: FloatArray,
     options: MergeOptions,
 ) -> Part:
+    lod_counts = {len(item.occurrence.part.lod_meshes) for item in inputs}
+    if len(lod_counts) != 1:
+        raise MeshValidationError("merge requires matching LOD chain lengths; merge these parts separately")
+    lod_count = next(iter(lod_counts), 0)
+    if lod_count and any(
+        item.occurrence.part.mesh is not None and item.face_indices.size != item.occurrence.part.mesh.triangle_count
+        for item in inputs
+    ):
+        raise MeshValidationError("merge cannot split a stored LOD chain by material; use merge mode all")
     parent_inverse = np.asarray(np.linalg.inv(parent_world_transform), dtype=np.float64)
-    points: list[FloatArray] = []
-    faces: list[IntArray] = []
-    face_material_ids: list[str | None] = []
-    material_ids: list[str] = []
     material_index_by_id: dict[str, int] = {}
-    offset = 0
-
-    for merge_input in inputs:
-        mesh = merge_input.occurrence.part.mesh
-        if mesh is None or merge_input.face_indices.size == 0:
-            continue
-        used = np.unique(mesh.faces[merge_input.face_indices].reshape(-1))
-        remap = np.full(mesh.vertex_count, -1, dtype=np.int64)
-        remap[used] = np.arange(used.shape[0], dtype=np.int64)
-        local_points = mesh.points[used]
-        world_points = _transform_points(local_points, merge_input.occurrence.world_transform)
-        parent_points = _transform_points(world_points, parent_inverse)
-        points.append(parent_points)
-        faces.append(remap[mesh.faces[merge_input.face_indices]] + offset)
-        material_ids_for_faces = _face_material_ids(merge_input)
-        face_material_ids.extend(material_ids_for_faces)
-        if options.preserve_materials:
-            for material_id in material_ids_for_faces:
-                if material_id is not None and material_id not in material_index_by_id:
-                    material_index_by_id[material_id] = len(material_ids)
-                    material_ids.append(material_id)
-        offset += used.shape[0]
-
-    merged_mesh = Mesh(
-        points=np.vstack(points) if points else np.empty((0, 3), dtype=np.float64),
-        faces=np.vstack(faces) if faces else np.empty((0, 3), dtype=np.int64),
-        material_indices=_material_indices(face_material_ids, material_index_by_id)
-        if options.preserve_materials
-        else None,
-        metadata=_mesh_metadata(inputs),
-    ).compute_normals()
-    merged_mesh.validate()
+    merged_mesh = _merge_mesh(inputs, parent_inverse, options, material_index_by_id)
+    lod_meshes = [
+        _merge_mesh(inputs, parent_inverse, options, material_index_by_id, lod_index=index)
+        for index in range(lod_count)
+    ]
     return Part(
         id=part_id,
         name=part_name,
         mesh=merged_mesh,
-        material_ids=material_ids if options.preserve_materials else [],
+        lod_meshes=lod_meshes,
+        material_ids=list(material_index_by_id),
         metadata=_part_metadata(inputs, options.metadata),
         fingerprint=merged_mesh.fingerprint(),
     )
 
 
-def _face_material_ids(merge_input: _MergeInput) -> list[str | None]:
-    mesh = merge_input.occurrence.part.mesh
-    if mesh is None:
-        return []
-    if mesh.material_indices is None:
-        return [merge_input.material_id] * int(merge_input.face_indices.shape[0])
-    material_indices = mesh.material_indices[merge_input.face_indices].astype(np.int64, copy=False)
-    part_material_ids = merge_input.occurrence.part.material_ids
-    return [
-        part_material_ids[material_index] if material_index < len(part_material_ids) else None
-        for material_index in material_indices.tolist()
-    ]
+def _merge_mesh(
+    inputs: tuple[_MergeInput, ...],
+    parent_inverse: FloatArray,
+    options: MergeOptions,
+    material_index_by_id: dict[str, int],
+    *,
+    lod_index: int | None = None,
+) -> Mesh:
+    points: list[FloatArray] = []
+    faces: list[IntArray] = []
+    normals: list[FloatArray] = []
+    tangents: list[FloatArray] = []
+    uvs: dict[int, list[FloatArray]] = {}
+    groups: dict[str, list[IntArray]] = {}
+    face_material_ids: list[str | None] = []
+    source_meshes: list[Mesh] = []
+    layout: tuple[set[int], bool] | None = None
+    vertex_offset = 0
+    face_offset = 0
+    for item in inputs:
+        part = item.occurrence.part
+        mesh = part.mesh if lod_index is None else part.lod_meshes[lod_index]
+        if mesh is None:
+            continue
+        mesh.validate()
+        source_meshes.append(mesh)
+        face_indices = item.face_indices if lod_index is None else np.arange(mesh.triangle_count, dtype=np.int64)
+        if face_indices.size == 0:
+            continue
+        current_layout = (set(mesh.uvs), mesh.tangents is not None)
+        if layout is not None and current_layout != layout:
+            raise MeshValidationError(
+                "merge requires matching UV channels and tangent presence at each level; merge these parts separately"
+            )
+        layout = current_layout
+        used = np.unique(mesh.faces[face_indices].reshape(-1))
+        remap = np.full(mesh.vertex_count, -1, dtype=np.int64)
+        remap[used] = np.arange(used.size, dtype=np.int64)
+        transform = parent_inverse @ item.occurrence.world_transform
+        linear = transform[:3, :3]
+        try:
+            normal_matrix = np.linalg.inv(linear).T
+        except np.linalg.LinAlgError as exc:
+            raise MeshValidationError("merge cannot preserve normals under a singular transform") from exc
+        source_normals = mesh.normals if mesh.normals is not None else mesh.compute_normals().normals
+        assert source_normals is not None
+        transformed_normals = _normalized_vectors(source_normals[used] @ normal_matrix.T)
+        points.append(_transform_points(mesh.points[used], transform))
+        mapped_faces = remap[mesh.faces[face_indices]] + vertex_offset
+        mirrored = float(np.linalg.det(linear)) < 0.0
+        if mirrored:
+            mapped_faces = mapped_faces[:, [0, 2, 1]]
+        faces.append(mapped_faces)
+        normals.append(transformed_normals)
+        if mesh.tangents is not None:
+            directions = mesh.tangents[used, :3] @ linear.T
+            directions -= transformed_normals * np.einsum("ij,ij->i", directions, transformed_normals)[:, None]
+            tangents.append(
+                np.column_stack(
+                    [
+                        _normalized_vectors(directions),
+                        mesh.tangents[used, 3] * (-1.0 if mirrored else 1.0),
+                    ]
+                )
+            )
+        for channel, values in mesh.uvs.items():
+            uvs.setdefault(channel, []).append(values[used])
+        face_lookup = sliced_face_lookup(face_indices, mesh.triangle_count)
+        for name, group_faces in mesh.face_groups.items():
+            mapped = remap_sliced_face_group(face_lookup, group_faces)
+            if mapped.size:
+                groups.setdefault(name, []).append(mapped + face_offset)
+        if options.preserve_materials:
+            if mesh.material_indices is None:
+                material_ids = [part.material_ids[0] if part.material_ids else None] * int(face_indices.size)
+            else:
+                material_ids = [
+                    part.material_ids[index] if index < len(part.material_ids) else None
+                    for index in mesh.material_indices[face_indices].tolist()
+                ]
+            face_material_ids.extend(material_ids)
+            for material_id in material_ids:
+                if material_id is not None and material_id not in material_index_by_id:
+                    material_index_by_id[material_id] = len(material_index_by_id)
+        vertex_offset += used.size
+        face_offset += face_indices.size
+
+    if lod_index is not None:
+        for key in ("lod_screen_coverage", "lod_switch_distance", "lod_ratio"):
+            if len({mesh.metadata.get(key) for mesh in source_meshes}) > 1:
+                raise MeshValidationError(f"merge requires matching LOD {lod_index + 1} {key} values")
+    metadata = {
+        key: value
+        for key, value in (source_meshes[0].metadata.items() if source_meshes else [])
+        if all(mesh.metadata.get(key) == value for mesh in source_meshes)
+    }
+    merged = Mesh(
+        points=np.vstack(points) if points else np.empty((0, 3), dtype=np.float64),
+        faces=np.vstack(faces) if faces else np.empty((0, 3), dtype=np.int64),
+        normals=np.vstack(normals) if normals else np.empty((0, 3), dtype=np.float64),
+        tangents=np.vstack(tangents) if tangents else None,
+        uvs={channel: np.vstack(values) for channel, values in uvs.items()},
+        face_groups={name: np.concatenate(values) for name, values in groups.items()},
+        material_indices=_material_indices(face_material_ids, material_index_by_id)
+        if options.preserve_materials
+        else None,
+        metadata={**metadata, **_mesh_metadata(inputs)},
+    )
+    merged.validate()
+    return merged
+
+
+def _normalized_vectors(values: FloatArray) -> FloatArray:
+    lengths = np.linalg.norm(values, axis=1, keepdims=True)
+    return values / np.where(lengths > 0.0, lengths, 1.0)
 
 
 def _material_indices(face_material_ids: list[str | None], material_index_by_id: dict[str, int]) -> IntArray | None:
@@ -422,7 +504,7 @@ def _material_indices(face_material_ids: list[str | None], material_index_by_id:
         return None
     material_ids = [material_id for material_id in face_material_ids if material_id is not None]
     if len(material_ids) != len(face_material_ids):
-        return None
+        raise MeshValidationError("merge cannot mix assigned and unassigned face materials")
     return np.asarray([material_index_by_id[material_id] for material_id in material_ids], dtype=np.int64)
 
 
