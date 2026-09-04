@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 from fascat.asset import Asset
 from fascat.io._atomic import atomic_output
 from fascat.io._errors import wrap_io_errors
-from fascat.io._geometry import normalize_rows, transform_points
+from fascat.io._geometry import normalize_rows, transform_points, transformed_faces
 from fascat.io._suffixes import STL_SUFFIXES
 from fascat.options import StlExportOptions
 
@@ -82,7 +82,8 @@ def _triangles(asset: Asset) -> FloatArray:
             mesh = asset.parts[node.part_id].mesh
             if mesh is not None:
                 points = transform_points(mesh.points, current)
-                chunks.append(points[mesh.faces].astype(np.float64))
+                faces = transformed_faces(mesh.faces, current)
+                chunks.append(points[faces].astype(np.float64))
     if not chunks:
         return np.empty((0, 3, 3), dtype=np.float64)
     return np.concatenate(chunks, axis=0)

@@ -9,6 +9,13 @@ FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int64]
 
 
+def transformed_faces(faces: IntArray, transform: FloatArray) -> IntArray:
+    """Preserve surface orientation when baking a reflected transform."""
+    if np.linalg.det(transform[:3, :3]) < 0.0:
+        return faces[:, [0, 2, 1]]
+    return faces
+
+
 def transform_points(points: FloatArray, transform: FloatArray) -> FloatArray:
     """Apply a homogeneous transform to 3D points."""
     if points.shape[0] == 0:

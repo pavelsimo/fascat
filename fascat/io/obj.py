@@ -9,7 +9,7 @@ from fascat.asset import Asset, Node, Part
 from fascat.export_report import referenced_materials
 from fascat.io._atomic import atomic_outputs
 from fascat.io._errors import wrap_io_errors
-from fascat.io._geometry import face_normals, transform_normals, transform_points
+from fascat.io._geometry import face_normals, transform_normals, transform_points, transformed_faces
 from fascat.io._suffixes import OBJ_SUFFIXES
 from fascat.material import Material
 from fascat.mesh import Mesh
@@ -62,16 +62,18 @@ def _write_obj(
             chunks.append(f"g {name}\n")
             chunks.append(f"o {name}\n")
         points = transform_points(mesh.points, occurrence.world_transform)
+        faces = transformed_faces(mesh.faces, occurrence.world_transform)
         written_vertices += int(points.shape[0])
         written_triangles += mesh.triangle_count
         chunks.append(_format_prefixed_rows("v", points))
-        normals = _occurrence_normals(mesh, points, occurrence.world_transform)
+        normals = _occurrence_normals(mesh, points, faces, occurrence.world_transform)
         chunks.append(_format_prefixed_rows("vn", normals.values))
         chunks.append(f"{_smoothing_directive(mesh, normals.per_face)}\n")
         chunks.extend(
             _face_chunks(
                 part,
                 mesh,
+                faces,
                 vertex_offset=vertex_offset,
                 normal_offset=normal_offset,
                 per_face_normals=normals.per_face,
@@ -122,10 +124,10 @@ class _ObjNormals:
         self.per_face = per_face
 
 
-def _occurrence_normals(mesh: Mesh, points: np.ndarray, transform: np.ndarray) -> _ObjNormals:
+def _occurrence_normals(mesh: Mesh, points: np.ndarray, faces: np.ndarray, transform: np.ndarray) -> _ObjNormals:
     if mesh.normals is not None:
         return _ObjNormals(transform_normals(mesh.normals, transform), per_face=False)
-    return _ObjNormals(face_normals(points, mesh.faces), per_face=True)
+    return _ObjNormals(face_normals(points, faces), per_face=True)
 
 
 def _smoothing_directive(mesh: Mesh, per_face_normals: bool) -> str:
@@ -146,6 +148,7 @@ def _format_prefixed_rows(prefix: str, values: np.ndarray) -> str:
 def _face_chunks(
     part: Part,
     mesh: Mesh,
+    faces: np.ndarray,
     *,
     vertex_offset: int,
     normal_offset: int,
@@ -157,7 +160,7 @@ def _face_chunks(
     if not write_materials:
         return [
             _face_lines(
-                mesh.faces,
+                faces,
                 face_start=0,
                 vertex_offset=vertex_offset,
                 normal_offset=normal_offset,
@@ -177,7 +180,7 @@ def _face_chunks(
             chunks.append(f"usemtl {_obj_name(material_id)}\n")
         chunks.append(
             _face_lines(
-                mesh.faces[start:end],
+                faces[start:end],
                 face_start=start,
                 vertex_offset=vertex_offset,
                 normal_offset=normal_offset,
