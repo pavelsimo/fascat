@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from fascat.asset import Asset, Node, Part
+from fascat.filter import Filter
 from fascat.mesh import Mesh, MeshValidationError
 from fascat.options import OptimizeOptions
 
@@ -70,6 +71,59 @@ def test_target_triangles_wins_over_ratio() -> None:
 
     assert optimized_mesh is not None
     assert optimized_mesh.triangle_count == 3
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_expanding_selected_part_preserves_existing_colliding_ids(reverse: bool) -> None:
+    children = [Node(id="selected", name="selected", part_id="a"), Node(id="other", name="other", part_id="a_1")]
+    if reverse:
+        children.reverse()
+    asset = Asset(
+        root=Node(id="root", name="root", children=children),
+        parts={
+            "a": Part(id="a", name="A", mesh=mesh_with_triangles(1)),
+            "a_1": Part(id="a_1", name="Other", mesh=mesh_with_triangles(2)),
+        },
+    )
+
+    result = asset.optimize(
+        OptimizeOptions(simplify=False, optimize_buffers=False, preserve_instances=False), where=Filter.part("a")
+    )
+
+    nodes = {node.id: node for node in result.root.children}
+    assert nodes["selected"].part_id != "a_1"
+    assert nodes["other"].part_id == "a_1"
+    selected = result.parts[nodes["selected"].part_id or ""]
+    assert selected.mesh is not None and selected.mesh.triangle_count == 1
+    other = result.parts["a_1"]
+    assert other.mesh is not None and other.mesh.triangle_count == 2
+    assert result.part_count == 2
+    assert asset.parts["a"].mesh is not None and asset.parts["a"].mesh.triangle_count == 1
+
+
+def test_instance_expansion_does_not_select_historical_source_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[int] = []
+
+    def simplify(mesh: Mesh, **kwargs: object) -> Mesh:
+        calls.append(mesh.triangle_count)
+        return mesh.copy()
+
+    monkeypatch.setattr(Mesh, "simplify", simplify)
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[Node(id="a", name="a", part_id="a"), Node(id="b", name="b", part_id="b")],
+        ),
+        parts={
+            "a": Part(id="a", name="A", mesh=mesh_with_triangles(1)),
+            "b": Part(id="b", name="B", mesh=mesh_with_triangles(2), metadata={"source_part_id": "old"}),
+        },
+    )
+
+    asset.optimize(OptimizeOptions(preserve_instances=False, optimize_buffers=False), where=Filter.part("a"))
+
+    assert calls == [1]
 
 
 def test_optimize_validates_simplified_mesh_before_buffer_optimization(monkeypatch) -> None:  # type: ignore[no-untyped-def]
