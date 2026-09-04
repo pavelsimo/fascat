@@ -245,6 +245,12 @@ def test_preserve_material_boundaries_keeps_adjacent_faces() -> None:
     assert optimized_mesh.triangle_count == 2
     feature_counts = json.loads(str(optimized_part.metadata["simplification_preserved_features"]))
     assert feature_counts["material_boundary_faces"] == 2
+    warning = (
+        "part part: simplification retained the original 2 triangles; "
+        "target 1 was not reached (constrained_backend_unavailable)"
+    )
+    assert warning in optimized.report.warnings
+    assert warning in optimized.report.steps[-1].warnings
 
 
 def test_preserve_hard_edges_keeps_non_coplanar_faces() -> None:

@@ -1952,11 +1952,92 @@ def test_simplify_preserves_explicit_protected_faces() -> None:
     )
 
     simplified = mesh.simplify(target_triangles=1, protected_faces=np.asarray([2], dtype=int))
-    centroid = simplified.points[simplified.faces[0]].mean(axis=0)
-
-    assert simplified.triangle_count == 1
-    assert centroid[0] > 19.0
+    # Preserving one face must not delete the two unprotected components.
+    assert simplified.triangle_count == mesh.triangle_count
+    np.testing.assert_array_equal(simplified.points, mesh.points)
+    np.testing.assert_array_equal(simplified.faces, mesh.faces)
     assert simplified.metadata["simplification_preserved_feature_faces"] == "1"
+
+
+@pytest.fixture
+def textured_closed_mesh() -> Mesh:
+    import trimesh
+
+    sphere = trimesh.creation.icosphere(subdivisions=2)
+    return Mesh(
+        points=np.asarray(sphere.vertices),
+        faces=np.asarray(sphere.faces),
+        normals=np.asarray(sphere.vertex_normals),
+        tangents=np.tile([1.0, 0.0, 0.0, 1.0], (len(sphere.vertices), 1)),
+        uvs={0: np.asarray(sphere.vertices[:, :2]), 1: np.asarray(sphere.vertices[:, 1:])},
+        material_indices=(sphere.triangles_center[:, 0] > 0).astype(np.int64),
+        face_groups={"marked": np.asarray([0, 11, len(sphere.faces) - 1], dtype=np.int64)},
+        metadata={"source": "closed-textured-sphere"},
+    )
+
+
+def _assert_retained_original_mesh(source: Mesh, result: Mesh) -> None:
+    result.validate()
+    assert result is not source
+    assert result.triangle_count == source.triangle_count
+    assert source.quality_metrics()["boundary_edges"] == 0
+    assert result.quality_metrics()["boundary_edges"] == 0
+    for name in ("points", "faces", "normals", "tangents", "material_indices"):
+        np.testing.assert_array_equal(getattr(result, name), getattr(source, name))
+        assert not np.shares_memory(getattr(result, name), getattr(source, name))
+    assert result.uvs.keys() == source.uvs.keys()
+    for channel, values in source.uvs.items():
+        np.testing.assert_array_equal(result.uvs[channel], values)
+    assert result.face_groups.keys() == source.face_groups.keys()
+    for name, faces in source.face_groups.items():
+        np.testing.assert_array_equal(result.face_groups[name], faces)
+    assert result.metadata["source"] == source.metadata["source"]
+    assert result.metadata["simplification_status"] == "retained_original"
+    assert result.metadata["simplification_source_triangles"] == "320"
+    assert result.metadata["simplification_target_triangles"] == "80"
+    assert result.metadata["simplification_target_status"] == "unmet"
+    assert "simplification_status" not in source.metadata
+
+
+@pytest.mark.parametrize("feature", ["material_boundaries", "hard_edges", "explicit"])
+def test_constrained_simplify_retains_closed_surface_and_attributes(
+    textured_closed_mesh: Mesh, feature: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="fascat"):
+        simplified = textured_closed_mesh.simplify(
+            target_triangles=80,
+            preserve_material_boundaries=feature == "material_boundaries",
+            preserve_hard_edges=feature == "hard_edges",
+            hard_edge_angle=1.0,
+            protected_faces=np.asarray([0], dtype=np.int64) if feature == "explicit" else None,
+        )
+
+    _assert_retained_original_mesh(textured_closed_mesh, simplified)
+    assert simplified.metadata["simplification_fallback_reason"] == "constrained_backend_unavailable"
+    assert int(simplified.metadata["simplification_preserved_feature_faces"]) > 0
+    assert "constrained simplification is unavailable; retaining original mesh" in caplog.text
+    assert "320 triangles, target 80" in caplog.text
+
+
+@pytest.mark.parametrize("missing_backends", [False, True])
+def test_simplify_backend_failure_retains_closed_surface_and_attributes(
+    textured_closed_mesh: Mesh,
+    missing_backends: bool,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_simplify(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("simplification backend failed")
+
+    for name in ("meshoptimizer", "fast_simplification"):
+        monkeypatch.setitem(sys.modules, name, None if missing_backends else SimpleNamespace(simplify=fail_simplify))
+
+    with caplog.at_level(logging.WARNING, logger="fascat"):
+        simplified = textured_closed_mesh.simplify(target_triangles=80)
+
+    _assert_retained_original_mesh(textured_closed_mesh, simplified)
+    assert simplified.metadata["simplification_fallback_reason"] == "backends_failed"
+    assert "fast-simplification failed; retaining original mesh" in caplog.text
 
 
 def test_uv_seam_vertices_returns_empty_without_uvs_or_vertices() -> None:

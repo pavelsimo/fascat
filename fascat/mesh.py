@@ -2733,7 +2733,7 @@ class Mesh:
         preserve_silhouette: bool = False,
         protected_faces: IntArray | None = None,
     ) -> Mesh:
-        """Return a mesh simplified to a triangle target or error bound."""
+        """Simplify toward a target, retaining the mesh if safe reduction is unavailable."""
         if self.triangle_count == 0:
             return self.copy()
         if target_triangles is None:
@@ -2774,7 +2774,7 @@ class Mesh:
             protected = np.unique(np.concatenate(protected_sets))
             protected = protected[(protected >= 0) & (protected < self.triangle_count)]
             if protected.size:
-                mesh = self._simplify_preserving_faces(protected, max(target_triangles, int(protected.shape[0])))
+                mesh = self._simplify_preserving_faces(protected, target_triangles)
                 mesh.metadata = {
                     **mesh.metadata,
                     "simplification_preserved_feature_faces": str(int(protected.shape[0])),
@@ -2846,10 +2846,15 @@ class Mesh:
                 mesh.validate()
                 return mesh
             except Exception:
-                stride = max(1, int(np.ceil(self.triangle_count / target_triangles)))
-                keep = np.arange(0, self.triangle_count, stride, dtype=np.int64)[:target_triangles]
-                mesh = self._filter_faces(keep).remove_unreferenced_vertices().compute_normals()
-                mesh.validate()
+                logger.warning("fast-simplification failed; retaining original mesh", exc_info=True)
+                mesh = self.copy()
+                mesh.metadata["simplification_status"] = "retained_original"
+                mesh.metadata["simplification_fallback_reason"] = "backends_failed"
+                mesh.metadata["simplification_source_triangles"] = str(self.triangle_count)
+                mesh.metadata["simplification_target_triangles"] = str(target_triangles)
+                mesh.metadata["simplification_target_status"] = (
+                    "unmet" if self.triangle_count > target_triangles else "unchanged"
+                )
                 return mesh
 
     def optimize_buffers(self) -> Mesh:
@@ -2965,18 +2970,26 @@ class Mesh:
         }
 
     def _simplify_preserving_faces(self, protected_faces: IntArray, target_triangles: int) -> Mesh:
-        protected = {int(index) for index in protected_faces.astype(int).tolist()}
-        keep = set(protected)
-        remaining = max(0, min(target_triangles, self.triangle_count) - len(keep))
-        if remaining:
-            unprotected = [index for index in range(self.triangle_count) if index not in protected]
-            if unprotected:
-                stride = max(1, int(np.ceil(len(unprotected) / remaining)))
-                keep.update(unprotected[::stride][:remaining])
-        keep_indices = np.asarray(sorted(keep), dtype=np.int64)
-        if keep_indices.shape[0] >= self.triangle_count:
-            return self.copy()
-        return self._filter_faces(keep_indices).remove_unreferenced_vertices().compute_normals()
+        # The integrated simplifiers cannot reliably lock arbitrary feature faces.
+        # Sampling unprotected triangles is not decimation: it opens holes in the
+        # surface. Keep all geometry and attributes until a constrained backend is
+        # supported, even when that means exceeding the requested triangle target.
+        logger.warning(
+            "constrained simplification is unavailable; retaining original mesh "
+            "(%d triangles, target %d, %d protected faces)",
+            self.triangle_count,
+            target_triangles,
+            protected_faces.size,
+        )
+        mesh = self.copy()
+        mesh.metadata["simplification_status"] = "retained_original"
+        mesh.metadata["simplification_fallback_reason"] = "constrained_backend_unavailable"
+        mesh.metadata["simplification_source_triangles"] = str(self.triangle_count)
+        mesh.metadata["simplification_target_triangles"] = str(target_triangles)
+        mesh.metadata["simplification_target_status"] = (
+            "unmet" if self.triangle_count > target_triangles else "unchanged"
+        )
+        return mesh
 
     def _feature_face_indices(
         self,

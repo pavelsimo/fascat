@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 
 from fascat.asset import Asset, Part
 from fascat.mesh import Mesh
-from fascat.ops._mesh_utils import selected_mesh_part_id_list, slice_faces
+from fascat.ops._mesh_utils import selected_mesh_part_id_list
 from fascat.ops._visibility import face_ambient_occlusion
 from fascat.ops.parallel import parallel_map
 from fascat.options import DecimateOptions
@@ -59,7 +59,6 @@ def decimate_asset(
             selected_part_ids=selected_part_ids,
         )
         _warn_aggressive_lod0_decimation(result, source_meshes, options)
-        _enforce_triangle_budget(result, options, selected_part_ids=selected_part_ids)
         _finalize_decimation_uv_importance(result, options, selected_part_ids=selected_part_ids)
         _annotate_decimation_result(
             result,
@@ -193,8 +192,6 @@ def _decimate_part_budget(part: Part, options: DecimateOptions, ratio: float | N
         ratio=None if target is not None else ratio,
     )
     mesh = mesh.optimize_buffers().repair()
-    if target_budget is not None and mesh.triangle_count > target_budget:
-        mesh = _sample_mesh_faces(mesh, target_budget).compute_normals()
     mesh = _finalize_decimated_mesh_uvs(mesh, options)
     mesh.metadata = {
         **mesh.metadata,
@@ -672,6 +669,7 @@ def _annotate_decimation_result(
     allocation_preserved_parts = 0
     allocation_reduced_parts = 0
     allocation_targets: list[int] = []
+    unmet_target_parts = 0
     feature_totals = {
         "hard_edge_faces": 0,
         "hole_boundary_faces": 0,
@@ -737,6 +735,15 @@ def _annotate_decimation_result(
                 allocation_preserved_parts += 1
             else:
                 allocation_reduced_parts += 1
+            target_unmet = metrics.output_triangles > allocated_target
+            metadata["decimate_target_status"] = "unmet" if target_unmet else "met"
+            if target_unmet:
+                unmet_target_parts += 1
+                asset.report.add_warning(
+                    f"part {part.id}: decimation produced {metrics.output_triangles} triangles "
+                    f"from {metrics.source_triangles}; target {allocated_target} was not reached; "
+                    "retaining the safe simplification result"
+                )
             metadata["decimate_allocated_target_triangles"] = str(allocated_target)
             metadata["decimate_allocation_target_reduction"] = (
                 f"{((metrics.source_triangles - allocated_target) / metrics.source_triangles):.9g}"
@@ -775,6 +782,15 @@ def _annotate_decimation_result(
     asset.metadata.update(target_strategy_metadata)
     asset.metadata["decimate_source_triangles"] = str(source_total)
     asset.metadata["decimate_output_triangles"] = str(output_total)
+    selection_target_unmet = (
+        options.budget_scope == "selection"
+        and options.target_triangles is not None
+        and output_total > options.target_triangles
+    )
+    asset.metadata["decimate_target_status"] = (
+        "unmet" if unmet_target_parts or selection_target_unmet else "met" if allocation_part_count else "not_requested"
+    )
+    asset.metadata["decimate_unmet_target_parts"] = str(unmet_target_parts)
     asset.metadata["decimate_triangle_reduction"] = f"{reduction:.9g}"
     asset.metadata["decimate_max_vertex_error"] = f"{max_error:.9g}"
     asset.metadata["decimate_mean_vertex_error"] = f"{(weighted_error / measured_parts):.9g}"
@@ -939,70 +955,7 @@ def _nearest_distances(points: FloatArray, targets: FloatArray) -> FloatArray:
     return distances
 
 
-def _enforce_triangle_budget(
-    asset: Asset,
-    options: DecimateOptions,
-    *,
-    selected_part_ids: set[str] | None,
-) -> None:
-    eligible = [
-        part
-        for part in asset.parts.values()
-        if (selected_part_ids is None or part.id in selected_part_ids) and part.mesh is not None
-    ]
-    if not eligible:
-        return
-    if options.target_triangles is not None:
-        current_total = sum(cast(Mesh, part.mesh).triangle_count for part in eligible)
-        if current_total <= options.target_triangles:
-            return
-        assigned = 0
-        budgets: dict[str, int] = {}
-        for part in eligible:
-            mesh = cast(Mesh, part.mesh)
-            exact = options.target_triangles * (mesh.triangle_count / current_total)
-            budget = max(1, min(mesh.triangle_count, int(round(exact))))
-            budgets[part.id] = budget
-            assigned += budget
-        while assigned > options.target_triangles:
-            reducible = [part_id for part_id, budget in budgets.items() if budget > 1]
-            if not reducible:
-                break
-            part_id = max(reducible, key=lambda item: budgets[item])
-            budgets[part_id] -= 1
-            assigned -= 1
-        for part in eligible:
-            mesh = cast(Mesh, part.mesh)
-            if mesh.triangle_count > budgets[part.id]:
-                part.mesh = _sample_mesh_faces(mesh, budgets[part.id]).compute_normals()
-                part.fingerprint = part.mesh.fingerprint()
-        return
-
-    ratio = _decimate_ratio(options)
-    for part in eligible:
-        mesh = cast(Mesh, part.mesh)
-        target = _ratio_target(mesh, ratio)
-        if target is not None and mesh.triangle_count > target:
-            part.mesh = _sample_mesh_faces(mesh, target).compute_normals()
-            part.fingerprint = part.mesh.fingerprint()
-
-
 def _ratio_target(mesh: Mesh | None, ratio: float | None) -> int | None:
     if mesh is None or ratio is None:
         return None
     return max(1, int(round(mesh.triangle_count * ratio)))
-
-
-def _sample_mesh_faces(mesh: Mesh, target_triangles: int) -> Mesh:
-    target = max(1, min(target_triangles, mesh.triangle_count))
-    if target >= mesh.triangle_count:
-        return mesh.copy()
-    face_indices = np.unique(np.linspace(0, mesh.triangle_count - 1, target, dtype=np.int64))
-    while face_indices.shape[0] < target:
-        missing = np.setdiff1d(
-            np.arange(mesh.triangle_count, dtype=np.int64),
-            face_indices,
-            assume_unique=True,
-        )
-        face_indices = np.sort(np.concatenate([face_indices, missing[: target - face_indices.shape[0]]]))
-    return slice_faces(mesh, face_indices).remove_unreferenced_vertices()
