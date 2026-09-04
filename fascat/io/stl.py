@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import struct
 from io import StringIO
 from pathlib import Path
@@ -67,12 +68,68 @@ def validate_stl(path: str | Path) -> dict[str, int]:
         triangle_count = struct.unpack_from("<I", payload, 80)[0]
         expected = 84 + triangle_count * 50
         if expected == len(payload):
+            if triangle_count == 0:
+                raise RuntimeError("STL asset contains no triangles")
+            # Each packed record contains a normal, three vertices, and a uint16 attribute.
+            coordinates = np.ndarray((triangle_count, 12), dtype="<f4", buffer=payload, offset=84, strides=(50, 4))
+            if not np.isfinite(coordinates).all():
+                raise RuntimeError("STL asset contains non-finite coordinates or normals")
             return {"meshes": 1, "points": triangle_count * 3, "triangles": triangle_count}
-    text = payload.decode("utf-8", errors="ignore")
-    triangle_count = sum(1 for line in text.splitlines() if line.strip().startswith("facet normal"))
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RuntimeError("invalid STL binary length or ASCII encoding") from exc
+    triangle_count = _validate_ascii_stl(text)
     if triangle_count == 0:
         raise RuntimeError("STL asset contains no triangles")
     return {"meshes": 1, "points": triangle_count * 3, "triangles": triangle_count}
+
+
+def _validate_ascii_stl(text: str) -> int:
+    state = "solid"
+    vertices = 0
+    triangles = 0
+    for line_number, line in enumerate(text.splitlines(), 1):
+        fields = line.split()
+        if not fields:
+            continue
+        label = f"STL line {line_number}"
+        if state == "solid" and fields[0] == "solid":
+            state = "facet"
+        elif state == "facet" and fields[0] == "endsolid":
+            state = "solid"
+        elif state == "facet" and fields[:2] == ["facet", "normal"]:
+            _validate_stl_vector(fields[2:], label)
+            state = "loop"
+        elif state == "loop" and fields == ["outer", "loop"]:
+            vertices = 0
+            state = "vertex"
+        elif state == "vertex" and fields[0] == "vertex":
+            _validate_stl_vector(fields[1:], label)
+            vertices += 1
+            if vertices == 3:
+                state = "endloop"
+        elif state == "endloop" and fields == ["endloop"]:
+            state = "endfacet"
+        elif state == "endfacet" and fields == ["endfacet"]:
+            triangles += 1
+            state = "facet"
+        else:
+            raise RuntimeError(f"{label} has invalid facet structure (expected {state})")
+    if state != "solid":
+        raise RuntimeError("STL contains an incomplete solid or facet")
+    return triangles
+
+
+def _validate_stl_vector(fields: list[str], label: str) -> None:
+    if len(fields) != 3:
+        raise RuntimeError(f"{label} requires three coordinates")
+    try:
+        finite = all(math.isfinite(float(value)) for value in fields)
+    except ValueError as exc:
+        raise RuntimeError(f"{label} contains invalid coordinates") from exc
+    if not finite:
+        raise RuntimeError(f"{label} contains non-finite coordinates")
 
 
 def _triangles(asset: Asset) -> FloatArray:

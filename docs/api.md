@@ -1538,6 +1538,23 @@ preview = validation.write_output_preview("motor.glb", "motor-preview.png")
 browser_preview = validation.write_browser_render_preview("motor.glb", "motor-browser.png")
 ```
 
+OBJ, STL, and glTF structural validation rejects empty triangle meshes, incomplete
+faces, and non-finite stored coordinates. OBJ validation resolves positive and
+relative vertex, texture, and normal indices, and counts an n-sided polygon as
+n − 2 triangles. STL validation requires complete ASCII facets or an exact binary
+record count. glTF validation checks dense accessor storage, matching attribute
+counts, and decoded indices against the primitive's vertex count in the default
+scene; quantized and interleaved attributes are supported. Sparse accessors and
+non-triangle primitive modes are explicitly unsupported.
+
+Compression has narrower guarantees: meshopt validation checks the uncompressed
+fallback data, not the compressed stream. Draco-only geometry receives metadata
+and buffer-reference checks without decoding its payload, so a successful result
+does not certify its coordinates or indices. These checks are not a full format
+conformance test and do not establish non-degeneracy, watertightness, correct
+winding, materials, or visual quality. Use geometry-quality and runtime checks
+for those additional assessments.
+
 The CLI can write a validation-time quality report for exported assets:
 
 ```bash
