@@ -1074,22 +1074,31 @@ def _asset_from_usd(path: Path) -> Asset:
 
     parts: dict[str, Part] = {}
     nodes: list[Node] = []
-    for prim in Usd.PrimRange(default_prim):
+    mesh_cache: dict[str, Mesh] = {}
+    # Instance proxies expose each scene occurrence, including nested instances,
+    # without traversing the prototype storage outside the default prim.
+    for prim in Usd.PrimRange(default_prim, Usd.TraverseInstanceProxies()):
         if not prim.IsA(UsdGeom.Mesh):
             continue
-        usd_mesh = UsdGeom.Mesh(prim)
-        points_value = usd_mesh.GetPointsAttr().Get() or []
-        counts = [int(value) for value in (usd_mesh.GetFaceVertexCountsAttr().Get() or [])]
-        indices = [int(value) for value in (usd_mesh.GetFaceVertexIndicesAttr().Get() or [])]
-        if any(count != 3 for count in counts):
-            continue
-        points = np.asarray(
-            [[float(coord[0]), float(coord[1]), float(coord[2])] for coord in points_value], dtype=np.float64
-        )
-        faces = np.asarray(indices, dtype=np.int64).reshape((-1, 3))
+        source_prim = prim.GetPrimInPrototype() if prim.IsInstanceProxy() else prim
+        source_key = str(source_prim.GetPath())
+        mesh = mesh_cache.get(source_key)
+        if mesh is None:
+            usd_mesh = UsdGeom.Mesh(source_prim)
+            points_value = usd_mesh.GetPointsAttr().Get() or []
+            counts = [int(value) for value in (usd_mesh.GetFaceVertexCountsAttr().Get() or [])]
+            indices = [int(value) for value in (usd_mesh.GetFaceVertexIndicesAttr().Get() or [])]
+            if any(count != 3 for count in counts):
+                continue
+            points = np.asarray(
+                [[float(coord[0]), float(coord[1]), float(coord[2])] for coord in points_value], dtype=np.float64
+            )
+            faces = np.asarray(indices, dtype=np.int64).reshape((-1, 3))
+            mesh = Mesh(points=points, faces=faces)
+            mesh_cache[source_key] = mesh
         part_id = f"usd_mesh_{len(parts)}"
         name = prim.GetName() or part_id
-        parts[part_id] = Part(id=part_id, name=name, mesh=Mesh(points=points, faces=faces))
+        parts[part_id] = Part(id=part_id, name=name, mesh=mesh)
         nodes.append(Node(id=f"node_{part_id}", name=name, part_id=part_id))
 
     if not parts:
