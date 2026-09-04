@@ -1456,6 +1456,16 @@ reached, `self_intersections_lower_bound` is `true` and the report includes
 `self_intersection_warnings` is kept as a compatibility alias for
 `self_intersections`.
 
+Topology analysis uses geometric edge connectivity within each part. Duplicated
+endpoints are connected only when both endpoints of an edge match exactly
+(zero tolerance), so STL facets and glTF material, hard-normal, and UV seams do
+not create false holes. Nonzero gaps remain open, however small. A coincident
+point alone does not connect otherwise disconnected shells. This analysis does
+not modify render vertices, attributes, face counts, or self-intersection inputs.
+Coincident disconnected shells sharing full edges cannot be distinguished from
+seams using positions alone; their edge incidences are combined, with every
+face retained, so overlapping closed shells can report non-manifold edges.
+
 Analysis parameters:
 
 | Parameter | Meaning |

@@ -604,6 +604,12 @@ above and on the [Python API page](api.html) document each field.
 
 ## Validate flags
 
+Boundary and non-manifold checks use exact geometric edge matches within each
+part, including across duplicated STL vertices and glTF rendering seams. No
+distance tolerance is used: nonzero gaps stay open. Geometry and attributes are
+unchanged. Coincident disconnected shells sharing edges are ambiguous and their
+face incidences are combined; duplicated faces are never removed from the count.
+
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--geometry-quality` | `false` | Enable all geometry quality checks in the validation report |
