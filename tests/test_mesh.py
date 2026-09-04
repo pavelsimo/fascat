@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import math
 import sys
+from collections.abc import Iterator
 from types import SimpleNamespace
 
 import numpy as np
@@ -1484,7 +1485,7 @@ def test_mesh_copy_does_not_reenter_constructor_copy(monkeypatch: pytest.MonkeyP
     assert mesh.uvs[0][0, 0] == 0.0
 
 
-def test_mesh_copy_reuses_cached_topology_without_sharing_mutable_values(
+def test_mesh_copy_reuses_shared_topology_without_sharing_mutable_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     mesh = Mesh(
@@ -1496,7 +1497,7 @@ def test_mesh_copy_reuses_cached_topology_without_sharing_mutable_values(
     edge_faces[(1, 2)].append(99)
 
     def fail_face_edges(self: Mesh) -> np.ndarray:
-        pytest.fail("copied mesh should reuse the cloned topology cache")
+        pytest.fail("copied mesh should reuse the shared topology cache")
 
     monkeypatch.setattr(Mesh, "_face_edges", fail_face_edges)
 
@@ -1506,7 +1507,7 @@ def test_mesh_copy_reuses_cached_topology_without_sharing_mutable_values(
 
 
 def test_equivalent_new_mesh_reuses_shared_topology_cache(monkeypatch: pytest.MonkeyPatch) -> None:
-    mesh_module._GLOBAL_MESH_CACHE.clear()
+    mesh_module._clear_global_mesh_cache()
     try:
         mesh = Mesh(
             points=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float),
@@ -1527,11 +1528,11 @@ def test_equivalent_new_mesh_reuses_shared_topology_cache(monkeypatch: pytest.Mo
 
         assert np.array_equal(third._face_unit_normals(), expected)
     finally:
-        mesh_module._GLOBAL_MESH_CACHE.clear()
+        mesh_module._clear_global_mesh_cache()
 
 
 def test_equivalent_new_mesh_reuses_shared_fingerprint_cache(monkeypatch: pytest.MonkeyPatch) -> None:
-    mesh_module._GLOBAL_MESH_CACHE.clear()
+    mesh_module._clear_global_mesh_cache()
     try:
         mesh = valid_triangle()
         expected = mesh.fingerprint()
@@ -1544,7 +1545,7 @@ def test_equivalent_new_mesh_reuses_shared_fingerprint_cache(monkeypatch: pytest
 
         assert recreated.fingerprint() == expected
     finally:
-        mesh_module._GLOBAL_MESH_CACHE.clear()
+        mesh_module._clear_global_mesh_cache()
 
 
 def test_mesh_copy_reuses_cached_orientability_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1563,7 +1564,7 @@ def test_mesh_copy_reuses_cached_orientability_metrics(monkeypatch: pytest.Monke
 
 
 def test_equivalent_new_mesh_reuses_shared_orientability_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
-    mesh_module._GLOBAL_MESH_CACHE.clear()
+    mesh_module._clear_global_mesh_cache()
     try:
         mesh = flipped_tetrahedron_mesh()
         expected = mesh.orientability_metrics()
@@ -1576,7 +1577,7 @@ def test_equivalent_new_mesh_reuses_shared_orientability_metrics(monkeypatch: py
 
         assert recreated.orientability_metrics() == expected
     finally:
-        mesh_module._GLOBAL_MESH_CACHE.clear()
+        mesh_module._clear_global_mesh_cache()
 
 
 def test_mesh_orientability_cache_rebuilds_after_in_place_face_mutation() -> None:
@@ -2475,3 +2476,144 @@ def test_mesh_to_trimesh_copies_geometry_and_attributes() -> None:
     np.testing.assert_allclose(converted.vertex_attributes["uv0"], uvs[0])
     np.testing.assert_array_equal(converted.face_attributes["material_indices"], material_indices)
     assert converted.metadata == {"source": "cad"}
+
+
+@pytest.fixture
+def empty_shared_mesh_cache() -> Iterator[None]:
+    mesh_module._clear_global_mesh_cache()
+    yield
+    mesh_module._clear_global_mesh_cache()
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_shared_mesh_cache_byte_budget_evicts_least_recently_used(
+    monkeypatch: pytest.MonkeyPatch, empty_shared_mesh_cache: object, nested: bool
+) -> None:
+    value = {(1, 2): [np.arange(128), 17]} if nested else np.arange(128)
+    name = "edge_faces_map"
+    mesh_module._store_global_cache_value(name, (0,), value)
+    entry_size = mesh_module._global_mesh_cache_bytes
+    assert entry_size > 128 * 8
+    mesh_module._clear_global_mesh_cache()
+    monkeypatch.setattr(mesh_module, "_GLOBAL_MESH_CACHE_MAX_BYTES", entry_size * 2)
+
+    for index in range(2):
+        mesh_module._store_global_cache_value(name, (index,), value)
+    assert mesh_module._global_cache_value(name, (0,)) is not mesh_module._MISSING_CACHE_VALUE
+    mesh_module._store_global_cache_value(name, (2,), value)
+
+    assert list(mesh_module._GLOBAL_MESH_CACHE) == [(name, (0,)), (name, (2,))]
+    assert mesh_module._global_mesh_cache_bytes == entry_size * 2
+    # Replacing an entry must subtract its old size before adding the new size.
+    mesh_module._store_global_cache_value(name, (0,), 1)
+    assert mesh_module._global_mesh_cache_bytes < entry_size * 2
+    assert mesh_module._global_mesh_cache_bytes == sum(size for size, _ in mesh_module._GLOBAL_MESH_CACHE.values())
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_shared_mesh_cache_skips_oversized_values_before_cloning(
+    monkeypatch: pytest.MonkeyPatch, empty_shared_mesh_cache: object, nested: bool
+) -> None:
+    monkeypatch.setattr(mesh_module, "_GLOBAL_MESH_CACHE_MAX_BYTES", 4096)
+    value = {(index, index + 1): [index] for index in range(100)} if nested else np.arange(1024)
+
+    def fail_clone(_value: object) -> object:
+        pytest.fail("oversized entries must not be cloned")
+
+    monkeypatch.setattr(mesh_module, "_clone_cache_value", fail_clone)
+    mesh_module._store_global_cache_value("edge_faces_map", (0,), value)
+    assert not mesh_module._GLOBAL_MESH_CACHE
+    assert mesh_module._global_mesh_cache_bytes == 0
+
+
+def test_shared_mesh_cache_accounts_for_copied_views_and_repeated_arrays(
+    monkeypatch: pytest.MonkeyPatch, empty_shared_mesh_cache: object
+) -> None:
+    monkeypatch.setattr(mesh_module, "_GLOBAL_MESH_CACHE_MAX_BYTES", 4096)
+    view = np.arange(100_000)[::10_000]
+    mesh_module._store_global_cache_value("undirected_edges_and_counts", (0,), (view, view))
+    size, stored = next(iter(mesh_module._GLOBAL_MESH_CACHE.values()))
+    assert isinstance(stored, tuple)
+    assert all(array.base is None for array in stored)
+    assert not np.shares_memory(*stored)
+    assert size >= sum(sys.getsizeof(array) for array in stored)
+    view[0] = -1
+    assert stored[0][0] == 0
+
+
+def test_mesh_copy_loads_derived_data_lazily_without_shared_cache(
+    monkeypatch: pytest.MonkeyPatch, empty_shared_mesh_cache: object
+) -> None:
+    monkeypatch.setattr(mesh_module, "_GLOBAL_MESH_CACHE_MAX_BYTES", 0)
+    mesh = valid_triangle()
+    expected_edges, expected_counts = mesh._undirected_edges_and_counts()
+    assert mesh._undirected_edges_and_counts()[0] is expected_edges
+    assert not mesh_module._GLOBAL_MESH_CACHE
+    copied = mesh.copy()
+    assert not copied._cache
+    copied_edges, copied_counts = copied._undirected_edges_and_counts()
+    assert np.array_equal(copied_edges, expected_edges)
+    assert np.array_equal(copied_counts, expected_counts)
+    assert not np.shares_memory(copied_edges, expected_edges)
+    copied_edges[0, 0] = 99
+    assert expected_edges[0, 0] == 0
+    copied.faces[0] = [0, 2, 2]
+    rebuilt_edges, _ = copied._undirected_edges_and_counts()
+    assert 99 not in rebuilt_edges
+    assert np.array_equal(mesh.faces, [[0, 1, 2]])
+
+
+def test_shared_mesh_cache_bounds_retained_arrays_after_mesh_release(
+    monkeypatch: pytest.MonkeyPatch, empty_shared_mesh_cache: object
+) -> None:
+    import gc
+    import weakref
+
+    monkeypatch.setattr(mesh_module, "_GLOBAL_MESH_CACHE_MAX_BYTES", 16_384)
+    random = np.random.default_rng(42)
+    references = []
+    for _ in range(20):
+        mesh = Mesh(points=random.random((60, 3)), faces=random.integers(0, 60, (100, 3)))
+        edges, counts = mesh._undirected_edges_and_counts()
+        references.extend([weakref.ref(mesh), weakref.ref(edges), weakref.ref(counts)])
+    del mesh, edges, counts
+    gc.collect()
+
+    assert all(reference() is None for reference in references)
+    assert 0 < mesh_module._global_mesh_cache_bytes <= 16_384
+    retained = [weakref.ref(array) for _, arrays in mesh_module._GLOBAL_MESH_CACHE.values() for array in arrays]
+    assert sum(reference().nbytes for reference in retained) <= 16_384
+    mesh_module._clear_global_mesh_cache()
+    gc.collect()
+    assert all(reference() is None for reference in retained)
+    assert mesh_module._global_mesh_cache_bytes == 0
+
+
+def test_shared_mesh_cache_threaded_hits_eviction_and_clear(
+    monkeypatch: pytest.MonkeyPatch, empty_shared_mesh_cache: object
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    monkeypatch.setattr(mesh_module, "_GLOBAL_MESH_CACHE_MAX_BYTES", 4096)
+    monkeypatch.setattr(mesh_module, "_GLOBAL_MESH_CACHE_MAX_ENTRIES", 3)
+
+    def exercise_cache(worker: int) -> None:
+        for iteration in range(100):
+            token = (iteration % 7,)
+            mesh_module._store_global_cache_value("edge_faces_map", token, {token: [token[0]]})
+            value = mesh_module._global_cache_value("edge_faces_map", token)
+            if value is not mesh_module._MISSING_CACHE_VALUE:
+                assert isinstance(value, dict)
+                assert value[token] == [token[0]]
+                value[token].append(-1)
+            if (iteration + worker) % 31 == 0:
+                mesh_module._clear_global_mesh_cache()
+            with mesh_module._GLOBAL_MESH_CACHE_LOCK:
+                assert len(mesh_module._GLOBAL_MESH_CACHE) <= 3
+                assert 0 <= mesh_module._global_mesh_cache_bytes <= 4096
+                assert mesh_module._global_mesh_cache_bytes == sum(
+                    size for size, _ in mesh_module._GLOBAL_MESH_CACHE.values()
+                )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(exercise_cache, range(8)))
