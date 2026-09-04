@@ -104,12 +104,14 @@ def _reconstruct_instances(asset: Asset, selected_node_ids: set[str], *, similar
     material_blocked_groups = 0
     attribute_blocked_groups = 0
     metadata_blocked_groups = 0
+    lod_blocked_groups = 0
     material_key_by_part: dict[str, tuple[tuple[str, ...], str | None]] = {}
     attribute_key_by_part: dict[
         str,
         tuple[str | None, str | None, tuple[tuple[int, str], ...], tuple[tuple[str, str], ...]],
     ] = {}
     metadata_key_by_part: dict[str, tuple[str, str]] = {}
+    lod_key_by_part: dict[str, tuple[tuple[object, ...], ...]] = {}
     for part_ids in part_ids_by_fingerprint.values():
         if len(part_ids) <= 1:
             continue
@@ -118,6 +120,7 @@ def _reconstruct_instances(asset: Asset, selected_node_ids: set[str], *, similar
             material_key_by_part.setdefault(part_id, _part_material_key(part))
             attribute_key_by_part.setdefault(part_id, _part_mesh_attribute_key(part.mesh))
             metadata_key_by_part.setdefault(part_id, _part_metadata_key(part))
+            lod_key_by_part[part_id] = _part_lod_key(part)
         material_keys = {material_key_by_part[part_id] for part_id in part_ids}
         attribute_keys = {attribute_key_by_part[part_id] for part_id in part_ids}
         metadata_keys = {metadata_key_by_part[part_id] for part_id in part_ids}
@@ -127,13 +130,15 @@ def _reconstruct_instances(asset: Asset, selected_node_ids: set[str], *, similar
             attribute_blocked_groups += 1
         if len(metadata_keys) > 1:
             metadata_blocked_groups += 1
+        if len({lod_key_by_part[part_id] for part_id in part_ids}) > 1:
+            lod_blocked_groups += 1
 
         canonical_by_key: dict[tuple[object, ...], str] = {}
         for part_id in part_ids:
             material_key = material_key_by_part[part_id]
             attribute_key = attribute_key_by_part[part_id]
             metadata_key = metadata_key_by_part[part_id]
-            key = (material_key, attribute_key, metadata_key)
+            key = (material_key, attribute_key, metadata_key, lod_key_by_part[part_id])
             canonical_id = canonical_by_key.get(key)
             if canonical_id is None:
                 canonical_by_key[key] = part_id
@@ -186,6 +191,11 @@ def _reconstruct_instances(asset: Asset, selected_node_ids: set[str], *, similar
         asset.report.add_warning(
             "instance reconstruction found "
             f"{metadata_blocked_groups} matching mesh group(s) with metadata differences that prevented full instancing"
+        )
+    if lod_blocked_groups:
+        asset.report.add_warning(
+            "instance reconstruction found "
+            f"{lod_blocked_groups} matching mesh group(s) with LOD differences that prevented full instancing"
         )
 
 
@@ -251,6 +261,7 @@ def _part_similarity_key(part: Part) -> tuple[object, ...] | None:
         _part_material_key(part),
         _part_mesh_attribute_key(mesh),
         _part_metadata_key(part),
+        _part_lod_key(part),
         mesh.points.shape,
         array_digest_required(mesh.faces),
     )
@@ -286,6 +297,19 @@ def _part_material_key(part: Part) -> tuple[tuple[str, ...], str | None]:
 def _part_metadata_key(part: Part) -> tuple[str, str]:
     mesh_metadata = {} if part.mesh is None else part.mesh.metadata
     return (_metadata_key(part.metadata), _metadata_key(mesh_metadata))
+
+
+def _part_lod_key(part: Part) -> tuple[tuple[object, ...], ...]:
+    return tuple(
+        (
+            array_digest_required(mesh.points),
+            array_digest_required(mesh.faces),
+            _part_mesh_attribute_key(mesh),
+            array_digest(mesh.material_indices),
+            _metadata_key(mesh.metadata),
+        )
+        for mesh in part.lod_meshes
+    )
 
 
 def _part_mesh_attribute_key(
