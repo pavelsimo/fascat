@@ -13,7 +13,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from fascat.errors import FascatError
-from fascat.metadata import Metadata
+from fascat.metadata import Metadata, _copy_metadata
 from fascat.options import DeleteDegeneratePolygonsOptions, MergeVerticesOptions, RepairOptions
 
 FloatArray = NDArray[np.float64]
@@ -495,7 +495,7 @@ class Mesh:
         self.face_groups = {
             name: np.array(values, dtype=np.int64, copy=True) for name, values in self.face_groups.items()
         }
-        self.metadata = dict(self.metadata)
+        self.metadata = _copy_metadata(self.metadata)
 
     @classmethod
     def _adopt(
@@ -542,7 +542,7 @@ class Mesh:
             uvs={channel: values.copy() for channel, values in self.uvs.items()},
             material_indices=None if self.material_indices is None else self.material_indices.copy(),
             face_groups={name: values.copy() for name, values in self.face_groups.items()},
-            metadata=dict(self.metadata),
+            metadata=_copy_metadata(self.metadata),
         )
         mesh._cache = _clone_cache_entries(self._cache)
         return mesh

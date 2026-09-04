@@ -74,7 +74,12 @@ containers you pass to their constructors. Creating an `Asset` copies the root
 tree, parts, materials, images, metadata, PMI list, report, and every nested mesh
 array. Creating a `Mesh` copies `points`, `faces`, normals, tangents, UVs,
 material indices, and face groups. Later changes to the original input arrays or
-dicts do not alter the constructed object.
+dicts do not alter the constructed object. Constructors and `copy()` recursively
+copy nested metadata dictionaries and lists, PMI annotations (including targets,
+planes, and source metadata), and report options. `clone()` has the same
+ownership guarantees as `copy()`. Immutable values may be shared. Backend
+source handles are retained by identity unless `keep_source=False` is passed;
+they are never deep-copied.
 
 Processing methods such as `tessellate()`, `repair()`, `stage()`, `optimize()`,
 and `lods()` follow copy-on-operation semantics: they return a new `Asset` and
