@@ -248,10 +248,11 @@ def _mesh_quality_entry(
     }
 
     if include_topology:
-        _edges, counts = mesh._undirected_edges_and_counts()
-        totals.non_manifold_edges = int(np.count_nonzero(counts > 2))
-        totals.boundary_edges = int(np.count_nonzero(counts == 1))
-        totals.open_boundaries = _open_boundary_count(mesh)
+        topology = _geometric_topology_mesh(mesh)
+        _, edge_counts = topology._undirected_edges_and_counts()
+        totals.non_manifold_edges = int(np.count_nonzero(edge_counts > 2))
+        totals.boundary_edges = int(np.count_nonzero(edge_counts == 1))
+        totals.open_boundaries = _open_boundary_count(topology)
         values["non_manifold_edges"] = totals.non_manifold_edges
         values["boundary_edges"] = totals.boundary_edges
         values["open_boundaries"] = totals.open_boundaries
@@ -316,6 +317,50 @@ def _bounds_payload(mesh: Mesh) -> dict[str, object]:
         "max": [float(value) for value in maxs.tolist()],
         "diagonal": diagonal,
     }
+
+
+def _geometric_topology_mesh(mesh: Mesh) -> Mesh:
+    """Join exact duplicate edge endpoints in a topology-only mesh.
+
+    STL facets and rendering seams duplicate vertices. Only complete coincident
+    edges connect their endpoints here: a shared position alone does not join
+    disconnected shells. No tolerance, face deduplication, or attribute edits
+    are applied. Coincident disconnected shells sharing edges are ambiguous;
+    their edge incidences are retained, including non-manifold multiplicities.
+    """
+    positions, point_ids = np.unique(mesh.points, axis=0, return_inverse=True)
+    if len(positions) == mesh.vertex_count or mesh.triangle_count == 0:
+        return mesh
+
+    edges = np.concatenate([mesh.faces[:, [0, 1]], mesh.faces[:, [1, 2]], mesh.faces[:, [2, 0]]])
+    geometric_edges = point_ids[edges]
+    reverse = geometric_edges[:, 0] > geometric_edges[:, 1]
+    edges[reverse] = edges[reverse, ::-1]
+    geometric_edges[reverse] = geometric_edges[reverse, ::-1]
+    order = np.lexsort((geometric_edges[:, 1], geometric_edges[:, 0]))
+    sorted_edges = geometric_edges[order]
+    shared = np.flatnonzero(
+        np.all(sorted_edges[1:] == sorted_edges[:-1], axis=1) & (sorted_edges[:-1, 0] != sorted_edges[:-1, 1])
+    )
+    if shared.size == 0:
+        return mesh
+
+    parents = list(range(mesh.vertex_count))
+
+    def root(vertex: int) -> int:
+        while parents[vertex] != vertex:
+            parents[vertex] = parents[parents[vertex]]
+            vertex = parents[vertex]
+        return vertex
+
+    for offset in shared:
+        left, right = edges[order[offset]], edges[order[offset + 1]]
+        for left_vertex, right_vertex in zip(left, right, strict=True):
+            left_root, right_root = root(int(left_vertex)), root(int(right_vertex))
+            parents[max(left_root, right_root)] = min(left_root, right_root)
+
+    remap = np.asarray([root(vertex) for vertex in range(mesh.vertex_count)], dtype=np.int64)
+    return Mesh(points=mesh.points, faces=remap[mesh.faces])
 
 
 def _open_boundary_count(mesh: Mesh) -> int:
