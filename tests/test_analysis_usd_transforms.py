@@ -146,3 +146,26 @@ def test_usd_analysis_transforms_each_instance_without_mutating_shared_geometry(
     assert len(report.parts) == 2
     np.testing.assert_allclose(report.parts[0]["bounds"]["max"], [12, 13, 4])
     np.testing.assert_allclose(report.parts[1]["bounds"]["max"], [-10, 10.25, 8])
+
+
+@pytest.mark.parametrize("sample_points", [False, True])
+def test_usd_analysis_reads_time_sampled_transforms_and_geometry(tmp_path: Path, sample_points: bool) -> None:
+    path = tmp_path / "sampled.usda"
+    stage = Usd.Stage.CreateNew(str(path))
+    scene = UsdGeom.Xform.Define(stage, "/Scene")
+    stage.SetDefaultPrim(scene.GetPrim())
+    mesh = _triangle(stage, "/Scene/Triangle")
+    mesh.AddTranslateOp().Set((100, 0, 0), Usd.TimeCode(1))
+    if sample_points:
+        for attribute, values in [
+            (mesh.GetPointsAttr(), [(0, 0, 0), (1, 0, 0), (0, 1, 0)]),
+            (mesh.GetFaceVertexCountsAttr(), [3]),
+            (mesh.GetFaceVertexIndicesAttr(), [0, 1, 2]),
+        ]:
+            attribute.Clear()
+            attribute.Set(values, Usd.TimeCode(1))
+    stage.GetRootLayer().Save()
+    report = analyze_output(path)
+    assert report.summary["triangles"] == 1
+    np.testing.assert_allclose(report.parts[0]["bounds"]["min"], [100, 0, 0])
+    np.testing.assert_allclose(report.parts[0]["bounds"]["max"], [101, 1, 0])

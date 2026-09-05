@@ -1072,7 +1072,8 @@ def _asset_from_usd(path: Path) -> Asset:
     if not default_prim:
         raise RuntimeError("USD stage has no defaultPrim")
 
-    xform_cache = UsdGeom.XformCache(Usd.TimeCode.Default())
+    time = Usd.TimeCode.EarliestTime()
+    xform_cache = UsdGeom.XformCache(time)
     parts: dict[str, Part] = {}
     nodes: list[Node] = []
     mesh_cache: dict[str, Mesh] = {}
@@ -1086,9 +1087,9 @@ def _asset_from_usd(path: Path) -> Asset:
         mesh = mesh_cache.get(source_key)
         if mesh is None:
             usd_mesh = UsdGeom.Mesh(source_prim)
-            points_value = usd_mesh.GetPointsAttr().Get() or []
-            counts = [int(value) for value in (usd_mesh.GetFaceVertexCountsAttr().Get() or [])]
-            indices = [int(value) for value in (usd_mesh.GetFaceVertexIndicesAttr().Get() or [])]
+            points_value = usd_mesh.GetPointsAttr().Get(time) or []
+            counts = [int(value) for value in (usd_mesh.GetFaceVertexCountsAttr().Get(time) or [])]
+            indices = [int(value) for value in (usd_mesh.GetFaceVertexIndicesAttr().Get(time) or [])]
             if any(count != 3 for count in counts):
                 continue
             points = np.asarray(
