@@ -228,7 +228,7 @@ def _validate_mesh_tree(
     point_count = 0
     face_count = 0
     for prim in Usd.PrimRange(root_prim):
-        if prim.IsInstance():
+        if prim.IsInstance() and not prim.IsA(UsdGeom.Mesh):
             prototype = prim.GetPrototype()
             if not prototype:
                 raise RuntimeError(f"instance {prim.GetPath()} has no prototype")

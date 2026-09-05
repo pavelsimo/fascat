@@ -1443,7 +1443,7 @@ def cmd_convert(
                 optimize_options,
                 target_triangles=target_triangles
                 if target_triangles is not None
-                else optimize_options.target_triangles,
+                else (None if ratio is not None else optimize_options.target_triangles),
                 ratio=ratio,
                 preserve_instances=preserve_instances,
                 preserve_hard_edges=preserve_hard_edges,

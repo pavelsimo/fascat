@@ -4,7 +4,7 @@ import base64
 from dataclasses import dataclass, field
 from typing import Literal
 
-from fascat.metadata import Metadata
+from fascat.metadata import Metadata, _copy_metadata
 
 ImageMimeType = Literal["image/png", "image/jpeg", "image/ktx2"]
 
@@ -27,7 +27,7 @@ class ImageResource:
         if self.width <= 0 or self.height <= 0:
             raise ValueError("image dimensions must be greater than 0")
         object.__setattr__(self, "data", bytes(self.data))
-        object.__setattr__(self, "metadata", dict(self.metadata))
+        object.__setattr__(self, "metadata", _copy_metadata(self.metadata))
 
     def copy(self) -> ImageResource:
         """Return an independent copy of the image resource."""
@@ -38,7 +38,7 @@ class ImageResource:
             data=self.data,
             width=self.width,
             height=self.height,
-            metadata=dict(self.metadata),
+            metadata=self.metadata,
         )
 
     def data_uri(self) -> str:

@@ -116,3 +116,17 @@ def test_nested_usd_instances_and_real_meshes_are_analyzed_once_per_occurrence(t
     assert len(decoded_paths) == len(set(decoded_paths)) == 2
     assert len({node.id for node in loaded.root.children}) == 5
     assert len({node.part_id for node in loaded.root.children}) == 5
+
+
+def test_direct_mesh_instances_validate_and_analyze(tmp_path: Path) -> None:
+    stage = Usd.Stage.CreateInMemory()
+    stage.SetDefaultPrim(UsdGeom.Xform.Define(stage, "/Scene").GetPrim())
+    _define_triangle(stage, "/Library/Triangle")
+    for name in ("A", "B"):
+        prim = stage.DefinePrim(f"/Scene/{name}")
+        prim.GetReferences().AddInternalReference("/Library/Triangle")
+        prim.SetInstanceable(True)
+        assert prim.IsA(UsdGeom.Mesh) and prim.IsInstance()
+    output = tmp_path / "direct.usda"
+    stage.GetRootLayer().Export(str(output))
+    _assert_occurrence_analysis_and_preview(output, 2, tmp_path)

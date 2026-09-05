@@ -749,3 +749,174 @@ def test_resolve_gltf_export_options_carries_draco_params_through_presets() -> N
     assert resolved.draco is True
     assert resolved.draco_compression_level == 9
     assert resolved.draco_quantize_position == 12
+
+
+def _structural_triangle() -> tuple[dict[str, Any], bytearray]:
+    # Hand-authored interleaved positions in one bufferView, with accessor offset.
+    rows = np.array([[99, 0, 0, 0], [99, 1, 0, 0], [99, 0, 1, 0]], dtype="<f4")
+    binary = bytearray(b"pad!" + rows.tobytes() + struct.pack("<3H", 0, 1, 2))
+    return {
+        "asset": {"version": "2.0"},
+        "scene": 0,
+        "scenes": [{"nodes": [0]}],
+        "nodes": [{"mesh": 0}],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1}]}],
+        "buffers": [{"byteLength": len(binary)}],
+        "bufferViews": [
+            {"buffer": 0, "byteOffset": 4, "byteLength": 48, "byteStride": 16},
+            {"buffer": 0, "byteOffset": 52, "byteLength": 6},
+        ],
+        "accessors": [
+            {"bufferView": 0, "byteOffset": 4, "count": 3, "type": "VEC3", "componentType": 5126},
+            {"bufferView": 1, "count": 3, "type": "SCALAR", "componentType": 5123},
+        ],
+    }, binary
+
+
+def test_validation_reads_strided_accessors_and_multiple_buffers() -> None:
+    from fascat.io.gltf import validate_gltf_payload
+
+    document, binary = _structural_triangle()
+    assert validate_gltf_document(document, binary) == {"meshes": 1, "points": 3, "triangles": 1}
+    document["buffers"] = [{"byteLength": 52}, {"byteLength": 6}]
+    document["bufferViews"][1].update(buffer=1, byteOffset=0)
+    assert validate_gltf_payload(document, [binary[:52], binary[52:]])["triangles"] == 1
+    bad_indices = struct.pack("<3H", 0, 1, 65534)
+    with pytest.raises(RuntimeError, match="index is out of range"):
+        validate_gltf_payload(document, [binary[:52], bad_indices])
+
+
+@pytest.mark.parametrize("component_type,format_code", [(5121, "B"), (5123, "H"), (5125, "I")])
+def test_validation_checks_decoded_indices(component_type: int, format_code: str) -> None:
+    document, binary = _structural_triangle()
+    binary[52:] = struct.pack("<3" + format_code, 0, 1, 2)
+    document["accessors"][1]["componentType"] = component_type
+    document["buffers"][0]["byteLength"] = len(binary)
+    document["bufferViews"][1]["byteLength"] = len(binary) - 52
+    assert validate_gltf_document(document, binary)["triangles"] == 1
+    struct.pack_into("<" + format_code, binary, 52, 3)
+    with pytest.raises(RuntimeError, match="index is out of range"):
+        validate_gltf_document(document, binary)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_validation_checks_decoded_positions(value: float) -> None:
+    document, binary = _structural_triangle()
+    struct.pack_into("<f", binary, 8 + 16, value)
+    with pytest.raises(RuntimeError, match="POSITION.*non-finite"):
+        validate_gltf_document(document, binary)
+
+
+@pytest.mark.parametrize("stride", [-16, 0, 4, 14, 256])
+def test_validation_rejects_invalid_accessor_stride(stride: int) -> None:
+    document, binary = _structural_triangle()
+    document["bufferViews"][0]["byteStride"] = stride
+    with pytest.raises(RuntimeError, match="byteStride"):
+        validate_gltf_document(document, binary)
+
+
+@pytest.mark.parametrize("count", [0, 1, 2])
+def test_validation_rejects_incomplete_indexed_triangles(count: int) -> None:
+    document, binary = _structural_triangle()
+    document["accessors"][1]["count"] = count
+    with pytest.raises(RuntimeError, match="index count"):
+        validate_gltf_document(document, binary)
+
+
+def test_validation_rejects_empty_mesh_primitives() -> None:
+    document, binary = _structural_triangle()
+    document["meshes"][0]["primitives"] = []
+    with pytest.raises(RuntimeError, match="no triangles"):
+        validate_gltf_document(document, binary)
+
+
+def test_validation_checks_nonindexed_triangles() -> None:
+    document, binary = _structural_triangle()
+    del document["meshes"][0]["primitives"][0]["indices"]
+    assert validate_gltf_document(document, binary)["triangles"] == 1
+    document["accessors"][0]["count"] = 2
+    with pytest.raises(RuntimeError, match="vertex count"):
+        validate_gltf_document(document, binary)
+    document["accessors"][0]["count"] = 0
+    with pytest.raises(RuntimeError, match="no vertices"):
+        validate_gltf_document(document, binary)
+
+
+def test_validation_rejects_unequal_attribute_counts() -> None:
+    document, binary = _structural_triangle()
+    document["accessors"].append(dict(document["accessors"][0], count=2))
+    document["meshes"][0]["primitives"][0]["attributes"]["NORMAL"] = 2
+    with pytest.raises(RuntimeError, match="NORMAL count"):
+        validate_gltf_document(document, binary)
+
+
+def test_validation_rejects_sparse_overrides_instead_of_ignoring_them() -> None:
+    document, binary = _structural_triangle()
+    document["accessors"][1]["sparse"] = {"count": 1}
+    with pytest.raises(RuntimeError, match="does not support sparse"):
+        validate_gltf_document(document, binary)
+
+
+def test_validation_draco_metadata_does_not_confuse_attribute_ids_with_accessors() -> None:
+    document, binary = _structural_triangle()
+    for accessor in document["accessors"]:
+        del accessor["bufferView"]
+        accessor.pop("byteOffset", None)
+    primitive = document["meshes"][0]["primitives"][0]
+    primitive["extensions"] = {"KHR_draco_mesh_compression": {"bufferView": 0, "attributes": {"POSITION": 123}}}
+    # Opaque bytes stand for Draco data: this deliberately tests metadata-only validation.
+    assert validate_gltf_document(document, binary)["triangles"] == 1
+    document["accessors"].append({"count": 3, "type": "VEC3", "componentType": 5126})
+    primitive["attributes"]["NORMAL"] = 2
+    with pytest.raises(RuntimeError, match="missing bufferView"):
+        validate_gltf_document(document, binary)
+
+
+def test_validation_rejects_corrupted_exported_indices(tmp_path: Path) -> None:
+    output = tmp_path / "export.glb"
+    write_gltf(_asset_with_materials_and_lods(), output)
+    document, payload = _read_glb(output)
+    binary = bytearray(payload)
+    accessor = document["accessors"][document["meshes"][0]["primitives"][0]["indices"]]
+    view = document["bufferViews"][accessor["bufferView"]]
+    offset = view.get("byteOffset", 0) + accessor.get("byteOffset", 0)
+    struct.pack_into("<H" if accessor["componentType"] == 5123 else "<I", binary, offset, 65534)
+    with pytest.raises(RuntimeError, match="index is out of range"):
+        validate_gltf_document(document, binary)
+
+
+@pytest.mark.parametrize("quantize,meshopt", [(True, False), (False, True), (True, True)])
+def test_validation_preserves_quantized_and_meshopt_fallback_exports(
+    tmp_path: Path, quantize: bool, meshopt: bool
+) -> None:
+    if meshopt:
+        pytest.importorskip("meshoptimizer")
+    output = tmp_path / "compressed.glb"
+    write_gltf(_asset_with_materials_and_lods(), output, options=GltfExportOptions(quantize=quantize, meshopt=meshopt))
+    assert validate_gltf(output)["triangles"] == 2
+    document, payload = _read_glb(output)
+    accessor = document["accessors"][document["meshes"][0]["primitives"][0]["indices"]]
+    view = document["bufferViews"][accessor["bufferView"]]
+    binary = bytearray(payload)
+    struct.pack_into("<H", binary, view.get("byteOffset", 0) + accessor.get("byteOffset", 0), 65534)
+    with pytest.raises(RuntimeError, match="index is out of range"):
+        validate_gltf_document(document, binary)
+
+
+def test_validation_checks_non_finite_normal_data() -> None:
+    document, binary = _structural_triangle()
+    document["accessors"].append(dict(document["accessors"][0], byteOffset=0))
+    document["meshes"][0]["primitives"][0]["attributes"]["NORMAL"] = 2
+    struct.pack_into("<f", binary, 4, float("nan"))
+    with pytest.raises(RuntimeError, match="NORMAL.*non-finite"):
+        validate_gltf_document(document, binary)
+
+
+@pytest.mark.parametrize("view_index", [-1, 10])
+def test_validation_rejects_invalid_draco_buffer_view(view_index: int) -> None:
+    document, binary = _structural_triangle()
+    document["meshes"][0]["primitives"][0]["extensions"] = {
+        "KHR_draco_mesh_compression": {"bufferView": view_index, "attributes": {"POSITION": 0}}
+    }
+    with pytest.raises(RuntimeError, match="Draco bufferView"):
+        validate_gltf_document(document, binary)
