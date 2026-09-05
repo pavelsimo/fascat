@@ -384,6 +384,7 @@ def _validate_and_analyze_output_for_cli(
                 handle.flush()
             assert temp_path is not None
             stats = validate_export(temp_path)
+            stats["file_size_bytes"] = len(data)
             if options is not None:
                 from fascat.analysis import analyze_output
 

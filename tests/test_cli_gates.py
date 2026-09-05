@@ -113,7 +113,7 @@ def test_resolve_thresholds_explicit_overrides_profile_budget() -> None:
         (1, 0, "FAIL"),
         (3, 3, "PASS"),
         (4, 3, "FAIL"),
-        (None, 0, "SKIP"),
+        (None, 0, "FAIL"),
     ],
 )
 def test_evaluate_gates_geometry_statuses(summary_value: int | None, limit: int, expected: str) -> None:
@@ -131,7 +131,7 @@ def test_evaluate_gates_geometry_statuses(summary_value: int | None, limit: int,
     assert _statuses(results)["non_manifold_edges"] == expected
 
 
-def test_evaluate_gates_skips_geometry_without_summary() -> None:
+def test_evaluate_gates_fails_geometry_without_summary() -> None:
     results = evaluate_gates(
         GateThresholds(max_open_boundaries=0),
         summary=None,
@@ -142,7 +142,7 @@ def test_evaluate_gates_skips_geometry_without_summary() -> None:
         lod_monotonic=None,
         include_report_gates=False,
     )
-    assert _statuses(results) == {"open_boundaries": "SKIP"}
+    assert _statuses(results) == {"open_boundaries": "FAIL"}
 
 
 def test_evaluate_gates_omits_unrequested_gates() -> None:
@@ -309,3 +309,24 @@ def test_any_gate_failed_ignores_skips() -> None:
         include_report_gates=False,
     )
     assert any_gate_failed(failing) is True
+
+
+@pytest.mark.parametrize("thresholds", [GateThresholds(max_triangles=10), GateThresholds(max_file_size_mb=1.0)])
+def test_requested_budget_without_measurement_fails(thresholds: GateThresholds) -> None:
+    results = evaluate_gates(
+        thresholds,
+        summary=None,
+        triangles=None,
+        file_size_bytes=None,
+        visual_diff_passed=None,
+        turntable_views_failed=None,
+        lod_monotonic=None,
+        include_report_gates=True,
+    )
+    payload = gates_to_dict(results)
+    assert payload["overall"] == "FAIL"
+    assert payload["failed"] == 1
+    assert payload["evaluated"] == 2
+    assert results[1].reason == "measurement unavailable"
+    assert any_gate_failed(results)
+    assert "measurement unavailable" in format_gate_lines(results)[1]

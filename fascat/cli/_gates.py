@@ -23,15 +23,22 @@ class GateResult:
     actual: GateValue
     op: str
     limit: GateValue
+    reason: str | None = None
+    actual_lower_bound: bool = False
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "gate": self.gate,
             "status": self.status,
             "actual": self.actual,
             "op": self.op,
             "limit": self.limit,
         }
+        if self.reason is not None:
+            payload["reason"] = self.reason
+        if self.actual_lower_bound:
+            payload["actual_lower_bound"] = True
+        return payload
 
 
 @dataclass(frozen=True)
@@ -72,11 +79,34 @@ def resolve_thresholds(
     )
 
 
-def _threshold_gate(gate: str, actual: GateValue, limit: GateValue, *, op: str = "<=") -> GateResult:
-    if actual is None or limit is None:
+def _threshold_gate(
+    gate: str,
+    actual: GateValue,
+    limit: GateValue,
+    *,
+    op: str = "<=",
+    required: bool = False,
+    actual_lower_bound: bool = False,
+) -> GateResult:
+    # A profile without a budget defines no constraint; optional reports can skip.
+    if limit is None or (actual is None and not required):
         return GateResult(gate=gate, status="SKIP", actual=actual, op=op, limit=limit)
+    if actual is None:
+        return GateResult(gate=gate, status="FAIL", actual=None, op=op, limit=limit, reason="measurement unavailable")
     passed = actual <= limit if op == "<=" else actual == limit
-    return GateResult(gate=gate, status="PASS" if passed else "FAIL", actual=actual, op=op, limit=limit)
+    reason = None
+    if actual_lower_bound:
+        reason = "incomplete measurement cannot establish compliance" if passed else "lower bound exceeds limit"
+        passed = False
+    return GateResult(
+        gate=gate,
+        status="PASS" if passed else "FAIL",
+        actual=actual,
+        op=op,
+        limit=limit,
+        reason=reason,
+        actual_lower_bound=actual_lower_bound,
+    )
 
 
 def structural_gate(*, ok: bool) -> GateResult:
@@ -108,14 +138,17 @@ def evaluate_gates(
             continue
         raw = summary.get(_GEOMETRY_SUMMARY_KEYS[gate]) if summary is not None else None
         actual = raw if isinstance(raw, int | float) and not isinstance(raw, bool) else None
-        results.append(_threshold_gate(gate, actual, limit))
+        lower_bound = gate == "self_intersections" and bool(
+            summary is not None and summary.get("self_intersections_lower_bound")
+        )
+        results.append(_threshold_gate(gate, actual, limit, required=True, actual_lower_bound=lower_bound))
     if thresholds.max_triangles is not None or thresholds.triangles_requested:
-        results.append(_threshold_gate("triangles", triangles, thresholds.max_triangles))
+        results.append(_threshold_gate("triangles", triangles, thresholds.max_triangles, required=True))
     if thresholds.max_file_size_mb is not None or thresholds.file_size_requested:
         limit_bytes = None if thresholds.max_file_size_mb is None else thresholds.max_file_size_mb * 1024 * 1024
         if isinstance(limit_bytes, float) and limit_bytes.is_integer():
             limit_bytes = int(limit_bytes)
-        results.append(_threshold_gate("file_size_bytes", file_size_bytes, limit_bytes))
+        results.append(_threshold_gate("file_size_bytes", file_size_bytes, limit_bytes, required=True))
     if visual_diff_passed is not None or include_report_gates:
         results.append(_threshold_gate("visual_diff", visual_diff_passed, True, op="=="))
     if turntable_views_failed is not None or include_report_gates:
@@ -137,7 +170,11 @@ def gates_to_dict(results: Sequence[GateResult]) -> dict[str, object]:
 
 
 def format_gate_lines(results: Sequence[GateResult]) -> list[str]:
-    lines = [f"{result.status} {result.gate} {result.actual} {result.op} {result.limit}" for result in results]
+    lines = []
+    for result in results:
+        actual = f">={result.actual}" if result.actual_lower_bound else str(result.actual)
+        reason = f" ({result.reason})" if result.reason else ""
+        lines.append(f"{result.status} {result.gate} {actual} {result.op} {result.limit}{reason}")
     failed = sum(1 for result in results if result.status == "FAIL")
     evaluated = sum(1 for result in results if result.status != "SKIP")
     overall = "FAIL" if failed else "PASS"
