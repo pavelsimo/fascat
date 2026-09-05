@@ -9,6 +9,7 @@ from itertools import pairwise
 import numpy as np
 
 from fascat.asset import Asset, Part
+from fascat.io._geometry import transformed_faces
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.ops.parallel import parallel_map
@@ -504,7 +505,7 @@ def _build_scene_far_proxy(
             continue
         transformed_points = _transform_points(mesh.points, world_transform)
         points.append(transformed_points)
-        faces.append(mesh.faces.astype(np.int64, copy=True) + offset)
+        faces.append(transformed_faces(mesh.faces, world_transform).astype(np.int64, copy=True) + offset)
         offset += mesh.vertex_count
         source_parts.add(part.id)
         source_occurrences += 1
