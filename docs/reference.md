@@ -419,8 +419,24 @@ discarded because they no longer describe the merged bounds.
 - T-junctions and boundary gaps are reported by default and fixed only with the opt-in `fix_t_junctions` / `stitch_boundary_gaps` flags; stitched vertices keep the surviving representative vertex's normals, tangents, and UVs, and UV-conflicting merges are counted in metadata.
 - `--delete-degenerate-polygons` removes repeated-vertex, collapsed-edge, near-flat, and exact-duplicate polygons (separate report counts per reason); use `--keep-duplicate-polygons` to only report duplicates.
 
+### Feature preservation during simplification
+
+When hard-edge, hole, material-boundary, UV-seam, silhouette, or explicit face
+protection identifies any protected faces, simplification currently retains the
+entire mesh. The current integration does not implement reliable constrained
+simplification. Default decimation protects silhouette faces, so it can retain
+the entire mesh even for ordinary inputs. Optional backend vertex-lock APIs are
+not yet integrated. This preserves geometry and attributes but can leave the mesh
+above its requested triangle target. A warning explains the retained count and
+target; mesh metadata records `simplification_status=retained_original`, source
+and target triangle counts, and `simplification_target_status=unmet`. Optimization
+also includes the warning in its report. If both ordinary simplification backends
+fail, the original mesh is likewise retained with a warning instead of removing
+triangles to reach the target.
+
 ### Decimation
 
+- Triangle budgets are targets: decimation retains safe results above budget when preservation constraints or backend limits prevent further reduction. Reports record actual output counts, `decimate_target_status`, and warnings for unmet per-part targets. Selection and per-part budgets never discard triangles merely to force the target count.
 - Keeping under 20% of source triangles emits an LOD0 distortion warning — prefer aggressive ratios for distant LODs.
 - `--decimate` without `--target-triangles`/`--ratio` seeds its target from the profile or `--target-device-profile` triangle budget.
 - `--decimate-criterion quality` passes tolerance-derived error bounds to the backend and records bound/result metadata.

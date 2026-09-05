@@ -67,6 +67,13 @@ def optimize_asset(asset: Asset, options: OptimizeOptions, *, selected_part_ids:
         part.mesh = optimized.mesh
         part.metadata = optimized.metadata
         part.fingerprint = optimized.fingerprint
+        if options.simplify and part.mesh.metadata.get("simplification_target_status") == "unmet":
+            result.report.add_warning(
+                f"part {part.id}: simplification retained the original "
+                f"{part.mesh.metadata['simplification_source_triangles']} triangles; "
+                f"target {part.mesh.metadata['simplification_target_triangles']} was not reached "
+                f"({part.mesh.metadata['simplification_fallback_reason']})"
+            )
     return result
 
 
