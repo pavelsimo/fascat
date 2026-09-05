@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -15,6 +16,11 @@ PmiKind = Literal[
     "saved_view",
     "annotation_plane",
 ]
+
+
+def _copy_metadata(metadata: Metadata) -> Metadata:
+    """Copy nested metadata without traversing scene geometry or native handles."""
+    return deepcopy(metadata)
 
 
 @dataclass(frozen=True)
@@ -47,7 +53,7 @@ class PmiAnnotation:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "applies_to", list(self.applies_to))
-        object.__setattr__(self, "source", dict(self.source))
+        object.__setattr__(self, "source", _copy_metadata(self.source))
         if self.plane is not None:
             object.__setattr__(self, "plane", [list(row) for row in self.plane])
 

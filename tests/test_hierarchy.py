@@ -12,7 +12,7 @@ from fascat.filter import Filter
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.ops import hierarchy as hierarchy_module
-from fascat.options import ExplodeOptions, MergeOptions, ReplaceOptions
+from fascat.options import ExplodeOptions, MergeOptions, ReplaceOptions, StageOptions
 
 runner = CliRunner()
 
@@ -325,3 +325,186 @@ def test_cli_convert_requires_region_size_for_region_merge() -> None:
 
     assert result.exit_code == 2
     assert "--merge-mode regions requires --region-size" in result.output
+
+
+def _attributed_asset() -> Asset:
+    mesh = _two_material_mesh()
+    # Authored normals deliberately differ from geometric face normals.
+    mesh.normals = np.tile(np.array([0.0, 1.0, 1.0]) / np.sqrt(2), (4, 1))
+    mesh.tangents = np.tile([1.0, 0.0, 0.0, -1.0], (4, 1))
+    mesh.uvs = {
+        0: np.array([[0, 0], [1, 0], [0, 1], [1, 1]], dtype=float),
+        2: np.array([[0.1, 0.1], [0.9, 0.1], [0.1, 0.9], [0.9, 0.9]]),
+    }
+    mesh.face_groups = {"shell": np.array([0, 1]), "detail": np.array([1])}
+    lod = hierarchy_module._mesh_subset(mesh, np.array([1], dtype=np.int64))
+    assert lod is not None
+    lod.metadata["lod_screen_coverage"] = "0.25"
+    return Asset(
+        root=Node(id="root", name="root", children=[Node(id="a", name="A", part_id="a")]),
+        parts={"a": Part(id="a", name="A", mesh=mesh, lod_meshes=[lod], material_ids=["red", "blue"])},
+        materials={
+            "red": Material(id="red", name="Red", base_color=(1, 0, 0, 1), metadata={"base_color_texture": "red.png"}),
+            "blue": Material(id="blue", name="Blue", base_color=(0, 0, 1, 1)),
+        },
+    )
+
+
+def test_merge_one_part_preserves_attributes_and_lod_without_aliasing() -> None:
+    source = _attributed_asset()
+    result = source.merge(MergeOptions(mode="all"))
+    part = next(iter(result.parts.values()))
+    original = source.parts["a"]
+    assert part.mesh is not None and original.mesh is not None
+    assert len(part.lod_meshes) == 1
+    assert part.material_ids == ["red", "blue"]
+    assert result.materials["red"].metadata["base_color_texture"] == "red.png"
+    for actual, expected in zip([part.mesh, *part.lod_meshes], [original.mesh, *original.lod_meshes], strict=True):
+        np.testing.assert_allclose(actual.points, expected.points)
+        np.testing.assert_array_equal(actual.faces, expected.faces)
+        np.testing.assert_allclose(actual.normals, expected.normals)
+        np.testing.assert_allclose(actual.tangents, expected.tangents)
+        np.testing.assert_array_equal(actual.material_indices, expected.material_indices)
+        assert set(actual.uvs) == {0, 2}
+        for channel in expected.uvs:
+            np.testing.assert_array_equal(actual.uvs[channel], expected.uvs[channel])
+            assert not np.shares_memory(actual.uvs[channel], expected.uvs[channel])
+        for name in expected.face_groups:
+            np.testing.assert_array_equal(actual.face_groups[name], expected.face_groups[name])
+        assert not np.shares_memory(actual.normals, expected.normals)
+    assert part.lod_meshes[0].metadata["lod_screen_coverage"] == "0.25"
+
+
+@pytest.mark.parametrize("mirrored", [False, True])
+def test_merge_parts_transforms_attributes_and_remaps_each_lod(mirrored: bool) -> None:
+    asset = _attributed_asset()
+    other = asset.parts["a"].copy()
+    other.id = "b"
+    other.material_ids = ["blue", "red"]
+    asset.parts["b"] = other
+    transform = np.array([[0, -3, 0, 7], [2, 0, 0, 8], [0, 0, -4 if mirrored else 4, 9], [0, 0, 0, 1]], dtype=float)
+    asset.root.children.append(Node(id="b", name="B", part_id="b", transform=transform))
+    part = next(iter(asset.merge(MergeOptions(mode="all")).parts.values()))
+    assert part.mesh is not None and other.mesh is not None
+    for actual, source in zip([part.mesh, *part.lod_meshes], [other.mesh, *other.lod_meshes], strict=True):
+        count = source.vertex_count
+        expected_points = source.points @ transform[:3, :3].T + transform[:3, 3]
+        np.testing.assert_allclose(actual.points[count:], expected_points)
+        expected_normal = np.array([-1 / 3, 0, -1 / 4 if mirrored else 1 / 4])
+        expected_normal /= np.linalg.norm(expected_normal)
+        np.testing.assert_allclose(actual.normals[count:], np.tile(expected_normal, (count, 1)))
+        np.testing.assert_allclose(actual.tangents[count:], np.tile([0, 1, 0, 1 if mirrored else -1], (count, 1)))
+        for channel in source.uvs:
+            np.testing.assert_array_equal(actual.uvs[channel][count:], source.uvs[channel])
+        expected_faces = source.faces[:, [0, 2, 1]] if mirrored else source.faces
+        np.testing.assert_array_equal(actual.faces[source.triangle_count :], expected_faces + count)
+        assert actual.face_groups["shell"].tolist() == list(range(source.triangle_count * 2))
+    assert part.mesh.material_indices.tolist() == [0, 1, 1, 0]
+    assert part.lod_meshes[0].material_indices.tolist() == [1, 0]
+    assert part.mesh.face_groups["detail"].tolist() == [1, 3]
+
+
+def test_merge_by_material_remaps_vertex_attributes_and_face_groups() -> None:
+    asset = _attributed_asset()
+    source = asset.parts["a"].mesh
+    assert source is not None
+    asset.parts["a"].lod_meshes = []
+    parts = list(asset.merge(MergeOptions(mode="by_material")).parts.values())
+    blue = next(part for part in parts if part.material_ids == ["blue"])
+    assert blue.mesh is not None
+    np.testing.assert_array_equal(blue.mesh.uvs[2], source.uvs[2][[1, 2, 3]])
+    np.testing.assert_allclose(blue.mesh.normals, source.normals[[1, 2, 3]])
+    np.testing.assert_array_equal(blue.mesh.tangents, source.tangents[[1, 2, 3]])
+    assert blue.mesh.face_groups["detail"].tolist() == [0]
+    assert blue.mesh.material_indices.tolist() == [0]
+
+
+@pytest.mark.parametrize("difference", ["uv", "tangents", "lod_count", "lod_uv", "coverage"])
+def test_merge_rejects_incompatible_attributes_and_lod_chains(difference: str) -> None:
+    asset = _attributed_asset()
+    other = asset.parts["a"].copy()
+    other.id = "b"
+    assert other.mesh is not None
+    if difference == "uv":
+        del other.mesh.uvs[2]
+    elif difference == "tangents":
+        other.mesh.tangents = None
+    elif difference == "lod_count":
+        other.lod_meshes = []
+    elif difference == "lod_uv":
+        del other.lod_meshes[0].uvs[0]
+    else:
+        other.lod_meshes[0].metadata["lod_screen_coverage"] = "0.5"
+    asset.parts["b"] = other
+    asset.root.children.append(Node(id="b", name="B", part_id="b"))
+    with pytest.raises(ValueError, match="merge requires matching"):
+        asset.merge(MergeOptions(mode="all"))
+    assert list(asset.parts) == ["a", "b"]
+    assert asset.parts["a"].mesh.uvs.keys() == {0, 2}
+    assert len(asset.parts["a"].lod_meshes) == 1
+
+
+def test_merge_rejects_splitting_stored_lods_by_material() -> None:
+    with pytest.raises(ValueError, match="cannot split a stored LOD chain by material"):
+        _attributed_asset().merge(MergeOptions(mode="by_material"))
+
+
+def test_stage_then_merge_retains_hard_edges_uvs_and_tangents() -> None:
+    asset = _attributed_asset()
+    asset.parts["a"].lod_meshes = []
+    asset.parts["a"].mesh = _box_mesh()
+    staged = asset.stage(StageOptions(normal_mode="hard_edges", uv0="box", uv1="copy_uv0", tangents=True, jobs=1))
+    source = staged.parts["a"].mesh
+    assert source is not None and source.normals is not None and source.tangents is not None
+    assert source.vertex_count > 4
+    parent = Node(id="parent", name="Parent", transform=_translation(20), children=staged.root.children)
+    staged.root.children = [parent]
+    part = next(iter(staged.merge(MergeOptions(mode="all", keep_parent=True)).parts.values()))
+    assert part.mesh is not None
+    np.testing.assert_allclose(part.mesh.points, source.points)
+    np.testing.assert_allclose(part.mesh.normals, source.normals)
+    np.testing.assert_allclose(part.mesh.tangents, source.tangents)
+    for channel in (0, 1):
+        np.testing.assert_array_equal(part.mesh.uvs[channel], source.uvs[channel])
+
+
+def test_merge_generates_missing_normals_without_overwriting_authored_normals() -> None:
+    asset = _asset()
+    asset.parts["bolt"].mesh.normals = np.tile([0.0, 1.0, 0.0], (3, 1))
+    part = next(iter(asset.merge(MergeOptions(mode="all")).parts.values()))
+    assert part.mesh is not None
+    np.testing.assert_allclose(part.mesh.normals[:6], np.tile([0.0, 1.0, 0.0], (6, 1)))
+    np.testing.assert_allclose(part.mesh.normals[6:], np.tile([0.0, 0.0, 1.0], (3, 1)))
+
+
+def test_merge_rejects_singular_transform() -> None:
+    asset = _attributed_asset()
+    asset.root.children[0].transform[0, 0] = 0
+    with pytest.raises(ValueError, match="singular transform"):
+        asset.merge(MergeOptions(mode="all"))
+
+
+def test_merge_rejects_mixed_material_assignments_unless_materials_are_dropped() -> None:
+    asset = _asset()
+    asset.parts["housing"].material_ids = []
+    with pytest.raises(ValueError, match="assigned and unassigned face materials"):
+        asset.merge(MergeOptions(mode="all"))
+    part = next(iter(asset.merge(MergeOptions(mode="all", preserve_materials=False)).parts.values()))
+    assert part.material_ids == []
+    assert part.mesh is not None and part.mesh.material_indices is None
+
+
+@pytest.mark.parametrize("same_distance", [False, True])
+def test_merge_discards_source_lod_switch_distances(same_distance: bool) -> None:
+    asset = _attributed_asset()
+    other = asset.parts["a"].copy()
+    other.id = "b"
+    asset.parts["b"] = other
+    asset.root.children.append(Node(id="b", name="B", part_id="b"))
+    for part, distance in [(asset.parts["a"], "10"), (other, "10" if same_distance else "30")]:
+        part.lod_meshes[0].metadata.update(lod_switch_distance=distance, lod_switch_distance_source="formula")
+    merged = next(iter(asset.merge(MergeOptions(mode="all")).parts.values()))
+    assert len(merged.lod_meshes) == 1
+    assert "lod_switch_distance" not in merged.lod_meshes[0].metadata
+    assert "lod_switch_distance_source" not in merged.lod_meshes[0].metadata
+    assert merged.lod_meshes[0].metadata["lod_screen_coverage"] == "0.25"

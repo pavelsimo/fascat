@@ -529,7 +529,7 @@ def validate_gltf_payload(document: dict[str, Any], buffers: Sequence[BinaryPayl
         raise RuntimeError("glTF asset version must be 2.0")
 
     _validate_buffers(document, buffers)
-    context = _GltfValidationContext.from_document(document)
+    context = _GltfValidationContext.from_document(document, buffers)
     stats = _validate_default_scene(context)
     if stats["meshes"] == 0:
         raise RuntimeError("glTF asset contains no meshes in default scene")
@@ -543,15 +543,17 @@ class _GltfValidationContext:
     nodes: list[Any]
     meshes: list[Any]
     accessors: list[Any]
+    buffers: Sequence[BinaryPayload]
 
     @classmethod
-    def from_document(cls, document: dict[str, Any]) -> _GltfValidationContext:
+    def from_document(cls, document: dict[str, Any], buffers: Sequence[BinaryPayload]) -> _GltfValidationContext:
         return cls(
             document=document,
             scenes=_array(document.get("scenes"), "scenes"),
             nodes=_array(document.get("nodes"), "nodes"),
             meshes=_array(document.get("meshes"), "meshes"),
             accessors=_array(document.get("accessors"), "accessors"),
+            buffers=buffers,
         )
 
 
@@ -2070,7 +2072,7 @@ def _validate_buffers(document: dict[str, Any], buffers: Sequence[BinaryPayload]
         raise RuntimeError("glTF buffer count does not match payload count")
     for index, buffer in enumerate(buffer_objects):
         buffer_length = _int(_object(buffer, f"buffer {index}").get("byteLength"), f"buffer {index} byteLength")
-        if buffer_length > len(buffers[index]):
+        if buffer_length < 0 or buffer_length > len(buffers[index]):
             raise RuntimeError(f"glTF buffer {index} is shorter than its byteLength")
     for index, buffer_view in enumerate(_array(document.get("bufferViews"), "bufferViews")):
         view = _object(buffer_view, f"bufferView {index}")
@@ -2079,7 +2081,8 @@ def _validate_buffers(document: dict[str, Any], buffers: Sequence[BinaryPayload]
             raise RuntimeError(f"glTF bufferView {index} references an invalid buffer")
         offset = _int(view.get("byteOffset", 0), f"bufferView {index} byteOffset")
         length = _int(view.get("byteLength"), f"bufferView {index} byteLength")
-        if offset < 0 or length < 0 or offset + length > len(buffers[buffer_index]):
+        declared_length = _int(_object(buffer_objects[buffer_index], "buffer").get("byteLength"), "buffer byteLength")
+        if offset < 0 or length < 0 or offset + length > declared_length:
             raise RuntimeError(f"glTF bufferView {index} is out of range")
     compressed_accessors = _draco_compressed_accessor_indices(document)
     for index, accessor in enumerate(_array(document.get("accessors"), "accessors")):
@@ -2099,6 +2102,8 @@ def _validate_accessor_storage(
     compressed: bool,
 ) -> None:
     buffer_views = _array(document.get("bufferViews"), "bufferViews")
+    if "sparse" in accessor:
+        raise RuntimeError("glTF validation does not support sparse accessors")
     if "bufferView" not in accessor:
         if compressed:
             _validate_compressed_accessor_metadata(index, accessor)
@@ -2118,6 +2123,12 @@ def _validate_accessor_storage(
     byte_offset = _int(accessor.get("byteOffset", 0), f"accessor {index} byteOffset")
     stride = _int(view.get("byteStride", 0), f"bufferView {view_index} byteStride") if "byteStride" in view else 0
     item_size = _COMPONENT_SIZES[component_type] * _ACCESSOR_WIDTHS[cast(str, accessor_type)]
+    component_size = _COMPONENT_SIZES[component_type]
+    view_offset = _int(view.get("byteOffset", 0), f"bufferView {view_index} byteOffset")
+    if (byte_offset + view_offset) % component_size or byte_offset % component_size:
+        raise RuntimeError(f"glTF accessor {index} has unaligned storage")
+    if "byteStride" in view and (stride < item_size or stride > 252 or stride % 4):
+        raise RuntimeError(f"glTF accessor {index} has invalid byteStride")
     needed = byte_offset
     if count > 0:
         needed += (count - 1) * stride + item_size if stride else count * item_size
@@ -2156,12 +2167,19 @@ def _draco_compressed_accessor_indices(document: dict[str, Any]) -> set[int]:
                 draco.get("attributes", {}),
                 f"mesh {mesh_index} primitive {primitive_index} Draco attributes",
             )
-            for accessor_index in attributes.values():
-                compressed.add(_int(accessor_index, "Draco attribute accessor"))
-            primitive_attributes = primitive.get("attributes", {})
-            if isinstance(primitive_attributes, dict):
-                for accessor_index in primitive_attributes.values():
-                    compressed.add(_int(accessor_index, "primitive attribute accessor"))
+            views = _array(document.get("bufferViews"), "bufferViews")
+            view_index = _int(draco.get("bufferView"), "Draco bufferView")
+            if view_index < 0 or view_index >= len(views):
+                raise RuntimeError("glTF Draco bufferView is invalid")
+            view = _object(views[view_index], "Draco bufferView")
+            if _int(view.get("byteLength"), "Draco bufferView byteLength") <= 0:
+                raise RuntimeError("glTF Draco bufferView contains no payload")
+            primitive_attributes = _object(primitive.get("attributes"), "primitive attributes")
+            for semantic, attribute_id in attributes.items():
+                if _int(attribute_id, "Draco attribute ID") < 0 or semantic not in primitive_attributes:
+                    raise RuntimeError("glTF Draco attribute mapping is invalid")
+                # Draco attribute IDs are not glTF accessor indices.
+                compressed.add(_int(primitive_attributes[semantic], "primitive attribute accessor"))
             if "indices" in primitive:
                 compressed.add(_int(primitive["indices"], "primitive indices accessor"))
     return compressed
@@ -2217,6 +2235,20 @@ def _validate_mesh(context: _GltfValidationContext, mesh_index: int, stats: dict
                 raise RuntimeError(
                     "glTF NORMAL accessor must use FLOAT or normalized KHR_mesh_quantization component types"
                 )
+        position_count = _accessor_count(context, position_index)
+        if position_count == 0:
+            raise RuntimeError("glTF triangle primitive contains no vertices")
+        draco_attributes = _primitive_draco_attributes(primitive)
+        for semantic, attribute_index in attributes.items():
+            attribute_index = _int(attribute_index, f"{semantic} accessor")
+            attribute = _require_accessor(context, attribute_index)
+            if _accessor_count(context, attribute_index) != position_count:
+                raise RuntimeError(f"glTF {semantic} count does not match POSITION count")
+            if "bufferView" not in attribute and semantic not in draco_attributes:
+                raise RuntimeError(f"glTF {semantic} accessor has no geometry data")
+            values = _validation_accessor_values(context, attribute_index)
+            if values is not None and not np.isfinite(values).all():
+                raise RuntimeError(f"glTF {semantic} accessor contains non-finite values")
         position_accessors.add(position_index)
         indices = primitive.get("indices")
         if indices is None:
@@ -2228,15 +2260,60 @@ def _validate_mesh(context: _GltfValidationContext, mesh_index: int, stats: dict
             index = _int(indices, f"mesh {mesh_index} indices accessor")
             accessor = _require_accessor(context, index, accessor_type="SCALAR")
             component_type = _int(accessor.get("componentType"), f"accessor {index} componentType")
-            if component_type not in {_UNSIGNED_SHORT, _UNSIGNED_INT}:
+            if component_type not in {_UNSIGNED_BYTE, _UNSIGNED_SHORT, _UNSIGNED_INT}:
                 raise RuntimeError("glTF index accessor must use unsigned integer components")
             index_count = _int(accessor.get("count"), f"accessor {index} count")
-            if index_count % 3:
+            if index_count == 0 or index_count % 3:
                 raise RuntimeError("glTF indexed triangle primitive has invalid index count")
+            if accessor.get("normalized", False):
+                raise RuntimeError("glTF index accessor must not be normalized")
+            if "bufferView" not in accessor and not draco_attributes:
+                raise RuntimeError("glTF index accessor has no geometry data")
+            values = _validation_accessor_values(context, index)
+            if values is not None and np.any(values >= position_count):
+                raise RuntimeError("glTF triangle index is out of range for POSITION accessor")
             triangles += index_count // 3
+    if triangles == 0:
+        raise RuntimeError("glTF mesh contains no triangles")
     stats["meshes"] += 1
     stats["points"] += sum(_accessor_count(context, accessor) for accessor in position_accessors)
     stats["triangles"] += triangles
+
+
+def _primitive_draco_attributes(primitive: dict[str, Any]) -> dict[str, Any]:
+    extensions = primitive.get("extensions", {})
+    if not isinstance(extensions, dict) or _KHR_DRACO_MESH_COMPRESSION not in extensions:
+        return {}
+    draco = _object(extensions[_KHR_DRACO_MESH_COMPRESSION], "Draco extension")
+    return _object(draco.get("attributes"), "Draco attributes")
+
+
+def _validation_accessor_values(context: _GltfValidationContext, index: int) -> np.ndarray | None:
+    """Read validated dense storage, including interleaved and meshopt fallback data.
+
+    Draco-only accessors have metadata but no locally decodable storage.
+    """
+    accessor = _require_accessor(context, index)
+    if "bufferView" not in accessor:
+        return None
+    view_index = _int(accessor["bufferView"], "accessor bufferView")
+    view = _object(_array(context.document.get("bufferViews"), "bufferViews")[view_index], "bufferView")
+    component_type = _int(accessor.get("componentType"), "accessor componentType")
+    dtype = np.dtype({5120: "i1", 5121: "u1", 5122: "<i2", 5123: "<u2", 5125: "<u4", 5126: "<f4"}[component_type])
+    width = _ACCESSOR_WIDTHS[accessor["type"]]
+    count = _accessor_count(context, index)
+    offset = _int(view.get("byteOffset", 0), "bufferView byteOffset") + _int(
+        accessor.get("byteOffset", 0), "accessor byteOffset"
+    )
+    stride = _int(view.get("byteStride", dtype.itemsize * width), "bufferView byteStride")
+    buffer_index = _int(view.get("buffer", 0), "bufferView buffer")
+    return np.ndarray(
+        (count, width),
+        dtype=dtype,
+        buffer=context.buffers[buffer_index],
+        offset=offset,
+        strides=(stride, dtype.itemsize),
+    )
 
 
 def _require_accessor(
@@ -2311,6 +2388,6 @@ def _object(value: Any, label: str) -> dict[str, Any]:
 
 
 def _int(value: Any, label: str) -> int:
-    if not isinstance(value, int):
+    if isinstance(value, bool) or not isinstance(value, int):
         raise RuntimeError(f"glTF {label} must be an integer")
     return value

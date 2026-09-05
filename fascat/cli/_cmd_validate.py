@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace as dataclass_replace
 from pathlib import Path
 from typing import Annotated, Any, cast
 
@@ -60,6 +61,14 @@ def cmd_validate(
         bool,
         typer.Option("--self-intersections", help="Report detected self-intersections with bounded triangle checks."),
     ] = False,
+    max_self_intersection_pairs: Annotated[
+        int | None,
+        typer.Option(
+            "--max-self-intersection-pairs",
+            min=1,
+            help="Triangle-pair search budget per mesh (default: 10000); raise to complete truncated checks.",
+        ),
+    ] = None,
     sliver_triangles: Annotated[
         bool,
         typer.Option("--sliver-triangles", help="Report degenerate and sliver triangle stats."),
@@ -251,6 +260,8 @@ def cmd_validate(
         draw_call_estimate=draw_call_estimate,
         visual_risk=visual_risk,
     )
+    if max_self_intersection_pairs is not None:
+        analyze_options = dataclass_replace(analyze_options, max_self_intersection_pairs=max_self_intersection_pairs)
     should_analyze = report is not None or _analysis_requested(analyze_options)
     payload = {
         "command": "validate",
@@ -477,7 +488,7 @@ def cmd_validate(
             message = f"{message} Browser runtime measured {runtime_report.measured_fps:.1f} FPS."
         else:
             message = f"{message} Browser runtime {runtime_report.status}: {runtime_report.error}."
-    file_size_bytes: int | None = None
+    file_size_bytes: int | None = stats.get("file_size_bytes")
     if not _is_stdio(output_path):
         try:
             file_size_bytes = output_path.stat().st_size

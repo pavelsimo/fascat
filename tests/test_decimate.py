@@ -60,7 +60,9 @@ def test_decimate_uses_selection_budget() -> None:
 
     decimated = asset.decimate(DecimateOptions(target_triangles=3, target_ratio=None))
 
-    assert decimated.triangle_count <= 3
+    # The strip's boundary faces are protected, so the target is not safely reachable.
+    assert decimated.triangle_count == 6
+    assert decimated.metadata["decimate_target_status"] == "unmet"
     assert decimated.report.steps[-1].name == "decimate"
     assert decimated.report.steps[-1].options["target_triangles"] == 3
     target_strategy = decimated.report.steps[-1].options["target_strategy"]
@@ -73,7 +75,7 @@ def test_decimate_uses_selection_budget() -> None:
     assert target_strategy["target_ratio"] is None
     assert target_strategy["effective_keep_ratio"] == 0.5
     assert decimated.metadata["decimate_source_triangles"] == "6"
-    assert decimated.metadata["decimate_output_triangles"] == "3"
+    assert decimated.metadata["decimate_output_triangles"] == "6"
     assert decimated.metadata["decimate_target_strategy"] == "target_count"
     assert decimated.metadata["decimate_target_strategy_source"] == "explicit_target_triangles"
     assert decimated.metadata["decimate_target_strategy_workflow"] == "unity_target_polygon_count"
@@ -96,7 +98,7 @@ def test_decimate_uses_selection_budget() -> None:
     assert decimated.metadata["decimate_max_part_simplification_passes"] == "1"
     assert decimated.parts["body"].metadata["decimate_target_strategy"] == "target_count"
     assert decimated.report.steps[-1].after["decimate_source_triangles"] == 6
-    assert decimated.report.steps[-1].after["decimate_output_triangles"] == 3
+    assert decimated.report.steps[-1].after["decimate_output_triangles"] == 6
     assert decimated.report.steps[-1].after["decimate_estimated_memory_bytes"] == 30_000
     assert decimated.report.steps[-1].after["decimate_iterative_threshold_triangles"] == 1_000_000
     assert decimated.report.steps[-1].after["decimate_iterative_recommended"] == 0
@@ -164,21 +166,82 @@ def test_decimate_reports_selection_target_allocation_by_part() -> None:
     assert step.after["decimate_allocation_reduced_parts"] == 1
 
 
-def test_sample_mesh_faces_tops_up_duplicate_samples_and_remaps_groups(monkeypatch: pytest.MonkeyPatch) -> None:
-    mesh = _triangle_strip(5)
-    mesh.face_groups["marked"] = np.asarray([0, 2, 4], dtype=int)
-    mesh.face_groups["missing"] = np.asarray([4], dtype=int)
+@pytest.mark.parametrize("budget_scope", ["selection", "part"])
+@pytest.mark.parametrize("use_ratio", [False, True])
+def test_decimate_unreachable_budget_preserves_closed_textured_surface(budget_scope: str, use_ratio: bool) -> None:
+    import trimesh
 
-    def duplicate_linspace(_start: float, _stop: float, _num: int, *, dtype: object | None = None) -> np.ndarray:
-        return np.asarray([0, 0, 2], dtype=dtype)
+    sphere = trimesh.creation.icosphere(subdivisions=2)
+    mesh = Mesh(
+        points=np.asarray(sphere.vertices),
+        faces=np.asarray(sphere.faces),
+        uvs={0: np.asarray(sphere.vertices[:, :2])},
+        material_indices=(sphere.triangles_center[:, 0] > 0).astype(np.int64),
+    )
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="body", name="Body", part_id="body")]),
+        parts={"body": Part(id="body", name="Body", mesh=mesh)},
+    )
 
-    monkeypatch.setattr(decimate_module.np, "linspace", duplicate_linspace)
+    decimated = asset.decimate(
+        DecimateOptions(
+            target_triangles=None if use_ratio else 80,
+            target_ratio=0.25 if use_ratio else None,
+            budget_scope=budget_scope,
+            jobs=1,
+        )
+    )
 
-    sampled = decimate_module._sample_mesh_faces(mesh, 3)
+    result = decimated.parts["body"].mesh
+    assert result is not None
+    result.validate()
+    assert result.triangle_count == mesh.triangle_count == 320
+    assert result.quality_metrics()["boundary_edges"] == 0
+    assert result.to_trimesh().volume == pytest.approx(sphere.volume)
+    assert result.material_indices is not None
+    np.testing.assert_array_equal(np.sort(result.material_indices), np.sort(mesh.material_indices))
+    source_indices = {tuple(point): index for index, point in enumerate(mesh.points)}
+    for index, point in enumerate(result.points):
+        np.testing.assert_array_equal(result.uvs[0][index], mesh.uvs[0][source_indices[tuple(point)]])
+    assert decimated.metadata["decimate_output_triangles"] == "320"
+    assert decimated.metadata["decimate_target_status"] == "unmet"
+    assert decimated.metadata["decimate_unmet_target_parts"] == "1"
+    assert decimated.parts["body"].metadata["decimate_target_status"] == "unmet"
+    assert decimated.parts["body"].metadata["decimate_allocated_target_triangles"] == "80"
+    warning = (
+        "part body: decimation produced 320 triangles from 320; target 80 was not reached; "
+        "retaining the safe simplification result"
+    )
+    assert warning in decimated.report.warnings
+    assert warning in decimated.report.steps[-1].warnings
 
-    assert sampled.triangle_count == 3
-    assert sampled.face_groups["marked"].tolist() == [0, 2]
-    assert sampled.face_groups["missing"].tolist() == []
+
+def test_decimate_ratio_budget_does_not_repeat_successful_reduction(monkeypatch: pytest.MonkeyPatch) -> None:
+    import trimesh
+
+    source = trimesh.creation.icosphere(subdivisions=2)
+    coarse = trimesh.creation.icosphere(subdivisions=1)
+    mesh = Mesh(points=np.asarray(source.vertices), faces=np.asarray(source.faces))
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="body", name="Body", part_id="body")]),
+        parts={"body": Part(id="body", name="Body", mesh=mesh)},
+    )
+
+    def simplify_to_closed_surface(self: Mesh, *, target_triangles: int, **_kwargs: object) -> Mesh:
+        assert self.triangle_count == 320
+        assert target_triangles == 80
+        return Mesh(points=np.asarray(coarse.vertices), faces=np.asarray(coarse.faces))
+
+    monkeypatch.setattr(Mesh, "simplify", simplify_to_closed_surface)
+    decimated = asset.decimate(DecimateOptions(target_ratio=0.25, jobs=1))
+
+    result = decimated.parts["body"].mesh
+    assert result is not None
+    assert result.triangle_count == 80
+    assert result.quality_metrics()["boundary_edges"] == 0
+    assert decimated.metadata["decimate_target_status"] == "met"
+    assert decimated.metadata["decimate_unmet_target_parts"] == "0"
+    assert decimated.parts["body"].metadata["decimate_target_status"] == "met"
 
 
 def test_decimate_iterative_threshold_controls_runtime_passes(monkeypatch: pytest.MonkeyPatch) -> None:

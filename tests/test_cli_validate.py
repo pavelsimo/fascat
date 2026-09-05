@@ -845,3 +845,175 @@ def test_validate_structural_failure_human_gate_lines(tmp_path: Path) -> None:
     output = plain(result.output)
     assert "FAIL structural False == True" in output
     assert "OVERALL FAIL (1/1 evaluated gates failed)" in output
+
+
+@pytest.mark.parametrize("limit", [1, 2, 10])
+@pytest.mark.parametrize("json_output", [False, True])
+def test_validate_incomplete_intersection_gate_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, limit: int, json_output: bool
+) -> None:
+    from dataclasses import replace
+
+    from fascat.cli import _cmd_validate
+    from fascat.options import AnalyzeOptions
+
+    points = np.tile(np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float), (4, 1))
+    mesh = Mesh(points=points, faces=np.arange(12).reshape(4, 3))
+    asset = Asset(
+        root=Node(id="root", name="root", part_id="mesh"), parts={"mesh": Part(id="mesh", name="mesh", mesh=mesh)}
+    )
+    complete = asset.analyze(AnalyzeOptions(self_intersections=True))
+    assert complete.summary["self_intersections"] == 6
+    assert complete.summary["self_intersections_lower_bound"] is False
+    output_file = tmp_path / "coincident.glb"
+    asset.write_gltf(output_file)
+    original_options = _cmd_validate._analyze_options
+
+    def bounded_options(**flags: bool) -> AnalyzeOptions:
+        return replace(original_options(**flags), max_self_intersection_pairs=2)
+
+    monkeypatch.setattr(_cmd_validate, "_analyze_options", bounded_options)
+    args = ["validate", str(output_file), "--max-self-intersections", str(limit)]
+    result = runner.invoke(app, ["--json", *args] if json_output else args)
+
+    assert result.exit_code == 1, result.output
+    reason = "lower bound exceeds limit" if limit < 2 else "incomplete measurement cannot establish compliance"
+    if json_output:
+        payload = json.loads(result.output)
+        assert payload["analysis"]["summary"]["self_intersections"] == 2
+        assert payload["analysis"]["summary"]["self_intersections_lower_bound"] is True
+        gate = _gate_results_by_name(payload)["self_intersections"]
+        assert gate["status"] == "FAIL"
+        assert gate["actual_lower_bound"] is True
+        assert gate["reason"] == reason
+        assert payload["gates"]["overall"] == "FAIL"
+        assert payload["gates"]["failed"] == 1
+        assert payload["gates"]["evaluated"] == 2
+    else:
+        output = compact(result.output)
+        assert f"FAIL self_intersections >=2 <= {limit} ({reason})" in output
+        assert "OVERALL FAIL (1/2 evaluated gates failed)" in output
+
+
+@pytest.mark.requires_usd
+@pytest.mark.parametrize("from_stdin", [False, True])
+def test_validate_unavailable_requested_geometry_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, from_stdin: bool
+) -> None:
+    from fascat import analysis
+
+    def unavailable_geometry(path: Path) -> Asset:
+        raise RuntimeError("geometry unavailable")
+
+    # Exercise the real validation-only fallback when mesh analysis cannot load.
+    monkeypatch.setattr(analysis, "_asset_from_output", unavailable_geometry)
+    output_file = tmp_path / "triangle.usda"
+    output_file.write_text(
+        """#usda 1.0
+(defaultPrim = "Triangle")
+def Mesh "Triangle" {
+    uniform token subdivisionScheme = "none"
+    point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 1, 0)]
+    int[] faceVertexCounts = [3]
+    int[] faceVertexIndices = [0, 1, 2]
+}
+""",
+        encoding="utf-8",
+    )
+    args = ["--json", "validate", "-" if from_stdin else str(output_file), "--strict-geometry"]
+    result = runner.invoke(app, args, input=output_file.read_bytes() if from_stdin else None)
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    gates = _gate_results_by_name(payload)
+    for name in ["non_manifold_edges", "self_intersections", "sliver_triangles", "open_boundaries"]:
+        assert gates[name]["status"] == "FAIL"
+        assert gates[name]["actual"] is None
+        assert gates[name]["reason"] == "measurement unavailable"
+    assert gates["structural"]["status"] == "PASS"
+    assert gates["visual_diff"]["status"] == "SKIP"
+    assert payload["gates"]["failed"] == 4
+
+
+@pytest.mark.requires_usd
+@pytest.mark.parametrize("budget_args", [["--max-file-size-mb", "1"], ["--profile", "realtime-web"]])
+def test_validate_stdin_file_size_gate_uses_received_bytes(budget_args: list[str]) -> None:
+    result = runner.invoke(
+        app,
+        ["--json", "validate", "-", *budget_args],
+        input="""#usda 1.0
+(defaultPrim = "Triangle")
+def Mesh "Triangle" {
+    uniform token subdivisionScheme = "none"
+    point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 1, 0)]
+    int[] faceVertexCounts = [3]
+    int[] faceVertexIndices = [0, 1, 2]
+}
+""",
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert "analysis" not in payload
+    gate = _gate_results_by_name(payload)["file_size_bytes"]
+    assert gate["status"] == "PASS"
+    assert gate["actual"] > 0
+    assert "reason" not in gate
+    assert payload["gates"]["overall"] == "PASS"
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_validate_requested_limits_without_analysis_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, json_output: bool
+) -> None:
+    from fascat.cli import _cmd_validate
+
+    def no_analysis(*args: object, **kwargs: object) -> tuple[dict[str, int], None]:
+        return {"meshes": 1}, None
+
+    output_file = tmp_path / "gated.glb"
+    _write_turntable_glb(output_file)
+    monkeypatch.setattr(_cmd_validate, "_validate_and_analyze_output_for_cli", no_analysis)
+    args = ["validate", str(output_file), "--max-non-manifold", "0", "--max-triangles", "10"]
+    result = runner.invoke(app, ["--json", *args] if json_output else args)
+
+    assert result.exit_code == 1, result.output
+    if json_output:
+        payload = json.loads(result.output)
+        assert "analysis" not in payload
+        gates = _gate_results_by_name(payload)
+        for name in ["non_manifold_edges", "triangles"]:
+            assert gates[name]["status"] == "FAIL"
+            assert gates[name]["reason"] == "measurement unavailable"
+        assert payload["gates"]["failed"] == 2
+        assert payload["gates"]["evaluated"] == 3
+    else:
+        assert "FAIL triangles None <= 10 (measurement unavailable)" in compact(result.output)
+        assert "OVERALL FAIL (2/3 evaluated gates failed)" in compact(result.output)
+
+
+def test_validate_pair_budget_can_complete_a_truncated_check(tmp_path: Path) -> None:
+    points = np.tile(np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float), (4, 1))
+    mesh = Mesh(points=points, faces=np.arange(12).reshape(4, 3))
+    asset = Asset(
+        root=Node(id="root", name="root", part_id="mesh"), parts={"mesh": Part(id="mesh", name="mesh", mesh=mesh)}
+    )
+    path = tmp_path / "overlapping.glb"
+    asset.write_gltf(path)
+    for pairs, status in [(2, "FAIL"), (6, "PASS")]:
+        result = runner.invoke(
+            app,
+            [
+                "--json",
+                "validate",
+                str(path),
+                "--max-self-intersections",
+                "6",
+                "--max-self-intersection-pairs",
+                str(pairs),
+            ],
+        )
+        assert result.exit_code == (1 if status == "FAIL" else 0), result.output
+        payload = json.loads(result.output)
+        assert _gate_results_by_name(payload)["self_intersections"]["status"] == status
+        assert payload["analysis"]["summary"]["self_intersections_lower_bound"] == (pairs == 2)

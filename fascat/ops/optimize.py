@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from fascat.asset import Asset, Part
 from fascat.mesh import Mesh
+from fascat.ops._ids import unique_id
 from fascat.ops.parallel import parallel_map
 from fascat.options import OptimizeOptions
 
@@ -21,13 +22,9 @@ class _OptimizedPart:
 def optimize_asset(asset: Asset, options: OptimizeOptions, *, selected_part_ids: set[str] | None = None) -> Asset:
     result = asset.copy(keep_source=True)
     if not options.preserve_instances:
-        result = _duplicate_parts_per_occurrence(result, selected_part_ids=selected_part_ids)
+        result, expanded_part_ids = _duplicate_parts_per_occurrence(result, selected_part_ids=selected_part_ids)
         if selected_part_ids is not None:
-            selected_part_ids = {
-                node.part_id
-                for node in result.root.walk()
-                if node.part_id is not None and "source_part_id" in result.parts[node.part_id].metadata
-            }
+            selected_part_ids = expanded_part_ids
     total_triangles = _selected_triangle_count(result.parts, selected_part_ids)
     targets = _targets_for_parts(
         result.parts,
@@ -70,6 +67,13 @@ def optimize_asset(asset: Asset, options: OptimizeOptions, *, selected_part_ids:
         part.mesh = optimized.mesh
         part.metadata = optimized.metadata
         part.fingerprint = optimized.fingerprint
+        if options.simplify and part.mesh.metadata.get("simplification_target_status") == "unmet":
+            result.report.add_warning(
+                f"part {part.id}: simplification retained the original "
+                f"{part.mesh.metadata['simplification_source_triangles']} triangles; "
+                f"target {part.mesh.metadata['simplification_target_triangles']} was not reached "
+                f"({part.mesh.metadata['simplification_fallback_reason']})"
+            )
     return result
 
 
@@ -97,7 +101,7 @@ def _optimize_part(part: Part, options: OptimizeOptions, *, target: int | None) 
             if _feature_preservation_enabled(options):
                 mesh = mesh.simplify(
                     target_triangles=target,
-                    ratio=None if target is not None else options.ratio,
+                    ratio=None if options.target_triangles is not None else options.ratio,
                     preserve_hard_edges=options.preserve_hard_edges,
                     hard_edge_angle=options.hard_edge_angle,
                     preserve_holes=options.preserve_holes,
@@ -106,7 +110,9 @@ def _optimize_part(part: Part, options: OptimizeOptions, *, target: int | None) 
                     preserve_silhouette=options.preserve_silhouette,
                 )
             else:
-                mesh = mesh.simplify(target_triangles=target, ratio=None if target is not None else options.ratio)
+                mesh = mesh.simplify(
+                    target_triangles=target, ratio=None if options.target_triangles is not None else options.ratio
+                )
             if feature_counts is not None:
                 metadata["simplification_preserved_features"] = json.dumps(
                     feature_counts,
@@ -120,10 +126,14 @@ def _optimize_part(part: Part, options: OptimizeOptions, *, target: int | None) 
     return _OptimizedPart(part_id=part.id, mesh=mesh, metadata=metadata, fingerprint=mesh.fingerprint())
 
 
-def _duplicate_parts_per_occurrence(asset: Asset, *, selected_part_ids: set[str] | None = None) -> Asset:
+def _duplicate_parts_per_occurrence(
+    asset: Asset, *, selected_part_ids: set[str] | None = None
+) -> tuple[Asset, set[str]]:
     parts: dict[str, Part] = {}
     counters: dict[str, int] = {}
     carried: set[str] = set()
+    reserved_ids = set(asset.parts)
+    expanded_part_ids: set[str] = set()
     for node in asset.root.walk():
         if node.part_id is None or node.part_id not in asset.parts:
             continue
@@ -137,7 +147,9 @@ def _duplicate_parts_per_occurrence(asset: Asset, *, selected_part_ids: set[str]
         counters[source_id] = occurrence_index
         source = asset.parts[source_id]
         part = source.copy(keep_source=True)
-        part.id = f"{source_id}_{occurrence_index}"
+        part.id = unique_id(reserved_ids, f"{source_id}_{occurrence_index}")
+        reserved_ids.add(part.id)
+        expanded_part_ids.add(part.id)
         part.metadata = {
             **part.metadata,
             "source_part_id": source_id,
@@ -146,7 +158,7 @@ def _duplicate_parts_per_occurrence(asset: Asset, *, selected_part_ids: set[str]
         parts[part.id] = part
         node.part_id = part.id
     asset.parts = parts
-    return asset
+    return asset, expanded_part_ids
 
 
 def _targets_for_parts(
