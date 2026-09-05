@@ -135,3 +135,22 @@ def test_stl_preserves_world_orientation(tmp_path: Path, parent_sign: int, child
     np.testing.assert_allclose(triangles[4:], original_points[original_faces], atol=1e-12)
     np.testing.assert_array_equal(mesh.faces, original_faces)
     np.testing.assert_array_equal(mesh.points, original_points)
+
+
+@pytest.mark.parametrize("parent_sign,child_sign", [(1, 1), (1, -1), (-1, 1), (-1, -1)])
+def test_far_proxy_preserves_occurrence_winding(parent_sign: int, child_sign: int) -> None:
+    from fascat.ops.lod import _build_scene_far_proxy
+    from fascat.options import LODOptions
+
+    asset, _ = _asset(parent_sign, child_sign)
+    part = asset.parts["tetra"]
+    assert part.mesh is not None
+    original_faces = part.mesh.faces.copy()
+    part.lod_meshes = [part.mesh.copy()]
+    result = _build_scene_far_proxy(asset, LODOptions(), selected_part_ids=None)
+    assert result is not None
+    proxy = asset.parts[str(result["lod_scene_far_proxy_part_id"])].mesh
+    assert proxy is not None
+    _assert_outward(proxy.points[proxy.faces])
+    np.testing.assert_array_equal(part.mesh.faces, original_faces)
+    np.testing.assert_array_equal(part.lod_meshes[0].faces, original_faces)
