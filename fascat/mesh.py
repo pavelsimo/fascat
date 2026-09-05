@@ -2719,6 +2719,11 @@ class Mesh:
         mesh.validate()
         return mesh
 
+    def _copy_for_simplification(self) -> Mesh:
+        mesh = self.copy()
+        mesh.metadata = {key: value for key, value in mesh.metadata.items() if not key.startswith("simplification_")}
+        return mesh
+
     def simplify(
         self,
         *,
@@ -2735,17 +2740,17 @@ class Mesh:
     ) -> Mesh:
         """Simplify toward a target, retaining the mesh if safe reduction is unavailable."""
         if self.triangle_count == 0:
-            return self.copy()
+            return self._copy_for_simplification()
         if target_triangles is None:
             if ratio is None:
                 if target_error is None:
-                    return self.copy()
+                    return self._copy_for_simplification()
                 target_triangles = 1
             else:
                 target_triangles = max(1, int(round(self.triangle_count * ratio)))
         target_triangles = max(1, min(int(target_triangles), self.triangle_count))
         if target_triangles >= self.triangle_count and target_error is None:
-            return self.copy()
+            return self._copy_for_simplification()
         error_bound = None if target_error is None else max(0.0, float(target_error))
 
         protected_sets: list[IntArray] = []
@@ -2799,9 +2804,9 @@ class Mesh:
             )
             simplified_indices = np.asarray(destination[:index_count], dtype=np.int64)
             if simplified_indices.size < 3:
-                return self.copy()
+                return self._copy_for_simplification()
             face_count = simplified_indices.size // 3
-            mesh = self.copy()
+            mesh = self._copy_for_simplification()
             mesh.faces = simplified_indices[: face_count * 3].reshape((-1, 3))
             mesh.material_indices = self._assign_materials_by_nearest_centroid(mesh.points, mesh.faces)
             mesh = mesh.remove_unreferenced_vertices().compute_normals()
@@ -2847,7 +2852,7 @@ class Mesh:
                 return mesh
             except Exception:
                 logger.warning("fast-simplification failed; retaining original mesh", exc_info=True)
-                mesh = self.copy()
+                mesh = self._copy_for_simplification()
                 mesh.metadata["simplification_status"] = "retained_original"
                 mesh.metadata["simplification_fallback_reason"] = "backends_failed"
                 mesh.metadata["simplification_source_triangles"] = str(self.triangle_count)
@@ -2981,7 +2986,7 @@ class Mesh:
             target_triangles,
             protected_faces.size,
         )
-        mesh = self.copy()
+        mesh = self._copy_for_simplification()
         mesh.metadata["simplification_status"] = "retained_original"
         mesh.metadata["simplification_fallback_reason"] = "constrained_backend_unavailable"
         mesh.metadata["simplification_source_triangles"] = str(self.triangle_count)

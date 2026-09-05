@@ -2556,3 +2556,16 @@ def test_mesh_to_trimesh_copies_geometry_and_attributes() -> None:
     np.testing.assert_allclose(converted.vertex_attributes["uv0"], uvs[0])
     np.testing.assert_array_equal(converted.face_attributes["material_indices"], material_indices)
     assert converted.metadata == {"source": "cad"}
+
+
+@pytest.mark.parametrize("target", [80, 320, None])
+def test_simplification_clears_previous_attempt_metadata(target: int | None) -> None:
+    import trimesh
+
+    sphere = trimesh.creation.icosphere(subdivisions=2)
+    source = Mesh(points=sphere.vertices, faces=sphere.faces, metadata={"source": "sphere"})
+    retained = source.simplify(target_triangles=80, protected_faces=np.array([0]))
+    assert retained.metadata["simplification_target_status"] == "unmet"
+    result = retained.simplify(target_triangles=target)
+    assert not any(key.startswith("simplification_") for key in result.metadata)
+    assert retained.metadata["simplification_target_status"] == "unmet"

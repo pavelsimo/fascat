@@ -406,8 +406,10 @@ placeholder nodes with warnings.
 
 When hard-edge, hole, material-boundary, UV-seam, silhouette, or explicit face
 protection identifies any protected faces, simplification currently retains the
-entire mesh. The integrated backends do not support reliable constrained
-simplification. This preserves geometry and attributes but can leave the mesh
+entire mesh. The current integration does not implement reliable constrained
+simplification. Default decimation protects silhouette faces, so it can retain
+the entire mesh even for ordinary inputs. Optional backend vertex-lock APIs are
+not yet integrated. This preserves geometry and attributes but can leave the mesh
 above its requested triangle target. A warning explains the retained count and
 target; mesh metadata records `simplification_status=retained_original`, source
 and target triangle counts, and `simplification_target_status=unmet`. Optimization
