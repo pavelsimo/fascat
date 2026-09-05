@@ -10,6 +10,11 @@ from fascat.mesh import Mesh
 from fascat.ops._visibility import BoolArray, FloatArray, _RayMeshIndex, face_ambient_occlusion, ray_hits_mesh_batch
 
 
+@pytest.fixture(autouse=True)
+def force_bvh_for_equivalence_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(visibility, "_AO_BVH_MIN_TRIANGLES", 0)
+
+
 def _separated_triangles(count: int) -> FloatArray:
     triangles = np.tile(np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]), (count, 1, 1))
     triangles[:, :, 1] += 2 * np.arange(count)[:, None]
@@ -132,3 +137,16 @@ def test_index_stops_testing_hit_directions(monkeypatch: pytest.MonkeyPatch) -> 
     hits = index.ray_hits(np.asarray([0.25, 0.25, -1.0]), np.asarray([[0.0, 0.0, 1.0]]), ignore_face=0, max_t=2)
     np.testing.assert_array_equal(hits, [True])
     assert triangle_tests <= visibility._AO_BVH_LEAF_SIZE
+
+
+def test_small_mesh_uses_direct_predicate(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(visibility, "_AO_BVH_MIN_TRIANGLES", 4096)
+    triangles = _separated_triangles(100)
+    index = _RayMeshIndex(triangles)
+    assert index.root is None
+    origin = np.array([0.25, 0.25, -1.0])
+    directions = np.array([[0.0, 0.0, 1.0]])
+    np.testing.assert_array_equal(
+        index.ray_hits(origin, directions, ignore_face=-1, max_t=2),
+        ray_hits_mesh_batch(origin, directions, triangles, ignore_face=-1, max_t=2),
+    )

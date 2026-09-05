@@ -16,6 +16,8 @@ IntArray = NDArray[np.int64]
 _AO_RAY_DIRECTION_BATCH_SIZE = 8
 _AO_RAY_TRIANGLE_BATCH_SIZE = 65_536
 _AO_BVH_LEAF_SIZE = 32
+# Small per-part meshes are faster through the vectorized direct predicate.
+_AO_BVH_MIN_TRIANGLES = 4096
 
 
 @dataclass(frozen=True)
@@ -63,15 +65,17 @@ class _RayMeshIndex:
         self.triangles = triangles
         self.root = (
             _build_ray_bvh(triangles.min(axis=1), triangles.max(axis=1), np.arange(len(triangles), dtype=np.int64))
-            if len(triangles)
+            if len(triangles) >= _AO_BVH_MIN_TRIANGLES and len(triangles)
             else None
         )
 
     def ray_hits(self, origin: FloatArray, directions: FloatArray, *, ignore_face: int, max_t: float) -> BoolArray:
         directions = np.asarray(directions, dtype=np.float64).reshape((-1, 3))
         hits = np.zeros(len(directions), dtype=np.bool_)
-        if self.root is None or len(directions) == 0:
+        if len(directions) == 0:
             return hits
+        if self.root is None:
+            return ray_hits_mesh_batch(origin, directions, self.triangles, ignore_face=ignore_face, max_t=max_t)
         pending = [(self.root, np.arange(len(directions), dtype=np.int64))]
         while pending:
             node, active = pending.pop()
