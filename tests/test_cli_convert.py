@@ -1725,3 +1725,38 @@ def test_cli_convert_accepts_optimization_action_options_during_dry_run() -> Non
     assert diagnostics["remove_occluded"]["level"] == "approximate"
     assert diagnostics["decimate"]["level"] == "exact"
     assert diagnostics["run_lod_generators"]["level"] == "exact"
+
+
+@pytest.mark.parametrize("explicit_target", [None, 1280])
+def test_convert_ratio_overrides_profile_budget_unless_target_is_explicit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, explicit_target: int | None
+) -> None:
+    import trimesh
+
+    from fascat.asset import Part
+    from fascat.cli import _io_helpers
+    from fascat.mesh import Mesh
+    from fascat.options import OptimizeOptions
+
+    input_path = tmp_path / "input.step"
+    input_path.write_text("ISO-10303-21;")
+    seen: list[int] = []
+
+    def convert(*args: object, **kwargs: Any) -> Asset:
+        options = kwargs["optimize"]
+        assert isinstance(options, OptimizeOptions)
+        assert options.target_triangles == explicit_target
+        sphere = trimesh.creation.icosphere(subdivisions=3)
+        asset = Asset(
+            root=Node(id="root", name="root", children=[Node(id="p", name="p", part_id="p")]),
+            parts={"p": Part(id="p", name="p", mesh=Mesh(points=sphere.vertices, faces=sphere.faces))},
+        ).optimize(options)
+        seen.append(asset.triangle_count)
+        return asset
+
+    monkeypatch.setattr(_io_helpers, "_convert_for_cli", convert)
+    flags = [] if explicit_target is None else ["--target-triangles", str(explicit_target)]
+    result = runner.invoke(app, ["convert", str(input_path), str(tmp_path / "out.glb"), "--ratio", "0.5", *flags])
+    assert result.exit_code == 0, result.output
+    assert len(seen) == 1
+    assert 0 < seen[0] < 1280 if explicit_target is None else seen[0] == 1280

@@ -94,7 +94,7 @@ def _optimize_part(part: Part, options: OptimizeOptions, *, target: int | None) 
             if _feature_preservation_enabled(options):
                 mesh = mesh.simplify(
                     target_triangles=target,
-                    ratio=None if target is not None else options.ratio,
+                    ratio=None if options.target_triangles is not None else options.ratio,
                     preserve_hard_edges=options.preserve_hard_edges,
                     hard_edge_angle=options.hard_edge_angle,
                     preserve_holes=options.preserve_holes,
@@ -103,7 +103,9 @@ def _optimize_part(part: Part, options: OptimizeOptions, *, target: int | None) 
                     preserve_silhouette=options.preserve_silhouette,
                 )
             else:
-                mesh = mesh.simplify(target_triangles=target, ratio=None if target is not None else options.ratio)
+                mesh = mesh.simplify(
+                    target_triangles=target, ratio=None if options.target_triangles is not None else options.ratio
+                )
             if feature_counts is not None:
                 metadata["simplification_preserved_features"] = json.dumps(
                     feature_counts,

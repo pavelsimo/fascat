@@ -153,6 +153,25 @@ def test_optimize_validates_simplified_mesh_before_buffer_optimization(monkeypat
     assert order == ["simplify"]
 
 
+@pytest.mark.parametrize("target", [8, 16])
+@pytest.mark.parametrize("preserve_holes", [False, True])
+def test_satisfied_triangle_target_does_not_apply_ratio(target: int, preserve_holes: bool) -> None:
+    original = mesh_with_triangles(8)
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="node", part_id="part")]),
+        parts={"part": Part(id="part", name="Part", mesh=original)},
+    )
+
+    result = asset.optimize(
+        OptimizeOptions(target_triangles=target, ratio=0.25, preserve_holes=preserve_holes, optimize_buffers=False)
+    )
+
+    mesh = result.parts["part"].mesh
+    assert mesh is not None
+    np.testing.assert_array_equal(mesh.faces, original.faces)
+    np.testing.assert_array_equal(mesh.points, original.points)
+
+
 def test_optimize_runs_buffer_optimization_after_simplification(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     order: list[str] = []
 
