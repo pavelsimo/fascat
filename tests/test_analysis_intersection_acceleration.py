@@ -119,3 +119,17 @@ def test_all_shared_indices_are_excluded_without_consuming_budget(count: int) ->
 
     assert result.intersections == result.pairs_checked == 0
     assert result.truncated is False
+
+
+@pytest.mark.parametrize("invalid", [float("nan"), float("inf")])
+def test_nonfinite_triangle_does_not_hide_other_intersections(invalid: float) -> None:
+    triangle = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    triangles = np.tile(triangle, (3, 1, 1))
+    triangles[2, 0, 0] = invalid
+    result = analysis._self_intersection_count(_mesh_from_triangles(triangles), 100)
+    assert result.intersections == 1
+    assert result.pairs_checked == 1
+    assert not result.truncated
+    triangles[:, 0, 0] = invalid
+    result = analysis._self_intersection_count(_mesh_from_triangles(triangles), 100)
+    assert result.pairs_checked == 0

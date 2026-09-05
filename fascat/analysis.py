@@ -373,7 +373,11 @@ def _intersection_bounds_overlap(left: _IntersectionBoundsNode, right: _Intersec
 def _intersection_candidates(mins: FloatArray, maxs: FloatArray, faces: IntArray) -> Iterator[tuple[int, int]]:
     # Halving before addition avoids overflowing finite bounding-box centers.
     centers = mins * 0.5 + maxs * 0.5
-    root = _build_intersection_bounds_tree(mins, maxs, centers, np.arange(len(faces), dtype=np.int64))
+    finite = np.isfinite(mins).all(axis=1) & np.isfinite(maxs).all(axis=1)
+    indices = np.flatnonzero(finite).astype(np.int64)
+    if indices.size == 0:
+        return
+    root = _build_intersection_bounds_tree(mins, maxs, centers, indices)
     pending = [(root, root)]
     while pending:
         left, right = pending.pop()
@@ -392,17 +396,18 @@ def _intersection_candidates(mins: FloatArray, maxs: FloatArray, faces: IntArray
             assert left.indices is not None and right.indices is not None
             # Leaf batches contain at most 8 x 8 pairs. Stream them rather than
             # materializing all overlaps before the caller can enforce its budget.
-            for position, left_index in enumerate(left.indices):
-                right_indices = right.indices[position + 1 :] if left is right else right.indices
-                overlaps = np.all(maxs[right_indices] >= mins[left_index], axis=1) & np.all(
-                    mins[right_indices] <= maxs[left_index], axis=1
-                )
-                right_indices = right_indices[overlaps]
-                shared_vertices = np.any(
-                    faces[right_indices, :, np.newaxis] == faces[left_index, np.newaxis, :], axis=(1, 2)
-                )
-                for right_index in right_indices[~shared_vertices]:
-                    yield int(left_index), int(right_index)
+            left_indices, right_indices = left.indices, right.indices
+            overlaps = np.all(maxs[right_indices][None] >= mins[left_indices][:, None], axis=2) & np.all(
+                mins[right_indices][None] <= maxs[left_indices][:, None], axis=2
+            )
+            shared_vertices = np.any(
+                faces[left_indices][:, None, :, None] == faces[right_indices][None, :, None, :], axis=(2, 3)
+            )
+            overlaps &= ~shared_vertices
+            if left is right:
+                overlaps &= np.triu(np.ones(overlaps.shape, dtype=bool), k=1)
+            for left_position, right_position in np.argwhere(overlaps):
+                yield int(left_indices[left_position]), int(right_indices[right_position])
 
 
 def _self_intersection_count(mesh: Mesh, max_pairs: int) -> _SelfIntersectionResult:
