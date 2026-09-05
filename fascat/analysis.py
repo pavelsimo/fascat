@@ -1124,6 +1124,8 @@ def _asset_from_usd(path: Path) -> Asset:
     if not default_prim:
         raise RuntimeError("USD stage has no defaultPrim")
 
+    time = Usd.TimeCode.EarliestTime()
+    xform_cache = UsdGeom.XformCache(time)
     parts: dict[str, Part] = {}
     nodes: list[Node] = []
     mesh_cache: dict[str, Mesh] = {}
@@ -1137,9 +1139,9 @@ def _asset_from_usd(path: Path) -> Asset:
         mesh = mesh_cache.get(source_key)
         if mesh is None:
             usd_mesh = UsdGeom.Mesh(source_prim)
-            points_value = usd_mesh.GetPointsAttr().Get() or []
-            counts = [int(value) for value in (usd_mesh.GetFaceVertexCountsAttr().Get() or [])]
-            indices = [int(value) for value in (usd_mesh.GetFaceVertexIndicesAttr().Get() or [])]
+            points_value = usd_mesh.GetPointsAttr().Get(time) or []
+            counts = [int(value) for value in (usd_mesh.GetFaceVertexCountsAttr().Get(time) or [])]
+            indices = [int(value) for value in (usd_mesh.GetFaceVertexIndicesAttr().Get(time) or [])]
             if any(count != 3 for count in counts):
                 continue
             points = np.asarray(
@@ -1150,7 +1152,13 @@ def _asset_from_usd(path: Path) -> Asset:
             mesh_cache[source_key] = mesh
         part_id = f"usd_mesh_{len(parts)}"
         name = prim.GetName() or part_id
-        parts[part_id] = Part(id=part_id, name=name, mesh=mesh)
+        # Gf matrices use row vectors; analysis uses column vectors. Bake the
+        # occurrence's full transform into fresh points, in stage units like
+        # the other output readers (metersPerUnit is descriptive, not a scale).
+        world_transform = np.asarray(xform_cache.GetLocalToWorldTransform(prim), dtype=np.float64).T
+        parts[part_id] = Part(
+            id=part_id, name=name, mesh=Mesh(points=_transform_points(mesh.points, world_transform), faces=mesh.faces)
+        )
         nodes.append(Node(id=f"node_{part_id}", name=name, part_id=part_id))
 
     if not parts:
