@@ -130,7 +130,12 @@ def _reconstruct_instances(asset: Asset, selected_node_ids: set[str], *, similar
             attribute_blocked_groups += 1
         if len(metadata_keys) > 1:
             metadata_blocked_groups += 1
-        if len({lod_key_by_part[part_id] for part_id in part_ids}) > 1:
+        if any(
+            _part_lod_key(asset.parts[part_id], include_positions=False)
+            != _part_lod_key(asset.parts[part_ids[0]], include_positions=False)
+            or not _lod_positions_within_tolerance(asset.parts[part_ids[0]], asset.parts[part_id], similarity_tolerance)
+            for part_id in part_ids[1:]
+        ):
             lod_blocked_groups += 1
 
         canonical_by_key: dict[tuple[object, ...], str] = {}
@@ -234,6 +239,7 @@ def _similar_instance_replacements(
                     cluster_id
                     for cluster_id in clusters
                     if _mesh_positions_within_tolerance(asset.parts[cluster_id].mesh, mesh, tolerance)
+                    and _lod_positions_within_tolerance(asset.parts[cluster_id], asset.parts[part_id], tolerance)
                 ),
                 None,
             )
@@ -261,7 +267,7 @@ def _part_similarity_key(part: Part) -> tuple[object, ...] | None:
         _part_material_key(part),
         _part_mesh_attribute_key(mesh),
         _part_metadata_key(part),
-        _part_lod_key(part),
+        _part_lod_key(part, include_positions=False),
         mesh.points.shape,
         array_digest_required(mesh.faces),
     )
@@ -299,10 +305,17 @@ def _part_metadata_key(part: Part) -> tuple[str, str]:
     return (_metadata_key(part.metadata), _metadata_key(mesh_metadata))
 
 
-def _part_lod_key(part: Part) -> tuple[tuple[object, ...], ...]:
+def _lod_positions_within_tolerance(left: Part, right: Part, tolerance: float) -> bool:
+    return len(left.lod_meshes) == len(right.lod_meshes) and all(
+        _mesh_positions_within_tolerance(a, b, tolerance)
+        for a, b in zip(left.lod_meshes, right.lod_meshes, strict=True)
+    )
+
+
+def _part_lod_key(part: Part, *, include_positions: bool = True) -> tuple[tuple[object, ...], ...]:
     return tuple(
         (
-            array_digest_required(mesh.points),
+            array_digest_required(mesh.points) if include_positions else mesh.points.shape,
             array_digest_required(mesh.faces),
             _part_mesh_attribute_key(mesh),
             array_digest(mesh.material_indices),

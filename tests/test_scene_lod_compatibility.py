@@ -45,7 +45,7 @@ def test_instance_reconstruction_preserves_different_lod_chains(difference: str,
     mesh = _mesh()
     lods = [mesh]
     if difference == "points":
-        mesh.points[0, 0] += 0.001
+        mesh.points[0, 0] += 0.02
     elif difference == "faces":
         mesh.faces = mesh.faces[:, [0, 2, 1]]
     elif difference == "normals":
@@ -84,3 +84,15 @@ def test_instance_reconstruction_reuses_identical_lod_chains(tolerance: float) -
     assert len(result.parts["a"].lod_meshes) == 1
     assert asset.part_count == 2
     assert not any("LOD differences" in warning for warning in result.report.warnings)
+
+
+@pytest.mark.parametrize("base_delta", [0.0, 0.001])
+def test_similarity_tolerance_applies_to_lod_positions(base_delta: float) -> None:
+    asset = _asset([_mesh()])
+    assert asset.parts["b"].mesh is not None
+    asset.parts["b"].mesh.points[0, 0] += base_delta
+    asset.parts["b"].lod_meshes[0].points[0, 0] += 0.001
+    result = asset.optimize_scene(SceneOptimizeOptions(instance_similarity_tolerance=0.01))
+    assert result.part_count == 1
+    assert not any("LOD differences" in warning for warning in result.report.warnings)
+    assert asset.part_count == 2
