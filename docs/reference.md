@@ -385,6 +385,23 @@ placeholder nodes with warnings.
 | `--report` | unset | Write a JSON conversion report sidecar |
 | `--force` | `false` | Overwrite an existing output file |
 
+Geometry merge preserves all compatible UV channels, authored normals, tangents,
+face groups, and stored LOD meshes. It bakes positions and shading directions into
+the merged node's coordinate system; missing normals are generated per source
+mesh. Equal face-group names are combined after remapping their face indices.
+Each LOD level uses the merged part's shared material table. Mesh metadata values
+shared by all contributing meshes are retained, alongside merge provenance.
+
+Merge fails when contributing meshes at a level have different UV channels or
+mixed tangent presence, when LOD chain lengths or recorded LOD ratios/screen
+coverage thresholds differ, or when assigned and unassigned face materials would be mixed.
+Merge these parts separately. Material splitting of a stored LOD chain is also
+rejected because base faces have no reliable correspondence to LOD faces; use
+`--merge-mode all` for that chain. Singular transforms are rejected because they
+cannot preserve shading directions. These checks also apply to stored LODs. Per-source LOD switch distances are
+discarded because they no longer describe the merged bounds.
+
+
 ### Units
 
 - Linear tolerances and sizes (`--sag`, `--min-edge-length`, `--max-edge-length`, `--max-polygon-length`, `--heal-tolerance`, `--max-sliver-area`, `--region-size`, `--max-hole-diameter`) use the source asset's working units unless stated otherwise.
