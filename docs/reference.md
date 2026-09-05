@@ -393,12 +393,13 @@ Each LOD level uses the merged part's shared material table. Mesh metadata value
 shared by all contributing meshes are retained, alongside merge provenance.
 
 Merge fails when contributing meshes at a level have different UV channels or
-mixed tangent presence, when LOD chain lengths or recorded LOD ratios/switch
-thresholds differ, or when assigned and unassigned face materials would be mixed.
+mixed tangent presence, when LOD chain lengths or recorded LOD ratios/screen
+coverage thresholds differ, or when assigned and unassigned face materials would be mixed.
 Merge these parts separately. Material splitting of a stored LOD chain is also
 rejected because base faces have no reliable correspondence to LOD faces; use
 `--merge-mode all` for that chain. Singular transforms are rejected because they
-cannot preserve shading directions. These checks also apply to stored LODs.
+cannot preserve shading directions. These checks also apply to stored LODs. Per-source LOD switch distances are
+discarded because they no longer describe the merged bounds.
 
 
 ### Units

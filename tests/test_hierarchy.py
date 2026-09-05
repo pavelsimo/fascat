@@ -492,3 +492,19 @@ def test_merge_rejects_mixed_material_assignments_unless_materials_are_dropped()
     part = next(iter(asset.merge(MergeOptions(mode="all", preserve_materials=False)).parts.values()))
     assert part.material_ids == []
     assert part.mesh is not None and part.mesh.material_indices is None
+
+
+@pytest.mark.parametrize("same_distance", [False, True])
+def test_merge_discards_source_lod_switch_distances(same_distance: bool) -> None:
+    asset = _attributed_asset()
+    other = asset.parts["a"].copy()
+    other.id = "b"
+    asset.parts["b"] = other
+    asset.root.children.append(Node(id="b", name="B", part_id="b"))
+    for part, distance in [(asset.parts["a"], "10"), (other, "10" if same_distance else "30")]:
+        part.lod_meshes[0].metadata.update(lod_switch_distance=distance, lod_switch_distance_source="formula")
+    merged = next(iter(asset.merge(MergeOptions(mode="all")).parts.values()))
+    assert len(merged.lod_meshes) == 1
+    assert "lod_switch_distance" not in merged.lod_meshes[0].metadata
+    assert "lod_switch_distance_source" not in merged.lod_meshes[0].metadata
+    assert merged.lod_meshes[0].metadata["lod_screen_coverage"] == "0.25"

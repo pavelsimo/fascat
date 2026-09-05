@@ -470,7 +470,7 @@ def _merge_mesh(
         face_offset += face_indices.size
 
     if lod_index is not None:
-        for key in ("lod_screen_coverage", "lod_switch_distance", "lod_ratio"):
+        for key in ("lod_screen_coverage", "lod_ratio"):
             if len({mesh.metadata.get(key) for mesh in source_meshes}) > 1:
                 raise MeshValidationError(f"merge requires matching LOD {lod_index + 1} {key} values")
     metadata = {
@@ -478,6 +478,10 @@ def _merge_mesh(
         for key, value in (source_meshes[0].metadata.items() if source_meshes else [])
         if all(mesh.metadata.get(key) == value for mesh in source_meshes)
     }
+    if lod_index is not None:
+        # Distances belong to the source bounds, not the merged geometry.
+        metadata.pop("lod_switch_distance", None)
+        metadata.pop("lod_switch_distance_source", None)
     merged = Mesh(
         points=np.vstack(points) if points else np.empty((0, 3), dtype=np.float64),
         faces=np.vstack(faces) if faces else np.empty((0, 3), dtype=np.int64),
