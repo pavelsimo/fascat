@@ -60,3 +60,9 @@ def test_binary_stl_rejects_non_finite_vectors(tmp_path: Path, component: int, v
     path.write_bytes(payload)
     with pytest.raises(RuntimeError, match="non-finite"):
         validate_stl(path)
+
+
+def test_ascii_stl_accepts_utf8_bom(tmp_path: Path) -> None:
+    path = tmp_path / "bom.stl"
+    path.write_text(_ASCII, encoding="utf-8-sig")
+    assert validate_stl(path) == {"meshes": 1, "points": 3, "triangles": 1}

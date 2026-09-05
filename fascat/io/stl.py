@@ -76,7 +76,7 @@ def validate_stl(path: str | Path) -> dict[str, int]:
                 raise RuntimeError("STL asset contains non-finite coordinates or normals")
             return {"meshes": 1, "points": triangle_count * 3, "triangles": triangle_count}
     try:
-        text = payload.decode("utf-8")
+        text = payload.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise RuntimeError("invalid STL binary length or ASCII encoding") from exc
     triangle_count = _validate_ascii_stl(text)

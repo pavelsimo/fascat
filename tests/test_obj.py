@@ -55,3 +55,9 @@ def test_obj_rejects_empty_and_unfinished_meshes(tmp_path: Path, text: str) -> N
     path.write_text(text)
     with pytest.raises(RuntimeError):
         validate_obj(path)
+
+
+def test_obj_accepts_utf8_bom(tmp_path: Path) -> None:
+    path = tmp_path / "bom.obj"
+    path.write_text(_VERTICES + "f 1 2 3\n", encoding="utf-8-sig")
+    assert validate_obj(path) == {"meshes": 1, "points": 4, "triangles": 1}

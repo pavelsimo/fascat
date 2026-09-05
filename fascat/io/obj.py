@@ -97,7 +97,7 @@ def validate_obj(path: str | Path) -> dict[str, int]:
     counts = {"v": 0, "vt": 0, "vn": 0}
     triangles = 0
     pending = ""
-    with Path(path).open(encoding="utf-8") as source:
+    with Path(path).open(encoding="utf-8-sig") as source:
         for line_number, line in enumerate(source, 1):
             line = pending + line.partition("#")[0].strip()
             if line.endswith("\\"):
