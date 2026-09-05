@@ -937,7 +937,7 @@ def Mesh "Triangle" {
 
 @pytest.mark.requires_usd
 @pytest.mark.parametrize("budget_args", [["--max-file-size-mb", "1"], ["--profile", "realtime-web"]])
-def test_validate_stdin_file_size_gate_fails(budget_args: list[str]) -> None:
+def test_validate_stdin_file_size_gate_uses_received_bytes(budget_args: list[str]) -> None:
     result = runner.invoke(
         app,
         ["--json", "validate", "-", *budget_args],
@@ -952,14 +952,14 @@ def Mesh "Triangle" {
 """,
     )
 
-    assert result.exit_code == 1, result.output
+    assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert "analysis" not in payload
     gate = _gate_results_by_name(payload)["file_size_bytes"]
-    assert gate["status"] == "FAIL"
-    assert gate["actual"] is None
-    assert gate["reason"] == "measurement unavailable"
-    assert payload["gates"]["overall"] == "FAIL"
+    assert gate["status"] == "PASS"
+    assert gate["actual"] > 0
+    assert "reason" not in gate
+    assert payload["gates"]["overall"] == "PASS"
 
 
 @pytest.mark.parametrize("json_output", [False, True])
@@ -990,3 +990,30 @@ def test_validate_requested_limits_without_analysis_fail(
     else:
         assert "FAIL triangles None <= 10 (measurement unavailable)" in compact(result.output)
         assert "OVERALL FAIL (2/3 evaluated gates failed)" in compact(result.output)
+
+
+def test_validate_pair_budget_can_complete_a_truncated_check(tmp_path: Path) -> None:
+    points = np.tile(np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float), (4, 1))
+    mesh = Mesh(points=points, faces=np.arange(12).reshape(4, 3))
+    asset = Asset(
+        root=Node(id="root", name="root", part_id="mesh"), parts={"mesh": Part(id="mesh", name="mesh", mesh=mesh)}
+    )
+    path = tmp_path / "overlapping.glb"
+    asset.write_gltf(path)
+    for pairs, status in [(2, "FAIL"), (6, "PASS")]:
+        result = runner.invoke(
+            app,
+            [
+                "--json",
+                "validate",
+                str(path),
+                "--max-self-intersections",
+                "6",
+                "--max-self-intersection-pairs",
+                str(pairs),
+            ],
+        )
+        assert result.exit_code == (1 if status == "FAIL" else 0), result.output
+        payload = json.loads(result.output)
+        assert _gate_results_by_name(payload)["self_intersections"]["status"] == status
+        assert payload["analysis"]["summary"]["self_intersections_lower_bound"] == (pairs == 2)

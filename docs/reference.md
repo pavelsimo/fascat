@@ -610,6 +610,7 @@ above and on the [Python API page](api.html) document each field.
 | `--non-manifold-edges` | `false` | Report non-manifold edge counts |
 | `--open-boundaries` | `false` | Report open boundary counts |
 | `--self-intersections` | `false` | Report detected self-intersections with bounded triangle-triangle checks and lower-bound fields when the pair limit is hit |
+| `--max-self-intersection-pairs` | `10000` | Maximum candidate pairs checked per mesh; raise when a self-intersection gate reports an incomplete measurement |
 | `--sliver-triangles` | `false` | Report degenerate and sliver triangle stats |
 | `--tiny-parts` | `false` | Report tiny part stats |
 | `--draw-call-estimate` | `false` | Report material count, draw-call estimate, mesh/submesh slots, instances, and merged batch counts |
@@ -649,9 +650,12 @@ validate evaluates the requested gates, prints one
 `PASS|FAIL|SKIP <gate> <actual> <op> <limit>` line per gate plus an `OVERALL`
 line on stdout, and exits 1 when any gate fails. A requested limit with an
 unavailable measurement fails with `reason: "measurement unavailable"`, including
-geometry checks unsupported by the output format and file-size limits on stdin.
+geometry checks unsupported by the output format. File-size limits on stdin
+use the received byte count.
 A bounded self-intersection count is a lower bound: it fails if already above
 the limit, and also fails if the incomplete search cannot establish compliance.
+Increase `--max-self-intersection-pairs` (default 10000 per mesh) to complete
+a truncated search. This increases runtime on dense meshes.
 These results include `actual_lower_bound: true` and a `reason` in JSON; text
 prints `>=` before the count and appends the reason. These failures count in
 `failed` and `evaluated`, and make `overall` equal to `FAIL`.
