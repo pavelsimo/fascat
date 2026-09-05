@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from math import isfinite
 
-from fascat.metadata import Metadata
+from fascat.metadata import Metadata, _copy_metadata
 
 
 @dataclass(frozen=True)
@@ -17,7 +17,7 @@ class Material:
     metadata: Metadata = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "metadata", dict(self.metadata))
+        object.__setattr__(self, "metadata", _copy_metadata(self.metadata))
         if len(self.base_color) != 4:
             raise ValueError("base_color must contain RGBA values")
         if any(not isfinite(value) for value in self.base_color):
@@ -46,7 +46,7 @@ class Material:
             metallic=self.metallic,
             roughness=self.roughness,
             opacity=self.opacity,
-            metadata=dict(self.metadata),
+            metadata=self.metadata,
         )
 
     @property

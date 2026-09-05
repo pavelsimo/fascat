@@ -1,19 +1,24 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
+import pytest
 from typer.testing import CliRunner
 
 from fascat.asset import Asset, Node, Part
 from fascat.cli import app
 from fascat.filter import Filter
+from fascat.image import ImageResource
 from fascat.io.gltf import validate_gltf, write_gltf
 from fascat.material import Material
 from fascat.mesh import Mesh
 from fascat.metadata import PmiAnnotation, Tolerance
 from fascat.options import GltfExportOptions, MetadataExportOptions, ReplaceOptions
+from fascat.report import Report, ReportStep
 
 runner = CliRunner()
 
@@ -281,3 +286,90 @@ def test_cli_convert_accepts_metadata_and_pmi_during_dry_run() -> None:
     assert payload["source_units"] == "millimetre"
     assert payload["target_units"] == "metre"
     assert payload["target_up_axis"] == "Y"
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda metadata: Asset(root=Node(id="root", name="Root"), metadata=metadata),
+        lambda metadata: Node(id="node", name="Node", metadata=metadata),
+        lambda metadata: Part(id="part", name="Part", metadata=metadata),
+        lambda metadata: Mesh(points=np.zeros((3, 3)), faces=np.array([[0, 1, 2]]), metadata=metadata),
+        lambda metadata: Material(id="mat", name="Material", base_color=(1, 1, 1, 1), metadata=metadata),
+        lambda metadata: ImageResource(
+            id="image", name="Image", mime_type="image/png", data=b"image", width=1, height=1, metadata=metadata
+        ),
+    ],
+    ids=["asset", "node", "part", "mesh", "material", "image"],
+)
+def test_nested_metadata_is_owned_by_constructors_and_copies(factory: Callable[..., Any]) -> None:
+    metadata = {"nested": {"values": [1]}}
+    original = factory(metadata)
+    metadata["nested"]["values"].append(2)
+    assert original.metadata == {"nested": {"values": [1]}}
+
+    copied = original.copy()
+    copied.metadata["nested"]["values"].append(3)
+    assert original.metadata == {"nested": {"values": [1]}}
+    original.metadata["nested"]["values"].append(4)
+    assert copied.metadata == {"nested": {"values": [1, 3]}}
+
+
+@pytest.mark.parametrize("copy_method", ["copy", "clone"])
+def test_asset_copies_nested_graph_metadata_pmi_and_report(copy_method: str) -> None:
+    source = {"nested": {"values": [1]}}
+    annotation = PmiAnnotation(
+        id="pmi", kind="dimension", text="Size", applies_to=["part"], plane=[[1, 0, 0]], source=source
+    )
+    source["nested"]["values"].append(2)
+    assert annotation.source == {"nested": {"values": [1]}}
+    options = {"nested": {"values": [1]}}
+    report = Report(steps=[ReportStep("import", options=options)])
+    mesh = Mesh(points=np.zeros((3, 3)), faces=np.array([[0, 1, 2]]), metadata=annotation.source)
+    asset = Asset(
+        root=Node(id="root", name="Root", children=[Node(id="child", name="Child", metadata=annotation.source)]),
+        parts={"part": Part(id="part", name="Part", mesh=mesh, lod_meshes=[mesh])},
+        pmi=[annotation],
+        report=report,
+    )
+    annotation.applies_to.append("other")
+    assert annotation.plane is not None
+    annotation.plane[0][0] = 9
+    cast(dict[str, list[int]], annotation.source["nested"])["values"].append(3)
+    cast(dict[str, list[int]], report.steps[0].options["nested"])["values"].append(3)
+    assert asset.pmi[0].applies_to == ["part"]
+    assert asset.pmi[0].plane == [[1, 0, 0]]
+    assert asset.pmi[0].source == {"nested": {"values": [1]}}
+    assert asset.report.steps[0].options == {"nested": {"values": [1]}}
+
+    copied = getattr(asset, copy_method)()
+    copied.pmi[0].applies_to.append("copy")
+    copied.pmi[0].plane[0][0] = 7
+    copied.pmi[0].source["nested"]["values"].append(7)
+    copied.report.steps[0].options["nested"]["values"].append(7)
+    copied.root.children[0].metadata["nested"]["values"].append(7)
+    copied.parts["part"].mesh.metadata["nested"]["values"].append(7)
+    copied.parts["part"].lod_meshes[0].metadata["nested"]["values"].append(7)
+    assert asset.pmi[0].applies_to == ["part"]
+    assert asset.pmi[0].plane == [[1, 0, 0]]
+    assert asset.pmi[0].source == {"nested": {"values": [1]}}
+    assert asset.report.steps[0].options == {"nested": {"values": [1]}}
+    assert asset.root.children[0].metadata == {"nested": {"values": [1]}}
+    assert asset.parts["part"].mesh is not None
+    assert asset.parts["part"].mesh.metadata == {"nested": {"values": [1]}}
+    assert asset.parts["part"].lod_meshes[0].metadata == {"nested": {"values": [1]}}
+
+
+def test_copy_preserves_native_source_handle_identity() -> None:
+    primitive = pytest.importorskip("OCP.BRepPrimAPI")
+    shape = primitive.BRepPrimAPI_MakeBox(1, 1, 1).Shape()
+    part = Part(id="part", name="Part", source_shape=shape, metadata={"nested": {"values": [1]}})
+    asset = Asset(root=Node(id="root", name="Root"), parts={part.id: part})
+
+    assert part.source_shape is shape
+    assert part.copy().source_shape is shape
+    assert part.copy(keep_source=False).source_shape is None
+    assert asset.parts[part.id].source_shape is shape
+    assert asset.copy().parts[part.id].source_shape is shape
+    assert asset.clone().parts[part.id].source_shape is shape
+    assert asset.copy(keep_source=False).parts[part.id].source_shape is None

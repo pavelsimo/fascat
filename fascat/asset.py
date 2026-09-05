@@ -16,7 +16,7 @@ from fascat.filter import Filter
 from fascat.image import ImageResource
 from fascat.material import Material
 from fascat.mesh import Mesh
-from fascat.metadata import Metadata, PmiAnnotation
+from fascat.metadata import Metadata, PmiAnnotation, _copy_metadata
 from fascat.ops.parallel import parallel_map
 from fascat.options import (
     AnalyzeKwargs,
@@ -125,7 +125,7 @@ class Node:
         self.transform = np.asarray(self.transform, dtype=np.float64).copy()
         if self.transform.shape != (4, 4):
             raise ValueError("node transform must have shape (4, 4)")
-        self.metadata = dict(self.metadata)
+        self.metadata = _copy_metadata(self.metadata)
 
     @classmethod
     def _adopt(
@@ -155,7 +155,7 @@ class Node:
             children=[child.copy() for child in self.children],
             part_id=self.part_id,
             transform=self.transform.copy(),
-            metadata=dict(self.metadata),
+            metadata=_copy_metadata(self.metadata),
         )
 
     def __repr__(self) -> str:
@@ -212,7 +212,7 @@ class Part:
         if self.mesh is not None:
             self.mesh = self.mesh.copy()
         self.material_ids = list(self.material_ids)
-        self.metadata = dict(self.metadata)
+        self.metadata = _copy_metadata(self.metadata)
         self.lod_meshes = [mesh.copy() for mesh in self.lod_meshes]
 
     @classmethod
@@ -247,7 +247,7 @@ class Part:
             source_shape=self.source_shape if keep_source else None,
             mesh=None if self.mesh is None else self.mesh.copy(),
             material_ids=list(self.material_ids),
-            metadata=dict(self.metadata),
+            metadata=_copy_metadata(self.metadata),
             fingerprint=self.fingerprint,
             lod_meshes=[mesh.copy() for mesh in self.lod_meshes],
         )
@@ -336,8 +336,8 @@ class Asset:
         self.parts = {part_id: part.copy(keep_source=True) for part_id, part in self.parts.items()}
         self.materials = {material_id: material.copy() for material_id, material in self.materials.items()}
         self.images = {image_id: image.copy() for image_id, image in self.images.items()}
-        self.metadata = dict(self.metadata)
-        self.pmi = [annotation for annotation in self.pmi]
+        self.metadata = _copy_metadata(self.metadata)
+        self.pmi = [dataclass_replace(annotation) for annotation in self.pmi]
         self.report = self.report.copy()
 
     @classmethod
@@ -502,8 +502,8 @@ class Asset:
             meters_per_unit=self.meters_per_unit,
             up_axis=self.up_axis,
             source_path=self.source_path,
-            metadata=dict(self.metadata),
-            pmi=list(self.pmi),
+            metadata=_copy_metadata(self.metadata),
+            pmi=[dataclass_replace(annotation) for annotation in self.pmi],
             report=self.report.copy(),
         )
 
