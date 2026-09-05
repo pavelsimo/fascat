@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import struct
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -393,6 +394,79 @@ def _open_boundary_count(mesh: Mesh) -> int:
     return count
 
 
+@dataclass(frozen=True)
+class _IntersectionBoundsNode:
+    minimum: FloatArray
+    maximum: FloatArray
+    size: int
+    indices: IntArray | None = None
+    children: tuple[_IntersectionBoundsNode, _IntersectionBoundsNode] | None = None
+
+
+def _build_intersection_bounds_tree(
+    mins: FloatArray, maxs: FloatArray, centers: FloatArray, indices: IntArray
+) -> _IntersectionBoundsNode:
+    minimum = mins[indices].min(axis=0)
+    maximum = maxs[indices].max(axis=0)
+    if len(indices) <= 8:
+        return _IntersectionBoundsNode(minimum, maximum, len(indices), indices=indices)
+
+    # Split by spatial spread, so coincident x bounds do not force a linear scan.
+    node_centers = centers[indices]
+    axis = int(np.argmax(np.ptp(node_centers, axis=0)))
+    ordered = indices[np.argsort(node_centers[:, axis], kind="stable")]
+    middle = len(ordered) // 2
+    children = (
+        _build_intersection_bounds_tree(mins, maxs, centers, ordered[:middle]),
+        _build_intersection_bounds_tree(mins, maxs, centers, ordered[middle:]),
+    )
+    return _IntersectionBoundsNode(minimum, maximum, len(indices), children=children)
+
+
+def _intersection_bounds_overlap(left: _IntersectionBoundsNode, right: _IntersectionBoundsNode) -> bool:
+    return bool(np.all(left.maximum >= right.minimum) and np.all(right.maximum >= left.minimum))
+
+
+def _intersection_candidates(mins: FloatArray, maxs: FloatArray, faces: IntArray) -> Iterator[tuple[int, int]]:
+    # Halving before addition avoids overflowing finite bounding-box centers.
+    centers = mins * 0.5 + maxs * 0.5
+    finite = np.isfinite(mins).all(axis=1) & np.isfinite(maxs).all(axis=1)
+    indices = np.flatnonzero(finite).astype(np.int64)
+    if indices.size == 0:
+        return
+    root = _build_intersection_bounds_tree(mins, maxs, centers, indices)
+    pending = [(root, root)]
+    while pending:
+        left, right = pending.pop()
+        if not _intersection_bounds_overlap(left, right):
+            continue
+        if left.children is not None and left is right:
+            first, second = left.children
+            pending.extend(((second, second), (first, second), (first, first)))
+        elif left.children is not None and (right.children is None or left.size >= right.size):
+            first, second = left.children
+            pending.extend(((second, right), (first, right)))
+        elif right.children is not None:
+            first, second = right.children
+            pending.extend(((left, second), (left, first)))
+        else:
+            assert left.indices is not None and right.indices is not None
+            # Leaf batches contain at most 8 x 8 pairs. Stream them rather than
+            # materializing all overlaps before the caller can enforce its budget.
+            left_indices, right_indices = left.indices, right.indices
+            overlaps = np.all(maxs[right_indices][None] >= mins[left_indices][:, None], axis=2) & np.all(
+                mins[right_indices][None] <= maxs[left_indices][:, None], axis=2
+            )
+            shared_vertices = np.any(
+                faces[left_indices][:, None, :, None] == faces[right_indices][None, :, None, :], axis=(2, 3)
+            )
+            overlaps &= ~shared_vertices
+            if left is right:
+                overlaps &= np.triu(np.ones(overlaps.shape, dtype=bool), k=1)
+            for left_position, right_position in np.argwhere(overlaps):
+                yield int(left_indices[left_position]), int(right_indices[right_position])
+
+
 def _self_intersection_count(mesh: Mesh, max_pairs: int) -> _SelfIntersectionResult:
     if mesh.triangle_count < 2:
         return _SelfIntersectionResult(intersections=0, truncated=False, pairs_checked=0, pair_limit=max_pairs)
@@ -400,46 +474,24 @@ def _self_intersection_count(mesh: Mesh, max_pairs: int) -> _SelfIntersectionRes
     mins = triangles.min(axis=1)
     maxs = triangles.max(axis=1)
     faces = mesh.faces.astype(np.int64, copy=False)
-    order = np.argsort(mins[:, 0], kind="mergesort")
-    sorted_mins = mins[order]
-    sorted_maxs = maxs[order]
-    sorted_faces = faces[order]
     intersections = 0
     checked = 0
 
-    for left_position in range(mesh.triangle_count - 1):
-        right_start = left_position + 1
-        right_end = int(np.searchsorted(sorted_mins[:, 0], sorted_maxs[left_position, 0], side="right"))
-        if right_end <= right_start:
-            continue
-
-        window = slice(right_start, right_end)
-        overlaps = np.all(sorted_maxs[window] >= sorted_mins[left_position], axis=1) & np.all(
-            sorted_mins[window] <= sorted_maxs[left_position], axis=1
-        )
-        if not bool(np.any(overlaps)):
-            continue
-
-        right_positions = np.nonzero(overlaps)[0] + right_start
-        shared_vertices = np.any(
-            sorted_faces[right_positions, :, np.newaxis] == sorted_faces[left_position, np.newaxis, :],
-            axis=(1, 2),
-        )
-        candidate_positions = right_positions[~shared_vertices]
-
-        left = int(order[left_position])
-        for right_position in candidate_positions:
-            if checked >= max_pairs:
-                return _SelfIntersectionResult(
-                    intersections=intersections,
-                    truncated=True,
-                    pairs_checked=checked,
-                    pair_limit=max_pairs,
-                )
-            checked += 1
-            right = int(order[int(right_position)])
-            if _triangles_intersect(triangles[left], triangles[right]):
-                intersections += 1
+    for left, right in _intersection_candidates(mins, maxs, faces):
+        if checked >= max_pairs:
+            return _SelfIntersectionResult(
+                intersections=intersections,
+                truncated=True,
+                pairs_checked=checked,
+                pair_limit=max_pairs,
+            )
+        checked += 1
+        # Preserve the old x-sweep's operand order for the tolerance-sensitive
+        # exact predicate, even though the tree visits pairs in spatial order.
+        if (mins[left, 0], left) > (mins[right, 0], right):
+            left, right = right, left
+        if _triangles_intersect(triangles[left], triangles[right]):
+            intersections += 1
 
     return _SelfIntersectionResult(
         intersections=intersections,
@@ -1129,24 +1181,41 @@ def _asset_from_usd(path: Path) -> Asset:
     if not default_prim:
         raise RuntimeError("USD stage has no defaultPrim")
 
+    time = Usd.TimeCode.EarliestTime()
+    xform_cache = UsdGeom.XformCache(time)
     parts: dict[str, Part] = {}
     nodes: list[Node] = []
-    for prim in Usd.PrimRange(default_prim):
+    mesh_cache: dict[str, Mesh] = {}
+    # Instance proxies expose each scene occurrence, including nested instances,
+    # without traversing the prototype storage outside the default prim.
+    for prim in Usd.PrimRange(default_prim, Usd.TraverseInstanceProxies()):
         if not prim.IsA(UsdGeom.Mesh):
             continue
-        usd_mesh = UsdGeom.Mesh(prim)
-        points_value = usd_mesh.GetPointsAttr().Get() or []
-        counts = [int(value) for value in (usd_mesh.GetFaceVertexCountsAttr().Get() or [])]
-        indices = [int(value) for value in (usd_mesh.GetFaceVertexIndicesAttr().Get() or [])]
-        if any(count != 3 for count in counts):
-            continue
-        points = np.asarray(
-            [[float(coord[0]), float(coord[1]), float(coord[2])] for coord in points_value], dtype=np.float64
-        )
-        faces = np.asarray(indices, dtype=np.int64).reshape((-1, 3))
+        source_prim = prim.GetPrimInPrototype() if prim.IsInstanceProxy() else prim
+        source_key = str(source_prim.GetPath())
+        mesh = mesh_cache.get(source_key)
+        if mesh is None:
+            usd_mesh = UsdGeom.Mesh(source_prim)
+            points_value = usd_mesh.GetPointsAttr().Get(time) or []
+            counts = [int(value) for value in (usd_mesh.GetFaceVertexCountsAttr().Get(time) or [])]
+            indices = [int(value) for value in (usd_mesh.GetFaceVertexIndicesAttr().Get(time) or [])]
+            if any(count != 3 for count in counts):
+                continue
+            points = np.asarray(
+                [[float(coord[0]), float(coord[1]), float(coord[2])] for coord in points_value], dtype=np.float64
+            )
+            faces = np.asarray(indices, dtype=np.int64).reshape((-1, 3))
+            mesh = Mesh(points=points, faces=faces)
+            mesh_cache[source_key] = mesh
         part_id = f"usd_mesh_{len(parts)}"
         name = prim.GetName() or part_id
-        parts[part_id] = Part(id=part_id, name=name, mesh=Mesh(points=points, faces=faces))
+        # Gf matrices use row vectors; analysis uses column vectors. Bake the
+        # occurrence's full transform into fresh points, in stage units like
+        # the other output readers (metersPerUnit is descriptive, not a scale).
+        world_transform = np.asarray(xform_cache.GetLocalToWorldTransform(prim), dtype=np.float64).T
+        parts[part_id] = Part(
+            id=part_id, name=name, mesh=Mesh(points=_transform_points(mesh.points, world_transform), faces=mesh.faces)
+        )
         nodes.append(Node(id=f"node_{part_id}", name=name, part_id=part_id))
 
     if not parts:

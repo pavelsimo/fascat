@@ -107,7 +107,7 @@ All `--json` payloads are one JSON object on stdout. Optional sections are omitt
 | `visual_diff` | object | Present with `--visual-baseline` |
 | `lod_preview` | object | Present with `--lod-preview-dir` |
 | `turntable` | object | Present with `--turntable-dir`; includes per-view previews and a `diff` summary with `--turntable-baseline-dir` |
-| `gates` | object | Present when any gate threshold flag, `--strict-geometry`, or `--profile` is set; contains `overall`, `failed`, `evaluated`, and per-gate `results` entries with `gate`, `status` (`PASS`/`FAIL`/`SKIP`), `actual`, `op`, and `limit` |
+| `gates` | object | Present when any gate threshold flag, `--strict-geometry`, or `--profile` is set; contains `overall`, `failed`, `evaluated`, and per-gate `results` entries with `gate`, `status` (`PASS`/`FAIL`/`SKIP`), `actual`, `op`, and `limit`, plus optional `reason` and `actual_lower_bound` |
 | `error` | string | Present only on failure |
 
 Conversion reports wrap the run in four steps: `preflight` (before expensive work —
@@ -385,6 +385,23 @@ placeholder nodes with warnings.
 | `--report` | unset | Write a JSON conversion report sidecar |
 | `--force` | `false` | Overwrite an existing output file |
 
+Geometry merge preserves all compatible UV channels, authored normals, tangents,
+face groups, and stored LOD meshes. It bakes positions and shading directions into
+the merged node's coordinate system; missing normals are generated per source
+mesh. Equal face-group names are combined after remapping their face indices.
+Each LOD level uses the merged part's shared material table. Mesh metadata values
+shared by all contributing meshes are retained, alongside merge provenance.
+
+Merge fails when contributing meshes at a level have different UV channels or
+mixed tangent presence, when LOD chain lengths or recorded LOD ratios/screen
+coverage thresholds differ, or when assigned and unassigned face materials would be mixed.
+Merge these parts separately. Material splitting of a stored LOD chain is also
+rejected because base faces have no reliable correspondence to LOD faces; use
+`--merge-mode all` for that chain. Singular transforms are rejected because they
+cannot preserve shading directions. These checks also apply to stored LODs. Per-source LOD switch distances are
+discarded because they no longer describe the merged bounds.
+
+
 ### Units
 
 - Linear tolerances and sizes (`--sag`, `--min-edge-length`, `--max-edge-length`, `--max-polygon-length`, `--heal-tolerance`, `--max-sliver-area`, `--region-size`, `--max-hole-diameter`) use the source asset's working units unless stated otherwise.
@@ -402,8 +419,24 @@ placeholder nodes with warnings.
 - T-junctions and boundary gaps are reported by default and fixed only with the opt-in `fix_t_junctions` / `stitch_boundary_gaps` flags; stitched vertices keep the surviving representative vertex's normals, tangents, and UVs, and UV-conflicting merges are counted in metadata.
 - `--delete-degenerate-polygons` removes repeated-vertex, collapsed-edge, near-flat, and exact-duplicate polygons (separate report counts per reason); use `--keep-duplicate-polygons` to only report duplicates.
 
+### Feature preservation during simplification
+
+When hard-edge, hole, material-boundary, UV-seam, silhouette, or explicit face
+protection identifies any protected faces, simplification currently retains the
+entire mesh. The current integration does not implement reliable constrained
+simplification. Default decimation protects silhouette faces, so it can retain
+the entire mesh even for ordinary inputs. Optional backend vertex-lock APIs are
+not yet integrated. This preserves geometry and attributes but can leave the mesh
+above its requested triangle target. A warning explains the retained count and
+target; mesh metadata records `simplification_status=retained_original`, source
+and target triangle counts, and `simplification_target_status=unmet`. Optimization
+also includes the warning in its report. If both ordinary simplification backends
+fail, the original mesh is likewise retained with a warning instead of removing
+triangles to reach the target.
+
 ### Decimation
 
+- Triangle budgets are targets: decimation retains safe results above budget when preservation constraints or backend limits prevent further reduction. Reports record actual output counts, `decimate_target_status`, and warnings for unmet per-part targets. Selection and per-part budgets never discard triangles merely to force the target count.
 - Keeping under 20% of source triangles emits an LOD0 distortion warning — prefer aggressive ratios for distant LODs.
 - `--decimate` without `--target-triangles`/`--ratio` seeds its target from the profile or `--target-device-profile` triangle budget.
 - `--decimate-criterion quality` passes tolerance-derived error bounds to the backend and records bound/result metadata.
@@ -616,6 +649,7 @@ face incidences are combined; duplicated faces are never removed from the count.
 | `--non-manifold-edges` | `false` | Report non-manifold edge counts |
 | `--open-boundaries` | `false` | Report open boundary counts |
 | `--self-intersections` | `false` | Report detected self-intersections with bounded triangle-triangle checks and lower-bound fields when the pair limit is hit |
+| `--max-self-intersection-pairs` | `10000` | Maximum candidate pairs checked per mesh; raise when a self-intersection gate reports an incomplete measurement |
 | `--sliver-triangles` | `false` | Report degenerate and sliver triangle stats |
 | `--tiny-parts` | `false` | Report tiny part stats |
 | `--draw-call-estimate` | `false` | Report material count, draw-call estimate, mesh/submesh slots, instances, and merged batch counts |
@@ -653,8 +687,19 @@ face incidences are combined; duplicated faces are never removed from the count.
 When any gate threshold flag, `--strict-geometry`, or `--profile` is set,
 validate evaluates the requested gates, prints one
 `PASS|FAIL|SKIP <gate> <actual> <op> <limit>` line per gate plus an `OVERALL`
-line on stdout, and exits 1 when any gate fails. Gates whose input is
-unavailable or inapplicable are reported as `SKIP` and never fail validation.
+line on stdout, and exits 1 when any gate fails. A requested limit with an
+unavailable measurement fails with `reason: "measurement unavailable"`, including
+geometry checks unsupported by the output format. File-size limits on stdin
+use the received byte count.
+A bounded self-intersection count is a lower bound: it fails if already above
+the limit, and also fails if the incomplete search cannot establish compliance.
+Increase `--max-self-intersection-pairs` (default 10000 per mesh) to complete
+a truncated search. This increases runtime on dense meshes.
+These results include `actual_lower_bound: true` and a `reason` in JSON; text
+prints `>=` before the count and appends the reason. These failures count in
+`failed` and `evaluated`, and make `overall` equal to `FAIL`.
+Optional report checks without inputs and profiles without a corresponding
+budget (such as `inspect-only`) remain `SKIP` and do not fail validation.
 Structural validity, visual diff, turntable diff, and LOD monotonicity are
 reported through the same gate mechanism.
 

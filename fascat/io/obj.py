@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from io import StringIO
 from pathlib import Path
 
@@ -93,12 +94,59 @@ def _write_obj(
 
 
 def validate_obj(path: str | Path) -> dict[str, int]:
-    text = Path(path).read_text(encoding="utf-8")
-    vertices = sum(1 for line in text.splitlines() if line.startswith("v "))
-    triangles = sum(1 for line in text.splitlines() if line.startswith("f "))
-    if vertices == 0 or triangles == 0:
+    counts = {"v": 0, "vt": 0, "vn": 0}
+    triangles = 0
+    pending = ""
+    with Path(path).open(encoding="utf-8-sig") as source:
+        for line_number, line in enumerate(source, 1):
+            line = pending + line.partition("#")[0].strip()
+            if line.endswith("\\"):
+                pending = line[:-1] + " "
+                continue
+            pending = ""
+            fields = line.split()
+            if not fields:
+                continue
+            record, values = fields[0], fields[1:]
+            label = f"OBJ line {line_number}"
+            if record in counts:
+                allowed_lengths = {"v": {3, 4, 6, 7}, "vt": {1, 2, 3}, "vn": {3}}
+                if len(values) not in allowed_lengths[record]:
+                    raise RuntimeError(f"{label} has invalid {record} coordinates")
+                try:
+                    finite = all(math.isfinite(float(value)) for value in values)
+                except ValueError as exc:
+                    raise RuntimeError(f"{label} has invalid {record} coordinates") from exc
+                if not finite:
+                    raise RuntimeError(f"{label} has non-finite {record} coordinates")
+                counts[record] += 1
+            elif record == "f":
+                if len(values) < 3:
+                    raise RuntimeError(f"{label} face requires at least three vertices")
+                for value in values:
+                    _validate_obj_corner(value, counts, label)
+                triangles += len(values) - 2
+    if pending:
+        raise RuntimeError("OBJ contains an unfinished continuation")
+    if counts["v"] == 0 or triangles == 0:
         raise RuntimeError("OBJ asset contains no mesh faces")
-    return {"meshes": 1, "points": vertices, "triangles": triangles}
+    return {"meshes": 1, "points": counts["v"], "triangles": triangles}
+
+
+def _validate_obj_corner(value: str, counts: dict[str, int], label: str) -> None:
+    fields = value.split("/")
+    if len(fields) > 3 or not fields[0] or (len(fields) > 1 and not fields[-1]):
+        raise RuntimeError(f"{label} has invalid face indices")
+    for kind, field in zip(("v", "vt", "vn"), fields, strict=False):
+        if not field:  # The texture index may be omitted in v//vn.
+            continue
+        try:
+            index = int(field)
+        except ValueError as exc:
+            raise RuntimeError(f"{label} has invalid face indices") from exc
+        count = counts[kind]
+        if index == 0 or index > count or index < -count:
+            raise RuntimeError(f"{label} face {kind} index is out of range")
 
 
 class _Occurrence:

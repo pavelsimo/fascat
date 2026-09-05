@@ -223,11 +223,12 @@ def _validate_mesh_tree(
 ) -> dict[str, int]:
     if prototype_stack is None:
         prototype_stack = set()
+    time = Usd.TimeCode.EarliestTime()
     mesh_count = 0
     point_count = 0
     face_count = 0
     for prim in Usd.PrimRange(root_prim):
-        if prim.IsInstance():
+        if prim.IsInstance() and not prim.IsA(UsdGeom.Mesh):
             prototype = prim.GetPrototype()
             if not prototype:
                 raise RuntimeError(f"instance {prim.GetPath()} has no prototype")
@@ -250,9 +251,9 @@ def _validate_mesh_tree(
         scheme = mesh.GetSubdivisionSchemeAttr().Get()
         if scheme != "none":
             raise RuntimeError(f"mesh {prim.GetPath()} has subdivisionScheme={scheme!r}, expected 'none'")
-        points = mesh.GetPointsAttr().Get() or []
-        counts = mesh.GetFaceVertexCountsAttr().Get() or []
-        indices = mesh.GetFaceVertexIndicesAttr().Get() or []
+        points = mesh.GetPointsAttr().Get(time) or []
+        counts = mesh.GetFaceVertexCountsAttr().Get(time) or []
+        indices = mesh.GetFaceVertexIndicesAttr().Get(time) or []
         if any(count != 3 for count in counts):
             raise RuntimeError(f"mesh {prim.GetPath()} contains non-triangle faces")
         if len(indices) != len(counts) * 3:

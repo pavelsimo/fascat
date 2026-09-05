@@ -7,6 +7,8 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
+from fascat.metadata import _copy_metadata
+
 logger = logging.getLogger("fascat")
 logger.addHandler(logging.NullHandler())
 
@@ -25,7 +27,7 @@ class ReportStep:
     warnings: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        self.options = dict(self.options)
+        self.options = _copy_metadata(self.options)
         self.before = dict(self.before)
         self.after = dict(self.after)
         self.warnings = list(self.warnings)
@@ -53,7 +55,7 @@ class ReportStep:
     def copy(self) -> ReportStep:
         return ReportStep._adopt(
             name=self.name,
-            options=dict(self.options),
+            options=_copy_metadata(self.options),
             duration=self.duration,
             before=dict(self.before),
             after=dict(self.after),
