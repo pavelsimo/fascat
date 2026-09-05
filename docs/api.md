@@ -87,6 +87,15 @@ leave the receiver unchanged. Use `asset.copy()` when you want a manual fork of
 the current scene. `asset.copy(keep_source=False)` drops backend source handles
 but still copies the public scene graph and mesh arrays.
 
+`mesh.copy()` copies public mesh arrays and starts with an empty derived-data
+cache. Topology and geometry results are loaded on demand from the shared cache
+or recomputed. Each process retains at most 256 shared entries and 16 MiB of
+estimated shared cache storage, including arrays and nested topology containers.
+Least recently used entries are evicted, and results larger than the byte budget
+are kept only by the mesh that requested them. Active meshes retain their own
+requested results; the shared budget does not limit total process memory. Direct
+changes to public mesh arrays invalidate the affected results on their next use.
+
 Internal hot paths use private adoption helpers only after they have already
 built owned roots, parts, materials, images, metadata, PMI annotations, and
 reports. That avoids a second full deep copy of large assemblies while keeping

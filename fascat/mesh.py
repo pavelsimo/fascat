@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+import sys
 from collections import OrderedDict, defaultdict, deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -32,6 +33,11 @@ _NEAREST_CENTROID_PAIR_LIMIT = 4_000_000
 # default classification is scale-invariant (unit-scale meshes resolve to ~1e-12).
 _RELATIVE_AREA_EPSILON = 1e-12
 _GLOBAL_MESH_CACHE_MAX_ENTRIES = 256
+# Shared results outlive their meshes. Bound retained data as well as entry count.
+_GLOBAL_MESH_CACHE_MAX_BYTES = 16 * 1024 * 1024
+# Allow for the OrderedDict node, the (size, value) tuple, and size integer.
+_GLOBAL_MESH_CACHE_ENTRY_OVERHEAD = 256
+_global_mesh_cache_bytes = 0
 _GLOBAL_MESH_CACHE_NAMES = {
     "boundary_loops",
     "edge_faces_map",
@@ -40,7 +46,7 @@ _GLOBAL_MESH_CACHE_NAMES = {
     "orientability_metrics",
     "undirected_edges_and_counts",
 }
-_GLOBAL_MESH_CACHE: OrderedDict[tuple[str, tuple[object, ...]], object] = OrderedDict()
+_GLOBAL_MESH_CACHE: OrderedDict[tuple[str, tuple[object, ...]], tuple[int, object]] = OrderedDict()
 _GLOBAL_MESH_CACHE_LOCK = Lock()
 _MISSING_CACHE_VALUE = object()
 _ORIENTABILITY_METRIC_KEYS = (
@@ -533,7 +539,7 @@ class Mesh:
         return int(self.faces.shape[0])
 
     def copy(self) -> Mesh:
-        """Return an independent mesh copy, including cloned cache entries."""
+        """Return an independent mesh copy, loading derived results lazily."""
         mesh = Mesh._adopt(
             points=self.points.copy(),
             faces=self.faces.copy(),
@@ -544,7 +550,6 @@ class Mesh:
             face_groups={name: values.copy() for name, values in self.face_groups.items()},
             metadata=_copy_metadata(self.metadata),
         )
-        mesh._cache = _clone_cache_entries(self._cache)
         return mesh
 
     def to_trimesh(self) -> Any:
@@ -3760,10 +3765,40 @@ def _array_cache_token(array: NDArray[Any]) -> tuple[tuple[int, ...], str, bytes
     return tuple(int(size) for size in contiguous.shape), str(contiguous.dtype), digest.digest()
 
 
-def _clone_cache_entries(
-    cache: dict[str, tuple[tuple[object, ...], object]],
-) -> dict[str, tuple[tuple[object, ...], object]]:
-    return {name: (token, _clone_cache_value(value)) for name, (token, value) in cache.items()}
+def _cache_value_size(value: object, limit: int) -> int:
+    """Estimate retained bytes, stopping once the budget is exceeded.
+
+    Count repeated references separately: cloned containers/arrays may no longer
+    share storage, and counting shared immutable keys again is conservative.
+    Array views are measured as owned copies, without retaining their base array.
+    """
+    size = sys.getsizeof(value)
+    if isinstance(value, np.ndarray):
+        return size if value.flags.owndata else size + value.nbytes
+    if size > limit:
+        return size
+    if isinstance(value, dict):
+        for key, item in value.items():
+            size += _cache_value_size(key, limit - size)
+            if size > limit:
+                return size
+            size += _cache_value_size(item, limit - size)
+            if size > limit:
+                return size
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            size += _cache_value_size(item, limit - size)
+            if size > limit:
+                return size
+    return size
+
+
+def _clear_global_mesh_cache() -> None:
+    """Release shared results and reset accounting under the cache lock."""
+    global _global_mesh_cache_bytes
+    with _GLOBAL_MESH_CACHE_LOCK:
+        _GLOBAL_MESH_CACHE.clear()
+        _global_mesh_cache_bytes = 0
 
 
 def _global_cache_key(name: str, token: tuple[object, ...]) -> tuple[str, tuple[object, ...]] | None:
@@ -3778,23 +3813,37 @@ def _global_cache_value(name: str, token: tuple[object, ...]) -> object:
         return _MISSING_CACHE_VALUE
     with _GLOBAL_MESH_CACHE_LOCK:
         try:
-            value = _GLOBAL_MESH_CACHE.pop(key)
+            entry = _GLOBAL_MESH_CACHE[key]
         except KeyError:
             return _MISSING_CACHE_VALUE
-        _GLOBAL_MESH_CACHE[key] = value
-    return _clone_cache_value(value)
+        _GLOBAL_MESH_CACHE.move_to_end(key)
+    return _clone_cache_value(entry[1])
 
 
 def _store_global_cache_value(name: str, token: tuple[object, ...], value: object) -> None:
+    global _global_mesh_cache_bytes
     key = _global_cache_key(name, token)
     if key is None:
         return
+    limit = _GLOBAL_MESH_CACHE_MAX_BYTES
+    overhead = _GLOBAL_MESH_CACHE_ENTRY_OVERHEAD + _cache_value_size(key, limit)
+    # Reject oversized results before allocating a second set of derived buffers.
+    if overhead + _cache_value_size(value, limit - overhead) > limit:
+        return
     stored = _clone_cache_value(value)
+    # Cloning can change container allocation sizes; account for the stored copy.
+    size = overhead + _cache_value_size(stored, limit - overhead)
+    if size > limit:
+        return
     with _GLOBAL_MESH_CACHE_LOCK:
-        _GLOBAL_MESH_CACHE[key] = stored
-        _GLOBAL_MESH_CACHE.move_to_end(key)
-        while len(_GLOBAL_MESH_CACHE) > _GLOBAL_MESH_CACHE_MAX_ENTRIES:
-            _GLOBAL_MESH_CACHE.popitem(last=False)
+        previous = _GLOBAL_MESH_CACHE.pop(key, None)
+        if previous is not None:
+            _global_mesh_cache_bytes -= previous[0]
+        _GLOBAL_MESH_CACHE[key] = (size, stored)
+        _global_mesh_cache_bytes += size
+        while len(_GLOBAL_MESH_CACHE) > _GLOBAL_MESH_CACHE_MAX_ENTRIES or _global_mesh_cache_bytes > limit:
+            _, (evicted_size, _) = _GLOBAL_MESH_CACHE.popitem(last=False)
+            _global_mesh_cache_bytes -= evicted_size
 
 
 def _clone_cache_value(value: object) -> object:
