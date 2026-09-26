@@ -6,6 +6,8 @@ from typing import Annotated, Any, cast
 
 import typer
 
+from fascat.io._sidecars import sidecar_bytes
+
 from ._app import DOCS_URL, _state, app
 from ._enums import Profile
 from ._gates import (
@@ -17,7 +19,15 @@ from ._gates import (
     structural_gate,
 )
 from ._io_helpers import _validate_and_analyze_output_for_cli, by_name
-from ._output import _emit, _export_label, _fail, _format_stats, _is_stdio, _require_existing_file
+from ._output import (
+    _emit,
+    _error_message,
+    _export_label,
+    _fail,
+    _format_stats,
+    _is_stdio,
+    _require_existing_file,
+)
 from ._params import _analysis_requested, _analyze_options, _parse_filter_options, _validate_export_output
 
 
@@ -226,6 +236,9 @@ def cmd_validate(
 
     """Validate a generated USD, glTF, OBJ, or STL file."""
     state = _state(ctx)
+    # Every flag that can make a gate fail belongs here: the visual-diff and
+    # turntable baselines fail the command through evaluate_gates just like the
+    # --max-* thresholds do, so their gate report must be emitted too.
     gating_active = (
         max_non_manifold is not None
         or max_self_intersections is not None
@@ -235,6 +248,8 @@ def cmd_validate(
         or max_file_size_mb is not None
         or profile is not None
         or strict_geometry
+        or visual_baseline is not None
+        or turntable_baseline_dir is not None
     )
     profile_options = by_name(profile.value) if profile is not None else None
     profile_budget = profile_options.budget if profile_options is not None else None
@@ -432,7 +447,7 @@ def cmd_validate(
             payload["gates"] = gates_to_dict(structural_results)
             if not state.json_output:
                 _emit(ctx, {}, "\n".join(format_gate_lines(structural_results)))
-        _fail(ctx, payload, str(exc))
+        _fail(ctx, payload, _error_message(exc))
         raise AssertionError("unreachable") from exc
     if report is not None and analysis is not None:
         analysis.write_json(report)
@@ -489,22 +504,35 @@ def cmd_validate(
         else:
             message = f"{message} Browser runtime {runtime_report.status}: {runtime_report.error}."
     file_size_bytes: int | None = stats.get("file_size_bytes")
+    sidecars = 0
     if not _is_stdio(output_path):
         try:
             file_size_bytes = output_path.stat().st_size
         except OSError:
             file_size_bytes = None
+        if file_size_bytes is not None:
+            # A .gltf keeps its payload in an external .bin plus texture files;
+            # gate on what the export actually costs on disk, not on the entry.
+            sidecars = sidecar_bytes(output_path)
+    gated_file_size_bytes = None if file_size_bytes is None else file_size_bytes + sidecars
+    if sidecars:
+        json_payload["file_size_bytes"] = file_size_bytes
+        json_payload["file_size_sidecar_bytes"] = sidecars
+        json_payload["file_size_total_bytes"] = gated_file_size_bytes
     gate_results = evaluate_gates(
         thresholds,
         summary=analysis.summary if analysis is not None else None,
         triangles=stats.get("triangles"),
-        file_size_bytes=file_size_bytes,
+        file_size_bytes=gated_file_size_bytes,
         visual_diff_passed=visual_diff_report.passed if visual_diff_report is not None else None,
         turntable_views_failed=turntable_report.views_failed() if turntable_report is not None else None,
         lod_monotonic=lod_preview_report.monotonic_triangles if lod_preview_report is not None else None,
         include_report_gates=gating_active,
     )
-    if gating_active:
+    gate_failed = any_gate_failed(gate_results)
+    # Backstop: a non-zero exit is never unexplained, even if a future gate
+    # escapes the gating_active flag list above.
+    if gating_active or gate_failed:
         json_payload["gates"] = gates_to_dict(gate_results)
         message = message + "\n" + "\n".join(format_gate_lines(gate_results))
     _emit(
@@ -512,5 +540,5 @@ def cmd_validate(
         json_payload,
         message,
     )
-    if any_gate_failed(gate_results):
+    if gate_failed:
         raise typer.Exit(1)

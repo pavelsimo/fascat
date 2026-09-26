@@ -78,6 +78,7 @@ from ._enums import (
 from ._io_helpers import _write_tessellation_quality_report
 from ._output import (
     _emit,
+    _error_message,
     _fail,
     _format_stats,
     _interrupt,
@@ -931,7 +932,7 @@ def cmd_convert(
     ] = UsdLayout.AUTO,
     file_size_budget_mb: Annotated[
         float | None,
-        typer.Option("--file-size-budget-mb", help="Warn in reports when output exceeds this size."),
+        typer.Option("--file-size-budget-mb", help="Warn in reports when output exceeds this size in MiB."),
     ] = None,
     size_ladder: Annotated[
         bool,
@@ -1785,7 +1786,7 @@ def cmd_convert(
             failure_report = getattr(exc, "report", None)
             if isinstance(failure_report, Report):
                 failure_report.write_json(report)
-        _fail(ctx, payload, str(exc))
+        _fail(ctx, payload, _error_message(exc))
         raise AssertionError("unreachable") from exc
 
     if report is not None:

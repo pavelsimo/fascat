@@ -568,10 +568,23 @@ def _filters(value: object, location: _TomlLocation | None = None) -> dict[str, 
                 _with_line(f"duplicate pipeline filter: {filter_id}", _table_or_key_line(filter_location, "name"))
             )
         try:
-            result[filter_id] = _filter_from_values(item, result)
+            parsed = _filter_from_values(item, result)
         except (TypeError, ValueError) as exc:
             message = str(exc)
             raise ValueError(_with_line(message, _message_line(filter_location, message, item))) from exc
+        if parsed.is_empty():
+            # Inside [[filters]], `name` is the filter's identifier, not the
+            # node-name criterion, so `name = "Bolt*"` parses into a filter
+            # with zero criteria that silently matches the whole asset.
+            raise ValueError(
+                _with_line(
+                    f"pipeline filter '{filter_id}' declares no criteria and would match every node; "
+                    "inside [[filters]] 'name' is the filter identifier, so spell the node-name "
+                    "criterion as 'names' or 'node_name'",
+                    _table_or_key_line(filter_location, "name"),
+                )
+            )
+        result[filter_id] = parsed
     return result
 
 

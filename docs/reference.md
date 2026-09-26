@@ -370,7 +370,7 @@ placeholder nodes with warnings.
 | `--jpeg-quality` | `85` | JPEG fallback quality, 0 through 100 |
 | `--package` | `default` | USD package mode: `default` or packaged `.usdz` |
 | `--usd-layout` | `auto` | USD scene layout: `auto` (`flat` for the `realtime-web` profile, `instanced` otherwise), `instanced` (prototypes, internal references, LOD variants, instancing), or `flat` (inline meshes per occurrence for viewers without USD composition support) |
-| `--file-size-budget-mb` | unset | Warn in reports when output exceeds this size |
+| `--file-size-budget-mb` | unset | Warn in reports when output exceeds this size in MiB (1 MiB = 1,048,576 bytes) |
 | `--size-ladder` | `false` | Measure baseline, optimized, compressed, and requested temporary GLB sizes in a `gltf_size_ladder` report |
 | `--obj-materials / --no-obj-materials` | `true` | Write OBJ material assignments |
 | `--write-mtl / --no-write-mtl` | `true` | Write an OBJ MTL sidecar |
@@ -409,7 +409,7 @@ discarded because they no longer describe the merged bounds.
 - Ratios (`--ratio`, `--lods`, decimation ratios) and screen-coverage values are fractions between `0` and `1`; LOD ratios must be sorted highest-to-lowest detail. File-size budgets are megabytes; atlas/bake sizes are pixels.
 - Import space normalization uses a root transform: source coordinates stay in source units while the asset declares the target units, up-axis, and handedness, and the import report records the transform.
 - `tessellate`, `heal_brep`, and `repair` report a `tolerance_policy` with effective source/target units, meter conversions, the active deflection kind, converted absolute lengths, and which cleanup backends are implemented.
-- `--sag` and `--sag-ratio` are mutually exclusive in the effective tessellation options: passing `--sag` switches from the realtime profiles' relative `sag_ratio=0.0002` default to an absolute tolerance.
+- `--sag` and `--sag-ratio` are mutually exclusive in the effective tessellation options: passing `--sag` switches from the realtime profiles' relative `sag_ratio=0.0002` default to an absolute tolerance. A per-part `sag` override in `part_settings` likewise clears the inherited `sag_ratio` for that part.
 - Migration note: current staging defaults use `--normal-weighting area` and `--hard-edge-angle 45` instead of the older angle weighting and 30 degree threshold, so re-converted assets can shade or split vertices differently unless the older values are passed explicitly.
 
 ### Repair
@@ -528,6 +528,9 @@ Supported filter expressions use case-sensitive shell-style `fnmatchcase` patter
 
 Repeated `--filter` flags are combined with logical AND. Use `--exclude-filter` for negative selectors.
 
+Exclusion propagates down the hierarchy: excluding a group node also excludes every
+node beneath it, so `--exclude-filter path=root/Bolts` protects the whole subassembly.
+
 ## Pipeline files
 
 Use `--pipeline` when different assembly branches need different ordered steps.
@@ -602,11 +605,17 @@ metadata = "combine"
 fascat convert motor.step motor.glb --pipeline realtime.toml
 ```
 
+Inside `[[filters]]`, `name` is the filter's **identifier** — the string other
+steps reference through `where` / `where_not` — not a node-name criterion. Match
+node names with `names` (or `node_name`); `name = "Bolt*"` on its own declares a
+filter with no criteria and is rejected rather than silently matching every node.
+
 Pipeline files are validated before conversion starts. Unknown top-level,
 filter, import/export, or operation keys are rejected, and option constraints
 such as invalid numeric ranges, missing `external_path`, conflicting `where` /
-`where_not`, or unsupported operation names fail during parse. CLI errors include
-`line N` when the source file location can be identified.
+`where_not`, a filter with no criteria, or unsupported operation names fail
+during parse. CLI errors include `line N` when the source file location can be
+identified.
 
 ## Unity-inspired capability matrix
 
@@ -680,7 +689,7 @@ face incidences are combined; duplicated faces are never removed from the count.
 | `--max-slivers` | unset | Fail validation when sliver triangles exceed this limit; implies `--sliver-triangles` |
 | `--max-open-boundaries` | unset | Fail validation when open boundaries exceed this limit; implies `--open-boundaries` |
 | `--max-triangles` | unset | Fail validation when the triangle count exceeds this limit |
-| `--max-file-size-mb` | unset | Fail validation when the on-disk output size exceeds this limit in MiB |
+| `--max-file-size-mb` | unset | Fail validation when the on-disk output size exceeds this limit in MiB (1 MiB = 1,048,576 bytes) |
 | `--profile` | unset | Resolve triangle and file-size gate budgets from a conversion profile; explicit `--max-*` flags take precedence |
 | `--strict-geometry` | `false` | Shorthand for setting all four geometry gate limits to 0 |
 

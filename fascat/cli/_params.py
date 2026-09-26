@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 from ._enums import MetadataMode, PmiMode, Profile
 from ._io_helpers import by_name, profile_from_file
-from ._output import _fail, _is_stdio, _require_existing_file
+from ._output import _error_message, _fail, _is_stdio, _require_existing_file
 
 
 def _resolve_convert_output(
@@ -289,9 +289,9 @@ def _parse_filter_options(
     try:
         return Filter.from_cli(filters or [], exclude=exclude_filters or [])
     except FilterExpressionError as exc:
-        _fail(ctx, payload, str(exc), code=2)
+        _fail(ctx, payload, _error_message(exc), code=2)
     except ValueError as exc:
-        _fail(ctx, payload, str(exc), code=2)
+        _fail(ctx, payload, _error_message(exc), code=2)
     raise AssertionError("unreachable")
 
 

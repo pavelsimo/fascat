@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
+from fascat._ocp import configure_occt_messages
 from fascat.asset import Asset, Node, Part
 from fascat.io import _import_base as _base
 from fascat.io._errors import wrap_io_errors
@@ -144,6 +145,7 @@ def _read_iges_path(source: Path, *, source_identity: str, options: IgesReadOpti
 
 
 def _read_xde_document(path: Path, options: IgesReadOptions) -> tuple[Any, Any, Any, Any]:
+    configure_occt_messages()
     try:
         from OCP.IFSelect import IFSelect_RetDone
         from OCP.IGESCAFControl import IGESCAFControl_Reader

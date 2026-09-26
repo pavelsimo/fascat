@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 
 from fascat.asset import Asset, Node, Part
 from fascat.cli import app
+from fascat.errors import FascatError
 from fascat.filter import Filter
 from fascat.material import Material
 from fascat.mesh import Mesh
@@ -508,3 +509,37 @@ def test_merge_discards_source_lod_switch_distances(same_distance: bool) -> None
     assert "lod_switch_distance" not in merged.lod_meshes[0].metadata
     assert "lod_switch_distance_source" not in merged.lod_meshes[0].metadata
     assert merged.lod_meshes[0].metadata["lod_screen_coverage"] == "0.25"
+
+
+def _collapsed_asset() -> Asset:
+    collapsed = np.eye(4, dtype=np.float64)
+    collapsed[2, 2] = 0.0
+    return Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(
+                    id="suppressed",
+                    name="Suppressed",
+                    transform=collapsed,
+                    children=[Node(id="bolt_a", name="Bolt A", part_id="bolt")],
+                )
+            ],
+        ),
+        parts={"bolt": Part(id="bolt", name="Bolt", mesh=_triangle(), material_ids=["steel"])},
+        materials={"steel": Material(id="steel", name="Steel", base_color=(0.7, 0.7, 0.7, 1.0))},
+    )
+
+
+def test_merge_on_a_zero_scale_parent_raises_a_named_fascat_error() -> None:
+    with pytest.raises(FascatError, match="root/Suppressed"):
+        _collapsed_asset().merge(MergeOptions(mode="all"), where=Filter.path("root/Suppressed/*"))
+
+
+def test_replace_on_a_zero_scale_parent_raises_a_named_fascat_error() -> None:
+    with pytest.raises(FascatError, match="root/Suppressed"):
+        _collapsed_asset().replace(
+            ReplaceOptions(mode="bounding_box", preserve_transform=False),
+            where=Filter.path("root/Suppressed/*"),
+        )

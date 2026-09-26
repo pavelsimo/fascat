@@ -11,7 +11,7 @@ from numpy.typing import NDArray
 from fascat.asset import Asset, Node, Part, identity_transform
 from fascat.mesh import Mesh, MeshValidationError
 from fascat.metadata import Metadata
-from fascat.ops._arrays import remap_sliced_face_group, sliced_face_lookup
+from fascat.ops._arrays import invert_transform, remap_sliced_face_group, sliced_face_lookup
 from fascat.options import ExplodeOptions, MergeOptions, ReplaceOptions
 
 FloatArray = NDArray[np.float64]
@@ -364,7 +364,8 @@ def _merge_inputs(
         for item in inputs
     ):
         raise MeshValidationError("merge cannot split a stored LOD chain by material; use merge mode all")
-    parent_inverse = np.asarray(np.linalg.inv(parent_world_transform), dtype=np.float64)
+    parent_label = inputs[0].occurrence.parent_path if inputs else part_name
+    parent_inverse = invert_transform(parent_world_transform, label=parent_label)
     material_index_by_id: dict[str, int] = {}
     merged_mesh = _merge_mesh(inputs, parent_inverse, options, material_index_by_id)
     lod_meshes = [
@@ -753,7 +754,7 @@ def _replacement_mesh(occurrence: _Occurrence, options: ReplaceOptions) -> Mesh:
     else:
         mesh = _bounding_box_mesh(source)
     if not options.preserve_transform:
-        parent_inverse = np.asarray(np.linalg.inv(occurrence.parent_world_transform), dtype=np.float64)
+        parent_inverse = invert_transform(occurrence.parent_world_transform, label=occurrence.parent_path)
         mesh.points = _transform_points(mesh.points, parent_inverse @ occurrence.world_transform)
     mesh.metadata = {
         **mesh.metadata,

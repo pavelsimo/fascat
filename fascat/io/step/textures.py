@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import re
+import zipfile
+from collections.abc import Iterator
 from dataclasses import dataclass
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlparse
 
 from fascat.image import ImageMimeType, ImageResource
@@ -13,7 +15,38 @@ from fascat.material import Material
 from fascat.metadata import Metadata
 from fascat.options import StepReadOptions
 
-_ArchiveTextureMap = dict[str, tuple[str, bytes]]
+
+@dataclass(frozen=True)
+class _ArchiveTextureMap:
+    """Index of texture members in a material-library archive, read on demand.
+
+    Decompressing every texture up front costs the full uncompressed payload
+    in memory (bounded only by the 128 MiB archive cap) even when a library
+    references none of them, so hold the member names and read each one the
+    first time it is actually referenced.
+    """
+
+    archive: zipfile.ZipFile
+    members: dict[str, str]
+
+    def __contains__(self, key: str) -> bool:
+        return key in self.members
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.members)
+
+    def read(self, key: str) -> tuple[str, bytes] | None:
+        name = self.members.get(key)
+        if name is None:
+            return None
+        try:
+            return _archive_display_name(name), self.archive.read(name)
+        except (KeyError, OSError, zipfile.BadZipFile):
+            return None
+
+
+def _archive_display_name(name: str) -> str:
+    return str(PurePosixPath(name.replace("\\", "/"))).lstrip("./")
 
 
 _SOURCE_TEXTURE_SUFFIXES = {".png", ".jpg", ".jpeg", ".ktx2"}

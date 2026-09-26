@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import numpy as np
 
-from fascat._ocp import shape_fingerprint
+from fascat._ocp import configure_occt_messages, shape_fingerprint
 from fascat.asset import Asset, Part
 from fascat.errors import FascatError
 from fascat.mesh import Mesh
@@ -179,6 +179,7 @@ def tessellate_shape(
     *,
     face_material_indices: list[int] | None = None,
 ) -> Mesh:
+    configure_occt_messages()
     try:
         from OCP.BRep import BRep_Tool
         from OCP.BRepMesh import BRepMesh_IncrementalMesh
@@ -519,6 +520,14 @@ def _options_for_part(options: TessellationOptions, part: Part, asset: Asset) ->
             values["sag_ratio"] = _DETAIL_ADAPTIVE_SAG_RATIO
         values["curvature_adaptive"] = True
     if overrides:
+        # A per-part deflection override replaces the inherited one instead of
+        # competing with it: _deflection_settings gives sag_ratio unconditional
+        # precedence, so an inherited ratio would otherwise silently swallow a
+        # per-part sag.
+        if overrides.get("sag") is not None and "sag_ratio" not in overrides:
+            values["sag_ratio"] = None
+        elif overrides.get("sag_ratio") is not None and "sag" not in overrides:
+            values["sag"] = None
         values.update(overrides)
     return TessellationOptions(**cast(Any, values))
 

@@ -14,6 +14,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - fail requested validation gates when measurements are unavailable or incomplete; stdin file-size gates use the received byte count
 - expose `validate --max-self-intersection-pairs` so truncated self-intersection checks can be completed with a larger search budget
+- `--max-file-size-mb` and `--file-size-budget-mb` now both mean MiB (1 MiB = 1,048,576 bytes); the budget flag previously used decimal MB
+- size budgets and the file-size gate now count a `.gltf` entry file plus its published sidecars (external `.bin` and texture files), reporting `file_size_sidecar_bytes` and `file_size_total_bytes`
+- `size_ladder_smallest_bytes` now measures the best *compressed* rung and excludes the uncompressed baseline
+- every glTF size-ladder rung now inherits the caller's export options and differs only in the compression knobs it isolates
+- excluding a node with `exclude` / `--exclude-filter` / `where_not` now excludes its entire subtree instead of only the node itself
+- a `[[filters]]` entry that resolves to no criteria is now rejected; inside `[[filters]]`, `name` is the filter identifier, so node names must be matched with `names` or `node_name`
+- a per-part `sag` override in `part_settings` now clears the inherited `sag_ratio` instead of being silently ignored when the global ratio is non-default
+
+### Fixed
+- route OCCT's own diagnostics to stderr with a `Message_PrinterOStream`, so malformed CAD input no longer corrupts `--json` stdout or a `-` (stdout) binary stream, and `NO_COLOR` is respected
+- `TessellationOptions(sag=..., sag_ratio=0.0002)` no longer discards the explicit ratio; `sag_ratio` uses a real unset sentinel instead of its literal default value
+- `merge` and `replace` on a zero-scale (collapsed) parent transform now raise a `FascatError` naming the node instead of a bare numpy `LinAlgError: Singular matrix`
+- reject a non-positive or non-finite `Asset.meters_per_unit` instead of failing with an opaque `Singular matrix` (`0.0`) or silently mirroring the asset (negative)
+- `fascat validate` now emits its `gates` report whenever a gate fails the command, including visual-diff and turntable-diff gates
+- glTF export refuses to overwrite an unrelated file with a sidecar and cleans up sidecars orphaned by a previous export
+- `human_count` promotes across magnitude boundaries (`999_999_999` renders as `1G`, not `1000M`)
+- `run_guarded` forwards the child's captured stdout/stderr on the re-raised `TimeoutExpired`
+- the global-flag normalizer stops at `--` and no longer hoists a token consumed as an option value
+- the broad CLI error handler falls back to the exception type name when `str(exc)` is empty
+- material-library archive textures are read on first reference instead of being decompressed up front
 
 ### Removed
 - remove `skills/cad-to-rt3d/scripts/gates.py` and its redundant `profile_triangles_over_budget` gate; the `cad-to-rt3d` skill now reads gate results from `fascat validate` output instead of producing `gates.txt`

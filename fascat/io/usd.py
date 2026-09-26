@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from fascat.asset import Asset, Node, Part
+from fascat.asset import Asset, Node, Part, validate_meters_per_unit
 from fascat.export_report import referenced_materials
 from fascat.image import ImageResource
 from fascat.io._atomic import atomic_output
@@ -145,7 +145,7 @@ def _write_usd_stage(
     if stage is None:
         raise RuntimeError(f"failed to create USD stage: {output_path}")
 
-    UsdGeom.SetStageMetersPerUnit(stage, asset.meters_per_unit)
+    UsdGeom.SetStageMetersPerUnit(stage, validate_meters_per_unit(asset.meters_per_unit))
     UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z if asset.up_axis == "Z" else UsdGeom.Tokens.y)
 
     scene_path = "/Scene"

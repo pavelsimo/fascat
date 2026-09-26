@@ -1,3 +1,4 @@
+import base64
 import json
 from pathlib import Path
 
@@ -1017,3 +1018,69 @@ def test_validate_pair_budget_can_complete_a_truncated_check(tmp_path: Path) -> 
         payload = json.loads(result.output)
         assert _gate_results_by_name(payload)["self_intersections"]["status"] == status
         assert payload["analysis"]["summary"]["self_intersections_lower_bound"] == (pairs == 2)
+
+
+def test_validate_reports_gates_when_a_visual_diff_gate_fails(tmp_path: Path) -> None:
+    output_file = tmp_path / "visual.glb"
+    preview_file = tmp_path / "preview.png"
+    baseline_file = tmp_path / "baseline.png"
+    mesh = Mesh(
+        points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+        faces=np.asarray([[0, 1, 2]], dtype=int),
+    )
+    Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Triangle", part_id="part")]),
+        parts={"part": Part(id="part", name="Triangle", mesh=mesh)},
+        up_axis="Y",
+    ).write_gltf(output_file)
+    Image.new("RGBA", (512, 512), (0, 0, 0, 255)).save(baseline_file)
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "validate",
+            str(output_file),
+            "--visual-preview",
+            str(preview_file),
+            "--visual-baseline",
+            str(baseline_file),
+        ],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    # The gate that caused the non-zero exit has to appear in the report.
+    assert "gates" in payload
+    statuses = {gate["gate"]: gate["status"] for gate in payload["gates"]["results"]}
+    assert statuses["visual_diff"] == "FAIL"
+
+
+def test_validate_file_size_gate_counts_gltf_sidecars(tmp_path: Path) -> None:
+    # The entry .gltf is a few KB of JSON; the payload lives in the sidecar.
+    entry = tmp_path / "scene.gltf"
+    buffer_file = tmp_path / "scene.bin"
+    vertex_count = 90_000
+    points = np.zeros((vertex_count, 3), dtype=float)
+    points[:, 0] = np.arange(vertex_count, dtype=float)
+    faces = np.arange(vertex_count, dtype=int).reshape(-1, 3)
+    Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Strip", part_id="part")]),
+        parts={"part": Part(id="part", name="Strip", mesh=Mesh(points=points, faces=faces))},
+        up_axis="Y",
+    ).write_gltf(entry)
+    document = json.loads(entry.read_text())
+    uri = document["buffers"][0].pop("uri")
+    buffer_file.write_bytes(base64.b64decode(uri.split(",", 1)[1]))
+    document["buffers"][0]["uri"] = buffer_file.name
+    entry.write_text(json.dumps(document))
+    assert entry.stat().st_size < 1024 * 1024 < buffer_file.stat().st_size
+
+    result = runner.invoke(app, ["--json", "validate", str(entry), "--max-file-size-mb", "1"])
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    assert payload["file_size_sidecar_bytes"] == buffer_file.stat().st_size
+    assert payload["file_size_total_bytes"] == entry.stat().st_size + buffer_file.stat().st_size
+    statuses = {gate["gate"]: gate["status"] for gate in payload["gates"]["results"]}
+    assert statuses["file_size_bytes"] == "FAIL"

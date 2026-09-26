@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from fascat.asset import Asset, Node, Part
 from fascat.mesh import Mesh
@@ -92,3 +93,26 @@ def test_pipeline_lod_generator_levels_accept_switch_distance_override() -> None
     assert lod.metadata["lod_switch_distance"] == "30"
     assert lod.metadata["lod_switch_distance_source"] == "override"
     assert result.report.steps[-1].options["levels"][0]["switch_distance_override"] == 30.0
+
+
+def test_pipeline_filter_without_criteria_is_rejected() -> None:
+    # `name` inside [[filters]] is the filter identifier, not the node-name
+    # criterion, so this used to parse into a filter matching every node.
+    with pytest.raises(ValueError, match="declares no criteria"):
+        PipelineSpec.from_dict(
+            {
+                "filters": [{"name": "Bolt*"}],
+                "steps": [{"op": "decimate", "where": "Bolt*", "ratio": 0.5}],
+            }
+        )
+
+
+def test_pipeline_filter_node_name_criterion_is_accepted() -> None:
+    spec = PipelineSpec.from_dict(
+        {
+            "filters": [{"name": "bolts", "names": "Bolt*"}],
+            "steps": [{"op": "decimate", "where": "bolts", "ratio": 0.5}],
+        }
+    )
+
+    assert spec.filters["bolts"].to_dict()["criteria"] == {"name": ["Bolt*"]}

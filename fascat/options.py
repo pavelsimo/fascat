@@ -188,10 +188,16 @@ def _validate_jobs(jobs: int) -> None:
         raise ValueError("jobs must be greater than or equal to 1")
 
 
+DEFAULT_TESSELLATION_SAG_RATIO = 0.0002
+
+
 @dataclass(frozen=True, repr=False)
 class TessellationOptions(OptionsRepr):
     sag: float | None = None
-    sag_ratio: float | None = 0.0002
+    # ``None`` means "not set": it is a real sentinel, unlike the old literal
+    # 0.0002 default, which made an explicitly passed sag_ratio=0.0002
+    # indistinguishable from an omitted one.
+    sag_ratio: float | None = None
     angle: float = 15.0
     relative: bool = True
     min_edge_length: float | None = None
@@ -214,9 +220,7 @@ class TessellationOptions(OptionsRepr):
 
     def __post_init__(self) -> None:
         if self.sag is None and self.sag_ratio is None:
-            object.__setattr__(self, "sag_ratio", 0.0002)
-        elif self.sag is not None and self.sag_ratio == 0.0002:
-            object.__setattr__(self, "sag_ratio", None)
+            object.__setattr__(self, "sag_ratio", DEFAULT_TESSELLATION_SAG_RATIO)
         if self.sag is not None and self.sag <= 0.0:
             raise ValueError("tessellation sag must be greater than 0 when set")
         if self.sag_ratio is not None and self.sag_ratio <= 0.0:

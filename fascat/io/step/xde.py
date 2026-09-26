@@ -5,6 +5,7 @@ from typing import Any
 
 import numpy as np
 
+from fascat._ocp import configure_occt_messages
 from fascat._ocp import shape_fingerprint as _shape_fingerprint
 from fascat.asset import Node, Part
 from fascat.io._import_base import (
@@ -32,6 +33,7 @@ from fascat.options import StepReadOptions
 
 
 def _read_xde_document(path: Path, options: StepReadOptions) -> tuple[Any, Any, Any, Any, str, float]:
+    configure_occt_messages()
     try:
         from OCP.IFSelect import IFSelect_RetDone
         from OCP.STEPCAFControl import STEPCAFControl_Reader

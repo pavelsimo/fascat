@@ -1294,3 +1294,36 @@ def test_tessellation_free_edge_report_records_reused_meshes() -> None:
     assert part.mesh.metadata["tessellation_free_edges"] == "3"
     assert part.mesh.metadata["tessellation_non_manifold_edges"] == "0"
     assert tessellated.report.steps[-1].warnings == ["part has 3 free tessellation edges: Part"]
+
+
+def test_explicit_sag_ratio_survives_alongside_sag() -> None:
+    # 0.0002 used to double as the "unset" sentinel, so it was the one ratio a
+    # caller could not express next to an absolute sag.
+    options = TessellationOptions(sag=0.1, sag_ratio=0.0002)
+
+    assert options.sag == 0.1
+    assert options.sag_ratio == 0.0002
+
+
+def test_sag_only_clears_the_default_ratio() -> None:
+    options = TessellationOptions(sag=0.05)
+
+    assert options.sag_ratio is None
+
+
+@pytest.mark.parametrize("global_sag_ratio", [None, 0.0005])
+def test_per_part_sag_override_wins_over_inherited_ratio(global_sag_ratio: float | None) -> None:
+    from fascat.ops.tessellate import _deflection_settings, _options_for_part
+
+    part = Part(id="part", name="Bracket", mesh=triangle_mesh())
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Bracket", part_id="part")]),
+        parts={"part": part},
+    )
+    options = TessellationOptions(sag_ratio=global_sag_ratio, part_settings={"part": {"sag": 0.05}})
+
+    effective = _options_for_part(options, part, asset)
+
+    assert effective.sag == 0.05
+    assert effective.sag_ratio is None
+    assert _deflection_settings(effective)[0] == 0.05

@@ -920,3 +920,57 @@ def test_validation_rejects_invalid_draco_buffer_view(view_index: int) -> None:
     }
     with pytest.raises(RuntimeError, match="Draco bufferView"):
         validate_gltf_document(document, binary)
+
+
+def _fake_gltf_copy_with_sidecar(arguments: tuple[str, ...]) -> None:
+    """Stand in for `gltf-transform copy`, whose .gltf output carries an external .bin."""
+    source, destination = Path(arguments[1]), Path(arguments[2])
+    if destination.suffix.lower() != ".gltf":
+        destination.write_bytes(source.read_bytes())
+        return
+    buffer_name = f"{destination.stem}.bin"
+    payload = b"\x00" * 64
+    (destination.parent / buffer_name).write_bytes(payload)
+    destination.write_text(
+        json.dumps({"asset": {"version": "2.0"}, "buffers": [{"uri": buffer_name, "byteLength": len(payload)}]}),
+        encoding="utf-8",
+    )
+
+
+def test_gltf_export_refuses_to_overwrite_an_unrelated_sidecar(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import fascat.io.gltf as gltf
+
+    monkeypatch.setattr(gltf, "_run_gltf_transform", _fake_gltf_copy_with_sidecar)
+    monkeypatch.setattr(gltf, "validate_gltf", lambda path: {"triangles": 0})
+    bystander = tmp_path / "panel.bin"
+    bystander.write_bytes(b"someone else's data")
+
+    with pytest.raises(FascatIOError, match="would overwrite an unrelated file"):
+        write_gltf(
+            _asset_with_materials_and_lods(),
+            tmp_path / "panel.gltf",
+            options=GltfExportOptions(draco=True),
+        )
+
+    assert bystander.read_bytes() == b"someone else's data"
+
+
+def test_gltf_export_replaces_its_own_sidecars_and_clears_stale_ones(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import fascat.io.gltf as gltf
+
+    monkeypatch.setattr(gltf, "_run_gltf_transform", _fake_gltf_copy_with_sidecar)
+    monkeypatch.setattr(gltf, "validate_gltf", lambda path: {"triangles": 0})
+    output = tmp_path / "panel.gltf"
+    write_gltf(_asset_with_materials_and_lods(), output, options=GltfExportOptions(draco=True))
+    stale = tmp_path / "panel-old.bin"
+    stale.write_bytes(b"stale")
+    document = json.loads(output.read_text(encoding="utf-8"))
+    document["buffers"].append({"uri": stale.name, "byteLength": 5})
+    output.write_text(json.dumps(document), encoding="utf-8")
+
+    write_gltf(_asset_with_materials_and_lods(), output, options=GltfExportOptions(draco=True))
+
+    assert (tmp_path / "panel.bin").exists()
+    assert not stale.exists()

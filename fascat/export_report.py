@@ -9,6 +9,8 @@ from typing import Any
 
 import numpy as np
 
+from fascat._format import mib_to_bytes
+from fascat.io._sidecars import sidecar_bytes
 from fascat.mesh import Mesh
 
 _TEXTURE_URI_METADATA_KEYS = (
@@ -38,6 +40,8 @@ def stats_with_file_size(
     if str(path) == "-" or not output_path.exists():
         return stats
     size = output_path.stat().st_size
+    sidecars = sidecar_bytes(output_path)
+    total_size = size + sidecars
     referenced_ids = referenced_material_ids(asset)
     referenced_materials_by_id = referenced_materials(asset, referenced_ids=referenced_ids)
     estimates = export_payload_estimates(asset, referenced_materials_by_id=referenced_materials_by_id)
@@ -49,11 +53,14 @@ def stats_with_file_size(
         **export_material_counts(asset, referenced_ids=referenced_ids),
         **export_image_counts(asset, referenced_materials_by_id=referenced_materials_by_id),
     }
+    if sidecars:
+        result["file_size_sidecar_bytes"] = sidecars
+        result["file_size_total_bytes"] = total_size
     if budget_mb is not None:
-        budget_bytes = int(budget_mb * 1_000_000)
+        budget_bytes = mib_to_bytes(budget_mb)
         result["file_size_budget_bytes"] = budget_bytes
-        if size > budget_bytes:
-            asset.report.add_warning(f"file size budget exceeded: {size} bytes > {budget_bytes} bytes")
+        if total_size > budget_bytes:
+            asset.report.add_warning(f"file size budget exceeded: {total_size} bytes > {budget_bytes} bytes")
     return result
 
 

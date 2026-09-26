@@ -67,6 +67,11 @@ def _is_stdio(path: Path) -> bool:
     return str(path) == "-"
 
 
+def _error_message(exc: BaseException) -> str:
+    """Never report a blank error: bare ``RuntimeError()`` still names its type."""
+    return str(exc) or type(exc).__name__
+
+
 def _fail(ctx: typer.Context, payload: dict[str, Any], message: str, code: int = 1) -> NoReturn:
     if _state(ctx).json_output:
         _app.out.print_json(json.dumps({**payload, "error": message}))
