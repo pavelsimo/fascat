@@ -222,7 +222,7 @@ Filter parameters:
 | `min_triangles`, `max_triangles` | Match by mesh triangle count. `Filter.triangle_count()` builds these criteria. |
 | `min_vertices`, `max_vertices` | Match by mesh vertex count. `Filter.vertex_count()` builds these criteria. |
 | `include` | Require at least one nested filter to match before criteria are accepted. |
-| `exclude` | Drop matches selected by nested filters. |
+| `exclude` | Drop matches selected by nested filters, along with their descendants: excluding a group node excludes its whole subtree. |
 | `Filter.all(...)` | Require every child filter to match. |
 | `Filter.any(...)` | Require at least one child filter to match. |
 | `Filter.not_(...)` | Invert one child filter. |
@@ -641,7 +641,7 @@ Tessellation parameters:
 | Parameter | Meaning |
 |-----------|---------|
 | `sag` | Absolute chordal deviation between source surface and tessellated mesh. Set this to override the default relative strategy. Lower values produce more triangles. |
-| `sag_ratio` | Relative chordal deviation ratio. Bare `TessellationOptions()` defaults to `0.0002` so tessellation scales with part size. |
+| `sag_ratio` | Relative chordal deviation ratio, and the winner when both it and `sag` are set. Bare `TessellationOptions()` defaults to `0.0002` so tessellation scales with part size. |
 | `angle` | Angular deviation limit in degrees. Lower values preserve curved surfaces with more triangles. |
 | `relative` | Compatibility switch for interpreting `sag` as a relative backend deflection when `sag_ratio` is unset. Prefer `sag_ratio` for new relative-tolerance workflows. |
 | `min_edge_length` | Collapse or avoid edges shorter than this length during post-processing. |
@@ -659,10 +659,12 @@ Tessellation parameters:
 | `max_triangles_per_part` | Optional guard that raises `FascatError` when any tessellated part exceeds the limit. |
 | `part_settings` | Per-part overrides keyed by part id or part name. Supports the same tessellation option names. |
 
-`sag` and `sag_ratio` are mutually exclusive in the effective options. If you
-construct `TessellationOptions(sag=0.1)` and leave `sag_ratio` at its default,
-Fascat clears `sag_ratio` and uses the absolute tolerance. Pass `sag_ratio=...`
-without `sag` for relative tessellation.
+`sag_ratio` takes precedence over `sag` when both are set. Leaving `sag_ratio`
+unset (its default) and constructing `TessellationOptions(sag=0.1)` therefore
+uses the absolute tolerance; pass `sag_ratio=...` without `sag` for relative
+tessellation. A `part_settings` entry that sets `sag` clears the inherited
+`sag_ratio` for that part (and vice versa), so a per-part override always wins
+over the global value regardless of what the global value happens to be.
 
 Repair parameters:
 
@@ -1322,25 +1324,25 @@ Export option parameters:
 | `GltfExportOptions` | `texture_fallback_format` | PNG/JPEG fallback policy when KTX2/Basis compression is not requested: `auto`, `png`, or `jpeg`. `auto` keeps alpha-bearing texture sets PNG-safe and color-only sets JPEG-compatible. |
 | `GltfExportOptions` | `png_compression` | PNG fallback compression level, 0 through 9. |
 | `GltfExportOptions` | `jpeg_quality` | JPEG fallback quality, 0 through 100. Reports warn when explicit JPEG fallback would discard alpha-bearing texture data. |
-| `GltfExportOptions` | `file_size_budget_mb` | Add report warnings when the output exceeds this size. |
+| `GltfExportOptions` | `file_size_budget_mb` | Add report warnings when the output exceeds this size in MiB (1 MiB = 1,048,576 bytes). |
 | `GltfExportOptions` | `size_ladder` | Add a measured `gltf_size_ladder` report comparing temporary baseline, optimized, compressed, and requested GLB variants. |
 | `GltfExportOptions` | `metadata` | `MetadataExportOptions` controlling metadata and PMI in `extras.fascat`. |
 | `UsdExportOptions` | `package` | `default` writes normal USD. `usdz` writes a packaged `.usdz` file. |
 | `UsdExportOptions` | `layout` | `instanced` authors prototypes with internal references, LOD variant sets, and instancing; `flat` inlines each occurrence's full-detail mesh for viewers without USD composition support (e.g. three.js `USDLoader`); `auto` (default) resolves to `flat` for the `realtime-web` profile and `instanced` otherwise. |
-| `UsdExportOptions` | `file_size_budget_mb` | Add report warnings when the output exceeds this size. |
+| `UsdExportOptions` | `file_size_budget_mb` | Add report warnings when the output exceeds this size in MiB (1 MiB = 1,048,576 bytes). |
 | `UsdExportOptions` | `metadata` | `MetadataExportOptions` controlling USD custom data and PMI prims. |
 | `ObjExportOptions` | `materials` | Write OBJ `usemtl` assignments when material data exists. |
 | `ObjExportOptions` | `write_mtl` | Write an `.mtl` sidecar next to the OBJ. |
 | `ObjExportOptions` | `preserve_groups` | Write OBJ group/object names from Fascat hierarchy and parts. |
-| `ObjExportOptions` | `file_size_budget_mb` | Add report warnings when the output exceeds this size. |
+| `ObjExportOptions` | `file_size_budget_mb` | Add report warnings when the output exceeds this size in MiB (1 MiB = 1,048,576 bytes). |
 | `StlExportOptions` | `binary` | Write binary STL when `True`; ASCII STL when `False`. |
 | `StlExportOptions` | `merge` | Merge selected triangles into one STL stream. STL does not preserve hierarchy or materials. |
-| `StlExportOptions` | `file_size_budget_mb` | Add report warnings when the output exceeds this size. |
+| `StlExportOptions` | `file_size_budget_mb` | Add report warnings when the output exceeds this size in MiB (1 MiB = 1,048,576 bytes). |
 | `FbxExportOptions` | `materials` | Write FBX material nodes, per-face material indices, and model-material connections. |
 | `FbxExportOptions` | `normals` | Write FBX normal layers. |
 | `FbxExportOptions` | `tangents` | Write FBX tangent layers when mesh tangents exist. |
 | `FbxExportOptions` | `uvs` | Write FBX UV layers when mesh UV channels exist. |
-| `FbxExportOptions` | `file_size_budget_mb` | Add report warnings when the output exceeds this size. |
+| `FbxExportOptions` | `file_size_budget_mb` | Add report warnings when the output exceeds this size in MiB (1 MiB = 1,048,576 bytes). |
 
 ## Profiles
 

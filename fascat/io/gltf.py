@@ -8,6 +8,7 @@ import struct
 import subprocess
 import tempfile
 from collections.abc import Sequence
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -17,11 +18,12 @@ import numpy as np
 from numpy.typing import NDArray
 
 from fascat import _subprocess
-from fascat.asset import Asset, Node, Part
+from fascat.asset import Asset, Node, Part, validate_meters_per_unit
 from fascat.export_report import referenced_materials
 from fascat.image import ImageResource
 from fascat.io._atomic import atomic_output, publish_staged
 from fascat.io._errors import wrap_io_errors
+from fascat.io._sidecars import sidecar_paths
 from fascat.io._suffixes import GLTF_SUFFIXES
 from fascat.material import Material
 from fascat.mesh import Mesh
@@ -1405,11 +1407,34 @@ def _write_gltf_with_external_compression(
         _run_gltf_transform(("copy", str(current), str(staged_entry)))
         stats = validate_gltf(staged_entry) if validate else None
         sidecars = sorted(item for item in staged_dir.iterdir() if item != staged_entry)
-        publish_staged(
-            [*sidecars, staged_entry],
-            [*(output_path.parent / sidecar.name for sidecar in sidecars), output_path],
-        )
+        targets = [output_path.parent / sidecar.name for sidecar in sidecars]
+        # Sidecars of the export currently at output_path are ours to replace;
+        # anything else in the directory is not, and stale ones get cleaned up.
+        previous = _existing_sidecars(output_path)
+        _reject_sidecar_collisions(targets, previous)
+        publish_staged([*sidecars, staged_entry], [*targets, output_path])
+        _remove_stale_sidecars(previous, targets)
         return stats
+
+
+def _existing_sidecars(output_path: Path) -> set[Path]:
+    return {sidecar.resolve() for sidecar in sidecar_paths(output_path)}
+
+
+def _reject_sidecar_collisions(targets: Sequence[Path], owned: set[Path]) -> None:
+    for target in targets:
+        if target.exists() and target.resolve() not in owned:
+            raise RuntimeError(
+                f"glTF sidecar would overwrite an unrelated file: {target}. "
+                "Export to an empty directory or remove the file first."
+            )
+
+
+def _remove_stale_sidecars(previous: set[Path], targets: Sequence[Path]) -> None:
+    published = {target.resolve() for target in targets}
+    for stale in previous - published:
+        with suppress(OSError):
+            stale.unlink()
 
 
 def _run_gltf_transform(arguments: Sequence[str]) -> None:
@@ -1945,7 +1970,9 @@ def _export_space(asset: Asset) -> _ExportSpace:
             ],
             dtype=np.float64,
         )
-    linear = axis * float(asset.meters_per_unit)
+    # Post-construction mutation can still set a degenerate scale; fail here
+    # naming the field rather than inside np.linalg.inv.
+    linear = axis * validate_meters_per_unit(asset.meters_per_unit)
     matrix = np.eye(4, dtype=np.float64)
     matrix[:3, :3] = linear
     inverse = np.asarray(np.linalg.inv(matrix), dtype=np.float64)

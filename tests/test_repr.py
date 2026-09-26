@@ -15,9 +15,11 @@ from fascat._format import count_phrase, human_count
         (999, "999"),
         (1000, "1K"),
         (1234, "1.2K"),
-        (999_999, "1000K"),
+        (999_999, "1M"),
         (1_200_000, "1.2M"),
+        (999_999_999, "1G"),
         (2_100_000_000, "2.1G"),
+        (-1_234, "-1.2K"),
     ],
 )
 def test_human_count(value: int, expected: str) -> None:

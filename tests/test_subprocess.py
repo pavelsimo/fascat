@@ -67,3 +67,12 @@ def test_run_guarded_kills_whole_process_group_on_timeout(tmp_path: Path) -> Non
             return
         time.sleep(0.1)
     pytest.fail(f"grandchild {grandchild_pid} survived the process-group kill")
+
+
+def test_run_guarded_timeout_keeps_partial_output() -> None:
+    script = "import sys, time; print('partial', flush=True); sys.stderr.write('warned\\n'); sys.stderr.flush(); time.sleep(30)"
+    with pytest.raises(subprocess.TimeoutExpired) as excinfo:
+        run_guarded([sys.executable, "-c", script], timeout=1.0)
+
+    assert "partial" in (excinfo.value.stdout or "")
+    assert "warned" in (excinfo.value.stderr or "")

@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from fascat.pipeline_file import PipelineSpec
 
 from ._enums import StdoutFormat
-from ._output import _fail, _is_stdio, _require_existing_file
+from ._output import _error_message, _fail, _is_stdio, _require_existing_file
 
 
 def by_name(name: str, **overrides: Any) -> ConversionProfile:
@@ -119,7 +119,7 @@ def _read_cad_for_cli(
             return read_jt(path, options=import_options)
         raise ValueError(f"unsupported CAD extension: {path.suffix or '<none>'}")
     except Exception as exc:
-        _fail(ctx, payload, str(exc))
+        _fail(ctx, payload, _error_message(exc))
         raise AssertionError("unreachable") from exc
 
 

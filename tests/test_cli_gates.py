@@ -330,3 +330,22 @@ def test_requested_budget_without_measurement_fails(thresholds: GateThresholds) 
     assert results[1].reason == "measurement unavailable"
     assert any_gate_failed(results)
     assert "measurement unavailable" in format_gate_lines(results)[1]
+
+
+def test_file_size_gate_and_budget_agree_on_mib() -> None:
+    from fascat._format import mib_to_bytes
+
+    results = evaluate_gates(
+        GateThresholds(max_file_size_mb=10.0),
+        summary=None,
+        triangles=None,
+        file_size_bytes=1,
+        visual_diff_passed=None,
+        turntable_views_failed=None,
+        lod_monotonic=None,
+        include_report_gates=False,
+    )
+    file_size = next(result for result in results if result.gate == "file_size_bytes")
+
+    # --max-file-size-mb and --file-size-budget-mb must mean the same bytes.
+    assert file_size.limit == mib_to_bytes(10.0) == 10 * 1024 * 1024

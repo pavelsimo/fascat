@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from dataclasses import replace as dataclass_replace
@@ -11,6 +12,7 @@ from numpy.typing import NDArray
 from typing_extensions import Unpack
 
 from fascat._format import count_phrase
+from fascat.errors import FascatError
 from fascat.export_report import stats_with_file_size as _stats_with_file_size
 from fascat.filter import Filter
 from fascat.image import ImageResource
@@ -301,6 +303,23 @@ def _merge_vertices_part_worker(payload: _MeshOpPayload) -> _MeshPartResult:
     return _MeshPartResult(part_id=payload.part_id, mesh=mesh, fingerprint=mesh.fingerprint())
 
 
+def validate_meters_per_unit(value: float) -> float:
+    """Return ``value`` as a usable unit scale, or raise naming the field.
+
+    ``meters_per_unit`` scales every exported coordinate and is inverted when
+    building an export space, so ``0.0`` is singular and a negative value
+    silently mirrors the asset. Reject both at the source instead of leaking a
+    ``numpy`` ``Singular matrix`` out of the writers.
+    """
+    try:
+        scale = float(value)
+    except (TypeError, ValueError):
+        raise FascatError(f"meters_per_unit must be a number greater than 0, got {value!r}") from None
+    if not math.isfinite(scale) or scale <= 0.0:
+        raise FascatError(f"meters_per_unit must be greater than 0, got {value!r}")
+    return scale
+
+
 @dataclass
 class Asset:
     """Mutable CAD scene graph with owned public containers.
@@ -332,6 +351,7 @@ class Asset:
     )
 
     def __post_init__(self) -> None:
+        self.meters_per_unit = validate_meters_per_unit(self.meters_per_unit)
         self.root = self.root.copy()
         self.parts = {part_id: part.copy(keep_source=True) for part_id, part in self.parts.items()}
         self.materials = {material_id: material.copy() for material_id, material in self.materials.items()}
@@ -371,7 +391,7 @@ class Asset:
         asset.materials = materials
         asset.images = images
         asset.units = units
-        asset.meters_per_unit = meters_per_unit
+        asset.meters_per_unit = validate_meters_per_unit(meters_per_unit)
         asset.up_axis = up_axis
         asset.source_path = source_path
         asset.metadata = metadata

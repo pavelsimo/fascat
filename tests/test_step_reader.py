@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -147,3 +151,46 @@ def test_step_import_decisions_report_requested_effective_states() -> None:
     assert decisions["construction_curves"]["state"] == "honored"
     assert decisions["construction_curves"]["counts"]["deleted_parts"] == 1
     assert decisions["space_normalization"]["state"] == "honored"
+
+
+def _run_cli(args: list[str], tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    environment = {**os.environ, "NO_COLOR": "1"}
+    return subprocess.run(
+        [sys.executable, "-m", "fascat", *args],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        cwd=tmp_path,
+        env=environment,
+    )
+
+
+def test_occt_parser_errors_do_not_corrupt_json_stdout(tmp_path: Path) -> None:
+    # OCCT prints its own parser errors from native code; they must land on
+    # stderr so --json stdout stays a single parseable document.
+    malformed = tmp_path / "bad.step"
+    malformed.write_bytes(b"\x00\x00\x00\x00bogus")
+
+    completed = _run_cli(["--json", "inspect", str(malformed)], tmp_path)
+
+    assert completed.returncode == 1
+    payload = json.loads(completed.stdout)
+    assert "error" in payload
+    assert "StepFile" in completed.stderr
+    assert "\x1b[" not in completed.stderr
+
+
+def test_occt_parser_errors_do_not_corrupt_binary_stdout(tmp_path: Path) -> None:
+    malformed = tmp_path / "bad.step"
+    malformed.write_bytes(b"\x00\x00\x00\x00bogus")
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "fascat", "inspect", str(malformed)],
+        capture_output=True,
+        timeout=180,
+        cwd=tmp_path,
+        env={**os.environ, "NO_COLOR": "1"},
+    )
+
+    assert completed.returncode == 1
+    assert completed.stdout == b""

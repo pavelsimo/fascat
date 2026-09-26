@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
+from fascat._ocp import configure_occt_messages
 from fascat._ocp import shape_fingerprint as _shape_fingerprint
 from fascat.asset import Asset, Node, Part
 from fascat.io import _import_base as _base
@@ -142,6 +143,7 @@ def _read_brep_path(source: Path, *, source_identity: str, options: BrepReadOpti
 
 
 def _read_shape(path: Path) -> object:
+    configure_occt_messages()
     try:
         from OCP.BRep import BRep_Builder
         from OCP.BRepTools import BRepTools

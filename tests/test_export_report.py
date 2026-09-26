@@ -108,3 +108,36 @@ def test_stats_with_file_size_reuses_referenced_material_ids(
     assert stats["export_referenced_material_count"] == 1
     assert stats["export_referenced_image_count"] == 1
     assert calls == 1
+
+
+def test_file_size_budget_uses_mib(tmp_path: object) -> None:
+    from pathlib import Path
+
+    from fascat._format import mib_to_bytes
+
+    output = Path(str(tmp_path)) / "out.glb"
+    output.write_bytes(b"x" * (10 * 1024 * 1024 - 1))
+    asset = _asset()
+
+    stats = stats_with_file_size({}, output, 10.0, asset)
+
+    assert stats["file_size_budget_bytes"] == mib_to_bytes(10.0) == 10_485_760
+    assert not asset.report.warnings
+
+
+def test_file_size_budget_counts_gltf_sidecars(tmp_path: object) -> None:
+    import json
+    from pathlib import Path
+
+    directory = Path(str(tmp_path))
+    entry = directory / "scene.gltf"
+    buffer_file = directory / "scene.bin"
+    buffer_file.write_bytes(b"x" * 4096)
+    entry.write_text(json.dumps({"asset": {"version": "2.0"}, "buffers": [{"uri": "scene.bin", "byteLength": 4096}]}))
+    asset = _asset()
+
+    stats = stats_with_file_size({}, entry, 0.001, asset)
+
+    assert stats["file_size_sidecar_bytes"] == 4096
+    assert stats["file_size_total_bytes"] == entry.stat().st_size + 4096
+    assert any("file size budget exceeded" in warning for warning in asset.report.warnings)

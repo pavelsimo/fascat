@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
+from fascat._ocp import configure_occt_messages
 from fascat.asset import Asset
 from fascat.mesh import _triangle_overlap_area_2d
 from fascat.ops._occt_mesh import _transformed_occt_nodes, _triangulation_faces
@@ -364,6 +365,7 @@ def brep_status(
     overlap_tolerance: float = 0.0,
     overlap_area_ratio: float = 0.995,
 ) -> BrepStatus:
+    configure_occt_messages()
     try:
         from OCP.BRepCheck import BRepCheck_Analyzer
         from OCP.BRepGProp import BRepGProp

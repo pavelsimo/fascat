@@ -708,15 +708,12 @@ def _archive_material_members(archive: zipfile.ZipFile) -> list[str]:
 
 
 def _archive_texture_members(archive: zipfile.ZipFile) -> _ArchiveTextureMap:
-    textures: _ArchiveTextureMap = {}
+    members: dict[str, str] = {}
     for name in archive.namelist():
         if not _safe_archive_member_name(name) or PurePosixPath(name).suffix.lower() not in _SOURCE_TEXTURE_SUFFIXES:
             continue
-        try:
-            textures[_archive_member_key(name)] = (_archive_member_name(name), archive.read(name))
-        except (KeyError, OSError, zipfile.BadZipFile):
-            continue
-    return textures
+        members[_archive_member_key(name)] = name
+    return _ArchiveTextureMap(archive=archive, members=members)
 
 
 def _safe_archive_member_name(name: str) -> bool:
@@ -1203,11 +1200,11 @@ def _resolve_archive_texture_reference(
     ]
     for key in candidate_keys:
         if key in archive_textures:
-            return archive_textures[key]
+            return archive_textures.read(key)
     basename = reference_path.name.lower()
-    basename_matches = [item for key, item in archive_textures.items() if PurePosixPath(key).name == basename]
+    basename_matches = [key for key in archive_textures if PurePosixPath(key).name == basename]
     if len(basename_matches) == 1:
-        return basename_matches[0]
+        return archive_textures.read(basename_matches[0])
     return None
 
 

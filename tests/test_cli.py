@@ -288,3 +288,51 @@ def test_run_converts_keyboard_interrupt_to_exit_130(
 
     assert result.exit_code == 130
     assert "Interrupted." in result.stderr
+
+
+def test_normalizer_stops_at_the_double_dash() -> None:
+    from fascat.cli._runner import _normalize_args
+
+    assert _normalize_args(["convert", "in.step", "--", "-n"]) == ["convert", "in.step", "--", "-n"]
+    assert _normalize_args(["--", "-h"]) == ["--", "-h"]
+    assert _normalize_args(["--", "-V"]) == ["--", "-V"]
+
+
+def test_normalizer_leaves_option_values_alone() -> None:
+    from fascat.cli._runner import _normalize_args
+
+    # "--json" here is the value of --filter, not the global flag.
+    assert _normalize_args(["convert", "in.step", "out.glb", "--filter", "--json"]) == [
+        "convert",
+        "in.step",
+        "out.glb",
+        "--filter",
+        "--json",
+    ]
+
+
+def test_normalizer_still_hoists_globals_after_the_subcommand() -> None:
+    from fascat.cli._runner import _normalize_args
+
+    assert _normalize_args(["convert", "in.step", "out.glb", "--json", "-n"]) == [
+        "--json",
+        "-n",
+        "convert",
+        "in.step",
+        "out.glb",
+    ]
+
+
+def test_broad_error_handler_never_reports_a_blank_message(capsys, monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    import fascat.cli._io_helpers as io_helpers
+
+    def raise_blank(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError
+
+    source = tmp_path / "input.step"
+    source.write_text("ISO-10303-21;")
+    monkeypatch.setattr(io_helpers, "_convert_for_cli", raise_blank)
+    result = invoke_run(["convert", str(source), str(tmp_path / "output.usdc")], capsys)
+
+    assert result.exit_code == 1
+    assert "RuntimeError" in result.stderr

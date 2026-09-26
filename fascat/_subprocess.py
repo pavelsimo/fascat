@@ -56,19 +56,39 @@ def run_guarded(
         )
     try:
         stdout, stderr = process.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         _kill_process_group(process)
         # Drain pipes and reap the child so no zombie or open handle outlives
         # the caller's temporary directories.
+        drained_stdout: str | None = None
+        drained_stderr: str | None = None
         with suppress(Exception):
-            process.communicate()
-        raise subprocess.TimeoutExpired(list(command), timeout or 0.0) from None
+            drained_stdout, drained_stderr = process.communicate()
+        # Whatever the tool managed to print before the timeout is usually the
+        # only diagnostic the caller gets, so carry it onto the re-raise.
+        raise subprocess.TimeoutExpired(
+            list(command),
+            timeout or 0.0,
+            output=_captured(drained_stdout, exc.stdout),
+            stderr=_captured(drained_stderr, exc.stderr),
+        ) from None
     except BaseException:
         _kill_process_group(process)
         with suppress(Exception):
             process.communicate()
         raise
     return subprocess.CompletedProcess(list(command), process.returncode, stdout, stderr)
+
+
+def _captured(drained: str | None, partial: object) -> str | None:
+    """Prefer the fully drained stream, falling back to the timeout's partial capture."""
+    if drained:
+        return drained
+    if isinstance(partial, bytes):
+        return partial.decode("utf-8", "replace")
+    if isinstance(partial, str):
+        return partial
+    return drained
 
 
 def _kill_process_group(process: subprocess.Popen[str]) -> None:

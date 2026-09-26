@@ -255,3 +255,38 @@ def test_cli_rejects_invalid_filter_expression() -> None:
 
     assert result.exit_code == 2
     assert "unsupported filter expression" in result.output
+
+
+def test_exclude_removes_the_whole_subtree() -> None:
+    asset = Asset(
+        root=Node(
+            id="root",
+            name="root",
+            children=[
+                Node(
+                    id="bolts",
+                    name="Bolts",
+                    children=[
+                        Node(id="bolt1", name="Bolt1", part_id="p1"),
+                        Node(id="bolt2", name="Bolt2", part_id="p2"),
+                    ],
+                ),
+                Node(id="body", name="Body", part_id="p3"),
+            ],
+        ),
+        parts={
+            "p1": Part(id="p1", name="Bolt1", mesh=_mesh(1.0, 1)),
+            "p2": Part(id="p2", name="Bolt2", mesh=_mesh(1.0, 1)),
+            "p3": Part(id="p3", name="Body", mesh=_mesh(1.0, 1)),
+        },
+    )
+
+    selection = Filter(path="*", exclude=[Filter.path("root/Bolts")]).select(asset)
+
+    assert sorted(match.node_path for match in selection.matches) == ["root", "root/Body"]
+
+
+def test_filter_is_empty_reports_criteria_less_filters() -> None:
+    assert Filter().is_empty() is True
+    assert Filter.name("Bolt*").is_empty() is False
+    assert Filter(exclude=[Filter.path("root/Bolts")]).is_empty() is False

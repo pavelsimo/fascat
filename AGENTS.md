@@ -7,10 +7,40 @@ This file is the single canonical source of agent instructions for this reposito
 
 ```
 fascat/
-├── fascat/          # Python package
-│   ├── __init__.py           # version string
+├── fascat/                   # Python package
+│   ├── __init__.py           # public API surface and version string
 │   ├── __main__.py           # python -m fascat entry point
-│   └── cli.py                # Typer app, global flags, subcommands
+│   ├── asset.py              # Asset/Node/Part scene graph
+│   ├── mesh.py               # Mesh container and geometry kernels
+│   ├── options.py            # frozen option dataclasses for every stage
+│   ├── pipeline.py           # conversion pipeline orchestration
+│   ├── pipeline_file.py      # TOML pipeline file parsing
+│   ├── profiles.py           # named conversion profiles
+│   ├── filter.py             # node/part selection filters
+│   ├── analysis.py           # geometry analysis and validation reports
+│   ├── report.py             # step/warning/error report model
+│   ├── errors.py             # FascatError taxonomy
+│   ├── cli/                  # Typer app (one module per subcommand)
+│   │   ├── _app.py           # Typer app, global flags, shared state
+│   │   ├── _runner.py        # console-script entry point and arg normalizer
+│   │   ├── _cmd_inspect.py   # fascat inspect
+│   │   ├── _cmd_convert.py   # fascat convert
+│   │   ├── _cmd_validate.py  # fascat validate
+│   │   ├── _gates.py         # validation gate thresholds and reporting
+│   │   ├── _params.py        # shared option parsing and coercion
+│   │   └── _output.py        # emit/fail helpers over the out/err consoles
+│   ├── io/                   # readers and writers
+│   │   ├── step/             # STEP (XDE, PMI, materials, variants)
+│   │   ├── jt/               # JT (pure-Python container and LSG reader)
+│   │   ├── iges.py brep.py   # other OCCT-backed readers
+│   │   ├── gltf.py usd.py    # primary realtime exporters
+│   │   ├── obj.py stl.py fbx.py
+│   │   └── _atomic.py        # transactional output publication
+│   ├── ops/                  # asset operations (tessellate, heal, decimate, …)
+│   ├── runtime/              # browser runtime measurement and previews
+│   ├── visual.py             # preview rendering, visual and turntable diffs
+│   ├── size_ladder.py        # glTF compression size ladder
+│   └── _ocp.py               # OCCT/OCP plumbing (messages, fingerprints)
 ├── tests/                    # pytest test suite
 ├── docs/                     # Markdown documentation source
 ├── scripts/                  # Build tooling (docs site builder, etc.)
@@ -47,8 +77,10 @@ make tools        # install development tools (lefthook)
 - File path arguments should accept `-` for stdin/stdout where meaningful
 - `-h` / `--help` and `-V` / `--version` should work anywhere in the invocation and ignore other arguments
 - Flag names are lowercase hyphenated; short flags only for the most common (`-v`, `-q`, `-n`, `-V`)
-- Subcommands live as `@app.command()` functions in `fascat/cli.py`
-  or in separate modules imported and registered there
+- Subcommands live as `@app.command()` functions in `fascat/cli/_cmd_*.py`, registered
+  against the Typer app in `fascat/cli/_app.py`
+- OCCT diagnostics must stay on stderr: call `configure_occt_messages()` from any new
+  OCCT entry point
 - Type annotations on all public functions; mypy strict mode is enforced
 
 ## Testing Guidelines

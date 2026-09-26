@@ -48,7 +48,10 @@ class GltfSizeLadderReport:
         measured = [
             variant for variant in self.variants if variant.status == "measured" and variant.file_size_bytes > 0
         ]
-        sizes = [variant.file_size_bytes for variant in measured]
+        # "smallest" means the best *compressed* rung: including the
+        # uncompressed baseline would report zero savings whenever no
+        # compression rung beats it, which is the interesting case.
+        sizes = [variant.file_size_bytes for variant in measured if variant.name != "baseline"]
         baseline_bytes = self.baseline_bytes
         requested_bytes = self.requested_bytes
         smallest_bytes = min(sizes, default=0)
@@ -110,25 +113,35 @@ def measure_gltf_size_ladder(
 
 
 def _size_ladder_variants(options: GltfExportOptions) -> list[tuple[str, GltfExportOptions]]:
-    metadata = options.metadata
+    # Every rung inherits the caller's own export options and differs only in
+    # the compression knobs it isolates, so ratio_to_baseline compares like
+    # with like and the draco rung reflects the user's draco settings.
+    # ``preset`` is cleared because ``options`` is already resolved and
+    # re-resolving a preset would force its quantize/meshopt back on.
+    base = replace(
+        options,
+        preset=None,
+        size_ladder=False,
+        quantize=False,
+        meshopt=False,
+        draco=False,
+        texture_compression=None,
+    )
     variants = [
-        ("baseline", GltfExportOptions(metadata=metadata)),
-        ("quantized", GltfExportOptions(quantize=True, metadata=metadata)),
-        ("meshopt", GltfExportOptions(quantize=True, meshopt=True, metadata=metadata)),
-        ("draco", GltfExportOptions(draco=True, metadata=metadata)),
+        ("baseline", base),
+        ("quantized", replace(base, quantize=True)),
+        ("meshopt", replace(base, quantize=True, meshopt=True)),
+        ("draco", replace(base, draco=True)),
     ]
     if options.texture_compression is not None:
         variants.append(
             (
                 "texture_compressed",
-                GltfExportOptions(
+                replace(
+                    base,
                     quantize=True,
                     meshopt=True,
                     texture_compression=options.texture_compression,
-                    texture_fallback_format=options.texture_fallback_format,
-                    png_compression=options.png_compression,
-                    jpeg_quality=options.jpeg_quality,
-                    metadata=metadata,
                 ),
             )
         )

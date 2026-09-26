@@ -854,3 +854,33 @@ def test_asset_write_gltf_records_failure_report(monkeypatch: pytest.MonkeyPatch
     assert step.after == asset.stats()
     assert asset.report.finished_at is not None
     assert asset.report.output_stats == asset.stats()
+
+
+@pytest.mark.parametrize("value", [0.0, -0.001, float("nan"), float("inf")])
+def test_asset_rejects_non_positive_meters_per_unit(value: float) -> None:
+    from fascat.errors import FascatError
+
+    with pytest.raises(FascatError, match="meters_per_unit"):
+        Asset(root=Node(id="root", name="root"), meters_per_unit=value)
+
+
+def test_gltf_export_names_the_field_for_a_mutated_unit_scale(tmp_path: Path) -> None:
+    from fascat.errors import FascatError
+
+    asset = Asset(
+        root=Node(id="root", name="root", children=[Node(id="node", name="Tri", part_id="part")]),
+        parts={
+            "part": Part(
+                id="part",
+                name="Tri",
+                mesh=Mesh(
+                    points=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float),
+                    faces=np.asarray([[0, 1, 2]], dtype=int),
+                ),
+            )
+        },
+    )
+    asset.meters_per_unit = -0.001
+
+    with pytest.raises(FascatError, match="meters_per_unit"):
+        asset.write_gltf(tmp_path / "out.glb")

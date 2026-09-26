@@ -160,6 +160,29 @@ class Filter:
         if self.min_vertices is not None and self.max_vertices is not None and self.min_vertices > self.max_vertices:
             raise ValueError("min_vertices must be less than or equal to max_vertices")
 
+    def is_empty(self) -> bool:
+        """Return whether this filter carries no criteria, and so matches every node."""
+        if self._children or self.include or self.exclude:
+            return False
+        if self._mode != "criteria":
+            return True
+        return not (
+            self.path_patterns
+            or self.name_patterns
+            or self.part_name_patterns
+            or self.part_id_patterns
+            or self.material_patterns
+            or self.metadata
+            or self.min_bounds is not None
+            or self.max_bounds is not None
+            or self.min_diagonal is not None
+            or self.max_diagonal is not None
+            or self.min_triangles is not None
+            or self.max_triangles is not None
+            or self.min_vertices is not None
+            or self.max_vertices is not None
+        )
+
     @classmethod
     def path(cls, value: PatternValue) -> Filter:
         """Return a filter matching assembly node paths with shell-style patterns."""
@@ -258,7 +281,13 @@ class Filter:
         """Return all asset nodes and parts matched by this filter."""
         matches: list[SelectionMatch] = []
         self._collect_matches(
-            asset, asset.root, _node_name(asset.root), ancestor_path="", ancestor_selected=False, matches=matches
+            asset,
+            asset.root,
+            _node_name(asset.root),
+            ancestor_path="",
+            ancestor_selected=False,
+            ancestor_excluded=False,
+            matches=matches,
         )
         return SelectionResult(filter=self, matches=tuple(matches))
 
@@ -327,12 +356,17 @@ class Filter:
         *,
         ancestor_path: str,
         ancestor_selected: bool,
+        ancestor_excluded: bool,
         matches: list[SelectionMatch],
     ) -> None:
         node_path = f"{ancestor_path}/{node_name}" if ancestor_path else node_name
         context = _context_for(asset, node, node_path)
+        # Exclusion propagates down the tree just like selection does:
+        # "exclude this subassembly" has to take its children with it, or a
+        # destructive op would still reach the geometry the user protected.
+        excluded = ancestor_excluded or self._excluded(context)
         direct = self.matches(context)
-        selected = (ancestor_selected or direct) and not self._excluded(context)
+        selected = (ancestor_selected or direct) and not excluded
         if selected:
             matches.append(_match_from_context(context))
         for child in node.children:
@@ -342,6 +376,7 @@ class Filter:
                 _node_name(child),
                 ancestor_path=node_path,
                 ancestor_selected=selected,
+                ancestor_excluded=excluded,
                 matches=matches,
             )
 

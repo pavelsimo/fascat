@@ -4,6 +4,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
+from fascat._format import mib_to_bytes
+
 GateStatus = Literal["PASS", "FAIL", "SKIP"]
 
 GateValue = int | float | bool | None
@@ -145,9 +147,7 @@ def evaluate_gates(
     if thresholds.max_triangles is not None or thresholds.triangles_requested:
         results.append(_threshold_gate("triangles", triangles, thresholds.max_triangles, required=True))
     if thresholds.max_file_size_mb is not None or thresholds.file_size_requested:
-        limit_bytes = None if thresholds.max_file_size_mb is None else thresholds.max_file_size_mb * 1024 * 1024
-        if isinstance(limit_bytes, float) and limit_bytes.is_integer():
-            limit_bytes = int(limit_bytes)
+        limit_bytes = None if thresholds.max_file_size_mb is None else mib_to_bytes(thresholds.max_file_size_mb)
         results.append(_threshold_gate("file_size_bytes", file_size_bytes, limit_bytes, required=True))
     if visual_diff_passed is not None or include_report_gates:
         results.append(_threshold_gate("visual_diff", visual_diff_passed, True, op="=="))
